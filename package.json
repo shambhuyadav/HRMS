@@ -1,0 +1,43 @@
+{
+  "name": "hrms",
+  "private": true,
+  "version": "0.0.0",
+  "description": "HRMS target implementation (BRD v8.2). Synthetic data only.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:migrate": "tsx db/migrate.ts",
+    "db:dev": "tsx db/dev-db.ts",
+    "db:seed": "tsx db/seed-dev.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck -w apps/web",
+    "test": "vitest run && npm test -w apps/web",
+    "dev:api": "tsx apps/api/src/server.ts",
+    "dev:worker": "tsx apps/api/src/worker.ts",
+    "dev:web": "npm run dev -w apps/web",
+    "test:db": "vitest run db/tests"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "embedded-postgres": "17.10.0-beta.17",
+    "pg": "^8.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "overrides": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "allowScripts": {
+    "@embedded-postgres/windows-x64@17.10.0-beta.17": true
+  }
+}
