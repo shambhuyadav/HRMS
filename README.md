@@ -6,9 +6,10 @@ Synthetic data only. Not deployed anywhere. Planning and evidence live in [docs/
 
 ```powershell
 npm install
+$env:DEV_DB_PASSWORD = 'replace-with-a-local-password'   # your own; set only when .dev-pg is first created
 npm run db:dev                      # terminal 1: embedded PostgreSQL on 127.0.0.1:54329 (data in .dev-pg/)
 
-$env:DATABASE_URL = 'postgres://hrms:hrms_local_only@127.0.0.1:54329/hrms_dev'
+$env:DATABASE_URL = 'postgres://hrms:replace-with-a-local-password@127.0.0.1:54329/hrms_dev'   # the same password
 $env:DEV_TOKEN_SECRET = 'replace-with-a-local-random-string-of-32-plus-chars'
 npm run db:seed                     # migrate + seed the synthetic DEMO company (idempotent)
 npm run dev:api                     # terminal 2: API on http://127.0.0.1:3000

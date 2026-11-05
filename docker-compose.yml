@@ -1,11 +1,12 @@
-# Local development database only. Synthetic data only; credentials below are local dev placeholders.
+# Local development database only. Synthetic data only. Set DEV_DB_PASSWORD to a password of your own, in your shell or in a local .env
+# (git-ignored); nothing here holds one.
 services:
   postgres:
     image: postgres:16
     environment:
       POSTGRES_DB: hrms_dev
       POSTGRES_USER: hrms
-      POSTGRES_PASSWORD: hrms_local_only
+      POSTGRES_PASSWORD: ${DEV_DB_PASSWORD:?Set DEV_DB_PASSWORD to a local password of your own (see .env.example)}
     ports:
       - "5432:5432"
     volumes:
