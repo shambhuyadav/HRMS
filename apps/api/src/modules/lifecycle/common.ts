@@ -28,11 +28,6 @@ export function requireDate(value: string, code = 'INVALID_DATE', field = 'date'
 /** Date arithmetic on calendar dates (UTC, so no zone shift). */
 export const addDays = (d: string, n: number): string => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-/** The groups a route needs must all have been granted (the guard allows a read when any one group is). */
-export function requireGroups(grant: AccessGrant, groups: readonly string[]): void {
-  if (!groups.every((g) => grant.allowedFieldGroups.includes(g))) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
-}
-
 export const holds = (grant: AccessGrant, group: string): boolean => grant.allowedFieldGroups.includes(group);
 
 /** Row scope: an employee outside the caller's scope reads as missing (never reveals existence). */

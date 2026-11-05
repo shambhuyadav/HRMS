@@ -3,6 +3,7 @@
 // valid approval"; H2 "Conflict needs rebase and renewed approval"). Synthetic data only.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
 import { applyDueChanges } from './service.js';
@@ -84,8 +85,8 @@ describe('sensitive change: re-check at deferred application (BR-054)', () => {
     A = await h.makeCompany();
     hr = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['employee.create.personal', 'employee.update.personal'] });
     verifier = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['document.read.document', 'document.verify.document'] });
-    system = await h.makeUser();
-    const today = (await h.one<{ d: string }>(`select to_char(hrms_business_date($1, now()), 'YYYY-MM-DD') as d`, [A.id])).d;
+    system = SYSTEM_ACTOR_ID;
+    const today =(await h.one<{ d: string }>(`select to_char(hrms_business_date($1, now()), 'YYYY-MM-DD') as d`, [A.id])).d;
     on = addDays(today, 3);
   });
 
@@ -149,6 +150,8 @@ describe('sensitive change: re-check at deferred application (BR-054)', () => {
     const assigned = await h.actor(A, 'REPORTING_MANAGER', { scope: 'ASSIGNED', duties: REVIEW });
     const e = await person();
     const id = await scheduled(assigned, e.actor, 'ADDRESS', address);
+    // The decision closed the task, so a plain row-scope check now fails for this approver.
+    expect((await h.call(assigned, 'GET', `/v1/employees/${e.id}/private-profile`)).statusCode).toBe(404);
     expect(await applyDueChanges(h.pool, A.id, on, system)).toEqual({ due: 1, applied: 1, conflicts: 0 });
     expect(await stateOf(id)).toBe('APPLIED');
     // Losing the grant still stops the next one.

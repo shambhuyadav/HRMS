@@ -8,6 +8,7 @@
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { contextCsvLines, fileContext } from '../report/context.js';
 import { audit, loadCycle } from './common.js';
 
 interface Population {
@@ -107,14 +108,16 @@ export async function cycleExport(db: Queryable, grant: AccessGrant, cycleId: st
   }
   const columns = ['employee_code', 'display_name', 'department', 'state', 'revision', 'goal_count', 'goal_weight_total', 'submitted_at', 'completed_at', ...(withRating ? ['weighted_result', 'final_rating'] : [])];
   const headers = ['Employee code', 'Employee name', 'Department', 'State', 'Revision', 'Goals', 'Goal weight total', 'Last submitted at', 'Completed at', ...(withRating ? ['Weighted manager result', 'Final rating'] : [])];
-  // DF09: the export states its filter, period and generation time.
+  // DF09: the export states its filter, period, scope and generation time, as every report file does (report/context.ts).
+  const context = await fileContext(db, grant, {
+    title: 'Appraisal export',
+    code: 'APPRAISAL_EXPORT',
+    period: { from: cycle.start_date, to: cycle.end_date },
+    filters: { cycle: cycle.code, department: q.departmentId ?? 'all in scope' },
+    rowCount: rows.length,
+  });
   const lines = [
-    line(['Appraisal export']),
-    line(['Cycle', cycle.code, cycle.start_date, cycle.end_date]),
-    line(['Department filter', q.departmentId ?? 'all in scope']),
-    line(['Generated at', new Date().toISOString()]),
-    line(['Rows', rows.length]),
-    '',
+    ...contextCsvLines(context),
     line(headers),
     ...rows.map((r) => line(columns.map((c) => r[c]))),
   ];

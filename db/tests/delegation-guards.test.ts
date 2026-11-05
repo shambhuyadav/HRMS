@@ -5,6 +5,7 @@
 import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CHECK_VIOLATION, type CompanyFixture, EXCLUSION_VIOLATION, expectSqlError, fixtures, uniq } from './fixtures.js';
+import { SYSTEM_ACTOR_ID } from '../../apps/api/src/audit/actors.js';
 import { startTestDatabase, type TestDatabase } from './test-database.js';
 
 let testDb: TestDatabase;
@@ -44,9 +45,9 @@ async function holder(user: string, opts: { code?: string; accessClass?: string;
   const stranger = await f.makeUser();
   return f.asGrantBootstrap(async () => {
     const assignment = await f.id(
-      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at)
-       values ($1, $2, $3, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now())`,
-      [a.company, user, role, opts.scope ?? 'COMPANY', stranger],
+      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, created_by)
+       values ($1, $2, $3, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now(), $6)`,
+      [a.company, user, role, opts.scope ?? 'COMPANY', stranger, SYSTEM_ACTOR_ID],
     );
     for (const p of opts.permissions ?? [permission]) {
       await db.query(`insert into role_permission (company_id, role_id, permission_id, effect) values ($1, $2, $3, 'ALLOW') on conflict do nothing`, [a.company, role, p]);

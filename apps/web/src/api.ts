@@ -71,15 +71,23 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   return (await res.json()) as T;
 }
 
+export interface PinnedRequest {
+  <T>(path: string, opts?: RequestOptions): Promise<T>;
+  /** Whether the session it was bound to is still the one in use, for an answer that arrives after a change. */
+  isCurrent(): boolean;
+}
+
 /**
  * For an action made of several requests (e.g. receipt uploads, then the claim, then its submission): a request
  * function bound to the session in use now. Once the user signs out or picks another company or role, the rest of
  * the action is not sent, so nothing started under one role is finished under another (BR-046).
  */
-export function pinSession(): <T>(path: string, opts?: RequestOptions) => Promise<T> {
+export function pinSession(): PinnedRequest {
   const started = current;
-  return <T>(path: string, opts: RequestOptions = {}) =>
-    current === started ? api<T>(path, opts) : Promise.reject(new ApiError(0, 'SESSION_CHANGED', 'The role or company changed before this was finished; nothing more was sent'));
+  const isCurrent = () => current === started;
+  const send = <T,>(path: string, opts: RequestOptions = {}) =>
+    isCurrent() ? api<T>(path, opts) : Promise.reject<T>(new ApiError(0, 'SESSION_CHANGED', 'The role or company changed before this was finished; nothing more was sent'));
+  return Object.assign(send, { isCurrent });
 }
 
 /**
@@ -145,5 +153,11 @@ export function formatDate(value: string | null | undefined): string {
   if (!instant || Number.isNaN(instant.getTime())) return value.slice(0, 10);
   return localDate(instant);
 }
+/** A quantity such as days as a person reads it: padding zeros gone, nothing rounded ("12.0000" reads 12, "1.6667" stays). */
+export const formatUnits = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined) return '—';
+  const text = String(value);
+  return /^-?\d+\.\d+$/.test(text) ? text.replace(/\.?0+$/, '') : text;
+};
 export const formatAmount = (value: string | null | undefined, currency = 'INR') =>
   value === null || value === undefined ? '—' : `${currency} ${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

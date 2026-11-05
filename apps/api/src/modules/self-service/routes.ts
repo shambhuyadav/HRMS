@@ -41,13 +41,18 @@ export async function selfServiceRoutes(app: FastifyInstance, opts: { db: Databa
           type: 'object',
           additionalProperties: false,
           minProperties: 1,
-          properties: { displayName: { type: 'string', minLength: 1, maxLength: 200 }, workEmail: { type: 'string', minLength: 3, maxLength: 254 } },
+          properties: {
+            displayName: { type: 'string', minLength: 1, maxLength: 200 },
+            workEmail: { type: 'string', minLength: 3, maxLength: 254 },
+            // DF03: the rejected request this one raises again.
+            predecessorRequestId: uuid,
+          },
         },
       },
     },
     async (request, reply) => {
       const grant = await requireAccess(db, request, 'profile_change', 'submit', ['operational'], { requireAll: true });
-      const result = await withTransaction(db, (tx) => requestProfileChange(tx, grant, request.body as ProfileChanges));
+      const result = await withTransaction(db, (tx) => requestProfileChange(tx, grant, request.body as ProfileChanges & { predecessorRequestId?: string }));
       reply.status(201);
       return result;
     },
@@ -85,13 +90,13 @@ export async function selfServiceRoutes(app: FastifyInstance, opts: { db: Databa
           type: 'object',
           additionalProperties: false,
           required: ['attendanceRecordId', 'status', 'reason'],
-          properties: { attendanceRecordId: uuid, status: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,39}$' }, reason: { type: 'string', minLength: 1, maxLength: 1000 } },
+          properties: { attendanceRecordId: uuid, status: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,39}$' }, reason: { type: 'string', minLength: 1, maxLength: 1000 }, predecessorRequestId: uuid },
         },
       },
     },
     async (request, reply) => {
       const grant = await requireAccess(db, request, 'attendance', 'request_correction', ['operational'], { requireAll: true });
-      const result = await withTransaction(db, (tx) => requestCorrection(tx, grant, request.body as { attendanceRecordId: string; status: string; reason: string }));
+      const result = await withTransaction(db, (tx) => requestCorrection(tx, grant, request.body as { attendanceRecordId: string; status: string; reason: string; predecessorRequestId?: string }));
       reply.status(201);
       return result;
     },

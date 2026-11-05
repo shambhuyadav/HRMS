@@ -4,9 +4,21 @@
 // EXPENSE_REGISTER; reconciliation takes the approval period; the ageing reports stand as at the day they are generated and,
 // like GET /expense/payables, take no period. Ages are calendar days and no buckets are drawn: the BRD names none. Columns
 // await the owner's samples (section 11; I-40 item 12). Reasons, receipts and payment evidence keys are never columns.
+import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
-import { employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import type { ReportDefinition, ReportFilters } from '../report/catalogue.js';
+import { claimReadCondition } from './service.js';
+
+/**
+ * The claims an expense output may hold (claim alias c): row scope over the claimant, and DF02 "visible only to claimant and
+ * assigned expense reviewers/payment operators" as the claim screens apply it, since DF02 enforces it on exports too. An
+ * export right alone therefore opens no claim: its holder also needs the payment read duty or a task on the claim.
+ */
+export async function claimsInScope(db: Queryable, grant: AccessGrant, p: SqlParams): Promise<string> {
+  const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, p);
+  return `(${scope} and ${await claimReadCondition(db, grant, p)})`;
+}
 
 /** An as-at report refuses a period rather than ignoring it (BR-026: a filter that is shown is a filter that applied). */
 function refusePeriod(f: ReportFilters): void {
@@ -43,10 +55,10 @@ export const EXPENSE_REPORTS: Record<string, ReportDefinition> = {
     ],
     async rows(db, grant, f) {
       const p = new SqlParams();
-      const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, p);
+      const scope = await claimsInScope(db, grant, p);
       return (
         await db.query(
-          `select e.employee_code, c.id as claim_id, r.revision, c.state, r.submitted_at, l.sequence, cat.code as category, l.expense_date, l.nights, l.merchant, l.invoice_reference,
+          `select e.employee_code, c.id as claim_id, r.revision, c.state, hrms_business_date(c.company_id, r.submitted_at) as submitted_at, l.sequence, cat.code as category, l.expense_date, l.nights, l.merchant, l.invoice_reference,
                   ${MONEY('l.claimed_amount', 'claimed_amount')}, ${MONEY(FINAL_ALLOWED, 'approved_amount')}, array_to_string(l.exception_flags, ' ') as exception_flags, c.currency_code as currency
              from expense_claim c join employee e on e.company_id = c.company_id and e.id = c.employee_id
              join expense_revision r on r.company_id = c.company_id and r.claim_id = c.id and r.revision = c.current_revision
@@ -83,7 +95,7 @@ export const EXPENSE_REPORTS: Record<string, ReportDefinition> = {
     ],
     async rows(db, grant) {
       const p = new SqlParams();
-      const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, p);
+      const scope = await claimsInScope(db, grant, p);
       const asAt = `${p.add(grant.businessDate)}::date`;
       return (
         await db.query(
@@ -125,7 +137,7 @@ export const EXPENSE_REPORTS: Record<string, ReportDefinition> = {
     ],
     async rows(db, grant, f) {
       const p = new SqlParams();
-      const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, p);
+      const scope = await claimsInScope(db, grant, p);
       // Spend is what final approval entitled: the lines of finally approved claims, by EXPENSE_REGISTER's period, so the
       // approved totals of one period add up to that register's approved amounts.
       return (
@@ -149,7 +161,8 @@ export const EXPENSE_REPORTS: Record<string, ReportDefinition> = {
   EXPENSE_PAYABLE_AGEING: {
     code: 'EXPENSE_PAYABLE_AGEING',
     title: 'Expense payable ageing',
-    resource: 'expense',
+    // C3 Payment "export": a payment output has its own export right (0131); the claim read rule above still applies.
+    resource: 'payment',
     fieldGroup: 'operational',
     requiresPeriod: false,
     checkFilters: refusePeriod,
@@ -168,7 +181,7 @@ export const EXPENSE_REPORTS: Record<string, ReportDefinition> = {
     ],
     async rows(db, grant) {
       const p = new SqlParams();
-      const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, p);
+      const scope = await claimsInScope(db, grant, p);
       const asAt = `${p.add(grant.businessDate)}::date`;
       // The same claims as GET /expense/payables (expense/service.ts listPayables), DF07's ledger figures.
       return (
@@ -193,7 +206,7 @@ export const EXPENSE_REPORTS: Record<string, ReportDefinition> = {
   EXPENSE_PAYMENT_RECONCILIATION: {
     code: 'EXPENSE_PAYMENT_RECONCILIATION',
     title: 'Expense payment reconciliation',
-    resource: 'expense',
+    resource: 'payment',
     fieldGroup: 'operational',
     requiresPeriod: true,
     columns: [
@@ -212,7 +225,7 @@ export const EXPENSE_REPORTS: Record<string, ReportDefinition> = {
     ],
     async rows(db, grant, f) {
       const p = new SqlParams();
-      const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, p);
+      const scope = await claimsInScope(db, grant, p);
       // DF07: net paid = confirmed - reversed; outstanding = approved - net paid; allocatable also leaves out pending. Every
       // figure as the ledger holds it when generated (pending is shown apart and is never paid, C5), for claims approved in
       // the period. Confirmed and reversed come from the claim's own allocations, as the ledger's net paid does (0088).

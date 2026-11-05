@@ -5,9 +5,8 @@ import { optionalPaging, type Paging, type Sorting, sortQuery } from '../../db/p
 import { type Database, withTransaction } from '../../db/transaction.js';
 import { requireAccess } from '../../http/guard.js';
 import { attachmentDisposition } from '../../storage/files.js';
-import type { ScanProvider } from '../../storage/scan.js';
+import { type ScanProvider, scanInMemory } from '../../storage/scan.js';
 import { sendTemplate } from '../imports/routes.js';
-import { requireGroups } from './common.js';
 import { expectedVersion, idempotencyKey, idParams, pagingQuery, reason } from './process-routes.js';
 import {
   approveSettlement,
@@ -49,11 +48,8 @@ const decision = {
 
 export async function settlementRoutes(app: FastifyInstance, opts: { db: Database; scanner: ScanProvider }): Promise<void> {
   const { db, scanner } = opts;
-  const read = async (request: Parameters<typeof requireAccess>[1], recordKey?: string) => {
-    const grant = await requireAccess(db, request, 'settlement', 'read', ['operational', 'amount'], recordKey ? { recordKey } : {});
-    requireGroups(grant, ['operational']);
-    return grant;
-  };
+  const read = (request: Parameters<typeof requireAccess>[1], recordKey?: string) =>
+    requireAccess(db, request, 'settlement', 'read', ['operational', 'amount'], { requireGroups: ['operational'], ...(recordKey ? { recordKey } : {}) });
 
   // FR-052: no approved full-and-final policy or rate pack, so there is no calculation.
   app.get('/settlements/calculation', async (request) => {
@@ -163,7 +159,10 @@ export async function settlementRoutes(app: FastifyInstance, opts: { db: Databas
     async (request) => {
       const { id } = request.params as { id: string };
       const grant = await requireAccess(db, request, 'settlement', 'prepare', ['amount'], { requireAll: true, recordKey: id });
-      return withTransaction(db, (tx) => uploadLines(tx, grant, scanner, id, request.body as { contentBase64: string; dryRun?: boolean; expectedVersion: number }));
+      const body = request.body as { contentBase64: string; dryRun?: boolean; expectedVersion: number };
+      // FR-106: asked before the transaction opens, so a slow scanner holds no connection and no lock on the settlement.
+      const verdict = await scanInMemory(scanner, Buffer.from(body.contentBase64, 'base64'));
+      return withTransaction(db, (tx) => uploadLines(tx, grant, verdict, id, body));
     },
   );
 

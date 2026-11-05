@@ -2,6 +2,7 @@
 // fields; BR-050; BR-051; CI27 hold part; ZT38 hold part). Synthetic employees, banks and amounts only.
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
 import { isModuleActive } from '../registry.js';
@@ -99,7 +100,7 @@ describe.runIf(isModuleActive('payroll'))('salary holds (FR-101, DB110, H2)', ()
   beforeAll(async () => {
     h = await startHarness();
     A = await h.makeCompany();
-    systemUser = await h.makeUser();
+    systemUser = SYSTEM_ACTOR_ID;
     hr = await h.actor(A, 'HR_ADMINISTRATOR');
     configA = await h.actor(A, 'HR_ADMINISTRATOR', { extra: grants(CONFIG, CRITERIA) });
     configB = await h.actor(A, 'HR_ADMINISTRATOR', { extra: grants(CONFIG, CRITERIA) });

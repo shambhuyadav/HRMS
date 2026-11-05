@@ -11,6 +11,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { EmployeesPage } from './home';
 import { EmployeeDocumentsPage, ImportsPage } from './records';
 
+// The automatic re-check of a waiting batch has its own tests (held-batch.test.tsx): here the manual check is on its own.
+vi.mock('../held-batch-timing', () => ({ HELD_BATCH_CHECK_INTERVAL_MS: 3_600_000, HELD_BATCH_MAX_CHECKS: 30 }));
 const session = vi.hoisted(() => ({ permissions: [] as string[] }));
 vi.mock('../session', () => ({
   useSession: () => ({
@@ -404,7 +406,7 @@ describe('batch imports', () => {
     });
     renderPage(<ImportsPage />);
     await upload(csv('employeeCode\nSYN-1'));
-    expect(await screen.findByText(/Check the scan again later to see the preview/)).toBeTruthy();
+    expect(await screen.findByText(/This is usually a short wait/)).toBeTruthy();
     await checkAgain();
     expect(await screen.findByText('Still waiting for the malware scan.')).toBeTruthy();
     await checkAgain();
@@ -442,14 +444,14 @@ describe('batch imports', () => {
     const list = await screen.findByRole('table', { name: 'Your employee onboarding batches' });
     expect(calls.find((c) => c.method === 'GET')!.url).toBe('/v1/employees/imports?page=1&pageSize=25');
     const rowOf = (name: string) => within(screen.getByRole('table', { name: 'Your employee onboarding batches' })).getByText(name).closest('tr')!;
-    expect(rowOf('held.csv').textContent).toContain('held for the malware scan');
+    expect(rowOf('held.csv').textContent).toContain('waiting for the scan');
     expect(rowOf('held.csv').textContent).toContain('waiting for the malware scan');
     expect(rowOf('done.csv').textContent).toContain('committed');
     expect(rowOf('done.csv').textContent).toContain('2 applied');
     expect(within(list).queryByText('SYN-1')).toBeNull(); // job facts only, never rows
 
     fireEvent.click(within(rowOf('held.csv')).getByRole('button', { name: /^Open held.csv/ }));
-    expect(await screen.findByText(/Check the scan again later to see the preview/)).toBeTruthy();
+    expect(await screen.findByText(/This is usually a short wait/)).toBeTruthy();
     expect(within(rowOf('held.csv')).getByText('open above')).toBeTruthy();
     await checkAgain();
     expect((await screen.findByRole('alert')).textContent).toContain('FILE_QUARANTINED');

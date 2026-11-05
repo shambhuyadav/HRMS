@@ -2,6 +2,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { csvTable } from '../report/csv.fixtures.js';
+import { processReportQueue } from '../report/service.js';
 
 let h: Harness;
 let A: Company;
@@ -269,5 +271,54 @@ describe('missing policy or reviewer reported for HR review (FR-082, DF11)', () 
     expect((await h.call(mgr, 'GET', '/v1/confirmations/attention')).statusCode).toBe(403);
     const otherDept = await h.actor(B, 'HR_ADMINISTRATOR', { departmentFilter: B.financeDept });
     expect((await attention(otherDept)).items).toEqual([]);
+  });
+});
+
+describe('the confirmation export (FR-093; section 11.2 "planned versus actual dates and decisions"; decisions-10)', () => {
+  async function exported(filters: object) {
+    const res = await h.call(hr, 'POST', '/v1/reports', { reportCode: 'CONFIRMATION_DUE', filters });
+    expect(res.statusCode, res.body).toBe(202);
+    await processReportQueue(h.pool);
+    const file = await h.call(hr, 'GET', `/v1/reports/${res.json().id}/download`);
+    expect(file.statusCode, file.body).toBe(200);
+    const [header, ...rows] = csvTable(file.body).trimEnd().split('\r\n').map((line) => [...line.matchAll(/"((?:[^"]|"")*)"/g)].map((m) => m[1]!.replace(/""/g, '"')));
+    return { body: file.body, rows: rows.map((row) => Object.fromEntries(header!.map((column, i) => [column, row[i]!]))) };
+  }
+
+  it('holds exactly the list’s cases for each view, with planned and actual dates and each decision, never its reason', async () => {
+    const e = await probationer({ joiningDate: '2026-01-31' });
+    const { caseId } = (await open(e)).json();
+    const code = (await h.call(hr, 'GET', `/v1/employees/${e}`)).json().employeeCode as string;
+    await recommendation(caseId, { recommendation: 'EXTEND', extensionMonths: 1 });
+    expect((await decide(hr, (await taskFor(hr, e))!.taskId, 'APPROVE')).json()).toMatchObject({ action: 'EXTENDED' });
+    await recommendation(caseId, { recommendation: 'CONFIRM', effectiveDate: '2026-06-01' });
+    expect((await decide(hr, (await taskFor(hr, e))!.taskId, 'APPROVE')).json()).toMatchObject({ state: 'CONFIRMED' });
+
+    for (const view of ['UPCOMING', 'DUE', 'OVERDUE', 'EXTENDED', 'CONFIRMED', 'ALL', 'DUE_WITHIN_30']) {
+      const listed = (await h.call(hr, 'GET', `/v1/confirmations?view=${view}`)).json();
+      const file = await exported({ view });
+      expect(file.rows.map((r) => r['Employee code']).sort(), view).toEqual((listed.items as { employeeCode: string }[]).map((i) => i.employeeCode).sort());
+    }
+    const confirmed = await exported({ view: 'CONFIRMED' });
+    const today = (await h.one<{ d: string }>(`select to_char(hrms_business_date($1, now()), 'YYYY-MM-DD') as d`, [A.id])).d;
+    expect(confirmed.rows.find((r) => r['Employee code'] === code)).toMatchObject({
+      'Initial due date': '2026-04-30',
+      'Current due date': '2026-05-30',
+      'Confirmed on': '2026-06-01',
+      Extensions: '1',
+      State: 'CONFIRMED',
+      View: 'CONFIRMED',
+      Decisions: `EXTENDED ${today}; CONFIRMED ${today}`,
+    });
+    expect(confirmed.body).not.toContain('HR decision (synthetic)');
+    expect(confirmed.body).not.toContain('Manager review (synthetic)');
+  });
+
+  it('with no view it holds every case, and refuses a view that does not exist', async () => {
+    expect((await exported({})).rows).toHaveLength((await h.call(hr, 'GET', '/v1/confirmations?view=ALL')).json().total);
+    const refused = await h.call(hr, 'POST', '/v1/reports', { reportCode: 'CONFIRMATION_DUE', filters: { view: 'LATER' } });
+    expect([refused.statusCode, refused.json().error]).toEqual([422, 'INVALID_FILTER']);
+    const elsewhere = await h.call(hr, 'POST', '/v1/reports', { reportCode: 'EMPLOYEE_REGISTER', filters: { view: 'ALL' } });
+    expect([elsewhere.statusCode, elsewhere.json().error]).toEqual([422, 'FILTER_NOT_SUPPORTED']);
   });
 });

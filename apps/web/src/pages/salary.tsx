@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { api, ApiError, download, fileToBase64, formatAmount, formatDate, idempotencyKey, localDate, pinSession } from '../api';
-import { reportProblem } from '../report-failures';
+import { isReportRefusal, reportProblem } from '../report-failures';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
@@ -33,6 +33,9 @@ const statusLabel = (code: string) => STATUSES.find((s) => s.value === code)?.la
 
 const SCROLL: CSSProperties = { overflowX: 'auto' };
 const isForbidden = (error: unknown) => error instanceof ApiError && error.status === 403;
+/** C4: a refusal of the past, not of salaries: today and later still answer. */
+const needsHistoryGrant = (error: unknown) => error instanceof ApiError && error.code === 'HISTORY_GRANT_REQUIRED';
+const HISTORY_GRANT_NOTE = 'Earlier dates and whole months need the salary history grant, which the selected role does not hold. Today and later dates are available.';
 /** A refusal or bad request will not change on retry; only transient failures are retried (once). */
 const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
 
@@ -204,7 +207,7 @@ function SalaryList({ filters, page, onPage }: { filters: Filters; page: number;
   return (
     <Section title={data ? `Salaries ${period} (${data.total})` : 'Salaries'}>
       {list.isPending && <p className="hint">Loading salaries…</p>}
-      {isForbidden(list.error) ? <NotPermitted>The selected role cannot view salaries.</NotPermitted> : <ErrorNote error={list.error} />}
+      {needsHistoryGrant(list.error) ? <NotPermitted>{HISTORY_GRANT_NOTE}</NotPermitted> : isForbidden(list.error) ? <NotPermitted>The selected role cannot view salaries.</NotPermitted> : <ErrorNote error={list.error} />}
       {data && data.items.length === 0 && <Empty>{page === 1 ? 'No salary arrangement matches these filters.' : 'No arrangements on this page.'}</Empty>}
       {data && data.items.length > 0 && (
         <>
@@ -306,7 +309,7 @@ function SalaryExports({ filters }: { filters: Filters }) {
         The exports use the filters shown above (as last applied with Show). The annual export lists every arrangement in force during the financial year, 1 April to 31 March. Exports are
         generated in the background, re-check your access when downloaded and expire after 24 hours.
       </p>
-      {isForbidden(request.error) ? <NotPermitted>The selected role cannot export salaries.</NotPermitted> : <ErrorNote error={request.error} />}
+      {needsHistoryGrant(request.error) ? <NotPermitted>{HISTORY_GRANT_NOTE}</NotPermitted> : isForbidden(request.error) ? <NotPermitted>The selected role cannot export salaries.</NotPermitted> : <ErrorNote error={request.error} />}
       {requested.length > 0 && (
         <ul className="tasks" aria-label="Requested exports">
           {requested.map((r) => (
@@ -322,7 +325,7 @@ function ExportStatus({ id, label }: { id: string; label: string }) {
   const status = useQuery({
     queryKey: ['report', id],
     queryFn: () => api<ReportState>(`/v1/reports/${encodeURIComponent(id)}`),
-    refetchInterval: (q) => (q.state.data?.state === 'QUEUED' || q.state.data?.state === 'RUNNING' ? 3000 : false),
+    refetchInterval: (q) => (!isReportRefusal(q.state.error) && (q.state.data?.state === 'QUEUED' || q.state.data?.state === 'RUNNING') ? 3000 : false),
     retry: retryTransient,
   });
   const get = useMutation({ mutationFn: () => download(`/v1/reports/${encodeURIComponent(id)}/download`) });
@@ -402,14 +405,18 @@ function SalaryUpload() {
     setFile(next);
     uploadKey.current = null;
   };
-  const { resume, open, refresh } = useBatchFollowUp(t.base, {
-    show: setJob,
-    closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
-    onStart: () => {
-      upload.reset();
-      act.reset();
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    t.base,
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+      },
     },
-  });
+    job,
+  );
   const act = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'commit' | 'cancel' }) => {
       // The decision and any look at the batch after it go out under the role it was made in (BR-046).
@@ -486,7 +493,7 @@ function SalaryUpload() {
       {job && (
         <>
           <ImportJobView job={job} template={t} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
-          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
       <ImportBatches base={t.base} title="Your salary master batches" openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />

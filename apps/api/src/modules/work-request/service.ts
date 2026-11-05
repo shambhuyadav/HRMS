@@ -5,10 +5,12 @@
 import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
+import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { assertUsableEvidence, EVIDENCE_JSON, linkEvidence, revisionEvidence } from '../employee/evidence.js';
 import { lastWorkingDateOf, lockEmployeeDays, MANAGER_BACKDATE_LIMIT_DAYS, refuseAfterLastWorkingDate, workingDays } from '../leave/service.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, startApproval } from '../workflow/engine.js';
+import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
 
 export const WORK_REQUEST_KINDS = {
   outdoor_duty: { table: 'outdoor_duty_request', label: 'outdoor duty' },
@@ -27,6 +29,8 @@ export interface WorkRequestInput {
   purpose: string;
   /** FR-027 supporting evidence: the requester's own usable documents (FR-106). */
   evidenceDocumentIds?: string[] | undefined;
+  /** DF03: the rejected request this one raises again (workflow/predecessor.ts); named once, at creation. */
+  predecessorRequestId?: string | undefined;
 }
 
 interface Row {
@@ -108,11 +112,13 @@ const operational = (input: WorkRequestInput) => ({
 export async function submitWorkRequest(tx: Queryable, grant: AccessGrant, kind: WorkRequestKind, input: WorkRequestInput) {
   const employeeId = grant.linkedEmployeeId;
   if (!employeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
+  await reassertAccess(tx, grant, 'work_request', 'submit', ['operational']);
   const { selectionOverride } = await check(tx, grant, kind, employeeId, input);
+  const predecessor = await rejectedPredecessor(tx, grant.companyId, WORK_REQUEST_KINDS[kind].table, employeeId, input.predecessorRequestId);
   const transactionId = (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by) values ($1, $2, $3, 'SUBMITTED', $4, $4) returning id`,
-      [grant.companyId, kind, employeeId, grant.userId],
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, predecessor_transaction_id, created_by, updated_by) values ($1, $2, $3, 'SUBMITTED', $5, $4, $4) returning id`,
+      [grant.companyId, kind, employeeId, grant.userId, predecessor],
     )
   ).rows[0]!.id;
   const requestId = (
@@ -133,7 +139,7 @@ export async function submitWorkRequest(tx: Queryable, grant: AccessGrant, kind:
     actingAssignmentId: grant.assignmentId,
     action: 'CREATE',
     newVersion: 1,
-    after: { operational: { ...operational(input), state: 'SUBMITTED', evidenceCount: evidence.length } },
+    after: { operational: { ...operational(input), state: 'SUBMITTED', evidenceCount: evidence.length, ...(input.predecessorRequestId ? { predecessorRequestId: input.predecessorRequestId } : {}) } },
   });
   await enqueueEvent(tx, {
     companyId: grant.companyId,
@@ -295,6 +301,7 @@ export async function withWorkTaskSummaries<T extends { transactionId: string; k
 const listColumns = (kind: WorkRequestKind) => `'${kind}' as kind, r.id, r.employee_id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName",
   r.start_date as "startDate", r.end_date as "endDate", to_char(r.start_time, 'HH24:MI') as "startTime", to_char(r.end_time, 'HH24:MI') as "endTime",
   r.purpose, r.state, r.version, r.created_at as "submittedAt",
+  ${predecessorRequestSql(WORK_REQUEST_KINDS[kind].table, 'r')} as "predecessorRequestId",
   ${EVIDENCE_JSON('r.company_id', 'r.transaction_id', '(select bt.revision from business_transaction bt where bt.company_id = r.company_id and bt.id = r.transaction_id)')} as evidence`;
 
 /** One employee's requests of both kinds (own view, team view, HR view per scope). */

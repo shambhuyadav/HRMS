@@ -8,7 +8,9 @@
 import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
+import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, canAccessEmployee } from '../access/authorize.js';
+import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
 import { amendRecord, refuseIfPayrollLocked } from '../attendance/service.js';
 import { updateEmployee } from '../employee/service.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
@@ -44,8 +46,9 @@ async function taskKind(tx: Queryable, grant: AccessGrant, taskId: string): Prom
 // Profile change requests
 // ---------------------------------------------------------------------------------------------------------
 
-export async function requestProfileChange(tx: Queryable, grant: AccessGrant, changes: ProfileChanges) {
+export async function requestProfileChange(tx: Queryable, grant: AccessGrant, changes: ProfileChanges & { predecessorRequestId?: string | undefined }) {
   const employeeId = ownEmployee(grant);
+  await reassertAccess(tx, grant, 'profile_change', 'submit', ['operational']);
   const requested: ProfileChanges = {};
   if (changes.displayName !== undefined) {
     const name = changes.displayName.trim();
@@ -64,11 +67,12 @@ export async function requestProfileChange(tx: Queryable, grant: AccessGrant, ch
   if (requested.displayName === current.display_name) delete requested.displayName;
   if (requested.workEmail === (current.work_email ?? undefined)) delete requested.workEmail;
   if (Object.keys(requested).length === 0) throw new HttpError(422, 'NO_CHANGE', 'Nothing differs from the current record');
+  const predecessor = await rejectedPredecessor(tx, grant.companyId, 'profile_change_request', employeeId, changes.predecessorRequestId);
 
   const transactionId = (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by) values ($1, 'profile_change', $2, 'SUBMITTED', $3, $3) returning id`,
-      [grant.companyId, employeeId, grant.userId],
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, predecessor_transaction_id, created_by, updated_by) values ($1, 'profile_change', $2, 'SUBMITTED', $4, $3, $3) returning id`,
+      [grant.companyId, employeeId, grant.userId, predecessor],
     )
   ).rows[0]!.id;
   const requestId = (
@@ -87,7 +91,7 @@ export async function requestProfileChange(tx: Queryable, grant: AccessGrant, ch
     actingAssignmentId: grant.assignmentId,
     action: 'CREATE',
     newVersion: 1,
-    after: { operational: { fields: Object.keys(requested), requested, state: 'SUBMITTED' } },
+    after: { operational: { fields: Object.keys(requested), requested, state: 'SUBMITTED', ...(changes.predecessorRequestId ? { predecessorRequestId: changes.predecessorRequestId } : {}) } },
   });
   await enqueueEvent(tx, {
     companyId: grant.companyId,
@@ -100,7 +104,8 @@ export async function requestProfileChange(tx: Queryable, grant: AccessGrant, ch
 }
 
 const profileColumns = `p.id, p.employee_id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName",
-  p.requested, p.current_values as "currentValues", p.state, p.applied_at as "appliedAt", p.created_at as "submittedAt", p.version`;
+  p.requested, p.current_values as "currentValues", p.state, p.applied_at as "appliedAt", p.created_at as "submittedAt", p.version,
+  ${predecessorRequestSql('profile_change_request', 'p')} as "predecessorRequestId"`;
 
 export async function listProfileChanges(db: Queryable, grant: AccessGrant, employeeId: string) {
   if (!(await canAccessEmployee(db, grant, employeeId))) throw notFound();
@@ -208,7 +213,7 @@ export async function decideProfileChange(tx: Queryable, grant: AccessGrant, tas
  */
 export const CORRECTABLE_STATUSES = ['PRESENT', 'HALF_DAY', 'ABSENT'] as const;
 
-export async function requestCorrection(tx: Queryable, grant: AccessGrant, input: { attendanceRecordId: string; status: string; reason: string }) {
+export async function requestCorrection(tx: Queryable, grant: AccessGrant, input: { attendanceRecordId: string; status: string; reason: string; predecessorRequestId?: string | undefined }) {
   const employeeId = ownEmployee(grant);
   if (!(CORRECTABLE_STATUSES as readonly string[]).includes(input.status)) {
     throw new HttpError(422, 'STATUS_NOT_CORRECTABLE', 'Use a leave or outdoor-duty request for this; a correction can set present, half day or absent');
@@ -230,11 +235,13 @@ export async function requestCorrection(tx: Queryable, grant: AccessGrant, input
   // BR-047: refused early when a processed payroll used the day; the amendment checks again at approval, when the
   // decision rolls back and the reviewer can still reject.
   await refuseIfPayrollLocked(tx, grant.companyId, employeeId, record.work_date);
+  await reassertAccess(tx, grant, 'attendance', 'request_correction', ['operational']);
+  const predecessor = await rejectedPredecessor(tx, grant.companyId, 'attendance_correction_request', employeeId, input.predecessorRequestId);
 
   const transactionId = (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by) values ($1, 'attendance_correction', $2, 'SUBMITTED', $3, $3) returning id`,
-      [grant.companyId, employeeId, grant.userId],
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, predecessor_transaction_id, created_by, updated_by) values ($1, 'attendance_correction', $2, 'SUBMITTED', $4, $3, $3) returning id`,
+      [grant.companyId, employeeId, grant.userId, predecessor],
     )
   ).rows[0]!.id;
   const requestId = (
@@ -253,7 +260,10 @@ export async function requestCorrection(tx: Queryable, grant: AccessGrant, input
     actingAssignmentId: grant.assignmentId,
     action: 'CREATE',
     newVersion: 1,
-    after: { operational: { attendanceRecordId: input.attendanceRecordId, workDate: record.work_date, from: record.status_code, to: input.status, state: 'SUBMITTED' }, reason: { reason: input.reason.trim() } },
+    after: {
+      operational: { attendanceRecordId: input.attendanceRecordId, workDate: record.work_date, from: record.status_code, to: input.status, state: 'SUBMITTED', ...(input.predecessorRequestId ? { predecessorRequestId: input.predecessorRequestId } : {}) },
+      reason: { reason: input.reason.trim() },
+    },
   });
   await enqueueEvent(tx, {
     companyId: grant.companyId,
@@ -268,7 +278,8 @@ export async function requestCorrection(tx: Queryable, grant: AccessGrant, input
 function correctionColumns(withReason: boolean) {
   return `c.id, c.employee_id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName",
     c.attendance_record_id as "attendanceRecordId", to_char(r.work_date, 'YYYY-MM-DD') as "workDate", cur.code as "currentStatus",
-    req.code as "requestedStatus", ${withReason ? 'c.reason, ' : ''}c.state, c.created_at as "submittedAt", c.version`;
+    req.code as "requestedStatus", ${withReason ? 'c.reason, ' : ''}c.state, c.created_at as "submittedAt", c.version,
+    ${predecessorRequestSql('attendance_correction_request', 'c')} as "predecessorRequestId"`;
 }
 const correctionFrom = `from attendance_correction_request c
   join employee e on e.company_id = c.company_id and e.id = c.employee_id

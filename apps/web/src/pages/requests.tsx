@@ -12,6 +12,38 @@ import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
 type Kind = 'outdoor_duty' | 'holiday_work';
 export const KIND_LABEL: Record<Kind, string> = { outdoor_duty: 'Outdoor duty', holiday_work: 'Work on holiday' };
 
+// ---------------------------------------------------------------------------------------------------------
+// DF03 "Rejected requests are terminal; a new request links to the rejected predecessor" (I-66): every own-request form offers a
+// rejected request to be raised again, filled in from it. The link is the server's to check; this only saves the refusal.
+// ---------------------------------------------------------------------------------------------------------
+
+const ENDED_STATES = ['REJECTED', 'WITHDRAWN', 'CANCELLED'];
+
+/** The rejected requests in this list that a live request already follows, which cannot be raised again. */
+export function followedRequests(items: readonly { state: string; predecessorRequestId?: string | null }[]): ReadonlySet<string> {
+  return new Set(items.filter((i) => i.predecessorRequestId && !ENDED_STATES.includes(i.state)).map((i) => i.predecessorRequestId!));
+}
+
+/** A rejected request of `items` can be raised again by someone who may submit. */
+export const canRaiseAgain = (r: { id: string; state: string }, followed: ReadonlySet<string>) => r.state === 'REJECTED' && !followed.has(r.id);
+
+/** Above a form holding a rejected request's details: says what the new request will follow, and how to drop that. */
+export function RaiseAgainNote({ onCancel }: { onCancel: () => void }) {
+  return (
+    <p className="hint" role="status">
+      This new request will be linked to your rejected request; the rejected one stays as it was.{' '}
+      <button type="button" className="link" onClick={onCancel}>
+        Make it an unlinked request
+      </button>
+    </p>
+  );
+}
+
+/** On a request's row: what it follows. */
+export function RaisedAgainHint({ predecessorRequestId }: { predecessorRequestId?: string | null | undefined }) {
+  return predecessorRequestId ? <div className="hint">Raised again after a rejected request</div> : null;
+}
+
 /** FR-106: an upload is served only once the malware scan has released it (CLEAN). */
 type ScanState = 'PENDING_SCAN' | 'CLEAN' | 'QUARANTINED' | null;
 type VerificationState = 'UNVERIFIED' | 'VERIFIED' | 'REJECTED';
@@ -41,6 +73,7 @@ interface WorkRequest {
   version: number;
   /** The supporting documents of the current revision. */
   evidence?: Evidence[];
+  predecessorRequestId?: string | null;
 }
 
 /** GET /v1/employees/{id}/documents: the fields the evidence choice uses. */
@@ -408,16 +441,21 @@ export function WorkRequestsPage() {
   const [kind, setKind] = useState<Kind>('outdoor_duty');
   const [draft, setDraft] = useState<Draft>(blankDraft);
   const [evidence, setEvidence] = useState<string[]>([]);
+  const [raisingAgain, setRaisingAgain] = useState<string | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['work-requests'] });
     void qc.invalidateQueries({ queryKey: ['work-request-register'] });
   };
   const submit = useMutation({
-    mutationFn: () => api(`/v1/work-requests/${kind}`, { body: { ...requestBody(kind, draft), ...(evidence.length ? { evidenceDocumentIds: evidence } : {}) } }),
+    mutationFn: () =>
+      api(`/v1/work-requests/${kind}`, {
+        body: { ...requestBody(kind, draft), ...(evidence.length ? { evidenceDocumentIds: evidence } : {}), ...(raisingAgain ? { predecessorRequestId: raisingAgain } : {}) },
+      }),
     // A submitted request starts the form clean; a refused one keeps what was typed and chosen for correction.
     onSuccess: () => {
       setDraft(blankDraft());
       setEvidence([]);
+      setRaisingAgain(null);
       refresh();
     },
     // A chosen document changed meanwhile (scan, verifier): the documents are read again, so the form says which one.
@@ -434,6 +472,7 @@ export function WorkRequestsPage() {
     <>
       {employeeId && can('work_request.submit.operational') && (
         <Section title="New outdoor duty or holiday work request">
+          {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
           <form
             className="grid-form"
             onSubmit={(e) => {
@@ -443,7 +482,14 @@ export function WorkRequestsPage() {
           >
             <label>
               Kind
-              <select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
+              <select
+                value={kind}
+                onChange={(e) => {
+                  setKind(e.target.value as Kind);
+                  // A request follows only one of its own kind.
+                  setRaisingAgain(null);
+                }}
+              >
                 <option value="outdoor_duty">{KIND_LABEL.outdoor_duty}</option>
                 <option value="holiday_work">{KIND_LABEL.holiday_work}</option>
               </select>
@@ -484,6 +530,7 @@ export function WorkRequestsPage() {
                     <td>{r.purpose}</td>
                     <td>
                       <StateBadge state={r.state} />
+                      <RaisedAgainHint predecessorRequestId={r.predecessorRequestId} />
                     </td>
                     <td>
                       <EvidenceList evidence={r.evidence ?? []} openPath={canOpenEvidence ? (documentId) => evidencePath(r.kind, r.id, documentId) : null} />
@@ -495,6 +542,29 @@ export function WorkRequestsPage() {
                         </button>
                       )}{' '}
                       {r.state === 'RETURNED' && can('work_request.submit.operational') && <ResubmitWorkRequest key={`${r.id}:${r.version}`} request={r} onChanged={refresh} />}
+                      {canRaiseAgain(r, followedRequests(mine.data?.items ?? [])) && can('work_request.submit.operational') && (
+                        <button
+                          type="button"
+                          className="link"
+                          aria-label={`Raise again the rejected ${KIND_LABEL[r.kind]} request`}
+                          onClick={() => {
+                            submit.reset();
+                            setKind(r.kind);
+                            setDraft({
+                              startDate: r.startDate.slice(0, 10),
+                              endDate: r.endDate.slice(0, 10),
+                              timed: r.startTime !== null,
+                              startTime: r.startTime ?? '09:00',
+                              endTime: r.endTime ?? '13:00',
+                              purpose: r.purpose,
+                            });
+                            setEvidence([]);
+                            setRaisingAgain(r.id);
+                          }}
+                        >
+                          Raise again
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

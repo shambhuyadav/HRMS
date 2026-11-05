@@ -1,6 +1,7 @@
 // Synthetic fixture builders for database tests. No real personal data.
 import type pg from 'pg';
 import { expect } from 'vitest';
+import { SYSTEM_ACTOR_ID } from '../../apps/api/src/audit/actors.js';
 
 export const FK_VIOLATION = '23503';
 export const UNIQUE_VIOLATION = '23505';
@@ -90,9 +91,9 @@ export function fixtures(db: pg.Client) {
     const approver = await makeUser();
     return asGrantBootstrap(() =>
       id(
-        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at)
-         values ($1, $2, $3, 'COMPANY', '2026-01-01T00:00:00Z', 'ACTIVE', $4, now())`,
-        [c.company, user, role, approver],
+        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, created_by)
+         values ($1, $2, $3, 'COMPANY', '2026-01-01T00:00:00Z', 'ACTIVE', $4, now(), $5)`,
+        [c.company, user, role, approver, SYSTEM_ACTOR_ID],
       ),
     );
   }

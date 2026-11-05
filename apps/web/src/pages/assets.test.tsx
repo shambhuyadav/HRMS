@@ -735,6 +735,30 @@ describe('My ESS TN16', () => {
     expect(screen.getByRole('table', { name: 'Items I hold' }).textContent).toContain('Acknowledged');
   });
 
+  it('DF03: a request that raises a rejected one again says so, and the rejected one is no longer offered', async () => {
+    serve();
+    db.requests.push(request('40000000-0000-4000-8000-0000000000f1', ASHA, 'SUBMITTED', { predecessorRequestId: R_OWN_REJECTED }));
+    renderPanel(EMPLOYEE);
+    const table = await screen.findByRole('table', { name: 'My custody requests' });
+    expect(table.textContent).toContain('Raised again after a rejected request');
+    expect(within(table).queryByRole('button', { name: /^Raise again/ })).toBeNull();
+  });
+
+  it('DF03: a rejected request can be raised again from what it asked, linked to it, with its own key', async () => {
+    serve();
+    renderPanel(EMPLOYEE);
+    const table = await screen.findByRole('table', { name: 'My custody requests' });
+    fireEvent.click(button(table, /^Raise again the rejected request/));
+    const form = await screen.findByRole('form', { name: 'Ask for an item' });
+    await waitFor(() => expect(valueOf(form, 'Why you need it')).toBe('Synthetic project work'));
+    await waitFor(() => expect(valueOf(form, 'Category')).toBe('LAPTOP'));
+    expect(screen.getByText('Make it an unlinked request')).toBeTruthy();
+    fireEvent.click(button(form, 'Send the request'));
+    await screen.findByText('Your request was sent and is waiting for a decision.');
+    expect(bodiesTo('POST', '/v1/me/asset-requests')[0]).toEqual({ categoryCode: 'LAPTOP', reason: 'Synthetic project work', predecessorRequestId: R_OWN_REJECTED, idempotencyKey: key('asset-request') });
+    expect(screen.queryByText('Make it an unlinked request')).toBeNull();
+  });
+
   it('asks for an item from the own category list with the exact body; refusals in words keep what was typed', async () => {
     serve({ 'POST /v1/me/asset-requests': refuseFirst(1, 422, 'NO_ELIGIBLE_REVIEWER') });
     renderPanel(EMPLOYEE);
@@ -768,12 +792,12 @@ describe('My ESS TN16', () => {
     expect(table.textContent).toContain('Waiting for a decision · with Hema Synthetic');
     expect(table.textContent).toContain('Rejected');
     expect(table.textContent).toContain('MON-0004, issued 2026-10-01');
-    expect(within(table).getAllByRole('button')).toHaveLength(1);
+    expect(within(table).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Withdraw the request for General item', 'Raise again the rejected request for Laptop']);
     fireEvent.click(button(table, 'Withdraw the request for General item'));
     await screen.findByText('Your request was withdrawn.');
     expect(callsTo('POST', `/v1/me/asset-requests/${R_OWN_WAITING}/withdraw`)).toHaveLength(1);
     expect(callsTo('POST', `/v1/me/asset-requests/${R_OWN_WAITING}/withdraw`)[0]!.body).toBeUndefined();
-    await waitFor(() => expect(within(screen.getByRole('table', { name: 'My custody requests' })).queryAllByRole('button')).toHaveLength(0));
+    await waitFor(() => expect(within(screen.getByRole('table', { name: 'My custody requests' })).queryByRole('button', { name: /^Withdraw/ })).toBeNull());
   });
 
   it('without the submit key there is no request form or withdrawal; without the acknowledge key no acknowledgment', async () => {

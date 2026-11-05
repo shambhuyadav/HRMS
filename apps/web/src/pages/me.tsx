@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { api, formatDate } from '../api';
 import { useSession } from '../session';
 import { Empty, ErrorNote, Section, StateBadge } from '../ui';
+import { canRaiseAgain, followedRequests, RaiseAgainNote, RaisedAgainHint } from './requests';
 
 // ---------------------------------------------------------------------------------------------------------
 // Employee portal (FR-059): own record, reviewed change requests, attendance corrections and app links.
@@ -22,6 +23,7 @@ interface ProfileChange {
   requested: { displayName?: string; workEmail?: string };
   state: string;
   submittedAt: string;
+  predecessorRequestId?: string | null;
 }
 interface Link {
   id: string;
@@ -48,6 +50,7 @@ export function MyProfilePage() {
     queryFn: () => api<{ items: Link[] }>(`/v1/employees/${employeeId}/mobile-links`),
   });
   const [form, setForm] = useState({ displayName: '', workEmail: '' });
+  const [raisingAgain, setRaisingAgain] = useState<string | null>(null);
   const [appRef, setAppRef] = useState('');
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['me-profile-changes'] });
@@ -56,10 +59,15 @@ export function MyProfilePage() {
   const request = useMutation({
     mutationFn: () =>
       api('/v1/me/profile-changes', {
-        body: { ...(form.displayName.trim() ? { displayName: form.displayName.trim() } : {}), ...(form.workEmail.trim() ? { workEmail: form.workEmail.trim() } : {}) },
+        body: {
+          ...(form.displayName.trim() ? { displayName: form.displayName.trim() } : {}),
+          ...(form.workEmail.trim() ? { workEmail: form.workEmail.trim() } : {}),
+          ...(raisingAgain ? { predecessorRequestId: raisingAgain } : {}),
+        },
       }),
     onSuccess: () => {
       setForm({ displayName: '', workEmail: '' });
+      setRaisingAgain(null);
       refresh();
     },
   });
@@ -112,6 +120,7 @@ export function MyProfilePage() {
 
       {can('profile_change.submit.operational') && (
         <Section title="Ask for a change">
+          {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
           <form
             className="grid-form"
             onSubmit={(e) => {
@@ -148,11 +157,27 @@ export function MyProfilePage() {
                     .map(([k, v]) => `${LABEL[k] ?? k}: ${v}`)
                     .join(' · ')}{' '}
                   <StateBadge state={c.state} /> <span className="hint">{formatDate(c.submittedAt)}</span>
+                  <RaisedAgainHint predecessorRequestId={c.predecessorRequestId} />
                 </div>
                 {c.state === 'SUBMITTED' && (
                   <div className="row">
                     <button type="button" className="link" onClick={() => withdraw.mutate(c.id)}>
                       Withdraw
+                    </button>
+                  </div>
+                )}
+                {canRaiseAgain(c, followedRequests(changes.data?.items ?? [])) && can('profile_change.submit.operational') && (
+                  <div className="row">
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => {
+                        request.reset();
+                        setForm({ displayName: c.requested.displayName ?? '', workEmail: c.requested.workEmail ?? '' });
+                        setRaisingAgain(c.id);
+                      }}
+                    >
+                      Raise again
                     </button>
                   </div>
                 )}
@@ -209,10 +234,12 @@ interface Day {
 }
 interface Correction {
   id: string;
+  attendanceRecordId: string;
   workDate: string;
   currentStatus: string;
   requestedStatus: string;
   state: string;
+  predecessorRequestId?: string | null;
 }
 
 const CORRECTABLE = ['PRESENT', 'HALF_DAY', 'ABSENT'];
@@ -222,11 +249,14 @@ const shiftDate = (days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-function CorrectionForm({ day, onDone }: { day: Day; onDone: () => void }) {
+function CorrectionForm({ day, predecessorRequestId, initialStatus, onDone }: { day: Pick<Day, 'id' | 'status'>; predecessorRequestId?: string; initialStatus?: string; onDone: () => void }) {
   const options = CORRECTABLE.filter((s) => s !== day.status);
-  const [status, setStatus] = useState(options[0] ?? 'PRESENT');
+  const [status, setStatus] = useState(initialStatus && options.includes(initialStatus) ? initialStatus : (options[0] ?? 'PRESENT'));
   const [reason, setReason] = useState('');
-  const send = useMutation({ mutationFn: () => api('/v1/me/attendance-corrections', { body: { attendanceRecordId: day.id, status, reason: reason.trim() } }), onSuccess: onDone });
+  const send = useMutation({
+    mutationFn: () => api('/v1/me/attendance-corrections', { body: { attendanceRecordId: day.id, status, reason: reason.trim(), ...(predecessorRequestId ? { predecessorRequestId } : {}) } }),
+    onSuccess: onDone,
+  });
   return (
     <form
       className="inline"
@@ -257,6 +287,7 @@ export function MyAttendancePage() {
   const employeeId = me?.employeeId;
   const [range, setRange] = useState({ from: shiftDate(-14), to: shiftDate(0) });
   const [open, setOpen] = useState<string | null>(null);
+  const [raisingAgain, setRaisingAgain] = useState<string | null>(null);
   const days = useQuery({
     queryKey: ['me-attendance', employeeId, range],
     enabled: !!employeeId,
@@ -340,6 +371,7 @@ export function MyAttendancePage() {
               <div>
                 {formatDate(c.workDate)}: {c.currentStatus.replace(/_/g, ' ').toLowerCase()} → {c.requestedStatus.replace(/_/g, ' ').toLowerCase()} <StateBadge state={c.state} />
               </div>
+              <RaisedAgainHint predecessorRequestId={c.predecessorRequestId} />
               {c.state === 'SUBMITTED' && (
                 <div className="row">
                   <button type="button" className="link" onClick={() => withdraw.mutate(c.id)}>
@@ -347,6 +379,28 @@ export function MyAttendancePage() {
                   </button>
                 </div>
               )}
+              {canRaiseAgain(c, followedRequests(corrections.data?.items ?? [])) &&
+                can('attendance.request_correction.operational') &&
+                (raisingAgain === c.id ? (
+                  <>
+                    <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />
+                    <CorrectionForm
+                      day={{ id: c.attendanceRecordId, status: c.currentStatus }}
+                      predecessorRequestId={c.id}
+                      initialStatus={c.requestedStatus}
+                      onDone={() => {
+                        setRaisingAgain(null);
+                        void qc.invalidateQueries({ queryKey: ['me-corrections'] });
+                      }}
+                    />
+                  </>
+                ) : (
+                  <div className="row">
+                    <button type="button" className="link" onClick={() => setRaisingAgain(c.id)}>
+                      Raise again
+                    </button>
+                  </div>
+                ))}
             </li>
           ))}
         </ul>

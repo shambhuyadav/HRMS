@@ -4,7 +4,6 @@ import type { FastifyInstance } from 'fastify';
 import { optionalPaging, type Paging, type Sorting, sortQuery } from '../../db/paging.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
 import { requireAccess } from '../../http/guard.js';
-import { requireGroups } from './common.js';
 import {
   cancelWithdrawalRequest,
   decideExit,
@@ -32,10 +31,7 @@ const exitStates = ['SUBMITTED', 'RECOMMENDED', 'APPROVED', 'SEPARATED', 'REJECT
 export async function exitRoutes(app: FastifyInstance, opts: { db: Database }): Promise<void> {
   const { db } = opts;
   const read = (request: Parameters<typeof requireAccess>[1], recordKey?: string) =>
-    requireAccess(db, request, 'exit', 'read', ['operational', 'reason'], recordKey ? { recordKey } : {}).then((g) => {
-      requireGroups(g, ['operational']);
-      return g;
-    });
+    requireAccess(db, request, 'exit', 'read', ['operational', 'reason'], { requireGroups: ['operational'], ...(recordKey ? { recordKey } : {}) });
 
   // ---- Employee OWN context ----
   app.post(

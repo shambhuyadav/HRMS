@@ -218,7 +218,7 @@ export async function pipelineRoutes(app: FastifyInstance, opts: { db: Database;
       const { bytes, mediaType } = decodeUpload(body.contentBase64);
       const stored = await files.put(grant.companyId, bytes);
       const { attachmentId, ...document } = await withTransaction(db, (tx) => addCandidateDocument(tx, grant, id, { documentType: body.documentType, fileName: body.fileName, stored, mediaType }));
-      // FR-106: scanned right after storing; a scanner error leaves the file PENDING_SCAN for the worker's retry.
+      // FR-106: the stored file stays PENDING_SCAN for the scan worker; in every deployment nothing is scanned in this request (NFR-S09; storage/scan.ts).
       const scanState = await scanAttachment(db, scanner, { companyId: grant.companyId, id: attachmentId, bytes });
       if (scanState !== 'PENDING_SCAN') await recordCandidateScanVerdict(db, grant, document.id, scanState);
       reply.status(201);

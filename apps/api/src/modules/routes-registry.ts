@@ -10,13 +10,15 @@ import { documentsRoutes } from './documents/routes.js';
 import { hiringRoutes } from './hiring/routes.js';
 import { lifecycleRoutes } from './lifecycle/routes.js';
 import { payrollRoutes } from './payroll/routes.js';
+import { payrollAdjustmentRoutes } from './payroll-adjustments/routes.js';
 import { payrollOutputsRoutes } from './payroll-outputs/routes.js';
 import { isModuleActive } from './registry.js';
 import { sensitiveChangeRoutes } from './sensitive-change/routes.js';
+import { taxDeclarationRoutes } from './tax-declarations/routes.js';
 import { timesheetRoutes } from './timesheet/routes.js';
 import { trainingRoutes } from './training/routes.js';
 
-/** Shared dependencies of module routes. `scanner` quarantines user uploads until released (FR-106, storage/scan.ts). */
+/** Shared dependencies of module routes. A stored upload stays quarantined until the scan worker's verdict; `scanner` leaves it to the worker (FR-106, NFR-S09, storage/scan.ts). */
 export type ModuleRoutes = (app: FastifyInstance, opts: { db: Database; files: FileStore; scanner: ScanProvider }) => Promise<void>;
 
 const ALL_ROUTES: readonly { key: string; routes: ModuleRoutes }[] = [
@@ -28,6 +30,8 @@ const ALL_ROUTES: readonly { key: string; routes: ModuleRoutes }[] = [
   { key: 'lifecycle', routes: lifecycleRoutes },
   { key: 'payroll', routes: payrollRoutes },
   { key: 'payroll-outputs', routes: payrollOutputsRoutes },
+  { key: 'payroll-adjustments', routes: payrollAdjustmentRoutes },
+  { key: 'tax-declarations', routes: taxDeclarationRoutes },
   { key: 'assets', routes: assetsRoutes },
   { key: 'documents', routes: documentsRoutes },
 ];

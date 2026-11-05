@@ -7,6 +7,7 @@ import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, assertNotOwnRecord, canAccessEmployee } from '../access/authorize.js';
 import { assertUsableEvidence, EVIDENCE_JSON, linkEvidence, revisionEvidence } from '../employee/evidence.js';
 import { workingDaySql } from '../shift/calendar.js';
+import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, startApproval } from '../workflow/engine.js';
 
 export const ACTIVE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'];
@@ -135,6 +136,8 @@ export interface SubmitLeaveInput {
   reason?: string | undefined;
   /** FR-026 attachment: the requester's own usable documents (FR-106, I-22). */
   evidenceDocumentIds?: string[] | undefined;
+  /** DF03: the rejected request this one raises again (workflow/predecessor.ts). */
+  predecessorRequestId?: string | undefined;
 }
 
 /**
@@ -205,13 +208,15 @@ export async function submitLeave(tx: Queryable, grant: AccessGrant, input: Subm
   // Self-service: the requester is always the caller's own linked employee.
   const employeeId = grant.linkedEmployeeId;
   if (!employeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
+  await reassertAccess(tx, grant, 'leave', 'submit', ['operational']);
   const { policy, units, selectionOverride } = await checkSubmission(tx, grant, employeeId, input);
+  const predecessor = await rejectedPredecessor(tx, grant.companyId, 'leave_request', employeeId, input.predecessorRequestId);
 
   const transactionId = (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by)
-       values ($1, 'leave_request', $2, 'SUBMITTED', $3, $3) returning id`,
-      [grant.companyId, employeeId, grant.userId],
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, predecessor_transaction_id, created_by, updated_by)
+       values ($1, 'leave_request', $2, 'SUBMITTED', $4, $3, $3) returning id`,
+      [grant.companyId, employeeId, grant.userId, predecessor],
     )
   ).rows[0]!.id;
   const requestId = (
@@ -256,7 +261,16 @@ export async function submitLeave(tx: Queryable, grant: AccessGrant, input: Subm
     action: 'CREATE',
     newVersion: 1,
     after: {
-      operational: { leaveType: input.leaveType, startDate: input.startDate, endDate: input.endDate, halfDay: input.halfDay ?? false, units, state: 'SUBMITTED', evidenceCount: evidence.length },
+      operational: {
+        leaveType: input.leaveType,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        halfDay: input.halfDay ?? false,
+        units,
+        state: 'SUBMITTED',
+        evidenceCount: evidence.length,
+        ...(input.predecessorRequestId ? { predecessorRequestId: input.predecessorRequestId } : {}),
+      },
       ...(input.reason ? { reason: { reason: input.reason.trim() } } : {}),
     },
   });
@@ -638,6 +652,7 @@ export async function listLeaveRequests(db: Queryable, grant: AccessGrant, emplo
     `select lr.id, t.code as "leaveType", lr.start_date as "startDate", lr.end_date as "endDate", lr.half_day as "halfDay",
             lr.requested_units::text as units, lr.state, lr.created_at as "submittedAt", lr.version,
             bt.revision,
+            ${predecessorRequestSql('leave_request', 'lr')} as "predecessorRequestId",
             (select c.state from leave_cancellation c where c.company_id = lr.company_id and c.leave_request_id = lr.id
               order by c.created_at desc limit 1) as "cancellationState",
             ${EVIDENCE_JSON('lr.company_id', 'lr.transaction_id', 'bt.revision')} as evidence

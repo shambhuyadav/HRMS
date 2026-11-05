@@ -7,6 +7,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { withTransaction } from '../../db/transaction.js';
 import type { PermissionKey } from '../access/baseline.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { prepareReady, releaseNaming } from './payment.fixtures.js';
 
 let h: Harness;
 let A: Company;
@@ -28,6 +29,7 @@ const FINANCE: PermissionKey[] = [
   'payment.read.operational',
   'payment.prepare.operational',
   'payment.release.operational',
+  'payment.confirm_outcome.operational',
   'payment.reverse.operational',
 ];
 
@@ -72,12 +74,14 @@ async function approved(amount: string, claimant: TestActor = employee) {
 }
 
 const prepare = async (claimId: string, amount: string) => {
-  const res = await h.call(fin2, 'POST', '/v1/expense/payments', { claimId, amount, paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') });
+  const res = await prepareReady(h, fin2, { claimId, amount, paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') });
   expect(res.statusCode).toBe(201);
   return res.json().instructionId as string;
 };
 const act = (a: TestActor, pi: string, path: string, body?: object) => h.call(a, 'POST', `/v1/expense/payments/${pi}/${path}`, body);
-const release = async (pi: string) => expect((await act(fin3, pi, 'release')).json().state).toBe('RELEASED');
+const release = async (pi: string) => expect((await releaseNaming(h, fin3, pi)).json().state).toBe('RELEASED');
+/** An instruction `direct` wrote stays in its draft batch until its preparer marks it ready. */
+const ready = async (pi: string) => expect((await act(fin2, pi, 'ready')).statusCode).toBe(200);
 const outcome = async (pi: string, kind: 'CONFIRMED' | 'FAILED') => {
   const key = uniq('bank-ref-');
   expect((await act(fin3, pi, 'outcome', { outcome: kind, evidenceKey: key })).json().state).toBe(kind);
@@ -102,9 +106,9 @@ interface DirectInstruction {
 async function writeInstruction(tx: Queryable, d: DirectInstruction): Promise<string> {
   const preparer = d.preparer ?? fin2.user;
   const payee = d.payee ?? employeeId;
-  const bt = (await tx.query<{ id: string }>(`insert into business_transaction (company_id, kind, state) values ($1, 'payment_batch', 'READY') returning id`, [A.id])).rows[0]!.id;
+  const bt = (await tx.query<{ id: string }>(`insert into business_transaction (company_id, kind, state) values ($1, 'payment_batch', 'DRAFT') returning id`, [A.id])).rows[0]!.id;
   const batch = (
-    await tx.query<{ id: string }>(`insert into payment_batch (company_id, transaction_id, state, prepared_by, currency_code) values ($1, $2, 'READY', $3, 'INR') returning id`, [A.id, bt, preparer])
+    await tx.query<{ id: string }>(`insert into payment_batch (company_id, transaction_id, state, prepared_by, currency_code) values ($1, $2, 'DRAFT', $3, 'INR') returning id`, [A.id, bt, preparer])
   ).rows[0]!.id;
   const pi = (
     await tx.query<{ id: string }>(
@@ -167,7 +171,11 @@ afterAll(async () => {
 });
 
 describe('instruction states follow the ledger (C5, B5)', () => {
-  const setState = (pi: string, state: string, releasedBy: string | null) => h.db.query(`update payment_instruction set state = $2, released_by = $3 where id = $1`, [pi, state, releasedBy]);
+  const setState = (pi: string, state: string, releasedBy: string | null) =>
+    h.db.query(
+      `update payment_instruction set state = $2, released_by = $3, outcome_actor_id = $3, outcome_assigned_by = $3, outcome_assigned_at = case when $3::uuid is null then null else now() end where id = $1`,
+      [pi, state, releasedBy],
+    );
 
   it('no jump past a state, and no way back or out once released', async () => {
     const { id } = await approved('500');
@@ -230,7 +238,7 @@ describe('instruction states follow the ledger (C5, B5)', () => {
     expect((await h.one<{ released_by: string }>(`select released_by from payment_instruction where id = $1`, [pi])).released_by).toBe(fin3.user);
   });
 
-  it('a new instruction starts prepared and unreleased, in a ready batch', async () => {
+  it('a new instruction starts prepared and unreleased, in a draft batch', async () => {
     const { obligation } = await approved('500');
     const pi = await direct({ amount: '10', allocations: [{ obligation, amount: '10' }] });
     const { batch_id: batch } = await h.one<{ batch_id: string }>(`select batch_id from payment_instruction where id = $1`, [pi]);
@@ -242,6 +250,7 @@ describe('instruction states follow the ledger (C5, B5)', () => {
       ),
       CHECK_VIOLATION,
     );
+    await ready(pi);
     await release(pi);
     // The batch has moved on: nothing more goes into it.
     await expectSqlError(
@@ -364,6 +373,7 @@ describe('one instruction may cover several obligations of one employee (CI05)',
     const pi = await direct({ amount: '500', allocations: [{ obligation: a.obligation, amount: '300' }, { obligation: b.obligation, amount: '200' }] });
     expect((await ledger(a.id)).pending).toBe('300.00');
     expect((await ledger(b.id)).pending).toBe('200.00');
+    await ready(pi);
     await release(pi);
     await outcome(pi, 'CONFIRMED');
     expect(await ledger(a.id)).toEqual({ net_paid: '300.00', pending: '0.00', payment_state: 'PAID' });

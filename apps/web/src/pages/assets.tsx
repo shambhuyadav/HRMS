@@ -19,6 +19,7 @@ import type { EssPanel, ScreenRoute } from '../screens';
 import { type MeContext, useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section } from '../ui';
 import { DelegatedBadge } from './delegations';
+import { canRaiseAgain, followedRequests, RaiseAgainNote, RaisedAgainHint } from './requests';
 
 // ---------------------------------------------------------------------------------------------------------
 // Permission keys (modules/assets/registration.ts, routes.ts; migration 0049_assets.sql) and screen paths
@@ -147,6 +148,8 @@ interface AssetRequest {
   fulfilment: { custodyId: string; assetId: string; assetCode: string; issuedOn: string } | null;
   /** Present only when the reviewer's assignment may also read asset custody. */
   currentlyHeld?: HeldItem[];
+  /** DF03: the rejected request this one raises again. */
+  predecessorRequestId?: string | null;
 }
 interface RequestTask {
   taskId: string;
@@ -1260,6 +1263,7 @@ function RequestHistory({
               <td>
                 <RequestState state={r.state} />
                 {r.state === 'SUBMITTED' && r.pendingWith && <span className="hint"> · with {r.pendingWith}</span>}
+                <RaisedAgainHint predecessorRequestId={r.predecessorRequestId} />
               </td>
               <td>{decisionsText(r)}</td>
               <td>
@@ -1476,11 +1480,18 @@ function MyAssetsPanel() {
   const { me, can } = useSession();
   if (!inOwnContext(me)) return <Empty>Select your Employee role to see your own items and custody requests.</Empty>;
   const employeeId = me!.employeeId!;
+  return <MyAssetsSections employeeId={employeeId} />;
+}
+
+function MyAssetsSections({ employeeId }: { employeeId: string }) {
+  const { can } = useSession();
+  // DF03: the rejected request being raised again fills the form.
+  const [raisingAgain, setRaisingAgain] = useState<AssetRequest | null>(null);
   return (
     <div className="stack">
       {can(ASSET_READ) ? <MyItems employeeId={employeeId} /> : <NotPermitted>Your Employee role cannot read your items.</NotPermitted>}
-      {can(REQUEST_SUBMIT) && <AskForItem />}
-      {can(REQUEST_READ) && <MyRequests employeeId={employeeId} />}
+      {can(REQUEST_SUBMIT) && <AskForItem raisingAgain={raisingAgain} onCancelRaising={() => setRaisingAgain(null)} />}
+      {can(REQUEST_READ) && <MyRequests employeeId={employeeId} onRaiseAgain={setRaisingAgain} />}
     </div>
   );
 }
@@ -1532,7 +1543,7 @@ function MyItems({ employeeId }: { employeeId: string }) {
   );
 }
 
-function AskForItem() {
+function AskForItem({ raisingAgain, onCancelRaising }: { raisingAgain: AssetRequest | null; onCancelRaising: () => void }) {
   const refetchAll = useRefetchAll();
   const attempt = useAttemptKey('asset-request');
   const categories = useCategories(true, true);
@@ -1541,6 +1552,14 @@ function AskForItem() {
   const [reason, setReason] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  useEffect(() => {
+    if (!raisingAgain) return;
+    setCategoryCode(raisingAgain.category.code);
+    setItemDescription(raisingAgain.itemDescription ?? '');
+    setReason(raisingAgain.reason);
+    setDone(false);
+    setProblem(null);
+  }, [raisingAgain]);
   const submit = useMutation({
     mutationFn: (body: Record<string, unknown>) => api<{ requestId: string; state: string }>('/v1/me/asset-requests', { method: 'POST', body }),
     onSuccess: () => {
@@ -1549,6 +1568,7 @@ function AskForItem() {
       setCategoryCode('');
       setItemDescription('');
       setReason('');
+      onCancelRaising();
       void refetchAll();
     },
     onError: (error) => {
@@ -1561,11 +1581,12 @@ function AskForItem() {
     if (!categoryCode) return setProblem('Choose the kind of item you need.');
     if (!reason.trim()) return setProblem('Explain why you need the item.');
     setProblem(null);
-    const content = { categoryCode, ...(itemDescription.trim() ? { itemDescription: itemDescription.trim() } : {}), reason: reason.trim() };
+    const content = { categoryCode, ...(itemDescription.trim() ? { itemDescription: itemDescription.trim() } : {}), reason: reason.trim(), ...(raisingAgain ? { predecessorRequestId: raisingAgain.id } : {}) };
     submit.mutate({ ...content, idempotencyKey: attempt.keyFor(JSON.stringify(content)) });
   };
   return (
     <Section title="Ask for an item">
+      {raisingAgain && <RaiseAgainNote onCancel={onCancelRaising} />}
       <form className="grid-form" aria-label="Ask for an item" onSubmit={send} noValidate>
         <CategorySelect label="Category" value={categoryCode} onChange={setCategoryCode} categories={shown(categories)?.items} />
         <label>
@@ -1595,7 +1616,7 @@ function AskForItem() {
   );
 }
 
-function MyRequests({ employeeId }: { employeeId: string }) {
+function MyRequests({ employeeId, onRaiseAgain }: { employeeId: string; onRaiseAgain: (r: AssetRequest) => void }) {
   const { can } = useSession();
   const keys = useKeys();
   const refetchAll = useRefetchAll();
@@ -1613,6 +1634,10 @@ function MyRequests({ employeeId }: { employeeId: string }) {
     r.state === 'SUBMITTED' && can(REQUEST_SUBMIT) ? (
       <button type="button" className="secondary" disabled={withdraw.isPending} aria-label={`Withdraw the request for ${r.category.label}`} onClick={() => withdraw.mutate(r.id)}>
         Withdraw
+      </button>
+    ) : canRaiseAgain(r, followedRequests(data?.items ?? [])) && can(REQUEST_SUBMIT) ? (
+      <button type="button" className="secondary" aria-label={`Raise again the rejected request for ${r.category.label}`} onClick={() => onRaiseAgain(r)}>
+        Raise again
       </button>
     ) : (
       '—'

@@ -21,6 +21,8 @@ const session = vi.hoisted(() => ({
   roleCode: 'HR_ADMINISTRATOR',
   scopeKind: 'COMPANY',
 }));
+// The automatic re-check of a waiting batch has its own tests (held-batch.test.tsx): here the manual check is on its own.
+vi.mock('../held-batch-timing', () => ({ HELD_BATCH_CHECK_INTERVAL_MS: 3_600_000, HELD_BATCH_MAX_CHECKS: 30 }));
 vi.mock('../session', () => ({
   useSession: () => ({
     stored: { token: 'synthetic-token', companies: [], companyId: session.companyId, assignmentId: session.assignmentId },
@@ -1092,7 +1094,7 @@ describe('the KRA upload (FR-041: DRAFT only)', () => {
     renderAt('/appraisal/goal-upload', [IMPORT, MANAGE]);
     const list = await screen.findByRole('table', { name: 'Your KRA uploads' }, SLOW);
     const row = within(list).getByText('held-goals.csv').closest('tr')!;
-    expect(row.textContent).toContain('held for the malware scan');
+    expect(row.textContent).toContain('waiting for the scan');
     expect(callsTo('GET', '/v1/appraisal-goal-imports')[0]!.params.toString()).toBe('page=1&pageSize=25');
     fireEvent.click(within(row).getByRole('button', { name: /^Open held-goals.csv/ }));
     expect(await screen.findByText(/waiting for the malware scan, so nothing in it has been read yet/, {}, SLOW)).toBeTruthy();

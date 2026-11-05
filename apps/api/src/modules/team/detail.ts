@@ -119,11 +119,12 @@ async function goalItems(db: Queryable, grant: AccessGrant, employeeId: string):
 }
 
 /** Salary arrangements of the member. */
-async function salaryItems(db: Queryable, grant: AccessGrant, employeeId: string): Promise<TabSection> {
+async function salaryItems(db: Queryable, grant: AccessGrant, employeeId: string, withHistory: boolean): Promise<TabSection> {
   const rows = await db.query(
     `select effective_from as "effectiveFrom", effective_to as "effectiveTo", monthly_gross::text as "monthlyGross", annual_ctc::text as "annualCtc", currency_code as currency
-       from salary_arrangement where company_id = $1 and employee_id = $2 order by effective_from`,
-    [grant.companyId, employeeId],
+       from salary_arrangement where company_id = $1 and employee_id = $2 and superseded_at is null
+        and ($3::boolean or effective_to is null or effective_to > $4::date) order by effective_from`,
+    [grant.companyId, employeeId, withHistory, grant.businessDate],
   );
   return { available: true, items: rows.rows };
 }
@@ -133,7 +134,7 @@ async function incrementItems(db: Queryable, grant: AccessGrant, employeeId: str
   const rows = await db.query(
     `select effective_date as "effectiveDate", compensation_basis as basis, currency_code as currency, before_amount::text as "beforeAmount", after_amount::text as "afterAmount",
             change_amount::text as "changeAmount", to_char(change_percent, 'FM999999990.00') as "changePercent", percent_na_reason as "percentNaReason"
-       from increment_history where company_id = $1 and employee_id = $2 order by effective_date, applied_at`,
+       from increment_history_in_force where company_id = $1 and employee_id = $2 order by effective_date, applied_at`,
     [grant.companyId, employeeId],
   );
   return { available: true, items: rows.rows };
@@ -216,8 +217,9 @@ export async function teamMemberDetail(db: Queryable, grant: AccessGrant, employ
 
   // Confidential tabs (DF16): present only with the specific field grant in this assignment, each section under its own.
   const compensation: Record<string, TabSection> = {};
-  if (await can('salary', 'read', 'salary')) compensation.salaryArrangements = await salaryItems(db, grant, employeeId);
-  if (await can('increment', 'read', 'salary')) compensation.incrementHistory = await incrementItems(db, grant, employeeId);
+  // C4 "Historical financial views require an explicit history grant": a new manager gets the current salary, not the past.
+  if (await can('salary', 'read', 'salary')) compensation.salaryArrangements = await salaryItems(db, grant, employeeId, (await can('salary', 'history_read', 'salary')) !== null);
+  if (await can('increment', 'history_read', 'salary')) compensation.incrementHistory = await incrementItems(db, grant, employeeId);
   if (Object.keys(compensation).length > 0) tabs.compensation = { available: true, sections: compensation };
 
   const privateInformation: Record<string, TabSection> = {};

@@ -259,6 +259,14 @@ describe.runIf(isModuleActive('training'))('training feedback (FR-050, F1, H3 TN
     expect(exported.headers['content-type']).toContain('text/csv');
     expect(exported.body).toContain('"Score: Overall rating of the training","Score: Trainer knowledge (synthetic)"');
     expect(exported.body).not.toContain('narrative C');
+    // DF09, FR-065, I-66: the leading block every report file carries, ended by a blank line.
+    const block = Object.fromEntries(exported.body.split('\r\n\r\n')[0]!.split('\r\n').map((l) => l.replace(/^"|"$/g, '').split('","')));
+    expect(Object.keys(block)).toEqual(['Report', 'Report code', 'Company', 'Acting role', 'Row scope', 'Period', 'Filters', 'Generated at', 'Rows']);
+    expect(block).toMatchObject({ Report: 'Training feedback export', 'Report code': 'TRAINING_FEEDBACK_EXPORT', 'Acting role': 'HR_ADMINISTRATOR', 'Row scope': 'COMPANY' });
+    expect(block.Period).toMatch(/^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/);
+    expect(block.Filters).toContain(`plan: ${p.code}`);
+    expect(block['Generated at']).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /);
+    expect(Number(block.Rows)).toBeGreaterThan(0);
     expect((await h.call(m.actor, 'GET', `/v1/training-plans/${p.id}/feedback/export`)).statusCode).toBe(403);
   });
 
@@ -329,6 +337,7 @@ describe.runIf(isModuleActive('training'))('training feedback (FR-050, F1, H3 TN
       accessClass: 'OTHER',
       scopeKind: 'COMPANY',
       filters: { departments: [], locations: [], employees: [] },
+      deniedScopes: [],
       allowedFieldGroups: ['operational'],
       ownEssFieldGroups: [],
       deniedFieldGroups: [],

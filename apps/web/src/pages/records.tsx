@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type FormEvent, useRef, useState } from 'react';
+import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey, pinSession } from '../api';
+import { HELD_BATCH_CHECK_INTERVAL_MS, HELD_BATCH_MAX_CHECKS } from '../held-batch-timing';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
 
 // ---------------------------------------------------------------------------------------------------------
 // Batch imports (FR-009, FR-023, DF09, I-13, I-20): upload, row-by-row preview, then an explicit commit or cancel.
 // Every batch is all or nothing: any row problem rejects the whole batch, and a commit applies every row or none.
-// A file the malware scan has not released yet is held unread (FR-106); the user's own batches of the selected template
-// are listed below the form, so a held batch can be opened again and checked again from its stored file.
+// Every stored file waits for the scan worker unread (FR-106, NFR-S09), so a first upload answers a held batch as a matter of
+// course; the screen re-checks it by itself until the preview comes (useHeldBatchWatch). The user's own batches of the selected
+// template are listed below the form, so a held batch can be opened again and checked again from its stored file.
 // ---------------------------------------------------------------------------------------------------------
 
 /** What an update row would change, as its preview stored it (imports/batch.ts RowChanges): field -> { from, to }. */
@@ -170,14 +172,18 @@ export function ImportsPage() {
   };
 
   // A held batch checked again, or one of the user's batches opened from the list (of the selected template).
-  const { resume, open, refresh } = useBatchFollowUp(template?.base ?? '', {
-    show: setJob,
-    closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
-    onStart: () => {
-      upload.reset();
-      act.reset();
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    template?.base ?? '',
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+      },
     },
-  });
+    job,
+  );
   const act = useMutation({
     mutationFn: async ({ t, id, action }: { t: ImportTemplate; id: string; action: 'commit' | 'cancel' }) => {
       // The decision and any look at the batch after it go out under the role it was made in (BR-046).
@@ -290,7 +296,7 @@ export function ImportsPage() {
             onAction={(action) => act.mutate({ t: jobTemplate, id: job.id, action })}
             error={act.error}
           />
-          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
       <ImportBatches
@@ -312,15 +318,12 @@ export function ImportJobView({
   pending,
   onAction,
   error,
-  heldNote = 'The file is waiting for the malware scan, so nothing in it has been read yet. Check the scan again later to see the preview, or cancel the import; the batch stays in your batches below meanwhile.',
 }: {
   job: ImportJob;
   template: ImportTemplate;
   pending: boolean;
   onAction: (a: 'commit' | 'cancel') => void;
   error: unknown;
-  /** What a batch held for the malware scan (UPLOADED) says about seeing its preview. */
-  heldNote?: string;
 }) {
   const rows = job.rowCount ?? job.rows.length;
   const problems = job.rows.filter((r) => r.errorCode && r.errorCode !== 'BATCH_REJECTED');
@@ -349,7 +352,7 @@ export function ImportJobView({
       <p>
         <StateBadge state={job.state} /> {job.state === 'UPLOADED' ? null : plural(rows, ['row', 'rows'])}
       </p>
-      {job.state === 'UPLOADED' && <p role="status">{heldNote}</p>}
+      {job.state === 'UPLOADED' && <p role="status">{HELD_BATCH_NOTE}</p>}
       {job.state === 'PREVIEWED' && <p>{rows === 1 ? 'The row is valid.' : `All ${rows} rows are valid.`} Committing applies every row in one go.</p>}
       {job.state === 'REJECTED' && (
         <p role="status">
@@ -453,11 +456,16 @@ export function TemplateDownload({ base, code }: { base: string; code: string })
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// The user's own batches of one import and a batch held for the malware scan (imports/routes.ts; FR-106): every import
-// lists its submitter's batches (GET <base>, paged, job facts only) and resumes a held one from the file the server
+// The user's own batches of one import and a batch held for the malware scan (imports/routes.ts; FR-106; NFR-S09): every
+// import lists its submitter's batches (GET <base>, paged, job facts only) and resumes a held one from the file the server
 // stored (POST <base>/:id/resume), so a held batch is found again after leaving the page and needs no second upload.
-// The import screens here, in timesheet.tsx and appraisal.tsx use these; documents.tsx has its own for the mapping.
+// Every stored file waits for the scan worker, so a held batch is the normal first answer: the screen re-checks it by itself.
+// The import screens here and in salary, payroll, lifecycle-documents, attendance-admin, timesheet and appraisal use these;
+// documents.tsx has its own follow-up calls for the mapping and shares the watch.
 // ---------------------------------------------------------------------------------------------------------
+
+/** What a batch waiting for the scan says: a normal short wait, nothing wrong. */
+export const HELD_BATCH_NOTE = 'The file is waiting for the malware scan, so nothing in it has been read yet. This is usually a short wait. You can cancel the import meanwhile; the batch stays in your batches below.';
 
 /** GET <base>: one of the caller's own batches, job facts only (GET <base>/:id has the rows). */
 export interface ImportBatch {
@@ -490,7 +498,7 @@ export const importBatchesKey = (base: string) => ['import-batches', base] as co
 
 /** A batch's state in plain words (imports/jobs.ts). */
 const BATCH_STATES: Record<string, { label: string; tone: 'good' | 'warn' | 'bad' | 'neutral' }> = {
-  UPLOADED: { label: 'held for the malware scan', tone: 'warn' },
+  UPLOADED: { label: 'waiting for the scan', tone: 'neutral' },
   PREVIEWED: { label: 'previewed, not committed', tone: 'warn' },
   COMMITTED: { label: 'committed', tone: 'good' },
   REJECTED: { label: 'rejected, nothing applied', tone: 'bad' },
@@ -500,7 +508,7 @@ const BATCH_STATES: Record<string, { label: string; tone: 'good' | 'warn' | 'bad
 function BatchScan({ state }: { state: string | null }) {
   if (state === 'CLEAN') return <Badge tone="good">released</Badge>;
   if (state === 'QUARANTINED') return <Badge tone="bad">quarantined by the malware scan</Badge>;
-  if (state === 'PENDING_SCAN') return <Badge tone="warn">waiting for the malware scan</Badge>;
+  if (state === 'PENDING_SCAN') return <Badge>waiting for the malware scan</Badge>;
   // A batch from before import files were scanned: never committed (imports/jobs.ts commitBatch).
   return <Badge>not scanned</Badge>;
 }
@@ -511,9 +519,11 @@ const retryTransient = (failureCount: number, error: Error) => !(error instanceo
  * The follow-up calls of one import: resuming a batch held for the malware scan from its stored file (still held, or
  * previewed) and opening one of the user's batches from the list. `show` puts the answer on screen; `closed` hears of a
  * held batch the server closed instead (422: its file was quarantined, or is not a valid batch); `onStart` clears the
- * screen's other answers. `refresh` reads the list of batches again; every change to a batch calls it.
+ * screen's other answers. `refresh` reads the list of batches again; every change to a batch calls it. `job` is the batch
+ * on screen: while it is held, `watch` re-checks it by itself. A refusal from an automatic check reads as `resume.error`, as
+ * one from the button does, and `resume.reset` clears it.
  */
-export function useBatchFollowUp(base: string, on: { show: (job: ImportJob) => void; closed: (id: string) => void; onStart: () => void }) {
+export function useBatchFollowUp(base: string, on: { show: (job: ImportJob) => void; closed: (id: string) => void; onStart: () => void }, job: Pick<ImportJob, 'id' | 'state'> | null) {
   const qc = useQueryClient();
   const refresh = () => void qc.invalidateQueries({ queryKey: importBatchesKey(base) });
   const resume = useMutation({
@@ -536,14 +546,128 @@ export function useBatchFollowUp(base: string, on: { show: (job: ImportJob) => v
     },
     onSuccess: (view) => on.show(view),
   });
-  return { resume, open, refresh };
+  const watch = useHeldBatchWatch(base, job, { show: on.show, closed: on.closed, refresh }, resume.isPending || open.isPending);
+  return {
+    resume: {
+      ...resume,
+      error: resume.error ?? watch.error,
+      reset: () => {
+        resume.reset();
+        watch.clearError();
+      },
+    },
+    open,
+    refresh,
+    watch,
+  };
 }
 
-/** Under a batch held for the malware scan: check its stored file again (POST /:id/resume), without a second upload. */
-export function HeldBatchCheck({ job, busy, onCheck, checked }: { job: ImportJob; busy: boolean; onCheck: () => void; checked: ImportJob | undefined }) {
+export interface HeldBatchWatch {
+  /** The screen no longer re-checks this held batch by itself: the manual check, or opening it again, starts over. */
+  stopped: boolean;
+  /** A refusal from an automatic check; it stays until the screen shows another batch or clears it. */
+  error: Error | null;
+  clearError: () => void;
+}
+
+/**
+ * While `job` is a batch waiting for the malware scan and the screen is open, re-checks it through POST <base>/:id/resume every
+ * HELD_BATCH_CHECK_INTERVAL_MS, so a normal import reaches its preview without a click. It stops at any other state, after
+ * HELD_BATCH_MAX_CHECKS checks and at a refusal, waits while the tab is hidden or `paused` (another call on this batch is on its
+ * way), and ends with the screen. Any new view of a held batch (the upload's answer, the manual check, opening it) starts
+ * over. Separate from the manual check on purpose: a quiet check clears nobody's error and disables no button. Its answer
+ * applies only while the same batch is still held on screen under the role that asked (BR-046), so it can never replace a
+ * newer view. A still-held answer changes nothing on screen.
+ */
+export function useHeldBatchWatch(base: string, job: Pick<ImportJob, 'id' | 'state'> | null, on: { show: (job: ImportJob) => void; closed: (id: string) => void; refresh: () => void }, paused: boolean): HeldBatchWatch {
+  const heldId = job?.state === 'UPLOADED' ? job.id : null;
+  const [checks, setChecks] = useState(0);
+  const [refused, setRefused] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [hidden, setHidden] = useState(() => document.visibilityState === 'hidden');
+  const send = useRef(pinSession());
+  const latest = useRef({ heldId, on });
+  latest.current = { heldId, on };
+
+  // A new view on screen starts over. When the server closed the batch there is no view, and its refusal stays to be read.
+  useEffect(() => {
+    if (!job) return;
+    send.current = pinSession();
+    setChecks(0);
+    setRefused(false);
+    setError(null);
+  }, [job]);
+
+  useEffect(() => {
+    const onChange = () => setHidden(document.visibilityState === 'hidden');
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+
+  // An answer that arrives after the screen has gone is dropped.
+  useEffect(
+    () => () => {
+      latest.current = { ...latest.current, heldId: null };
+    },
+    [],
+  );
+
+  const check = async (id: string) => {
+    const pinned = send.current;
+    const stale = () => latest.current.heldId !== id || !pinned.isCurrent();
+    try {
+      const view = await pinned<ImportJob>(`${base}/${encodeURIComponent(id)}/resume`, { method: 'POST' });
+      if (stale()) return;
+      if (view.state === 'UPLOADED') {
+        setChecks((n) => n + 1);
+        return;
+      }
+      latest.current.on.show(view);
+      latest.current.on.refresh();
+    } catch (err) {
+      if (stale()) return;
+      if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+        setError(err);
+        setRefused(true);
+        // 422: the server closed the batch (its file was quarantined, or is not a valid batch). Any other refusal leaves it on screen.
+        if (err.status === 422) latest.current.on.closed(id);
+        latest.current.on.refresh();
+      } else {
+        // No answer, or a server that is struggling: the next check asks again, and the limit still ends it.
+        setChecks((n) => n + 1);
+      }
+    }
+  };
+
+  const stopped = heldId !== null && (refused || checks >= HELD_BATCH_MAX_CHECKS);
+  const waiting = heldId !== null && !stopped && !hidden && !paused;
+  useEffect(() => {
+    if (!waiting || heldId === null) return;
+    const timer = setTimeout(() => void check(heldId), HELD_BATCH_CHECK_INTERVAL_MS);
+    return () => clearTimeout(timer);
+    // `checks` re-arms the timer after each answer; `check` reads what it needs through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting, heldId, checks, base]);
+
+  return { stopped, error, clearError: () => setError(null) };
+}
+
+/** Whether the preview will come by itself, or the screen has stopped checking and the wait is longer than usual. */
+export function HeldBatchWatchNote({ watch }: { watch: HeldBatchWatch }) {
+  if (watch.error) return null; // the refusal is on screen and says why
+  return watch.stopped ? (
+    <span role="status">This is taking longer than usual, so this page has stopped checking by itself. The batch is kept: check again here, or open it from your batches below later.</span>
+  ) : (
+    <span className="hint">The preview appears here by itself once the scan is done.</span>
+  );
+}
+
+/** Under a batch waiting for the malware scan: how the wait ends, and the manual check of its stored file (POST /:id/resume) for someone who comes back later. */
+export function HeldBatchCheck({ job, busy, onCheck, checked, watch }: { job: ImportJob; busy: boolean; onCheck: () => void; checked: ImportJob | undefined; watch: HeldBatchWatch }) {
   if (job.state !== 'UPLOADED') return null;
   return (
     <div className="row">
+      <HeldBatchWatchNote watch={watch} />
       <button type="button" className="secondary" disabled={busy} onClick={onCheck}>
         Check the scan again
       </button>
@@ -567,7 +691,7 @@ export function ImportBatches({ base, title, openedId, busy, onOpen, error }: { 
   const pages = Math.max(1, Math.ceil((list.data?.total ?? 0) / BATCHES_PAGE_SIZE));
   return (
     <Section title={title}>
-      <p className="hint">Only you see the files you uploaded here. Open a batch to see its rows; one held for the malware scan can be checked again and then committed or cancelled.</p>
+      <p className="hint">Only you see the files you uploaded here. Open a batch to see its rows; one still waiting for its scan can be checked again and then committed or cancelled.</p>
       {list.isPending && <p className="hint">Loading your batches…</p>}
       {list.error instanceof ApiError && list.error.status === 403 ? (
         <p role="note">

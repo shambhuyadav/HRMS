@@ -1,8 +1,12 @@
 // Reports and exports (FR-056, FR-065, FR-093; BR-026; DF09; ZT03, ZT05, ZT17).
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
-import { csvCell, REPORTS } from './catalogue.js';
+import { leaveQueue, leaveTasks } from '../workflow/leave-tasks.fixtures.js';
+import { csvCell, REPORTS, toXlsx } from './catalogue.js';
+import { csvContext, csvTable } from './csv.fixtures.js';
 import { processReportQueue, RUNNING_LEASE_MINUTES } from './service.js';
+import { readZip, sheetRows } from './xlsx.fixtures.js';
 
 let h: Harness;
 let A: Company;
@@ -11,7 +15,7 @@ let hr: TestActor;
 const request = (a: TestActor, reportCode: string, filters: object = {}) => h.call(a, 'POST', '/v1/reports', { reportCode, filters });
 const generate = () => processReportQueue(h.pool);
 const download = (a: TestActor, id: string) => h.call(a, 'GET', `/v1/reports/${id}/download`);
-const lines = (csv: string) => csv.trimEnd().split('\r\n');
+const lines = (csv: string) => csvTable(csv).trimEnd().split('\r\n');
 
 beforeAll(async () => {
   h = await startHarness();
@@ -233,23 +237,30 @@ describe('progress and recoverable downloads (FR-056)', () => {
     expect((await list(inB)).items).toEqual([]);
   });
 
-  it('marks an expired output, and listing never opens one after the export right is gone (FR-065)', async () => {
+  it('marks an expired output; once the export right is gone the report leaves the list as well as the download (FR-065, ZT05, F3 row 9)', async () => {
     const user = await h.actor(A, 'HR_ADMINISTRATOR');
     const { id } = (await request(user, 'EMPLOYEE_REGISTER')).json();
     await generate();
-    await h.db.query(
-      `update role_assignment_permission set active = false
-        where role_assignment_id = $1 and permission_id = (select id from permission where resource = 'employee' and action = 'export' and field_group = 'operational')`,
-      [user.assignment],
-    );
-    // Still listed, as the requester's own record of what happened; the download is what is refused.
     expect((await list(user)).items.map((r) => [r.id, r.state])).toEqual([[id, 'COMPLETED']]);
+    const setExportRight = (active: boolean) =>
+      h.db.query(
+        `update role_assignment_permission set active = $2
+          where role_assignment_id = $1 and permission_id = (select id from permission where resource = 'employee' and action = 'export' and field_group = 'operational')`,
+        [user.assignment, active],
+      );
+    await setExportRight(false);
+    expect(await list(user)).toMatchObject({ items: [], total: 0 });
+    expect((await h.call(user, 'GET', `/v1/reports/${id}`)).statusCode).toBe(403);
     expect((await download(user, id)).statusCode).toBe(403);
+    // The rule is live both ways: the right back, the report is back.
+    await setExportRight(true);
+    expect((await list(user)).items.map((r) => [r.id, r.state])).toEqual([[id, 'COMPLETED']]);
     await h.db.query(`update report_execution set expires_at = now() - interval '1 minute' where id = $1`, [id]);
     expect((await list(user)).items.map((r) => [r.id, r.state])).toEqual([[id, 'EXPIRED']]);
-    // A report whose module is gone keeps its code as its title.
+    // A report whose module is gone is not served: its rule can no longer be judged, so it is not listed or answered either.
     await h.db.query(`update report_execution set report_code = 'RETIRED_REPORT' where id = $1`, [id]);
-    expect((await list(user)).items[0]).toMatchObject({ reportCode: 'RETIRED_REPORT', title: 'RETIRED_REPORT' });
+    expect(await list(user)).toMatchObject({ items: [], total: 0 });
+    expect((await h.call(user, 'GET', `/v1/reports/${id}`)).statusCode).toBe(404);
   });
 });
 
@@ -303,7 +314,10 @@ describe('access at request, generation and download (ZT03, ZT05)', () => {
   it('confidential reports need their confidential export grant', async () => {
     expect((await request(hr, 'INCREMENT_HISTORY', { from: '2026-01-01', to: '2026-12-31' })).statusCode).toBe(403);
     expect((await request(hr, 'EXPENSE_REGISTER', { from: '2026-01-01', to: '2026-12-31' })).statusCode).toBe(403);
-    const payroll = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.export.salary'] });
+    // C4: the export grant alone does not reach into history.
+    const exportOnly = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.export.salary'] });
+    expect((await request(exportOnly, 'INCREMENT_HISTORY', { from: '2026-01-01', to: '2026-12-31' })).json().error).toBe('HISTORY_GRANT_REQUIRED');
+    const payroll = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.export.salary', 'increment.history_read.salary'] });
     expect((await request(payroll, 'INCREMENT_HISTORY', { from: '2026-01-01', to: '2026-12-31' })).statusCode).toBe(202);
     const manager = await h.actor(A, 'REPORTING_MANAGER');
     expect((await request(manager, 'EMPLOYEE_REGISTER')).statusCode).toBe(403);
@@ -314,7 +328,20 @@ describe('access at request, generation and download (ZT03, ZT05)', () => {
     const { id } = (await request(temp, 'EMPLOYEE_REGISTER')).json();
     await h.db.query(`update role_assignment set state = 'REVOKED', decision_reason = 'Synthetic revocation' where id = $1`, [temp.assignment]);
     await generate();
-    expect((await h.call(temp, 'GET', `/v1/reports/${id}`)).json()).toMatchObject({ state: 'FAILED', failureCode: 'ACCESS_REVOKED' });
+    // The requester is refused now (F3 row 9), so the row says what happened.
+    expect((await h.call(temp, 'GET', `/v1/reports/${id}`)).statusCode).toBe(403);
+    expect(await h.one(`select state, failure_code from report_execution where id = $1`, [id])).toEqual({ state: 'FAILED', failure_code: 'ACCESS_REVOKED' });
+  });
+
+  it('a revoked requester is refused on an unfinished report too, so the download does not say how far it got (ZT05)', async () => {
+    const temp = await h.actor(A, 'HR_ADMINISTRATOR');
+    const { id } = (await request(temp, 'EMPLOYEE_REGISTER')).json();
+    expect((await download(temp, id)).statusCode).toBe(409); // still live: not ready
+    await h.db.query(`update role_assignment set state = 'REVOKED', decision_reason = 'Synthetic revocation' where id = $1`, [temp.assignment]);
+    const refused = await download(temp, id);
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toMatchObject({ error: 'FORBIDDEN' });
+    await generate();
   });
 
   it('a completed output cannot be downloaded after revocation, by another user, under another assignment or after expiry', async () => {
@@ -339,6 +366,187 @@ describe('access at request, generation and download (ZT03, ZT05)', () => {
     await h.db.query(`update report_execution set expires_at = now() - interval '1 minute' where id = $1`, [other.id]);
     expect((await download(hr, other.id)).statusCode).toBe(410);
     expect((await h.call(hr, 'GET', `/v1/reports/${other.id}`)).json().state).toBe('EXPIRED');
+  });
+});
+
+describe('the current row scope at download (DF09 "recheck current access at download"; DF16; FR-065; ZT05; decisions-3)', () => {
+  const person = async (name: string, overrides: Record<string, unknown> = {}) => {
+    const res = await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A, { displayName: name, ...overrides }));
+    expect(res.statusCode, res.body).toBe(201);
+    await h.setStatus(A, res.json().id, 'ACTIVE_CONFIRMED');
+    return res.json().id as string;
+  };
+  const transfer = async (employeeId: string, departmentId: string, effectiveFrom: string) => {
+    const res = await h.call(hr, 'POST', `/v1/employees/${employeeId}/assignment`, { departmentId, locationId: A.loc, designationId: A.desig, effectiveFrom });
+    expect(res.statusCode, res.body).toBeLessThan(300);
+  };
+  const generated = async (a: TestActor, reportCode: string, filters: object = {}) => {
+    const res = await request(a, reportCode, filters);
+    expect(res.statusCode, res.body).toBe(202);
+    await generate();
+    return res.json().id as string;
+  };
+  const refusedForScope = (res: { statusCode: number; json(): { error: string } }) => {
+    expect([res.statusCode, res.json().error]).toEqual([403, 'SCOPE_CHANGED']);
+  };
+
+  it('a department-filtered exporter cannot download a file holding someone transferred out; a new request leaves them out', async () => {
+    const mover = uniq('Synthetic Mover ');
+    const moverId = await person(mover, { departmentId: A.financeDept });
+    const finance = await h.actor(A, 'HR_ADMINISTRATOR', { departmentFilter: A.financeDept });
+    const id = await generated(finance, 'EMPLOYEE_REGISTER');
+    expect((await download(finance, id)).body).toContain(mover);
+
+    await transfer(moverId, A.dept, '2026-03-01');
+    const refused = await download(finance, id);
+    refusedForScope(refused);
+    expect(refused.body).not.toContain(mover);
+    const denied = await h.one<{ n: string; reason: string }>(
+      `select count(*) as n, max(after_values->>'reason') as reason from audit_event where actor_user_id = $1 and action = 'ACCESS_DENIED' and record_key = $2`,
+      [finance.user, id],
+    );
+    expect(denied).toMatchObject({ n: '1', reason: 'SCOPE_NARROWED' });
+
+    const again = await generated(finance, 'EMPLOYEE_REGISTER');
+    const file = await download(finance, again);
+    expect(file.statusCode).toBe(200);
+    expect(file.body).not.toContain(mover);
+  });
+
+  it('a manager cannot download a team file once a member has moved to another manager (DF16 "later requests lose former-team access")', async () => {
+    const bossId = await person('Synthetic Boss');
+    const member = uniq('Synthetic Member ');
+    const memberId = await person(member);
+    const boss = await h.actor(A, 'REPORTING_MANAGER', { employeeId: bossId, extra: ['team.export.operational'] });
+    expect((await h.call(hr, 'POST', `/v1/employees/${memberId}/manager`, { managerEmployeeId: bossId, effectiveFrom: '2026-01-05' })).statusCode).toBeLessThan(300);
+    const id = await generated(boss, 'MY_TEAM');
+    expect((await download(boss, id)).body).toContain(member);
+
+    expect((await h.call(hr, 'POST', `/v1/employees/${memberId}/manager`, { managerEmployeeId: await person('Synthetic New Boss'), effectiveFrom: '2026-03-01' })).statusCode).toBeLessThan(300);
+    const refused = await download(boss, id);
+    refusedForScope(refused);
+    expect(refused.body).not.toContain(member);
+  });
+
+  it('an ASSIGNED exporter cannot download a file once the task that opened the employee has closed (C1)', async () => {
+    const world = leaveTasks(h, A, hr);
+    await world.activatePolicies();
+    const reviewer = await h.customActor(A, { scope: 'ASSIGNED', permissions: ['leave.export.operational', 'leave.read.operational', 'leave.approve.operational'] });
+    expect((await h.call(hr, 'PUT', '/v1/workflows/leave_request/fallback-reviewers', { reviewers: [{ userId: reviewer.user, priority: 1 }] })).statusCode).toBe(200);
+    const ownerId = await person('Synthetic Task Owner');
+    const self = await h.actor(A, 'EMPLOYEE', { employeeId: ownerId });
+    const owner = (await h.one<{ employee_code: string }>(`select employee_code from employee where id = $1`, [ownerId])).employee_code;
+    await world.submitLeave(self);
+    const id = await generated(reviewer, 'LEAVE_REGISTER', { from: '2026-01-01', to: '2030-12-31' });
+    expect((await download(reviewer, id)).body).toContain(`"${owner}"`);
+
+    const [task] = await leaveQueue(h, reviewer);
+    expect((await h.call(reviewer, 'POST', `/v1/leave/tasks/${task!.taskId}/decision`, { decision: 'APPROVE', idempotencyKey: uniq('scope-download-') })).statusCode).toBe(200);
+    refusedForScope(await download(reviewer, id));
+  });
+
+  it('a wider scope refuses nothing: someone joining the scope afterwards, or a transfer under an unrestricted exporter', async () => {
+    const finance = await h.actor(A, 'HR_ADMINISTRATOR', { departmentFilter: A.financeDept });
+    const joiner = await person(uniq('Synthetic Joiner '));
+    const inFinance = await generated(finance, 'EMPLOYEE_REGISTER');
+    const whole = await generated(hr, 'EMPLOYEE_REGISTER');
+    await transfer(joiner, A.financeDept, '2026-03-01');
+    expect((await download(finance, inFinance)).statusCode).toBe(200);
+    await transfer(joiner, A.dept, '2026-04-01');
+    expect((await download(finance, inFinance)).statusCode).toBe(200);
+    expect((await download(hr, whole)).statusCode).toBe(200);
+  });
+
+  it('a filter added to the exporter’s assignment after generation refuses an unrestricted file', async () => {
+    const exporter = await h.actor(A, 'HR_ADMINISTRATOR');
+    const id = await generated(exporter, 'EMPLOYEE_REGISTER');
+    expect((await download(exporter, id)).statusCode).toBe(200);
+    await h.db.query(`insert into role_scope_filter (company_id, role_assignment_id, dimension, department_id) values ($1, $2, 'DEPARTMENT', $3)`, [A.id, exporter.assignment, A.financeDept]);
+    refusedForScope(await download(exporter, id));
+  });
+
+  it('a file from before membership was recorded is served only to an unrestricted company scope', async () => {
+    const finance = await h.actor(A, 'HR_ADMINISTRATOR', { departmentFilter: A.financeDept });
+    const filtered = await generated(finance, 'EMPLOYEE_REGISTER');
+    const whole = await generated(hr, 'EMPLOYEE_REGISTER');
+    await h.db.query(`update report_execution set scope_members = null where id = any($1::uuid[])`, [[filtered, whole]]);
+    refusedForScope(await download(finance, filtered));
+    expect((await download(hr, whole)).statusCode).toBe(200);
+  });
+});
+
+describe('every file carries its context (DF09 "filter/period/revision/generated-time context"; FR-056; FR-065; decisions-11)', () => {
+  const generatedAt = async (id: string) =>
+    (
+      await h.one<{ at: string }>(
+        `select to_char(x.generated_at at time zone c.business_timezone, 'YYYY-MM-DD HH24:MI:SS') || ' ' || c.business_timezone as at from report_execution x join company c on c.id = x.company_id where x.id = $1`,
+        [id],
+      )
+    ).at;
+
+  it('a CSV starts with the report, company, role, scope, period, filters, generated time and row count, and the table follows', async () => {
+    const finance = await h.actor(A, 'HR_ADMINISTRATOR', { departmentFilter: A.financeDept });
+    const { id } = (await request(finance, 'LEAVE_REGISTER', { from: '2026-01-01', to: '2026-12-31' })).json();
+    await generate();
+    const { body } = await download(finance, id);
+    const company = await h.one<{ name: string; code: string }>(`select name, code from company where id = $1`, [A.id]);
+    expect(csvContext(body)).toEqual({
+      Report: 'Leave register',
+      'Report code': 'LEAVE_REGISTER',
+      Company: `${company.name} (${company.code})`,
+      'Acting role': 'HR_ADMINISTRATOR',
+      'Row scope': 'COMPANY; departments FIN',
+      Period: '2026-01-01 to 2026-12-31',
+      Filters: 'None',
+      'Generated at': await generatedAt(id),
+      Rows: '0',
+    });
+    expect(lines(body)).toEqual(['"Employee code","Leave type","Start date","End date","Days","State"']);
+  });
+
+  it('names the filters applied, says when no period applied, and counts the rows of the table', async () => {
+    const { id } = (await request(hr, 'EMPLOYEE_REGISTER', { status: 'ACTIVE_CONFIRMED', departmentId: A.financeDept })).json();
+    await generate();
+    const { body } = await download(hr, id);
+    const context = csvContext(body);
+    expect(context.Period).toBe('None');
+    expect(context.Filters!.split('; ').sort()).toEqual([`departmentId: ${A.financeDept}`, 'status: ACTIVE_CONFIRMED'].sort());
+    expect(Number(context.Rows)).toBe(lines(body).length - 1);
+    expect(context['Row scope']).toBe('COMPANY');
+    expect(context).not.toHaveProperty('Record revision');
+  });
+
+  it('a value cannot start a formula or end the block: the same guard as every cell, in CSV and XLSX', async () => {
+    const B = await h.makeCompany();
+    const hrB = await h.actor(B, 'HR_ADMINISTRATOR');
+    await h.db.query(`update company set name = '=SUM(1,2)' where id = $1`, [B.id]);
+    const twoLines = 'first\r\n\r\nsecond';
+    const { id } = (await request(hrB, 'EMPLOYEE_REGISTER', { search: twoLines })).json();
+    await generate();
+    const { body } = await download(hrB, id);
+    expect(body).toContain(`"Company","'=SUM(1,2) (`);
+    expect(csvContext(body).Filters).toBe('search: first second');
+    expect(lines(body)[0]).toContain('"Employee code"');
+  });
+
+  it('an XLSX keeps the report on the first sheet with its header in row 1, and the context on a second sheet', () => {
+    const def = REPORTS.LEAVE_REGISTER!;
+    const context = [
+      ['Report', def.title],
+      ['Company', '=SUM(1,2)'],
+      ['Filters', 'a\r\nb'],
+    ] as const;
+    const rows = [Object.fromEntries(def.columns.map((c) => [c.key, 'x']))];
+    const entries = readZip(toXlsx(def, rows, context));
+    expect(entries.get('xl/workbook.xml')!.toString('utf8')).toContain('<sheet name="Report context" sheetId="2" r:id="rId2"/>');
+    expect(entries.get('xl/_rels/workbook.xml.rels')!.toString('utf8')).toContain('Target="worksheets/sheet2.xml"');
+    expect(entries.get('[Content_Types].xml')!.toString('utf8')).toContain('/xl/worksheets/sheet2.xml');
+    expect(sheetRows(entries.get('xl/worksheets/sheet1.xml')!.toString('utf8'), def.columns.length)[0]).toEqual(def.columns.map((c) => c.header));
+    expect(sheetRows(entries.get('xl/worksheets/sheet2.xml')!.toString('utf8'), 2)).toEqual([
+      ['Report', def.title],
+      ['Company', "'=SUM(1,2)"],
+      ['Filters', 'a b'],
+    ]);
   });
 });
 
@@ -413,6 +621,23 @@ describe('list and export use identical filters (FR-007)', () => {
     expect((await download(hr, csv.json().id)).headers['content-disposition']).toMatch(/\.csv"$/);
     const items = (await h.call(hr, 'GET', '/v1/reports/catalogue')).json().items as { code: string; formats?: string[] }[];
     expect(items.find((r) => r.code === 'EMPLOYEE_REGISTER')).not.toHaveProperty('formats');
+  });
+
+  it('the catalogue lists only the reports the selected role may request (FR-046), each of which it may then request', async () => {
+    const codes = async (a: TestActor) => ((await h.call(a, 'GET', '/v1/reports/catalogue')).json().items as { code: string }[]).map((r) => r.code);
+    const hrCodes = await codes(hr);
+    expect(hrCodes).toContain('EMPLOYEE_REGISTER');
+    // The baseline manager holds no export grant, so nothing is offered, and asking anyway is still refused.
+    const manager = await h.actor(A, 'REPORTING_MANAGER');
+    expect(await codes(manager)).toEqual([]);
+    expect((await h.call(manager, 'POST', '/v1/reports', { reportCode: 'EMPLOYEE_REGISTER' })).statusCode).toBe(403);
+    // With the team export grant, the team report is offered; the company-wide employee register is not, because a team scope is
+    // not unrestricted company scope.
+    const exporting = await codes(await h.actor(A, 'REPORTING_MANAGER', { extra: ['team.export.operational'] }));
+    expect(exporting).toContain('MY_TEAM');
+    expect(exporting).not.toContain('EMPLOYEE_REGISTER');
+    // An employee with no export grant is offered nothing.
+    expect(await codes(await h.actor(A, 'EMPLOYEE'))).toEqual([]);
   });
 
   it('a report that does not apply a status filter refuses it rather than ignoring it', async () => {

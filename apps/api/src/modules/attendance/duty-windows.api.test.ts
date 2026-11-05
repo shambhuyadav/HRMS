@@ -5,6 +5,7 @@
 // Synthetic data; fixed past dates (2026-03-02 is a Monday; Asia/Kolkata is UTC+05:30).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 
 let h: Harness;
@@ -134,9 +135,9 @@ describe('timed duty while the biometric source failed (DF09)', () => {
       [A.id, uniq('DEVICE')],
     );
     const mapping = await h.one<{ id: string }>(
-      `insert into biometric_mapping_revision (company_id, profile_id, revision, effective_from, dedupe_strategy, timestamp_rule)
-       values ($1, $2, 1, '2026-01-01T00:00:00Z', 'PROVIDER_EVENT_KEY', 'ISO_WITH_OFFSET') returning id`,
-      [A.id, profile.id],
+      `insert into biometric_mapping_revision (company_id, profile_id, revision, effective_from, dedupe_strategy, timestamp_rule, created_by)
+       values ($1, $2, 1, '2026-01-01T00:00:00Z', 'PROVIDER_EVENT_KEY', 'ISO_WITH_OFFSET', $3) returning id`,
+      [A.id, profile.id, SYSTEM_ACTOR_ID],
     );
     await h.db.query(
       `insert into biometric_employee_link (company_id, profile_id, external_employee_key, employee_id, effective_from) values ($1, $2, $3, $4, '2026-01-01T00:00:00Z')`,

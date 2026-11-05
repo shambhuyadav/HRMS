@@ -15,7 +15,7 @@ let managerEmp: string;
 let cycleId: string;
 const emp: Record<string, string> = {};
 
-const FINANCE_GRANTS: PermissionKey[] = ['salary.manage.salary', 'salary.read.salary', 'increment.read.salary', 'increment.propose.salary', 'increment.approve.salary'];
+const FINANCE_GRANTS: PermissionKey[] = ['salary.manage.salary', 'salary.read.salary', 'salary.history_read.salary', 'increment.read.salary', 'increment.history_read.salary', 'increment.propose.salary', 'increment.approve.salary'];
 
 async function employee(status: string, opts: { joiningDate?: string; salary?: [string, string] } = {}): Promise<string> {
   const e = (await h.call(hrPlain, 'POST', '/v1/employees', h.newEmployeeBody(A, opts.joiningDate ? { joiningDate: opts.joiningDate } : {}))).json();
@@ -160,7 +160,7 @@ describe('proposal, independent approval and application (BR-041, CI20, ZT25)', 
     // The approver's free-text reason is its own confidential group: hidden with the salary grant alone ...
     expect(history.every((x: object) => !('reason' in x))).toBe(true);
     // ... and shown only with an approved increment reason grant (DF02).
-    const reasonReader = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.read.salary', 'increment.read.reason'] });
+    const reasonReader = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.history_read.salary', 'increment.read.reason'] });
     const withReasons = (await h.call(reasonReader, 'GET', `/v1/employees/${emp.E1}/increment-history`)).json().items;
     expect(withReasons.every((x: { reason?: string }) => typeof x.reason === 'string' && x.reason.length > 0)).toBe(true);
   });

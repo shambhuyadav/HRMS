@@ -19,6 +19,8 @@ const session = vi.hoisted(() => ({
   companyId: 'c0000000-0000-4000-8000-000000000001',
   assignmentId: 'a0000000-0000-4000-8000-000000000001',
 }));
+// The automatic re-check of a waiting batch has its own tests (held-batch.test.tsx): here the manual check is on its own.
+vi.mock('../held-batch-timing', () => ({ HELD_BATCH_CHECK_INTERVAL_MS: 3_600_000, HELD_BATCH_MAX_CHECKS: 30 }));
 vi.mock('../session', () => ({
   useSession: () => ({
     stored: { token: 'synthetic-token', companies: [], companyId: session.companyId, assignmentId: session.assignmentId },
@@ -637,7 +639,7 @@ describe('imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106)', 
     renderAt('/timesheet/allocation-imports', [ALLOC_IMPORT, ALLOC_MANAGE]);
     await validate(ALLOC_FILE());
     expect(await screen.findByText(/waiting for the malware scan, so nothing in it has been read yet/)).toBeTruthy();
-    expect(screen.getByText(/The batch stays in your batches below/)).toBeTruthy();
+    expect(screen.getByText(/the batch stays in your batches below/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Create/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Cancel import' })).toBeTruthy();
     await press('Check the scan again');
@@ -687,7 +689,7 @@ describe('imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106)', 
     renderAt('/timesheet/line-imports', [TS_IMPORT]);
     const list = await screen.findByRole('table', { name: 'Your timesheet entry import batches' });
     const row = (name: string) => within(screen.getByRole('table', { name: 'Your timesheet entry import batches' })).getByText(name).closest('tr')!;
-    expect(row('lines.csv').textContent).toContain('held for the malware scan');
+    expect(row('lines.csv').textContent).toContain('waiting for the scan');
     expect(row('lines.csv').textContent).toContain('waiting for the malware scan');
     expect(row('october.csv').textContent).toContain('3 applied');
     expect(within(list).queryByText(LINE_ROWS[0]!.businessKey)).toBeNull();
@@ -1127,6 +1129,7 @@ describe('reports', () => {
 describe('My ESS TN13', () => {
   const routes = (over: Record<string, Handler> = {}): Record<string, Handler> => ({
     'GET /v1/me/timesheets': [200, { items: [summary()] }],
+    'GET /v1/me/payroll-adjustments': [200, { items: [{ id: 'a1', serviceStart: '2026-09-07', serviceEnd: '2026-09-13', originPeriodCode: '2026-09', adjustmentKind: 'LATE_TIMESHEET', state: 'SUBMITTED' }], notice: 'These corrections are recorded and held.' }],
     'GET /v1/me/timesheet-allocations': [200, { items: OWN_ALLOCATIONS }],
     'GET /v1/me/timesheet-exceptions': [
       200,

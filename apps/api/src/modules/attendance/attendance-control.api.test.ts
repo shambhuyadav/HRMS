@@ -4,6 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { csvTable } from '../report/csv.fixtures.js';
 
 let h: Harness;
 let A: Company;
@@ -38,8 +39,11 @@ async function approvedLeave(employeeId: string, start: string, end: string, hal
     [A.id, employeeId, start, end, halfDay, halfDay ? 0.5 : 1],
   );
   if (!approve) return;
-  await h.db.query(`update business_transaction set state = 'APPROVED' where id = (select transaction_id from leave_request where id = $1)`, [lr.id]);
-  await h.db.query(`update leave_request set state = 'APPROVED' where id = $1`, [lr.id]);
+  await h.db.query(
+    `with t as (update business_transaction set state = 'APPROVED' where id = (select transaction_id from leave_request where id = $1) returning id)
+     update leave_request set state = 'APPROVED' from t where leave_request.id = $1`,
+    [lr.id],
+  );
 }
 async function approvedDuty(employeeId: string, day: string, window?: [string, string]) {
   const { id } = await h.one<{ id: string }>(
@@ -288,7 +292,7 @@ describe('attendance control (FR-021, E07)', () => {
       const { processReportQueue } = await import('../report/service.js');
       await processReportQueue(h.pool, 5);
       const body = (await h.call(hr, 'GET', `/v1/reports/${created.json().id}/download`)).body;
-      return body.split(/\r?\n/).filter((l) => l.trim() !== '').slice(1);
+      return csvTable(body).split(/\r?\n/).filter((l) => l.trim() !== '').slice(1);
     };
     expect(await generated({ locationId: otherLocation })).toHaveLength(1);
     const lines = await generated({ employeeId: shortDay.id, minuteField: 'WORKED', minuteOp: 'EQ', minuteValue: 240 });

@@ -1,7 +1,8 @@
 // Effective-dated employment changes (FR-003, FR-006, FR-089 base; BR-002, BR-005; CI13).
 // A change closes the current period at `effectiveFrom` and opens a new one; prior rows are kept.
-// Back-dating before the current period start or stacking on a future-dated change is refused here:
-// corrections of history are a separate, explicitly approved workflow (DF08), not an in-place edit.
+// A date behind the latest change, or stacked on a future-dated one, is refused: a value in force is never overwritten (DF08).
+// No correction of these histories exists. DF08 and FR-089 fix its form (a new, linked, attributable superseding event) but not
+// who may make one or what happens to days and payroll already worked out on the old values: an owner question (docs/03).
 import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
@@ -29,7 +30,10 @@ async function lockEmployee(tx: Queryable, grant: AccessGrant, employeeId: strin
   return { joiningDate: row.joining_date, status: row.status };
 }
 
-/** Closes the period open at `effectiveFrom`; refuses when a period already starts on/after it. */
+/**
+ * Closes the period open at `effectiveFrom`; refuses when a period already starts on or after it, or ends after it. A manager
+ * removal ends a period with no successor, so that end is the latest change: a date before it would rewrite a closed period.
+ */
 async function closeCurrentPeriod(
   tx: Queryable,
   table: 'employment_assignment' | 'manager_assignment' | 'shift_assignment',
@@ -39,11 +43,11 @@ async function closeCurrentPeriod(
   userId: string,
 ): Promise<Record<string, unknown> | null> {
   const later = await tx.query(
-    `select 1 from ${table} where company_id = $1 and employee_id = $2 and effective_from >= $3::date`,
+    `select 1 from ${table} where company_id = $1 and employee_id = $2 and (effective_from >= $3::date or effective_to > $3::date)`,
     [companyId, employeeId, effectiveFrom],
   );
   if (later.rowCount) {
-    throw new HttpError(409, 'CHANGE_NOT_LATEST', 'A change on or after this date already exists; use a history correction instead');
+    throw new HttpError(409, 'CHANGE_NOT_LATEST', 'A change on or after this date already exists; a new change must start after the latest one');
   }
   const closed = await tx.query<Record<string, unknown>>(
     `update ${table} set effective_to = $3::date, updated_by = $4
@@ -103,6 +107,9 @@ export async function changeManager(tx: Queryable, grant: AccessGrant, employeeI
        values ($1, $2, $3, $4, $5, $5)`,
       [grant.companyId, employeeId, change.managerEmployeeId, change.effectiveFrom, grant.userId],
     );
+  } else {
+    // DF04: the explicitly recorded reason, the same field activation writes. The audit below keeps each one given.
+    await tx.query(`update employee set no_manager_reason = $3, updated_by = $4 where company_id = $1 and id = $2`, [grant.companyId, employeeId, change.reason!.trim(), grant.userId]);
   }
   await writeAudit(tx, {
     companyId: grant.companyId,

@@ -108,6 +108,18 @@ describe('role dashboard (FR-096, FR-097, DF17)', () => {
     expect(context).toContain('2026-11-01');
   });
 
+  it('a code reads in words and a decimal loses only its padding zeros; nothing is rounded', async () => {
+    const figure = (code: string, value: string) => ({ code, title: `Figure ${code}`, kind: 'STATUS', status: 'OK', value });
+    mockRoutes({
+      '/v1/dashboard/tasks': { items: [], total: 0 },
+      '/v1/dashboard': { ...DASHBOARD, widgets: [figure('A', 'NOT_PROCESSED'), figure('B', '12.0000'), figure('C', '12.5000'), figure('D', '100.0000'), figure('E', '1/1'), figure('F', 'PRESENT')] },
+    });
+    renderAt('/', '/', <DashboardPage />);
+    for (const text of ['Not processed', '12', '12.5', '100', '1/1', 'Present']) expect(await screen.findByText(text)).toBeTruthy();
+    expect(screen.queryByText('NOT_PROCESSED')).toBeNull();
+    expect(screen.queryByText('12.0000')).toBeNull();
+  });
+
   it('shows only the shortcuts the server listed, and none when it lists none', async () => {
     mockRoutes({ '/v1/dashboard/tasks': { items: [], total: 0 }, '/v1/dashboard': DASHBOARD });
     renderAt('/', '/', <DashboardPage />);
@@ -360,6 +372,22 @@ describe('member detail (FR-095, DF16)', () => {
   });
 });
 
+describe('employee list links (FR-008)', () => {
+  it('a name opens the record for a role that may read it, and is plain text for one that may not', async () => {
+    mockApi();
+    renderPage();
+    await screen.findByText('SYN-1');
+    expect(screen.queryByRole('link', { name: 'Synthetic Person' })).toBeNull();
+    expect(screen.getByText('Synthetic Person')).toBeTruthy();
+    cleanup();
+
+    session.granted.add('employee.read.operational');
+    mockApi();
+    renderPage();
+    expect((await screen.findByRole('link', { name: 'Synthetic Person' })).getAttribute('href')).toBe('/employees/e-1');
+  });
+});
+
 describe('employee list sorting (FR-007)', () => {
   it('starts on the employee code and asks the server for each column, reversing on the second click', async () => {
     mockApi();
@@ -400,14 +428,22 @@ describe('employee list sorting (FR-007)', () => {
     expect(params().get('search')).toBe('syn');
   });
 
-  it('offers only the columns the server allows', async () => {
+  it('offers every column the server allows, each asking for that column', async () => {
     mockApi();
     renderPage();
     await screen.findByText('SYN-1');
-    const allowed = ['employeeCode', 'displayName', 'department', 'joiningDate', 'status'];
-    for (const name of [/^Code/, /^Name/, /^Department/, /^Joined/, /^Status/]) {
+    const columns: [RegExp, string][] = [
+      [/^Name/, 'displayName'],
+      [/^Department/, 'department'],
+      [/^Location/, 'location'],
+      [/^Designation/, 'designation'],
+      [/^Joined/, 'joiningDate'],
+      [/^Status/, 'status'],
+      [/^Code/, 'employeeCode'],
+    ];
+    for (const [name, sort] of columns) {
       fireEvent.click(heading(name));
-      await waitFor(() => expect(allowed).toContain(params().get('sort')));
+      await waitFor(() => expect(params().get('sort')).toBe(sort));
     }
   });
 
@@ -425,5 +461,193 @@ describe('employee list sorting (FR-007)', () => {
     renderPage('/employees?status=DRAFT');
     await screen.findByText('SYN-1');
     expect(params().get('status')).toBe('DRAFT');
+  });
+});
+
+describe('employee list filters and export (FR-007, I-37)', () => {
+  const ORG_READ = 'org_master.read.operational';
+  const EXPORT = 'employee.export.operational';
+  const LIST = { items: [ITEM], total: 60, page: 1, pageSize: 25 };
+  const DEPARTMENTS = { items: [{ id: 'd-1', code: 'ENG', name: 'Engineering', active: true }, { id: 'd-2', code: 'OLD', name: 'Old department', active: false }] };
+  const answers = { '/v1/employees': LIST, '/v1/org/departments': DEPARTMENTS, '/v1/reports': { id: 'r-1', state: 'QUEUED' } };
+  const list = () => listParams('/v1/employees');
+  const Address = () => <span data-testid="address">{useLocation().search}</span>;
+  const renderWithAddress = (entry = '/employees') =>
+    render(
+      <QueryClientProvider client={client()}>
+        <MemoryRouter initialEntries={[entry]}>
+          <EmployeesPage />
+          <Address />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  const change = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+
+  it('sends each filter to the server and keeps it in the address; a filter returns to the first page', async () => {
+    session.granted.add(ORG_READ);
+    mockRoutes(answers);
+    renderWithAddress();
+    await screen.findByText('SYN-1');
+    await screen.findByRole('option', { name: 'Engineering' });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(list().get('page')).toBe('2'));
+
+    change('Status', 'NOTICE');
+    await waitFor(() => expect(list().get('status')).toBe('NOTICE'));
+    expect(list().get('page')).toBe('1');
+    change('Department', 'd-1');
+    await waitFor(() => expect(list().get('departmentId')).toBe('d-1'));
+    change('Joined from', '2026-01-01');
+    await waitFor(() => expect(list().get('joinedFrom')).toBe('2026-01-01'));
+    change('Joined to', '2026-06-30');
+    await waitFor(() => expect(list().get('joinedTo')).toBe('2026-06-30'));
+    // Every filter holds together.
+    expect(Object.fromEntries(list())).toMatchObject({ status: 'NOTICE', departmentId: 'd-1', joinedFrom: '2026-01-01', joinedTo: '2026-06-30', sort: 'employeeCode', direction: 'ASC' });
+    expect(screen.getByTestId('address').textContent).toBe('?status=NOTICE&departmentId=d-1&joinedFrom=2026-01-01&joinedTo=2026-06-30');
+
+    // A filter emptied goes from the request and the address.
+    change('Department', '');
+    await waitFor(() => expect(list().has('departmentId')).toBe(false));
+    expect(screen.getByTestId('address').textContent).not.toContain('departmentId');
+  });
+
+  it('offers DF04’s statuses and the active set; each choice replaces the other, and an address opens on its own choice', async () => {
+    mockRoutes(answers);
+    renderWithAddress('/employees?statusGroup=ACTIVE');
+    await screen.findByText('SYN-1');
+    const select = screen.getByLabelText('Status') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(['', 'statusGroup:ACTIVE', 'DRAFT', 'ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE', 'INACTIVE_SEPARATED', 'ARCHIVED']);
+    expect(select.value).toBe('statusGroup:ACTIVE');
+
+    change('Status', 'DRAFT');
+    await waitFor(() => expect(list().get('status')).toBe('DRAFT'));
+    expect(list().has('statusGroup')).toBe(false);
+    change('Status', 'statusGroup:ACTIVE');
+    await waitFor(() => expect(list().get('statusGroup')).toBe('ACTIVE'));
+    expect(list().has('status')).toBe(false);
+    cleanup();
+
+    mockRoutes(answers);
+    renderWithAddress('/employees?status=INACTIVE_SEPARATED&joinedFrom=2026-02-01');
+    await screen.findByText('SYN-1');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('INACTIVE_SEPARATED');
+    expect((screen.getByLabelText('Joined from') as HTMLInputElement).value).toBe('2026-02-01');
+    expect(list().get('joinedFrom')).toBe('2026-02-01');
+  });
+
+  it('clearing a dashboard’s status leaves the other filters in place', async () => {
+    mockRoutes(answers);
+    renderWithAddress('/employees?statusGroup=ACTIVE&joinedTo=2026-06-30');
+    await screen.findByText('SYN-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await waitFor(() => expect(list().has('statusGroup')).toBe(false));
+    expect(list().get('joinedTo')).toBe('2026-06-30');
+  });
+
+  it('department choices come from the master, inactive ones marked; without its read duty there is no choice and nothing is asked', async () => {
+    session.granted.add(ORG_READ);
+    mockRoutes(answers);
+    renderPage();
+    await screen.findByRole('option', { name: 'Old department (inactive)' });
+    expect(urls).toContain('/v1/org/departments?includeInactive=true');
+    cleanup();
+    session.granted.clear();
+
+    mockRoutes(answers);
+    renderWithAddress('/employees?departmentId=d-1');
+    await screen.findByText('SYN-1');
+    expect(screen.queryByLabelText('Department')).toBeNull();
+    expect(urls.filter((u) => u.startsWith('/v1/org/'))).toEqual([]);
+    expect(screen.getByText(/Your role cannot read the department list/)).toBeTruthy();
+    // A filter it came with is applied, and it can still let go of it.
+    expect(list().get('departmentId')).toBe('d-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear the department filter' }));
+    await waitFor(() => expect(list().has('departmentId')).toBe(false));
+  });
+
+  it('a reversed date range is the server’s to refuse: it is sent, and the refusal reads beside the list', async () => {
+    urls.length = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        const reversed = url.includes('joinedFrom=2026-03-10');
+        return new Response(JSON.stringify(reversed ? { error: 'INVALID_PERIOD', message: 'The joining date range ends before it starts' } : LIST), { status: reversed ? 422 : 200, headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+    renderWithAddress('/employees?joinedTo=2026-03-01');
+    await screen.findByText('SYN-1');
+    change('Joined from', '2026-03-10');
+    expect((await screen.findByRole('alert')).textContent).toContain('The joining date range ends before it starts');
+    expect(list().get('joinedFrom')).toBe('2026-03-10');
+    expect(list().get('joinedTo')).toBe('2026-03-01');
+    expect((screen.getByLabelText('Joined from') as HTMLInputElement).value).toBe('2026-03-10');
+  });
+
+  it('offers the export only with its own grant', async () => {
+    mockRoutes(answers);
+    renderPage();
+    await screen.findByText('SYN-1');
+    expect(screen.queryByRole('button', { name: 'Export this list' })).toBeNull();
+    cleanup();
+
+    session.granted.add(EXPORT);
+    mockRoutes(answers);
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Export this list' })).toBeTruthy();
+  });
+
+  it('asks for the employee register with exactly the list’s filters and order, the active set too', async () => {
+    session.granted.add(EXPORT);
+    session.granted.add(ORG_READ);
+    const { posts } = mockRoutes(answers);
+    renderPage('/employees?statusGroup=ACTIVE&departmentId=d-1&joinedFrom=2026-01-01&joinedTo=2026-06-30');
+    await screen.findByText('SYN-1');
+    fireEvent.change(screen.getByLabelText(/Search/), { target: { value: 'syn' } });
+    await waitFor(() => expect(list().get('search')).toBe('syn'));
+    fireEvent.click(heading(/^Joined/));
+    fireEvent.click(heading(/^Joined/));
+    await waitFor(() => expect(list().get('direction')).toBe('DESC'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export this list' }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      url: '/v1/reports',
+      body: {
+        reportCode: 'EMPLOYEE_REGISTER',
+        filters: { statusGroup: 'ACTIVE', departmentId: 'd-1', joinedFrom: '2026-01-01', joinedTo: '2026-06-30', search: 'syn', sort: 'joiningDate', direction: 'DESC' },
+      },
+    });
+    // What the export holds is what the list was asked for, the page aside.
+    const { page, pageSize, ...asked } = Object.fromEntries(list());
+    expect(asked).toEqual((posts[0]!.body as { filters: Record<string, string> }).filters);
+    expect([page, pageSize]).toEqual(['1', '25']);
+  });
+
+  it('says where to collect the export; changing the list takes that away, since it no longer describes the list', async () => {
+    session.granted.add(EXPORT);
+    mockRoutes(answers);
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Export this list' }));
+    expect((await screen.findByRole('link', { name: 'Reports' })).getAttribute('href')).toBe('/reports');
+    change('Status', 'NOTICE');
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Reports' })).toBeNull());
+  });
+
+  it('an export the server refuses says so', async () => {
+    session.granted.add(EXPORT);
+    urls.length = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        urls.push(url);
+        const refused = init?.method === 'POST';
+        return new Response(JSON.stringify(refused ? { error: 'FORBIDDEN', message: 'Not permitted' } : LIST), { status: refused ? 403 : 200, headers: { 'Content-Type': 'application/json' } });
+      }),
+    );
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: 'Export this list' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Not permitted');
+    expect(screen.queryByRole('link', { name: 'Reports' })).toBeNull();
   });
 });

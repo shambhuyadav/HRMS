@@ -21,6 +21,7 @@ import { BulkJobStatus, exclusionReasonLabel, useBulkJob } from './bulk-jobs';
 const CYCLE_MANAGE = 'increment_cycle.manage.operational';
 const READ_OPERATIONAL = 'increment.read.operational';
 const READ_SALARY = 'increment.read.salary';
+const READ_HISTORY = 'increment.history_read.salary';
 const PROPOSE = 'increment.propose.salary';
 const APPROVE = 'increment.approve.salary';
 const SALARY_READ = 'salary.read.salary';
@@ -97,6 +98,8 @@ interface IncrementCase {
   proposedOutcome: Outcome | null;
   effectiveDate: string;
   version: number;
+  /** Set when this case corrects an applied change (BR-038). */
+  correctsHistoryId?: string | null;
   /** Confidential (salary field group): present only when the server returned amounts. */
   baselineAmount?: string;
   proposedAmount?: string | null;
@@ -139,6 +142,7 @@ interface InitialSalaryBody {
 }
 
 interface HistoryItem {
+  id?: string;
   effectiveDate: string;
   basis: Basis;
   currency: string;
@@ -149,6 +153,10 @@ interface HistoryItem {
   percentNaReason: string | null;
   /** The decision reason; shown only when the server returned it. */
   reason?: string;
+  /** BR-038: the record this one corrects, and the record that corrected this one. */
+  correctsHistoryId?: string | null;
+  supersededByHistoryId?: string | null;
+  correctable?: boolean;
 }
 
 interface AnnualGrowth {
@@ -357,7 +365,7 @@ export function IncrementsPage() {
   // Opening a review and proposing an off-cycle change need a company-wide assignment (the server refuses others).
   const companyWide = me.scopeKind === 'COMPANY';
   const canReadCases = can(READ_OPERATIONAL) || can(READ_SALARY);
-  const salaryPanel = can(SALARY_READ) || can(READ_SALARY) || can(SALARY_MANAGE);
+  const salaryPanel = can(SALARY_READ) || can(READ_HISTORY) || can(SALARY_MANAGE);
 
   const showSalary = (employee: PickedEmployee) => {
     setSalaryEmployee(employee);
@@ -764,7 +772,7 @@ function CasesSection({ onShowSalary }: { onShowSalary: ((employee: PickedEmploy
                   <Fragment key={c.id}>
                     <tr aria-current={open ? 'true' : undefined}>
                       <td>{c.employeeCode}</td>
-                      <td>{c.offCycle ? 'Off-cycle' : c.occurrence}</td>
+                      <td>{c.correctsHistoryId ? 'Correction' : c.offCycle ? 'Off-cycle' : c.occurrence}</td>
                       <td>{formatDate(c.effectiveDate)}</td>
                       <td>
                         <StateBadge state={c.state} />
@@ -1173,16 +1181,95 @@ function SalaryPanel({ employee, onEmployee, focusRequest }: { employee: PickedE
   );
 }
 
+/** Refusals of a correction in plain words; any other is shown as the server sent it. */
+const CORRECTION_REFUSALS: Readonly<Record<string, string>> = {
+  PAYROLL_PROCESSED: 'Payroll has been processed for this period, and processed payroll never changes. Correcting it needs an arrears case, which is not available yet. A change from a later date is an off-cycle case.',
+  PAYROLL_IN_PROGRESS: 'A payroll run has already calculated this period. Revise or cancel that run first.',
+  NOT_LATEST_CHANGE: 'Only the latest salary change can be corrected, and a later one exists.',
+  ALREADY_CORRECTED: 'This change has already been corrected. Correct the correction instead.',
+  CORRECTION_PENDING: 'A correction of this change is already waiting for a decision.',
+  NO_CHANGE: 'The correction changes nothing.',
+  INVALID_EFFECTIVE_DATE: 'The correction must take effect after the salary it replaces began.',
+  NO_ELIGIBLE_REVIEWER: 'No independent reviewer is available, so this cannot be sent. Someone other than you must decide it.',
+};
+
+/** BR-038, DF14: a correction is its own case, decided independently; the record it corrects stays on file. */
+function CorrectionForm({ item, onSent, onCancel }: { item: HistoryItem; onSent: () => void; onCancel: () => void }) {
+  const [form, setForm] = useState({ effectiveDate: '', monthlyGross: '', annualCtc: '', reason: '' });
+  const [problem, setProblem] = useState<string | null>(null);
+  const send = useMutation({
+    mutationFn: (body: { effectiveDate: string; proposedAmount: string; proposedCounterpart: string; reason: string }) =>
+      api<ProposalResult>(`/v1/increment-history/${encodeURIComponent(item.id ?? '')}/corrections`, { body }),
+    onSuccess: onSent,
+  });
+  const refusal = send.error instanceof ApiError ? CORRECTION_REFUSALS[send.error.code] : undefined;
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const text = form.reason.trim();
+    const missing = (form.effectiveDate === '' ? 'Enter the effective date.' : null) ?? moneyProblem(form.monthlyGross, 'the corrected monthly gross') ?? moneyProblem(form.annualCtc, 'the corrected annual CTC') ?? (text === '' ? 'Enter a reason.' : null);
+    setProblem(missing);
+    if (missing !== null) {
+      send.reset();
+      return;
+    }
+    const monthly = item.basis === 'MONTHLY_GROSS';
+    send.mutate({ effectiveDate: form.effectiveDate, proposedAmount: monthly ? form.monthlyGross : form.annualCtc, proposedCounterpart: monthly ? form.annualCtc : form.monthlyGross, reason: text });
+  };
+  return (
+    <form className="grid-form" aria-label={`Correct the change effective ${formatDate(item.effectiveDate)}`} style={PANEL} onSubmit={submit}>
+      <p className="hint wide">
+        A different financial Admin decides this in the <DecisionInboxLink />, and the salary changes only once it is approved. The change you are correcting stays on record. To undo it, enter the earlier amounts.
+      </p>
+      <label>
+        Effective date
+        <input type="date" required value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
+      </label>
+      <label>
+        Corrected monthly gross
+        <input inputMode="decimal" autoComplete="off" required value={form.monthlyGross} onChange={(e) => setForm({ ...form, monthlyGross: e.target.value })} />
+      </label>
+      <label>
+        Corrected annual CTC
+        <input inputMode="decimal" autoComplete="off" required value={form.annualCtc} onChange={(e) => setForm({ ...form, annualCtc: e.target.value })} />
+      </label>
+      <label className="wide">
+        Reason (required)
+        <textarea required maxLength={1000} rows={3} style={TEXTAREA} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+      </label>
+      {(problem ?? refusal) && (
+        <p role="alert" className="error wide">
+          {problem ?? refusal}
+        </p>
+      )}
+      {!refusal && <ErrorNote error={send.error} />}
+      <div className="wide row">
+        <button type="submit" disabled={send.isPending}>
+          Send correction
+        </button>{' '}
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
-  const { can } = useSession();
+  const { can, me } = useSession();
   const keys = useKeys();
   const ids = useId();
+  const reloadCases = useReloadCases();
   const canReadSalary = can(SALARY_READ);
-  const canReadIncrements = can(READ_SALARY);
+  // C4, C6: applied changes and annual growth are the financial past, a grant of their own.
+  const canReadIncrements = can(READ_HISTORY);
   const canManage = can(SALARY_MANAGE);
+  // Like an off-cycle change, a correction needs a company-wide assignment (the server refuses others).
+  const canCorrect = can(PROPOSE) && me?.scopeKind === 'COMPANY';
   const [recorded, setRecorded] = useState(false);
+  const [correcting, setCorrecting] = useState<HistoryItem | null>(null);
+  const [correctionSent, setCorrectionSent] = useState(false);
   const path = `/v1/employees/${encodeURIComponent(employee.id)}`;
-  const salary = useQuery({ queryKey: keys.salary(employee.id), enabled: canReadSalary, queryFn: () => api<{ items: SalaryArrangement[] }>(`${path}/salary`), retry: retryTransient });
+  const salary = useQuery({ queryKey: keys.salary(employee.id), enabled: canReadSalary, queryFn: () => api<{ items: SalaryArrangement[]; historyIncluded?: boolean }>(`${path}/salary`), retry: retryTransient });
   const history = useQuery({
     queryKey: keys.history(employee.id),
     enabled: canReadIncrements,
@@ -1196,6 +1283,8 @@ function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
   const arrangements = salaryData?.items ?? [];
   const historyItems = historyData?.items ?? [];
   const withReasons = historyItems.some((h) => typeof h.reason === 'string');
+  const withStatus = historyItems.some((h) => h.correctsHistoryId || h.supersededByHistoryId);
+  const withAction = canCorrect && historyItems.some((h) => h.correctable);
   const scopeNote = 'This employee is not in the selected role’s scope.';
 
   return (
@@ -1233,6 +1322,7 @@ function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
                 </table>
               </div>
               <p className="hint">An arrangement stays in force until the day the next one starts.</p>
+              {salaryData?.historyIncluded === false && <p className="hint">Earlier arrangements are not shown: the selected role has no salary history grant.</p>}
             </>
           )}
         </div>
@@ -1263,6 +1353,8 @@ function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
                     <th scope="col">Change</th>
                     <th scope="col">Change %</th>
                     {withReasons && <th scope="col">Reason</th>}
+                    {withStatus && <th scope="col">Status</th>}
+                    {withAction && <th scope="col">Action</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1275,11 +1367,46 @@ function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
                       <td>{money(h.changeAmount, h.currency)}</td>
                       <td>{percent(h.changePercent, h.percentNaReason)}</td>
                       {withReasons && <td>{h.reason ?? '—'}</td>}
+                      {withStatus && <td>{h.supersededByHistoryId ? <Badge tone="warn">Superseded by a correction</Badge> : h.correctsHistoryId ? <Badge>Correction</Badge> : '—'}</td>}
+                      {withAction && (
+                        <td>
+                          {h.correctable && (
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => {
+                                setCorrecting(h);
+                                setCorrectionSent(false);
+                              }}
+                            >
+                              Correct
+                            </button>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          )}
+          {withStatus && <p className="hint">A superseded change stays on record; reports and annual growth use the correction.</p>}
+          {correctionSent && (
+            <p className="ok" role="status">
+              Correction sent for an independent decision.
+            </p>
+          )}
+          {correcting && (
+            <CorrectionForm
+              key={correcting.id}
+              item={correcting}
+              onCancel={() => setCorrecting(null)}
+              onSent={() => {
+                setCorrecting(null);
+                setCorrectionSent(true);
+                reloadCases();
+              }}
+            />
           )}
         </div>
       )}

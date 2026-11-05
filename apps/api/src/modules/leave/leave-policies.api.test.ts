@@ -6,6 +6,7 @@ import { uniq } from '../../../../../db/tests/fixtures.js';
 import { withTransaction } from '../../db/transaction.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { resolveAccess } from '../access/authorize.js';
+import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 import { activatePolicy, createPolicyDraft, retirePolicy } from './policies.js';
 
@@ -389,7 +390,7 @@ describe('filters and the mapped-policy export (E06)', () => {
       await processReportQueue(h.pool, 5);
       return h.call(actor, 'GET', `/v1/reports/${res.json().id}/download`);
     };
-    const file = (await generated(author, { leaveType: t.code })).body.split(/\r?\n/).filter((l) => l !== '');
+    const file = csvTable((await generated(author, { leaveType: t.code })).body).split(/\r?\n/).filter((l) => l !== '');
     expect(file).toHaveLength(3);
     expect(file[0]).toContain('"Leave type","Revision","State"');
     expect(file[1]).toContain('ACTIVE');
@@ -397,9 +398,9 @@ describe('filters and the mapped-policy export (E06)', () => {
     expect(file[1]!.endsWith('"MAPPED"')).toBe(true);
     expect(file[2]).toContain('DRAFT');
     expect(file[2]!.endsWith('"UNMAPPED"')).toBe(true);
-    const onlyDraft = (await generated(author, { leaveType: t.code, status: 'DRAFT' })).body.split(/\r?\n/).filter((l) => l !== '');
+    const onlyDraft = csvTable((await generated(author, { leaveType: t.code, status: 'DRAFT' })).body).split(/\r?\n/).filter((l) => l !== '');
     expect(onlyDraft).toHaveLength(2);
-    const dated = (await generated(author, { leaveType: t.code, from: '2026-06-01' })).body.split(/\r?\n/).filter((l) => l !== '');
+    const dated = csvTable((await generated(author, { leaveType: t.code, from: '2026-06-01' })).body).split(/\r?\n/).filter((l) => l !== '');
     expect(dated).toHaveLength(2);
 
     // Company configuration: not from a filtered scope, and not without the export duty.

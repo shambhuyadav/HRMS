@@ -8,7 +8,13 @@
 // role active -> per field group: role ALLOWs the exact resource/action/field_group AND the assignment's
 // DB109 allowlist has an active, effective entry -> confidential field groups additionally need an
 // ADMIN/MANAGER access class -> row scope (OWN/TEAM/ASSIGNED/COMPANY) intersected with the assignment's
-// filters (values OR within a dimension, dimensions AND).
+// filters (values OR within a dimension, dimensions AND) -> no applicable scoped DENY.
+//
+// C1 "no applicable scoped DENY ... A deny only applies within its matched scope; it does not silently affect unrelated
+// companies": a role_permission DENY on another live assignment of the same user in this company takes the permission away within
+// that assignment's scope (its kind and filters). Over the whole company the field group is refused outright; narrower, the rows in
+// that scope leave this grant's row scope (employeeScopePredicate). A request for several groups loses those rows altogether when any
+// of its groups is denied there, since a row's fields are not masked one by one: it fails closed, inside the matched scope only.
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 
@@ -22,7 +28,8 @@ export type DenyReason =
   | 'ASSIGNMENT_NOT_ACTIVE'
   | 'ROLE_INACTIVE'
   | 'NO_PERMISSION'
-  | 'CONFIDENTIAL_NOT_ELIGIBLE';
+  | 'CONFIDENTIAL_NOT_ELIGIBLE'
+  | 'SCOPED_DENY';
 
 export interface AccessRequest {
   userId: string;
@@ -39,13 +46,20 @@ export interface AccessRequest {
 
 export interface FieldGroupDenial {
   fieldGroup: string;
-  reason: Extract<DenyReason, 'NO_PERMISSION' | 'CONFIDENTIAL_NOT_ELIGIBLE'>;
+  reason: Extract<DenyReason, 'NO_PERMISSION' | 'CONFIDENTIAL_NOT_ELIGIBLE' | 'SCOPED_DENY'>;
 }
 
 export interface ScopeFilters {
   departments: string[];
   locations: string[];
   employees: string[];
+}
+
+/** The scope of another assignment of the same user whose role DENYs what was asked (C1). */
+export interface DeniedScope {
+  assignmentId: string;
+  scopeKind: ScopeKind;
+  filters: ScopeFilters;
 }
 
 export interface AccessGrant {
@@ -57,6 +71,8 @@ export interface AccessGrant {
   accessClass: AccessClass;
   scopeKind: ScopeKind;
   filters: ScopeFilters;
+  /** Rows in these scopes are out of this grant (employeeScopePredicate). Empty but for a user holding a DENY role. */
+  deniedScopes: DeniedScope[];
   allowedFieldGroups: string[];
   /**
    * Allowed groups that come only from the H1 Employee OWN exception. Endpoints use this to keep reviewer-
@@ -178,6 +194,22 @@ export async function resolveAccess(db: Queryable, req: AccessRequest): Promise<
     )
   ).rows;
 
+  // C1: another live assignment of this user in this company whose role DENYs the same permission.
+  const denies = (
+    await db.query<{ field_group: string; assignment_id: string; scope_kind: ScopeKind; unfiltered: boolean }>(
+      `select p.field_group, ra.id as assignment_id, ra.scope_kind,
+              not exists (select 1 from role_scope_filter f where f.company_id = ra.company_id and f.role_assignment_id = ra.id) as unfiltered
+         from role_assignment ra
+         join role r on r.company_id = ra.company_id and r.id = ra.role_id and r.active
+         join role_permission rp on rp.company_id = ra.company_id and rp.role_id = ra.role_id and rp.effect = 'DENY'
+         join permission p on p.id = rp.permission_id and p.resource = $4 and p.action = $5 and p.field_group = any($6::text[])
+        where ra.company_id = $1 and ra.user_id = $2 and ra.id <> $3 and ra.state = 'ACTIVE'
+          and ra.effective_from <= $7 and (ra.effective_to is null or ra.effective_to > $7)`,
+      [req.companyId, req.userId, ctx.assignment_id, req.resource, req.action, [...new Set(req.fieldGroups)], at],
+    )
+  ).rows;
+  const deniedEverywhere = new Set(denies.filter((d) => d.scope_kind === 'COMPANY' && d.unfiltered).map((d) => d.field_group));
+
   const eligibleForConfidential = ctx.access_class === 'ADMIN' || ctx.access_class === 'MANAGER';
   // H1: the Employee OWN context may hold catalogued own-ESS groups; OWN row scope keeps them to the own record.
   const ownEssContext = OWN_ESS_ROLE_CODES.includes(ctx.role_code) && ctx.scope_kind === 'OWN';
@@ -186,6 +218,7 @@ export async function resolveAccess(db: Queryable, req: AccessRequest): Promise<
   const deniedFieldGroups: FieldGroupDenial[] = [];
   for (const g of groups) {
     if (!g.granted) deniedFieldGroups.push({ fieldGroup: g.field_group, reason: 'NO_PERMISSION' });
+    else if (deniedEverywhere.has(g.field_group)) deniedFieldGroups.push({ fieldGroup: g.field_group, reason: 'SCOPED_DENY' });
     else if (g.classification === 'CONFIDENTIAL' && !eligibleForConfidential) {
       if (ownEssContext && g.own_ess) {
         allowedFieldGroups.push(g.field_group);
@@ -196,21 +229,33 @@ export async function resolveAccess(db: Queryable, req: AccessRequest): Promise<
 
   if (allowedFieldGroups.length === 0) {
     const onlyConfidential = deniedFieldGroups.every((d) => d.reason === 'CONFIDENTIAL_NOT_ELIGIBLE');
-    return deny(onlyConfidential ? 'CONFIDENTIAL_NOT_ELIGIBLE' : 'NO_PERMISSION', deniedFieldGroups);
+    const denied = deniedFieldGroups.some((d) => d.reason === 'SCOPED_DENY');
+    return deny(denied ? 'SCOPED_DENY' : onlyConfidential ? 'CONFIDENTIAL_NOT_ELIGIBLE' : 'NO_PERMISSION', deniedFieldGroups);
   }
 
-  const filterRows = (
-    await db.query<{ dimension: 'DEPARTMENT' | 'LOCATION' | 'EMPLOYEE'; value: string }>(
-      `select dimension, coalesce(department_id, location_id, employee_id) as value
-         from role_scope_filter where company_id = $1 and role_assignment_id = $2`,
-      [req.companyId, ctx.assignment_id],
-    )
-  ).rows;
-  const filters: ScopeFilters = { departments: [], locations: [], employees: [] };
-  for (const f of filterRows) {
-    if (f.dimension === 'DEPARTMENT') filters.departments.push(f.value);
-    else if (f.dimension === 'LOCATION') filters.locations.push(f.value);
-    else filters.employees.push(f.value);
+  const filtersOf = async (assignmentId: string): Promise<ScopeFilters> => {
+    const filterRows = (
+      await db.query<{ dimension: 'DEPARTMENT' | 'LOCATION' | 'EMPLOYEE'; value: string }>(
+        `select dimension, coalesce(department_id, location_id, employee_id) as value
+           from role_scope_filter where company_id = $1 and role_assignment_id = $2`,
+        [req.companyId, assignmentId],
+      )
+    ).rows;
+    const filters: ScopeFilters = { departments: [], locations: [], employees: [] };
+    for (const f of filterRows) {
+      if (f.dimension === 'DEPARTMENT') filters.departments.push(f.value);
+      else if (f.dimension === 'LOCATION') filters.locations.push(f.value);
+      else filters.employees.push(f.value);
+    }
+    return filters;
+  };
+  const filters = await filtersOf(ctx.assignment_id);
+
+  // Narrower denies of the groups still allowed, each assignment once.
+  const deniedScopes: DeniedScope[] = [];
+  for (const d of denies) {
+    if (!allowedFieldGroups.includes(d.field_group) || deniedScopes.some((s) => s.assignmentId === d.assignment_id)) continue;
+    deniedScopes.push({ assignmentId: d.assignment_id, scopeKind: d.scope_kind, filters: await filtersOf(d.assignment_id) });
   }
 
   return {
@@ -222,6 +267,7 @@ export async function resolveAccess(db: Queryable, req: AccessRequest): Promise<
     accessClass: ctx.access_class,
     scopeKind: ctx.scope_kind,
     filters,
+    deniedScopes,
     allowedFieldGroups,
     ownEssFieldGroups,
     deniedFieldGroups,
@@ -302,47 +348,63 @@ export function employeeScopePredicate(
     day ??= `${params.add(grant.businessDate)}::date`;
     return `${alias}.effective_from <= ${day} and (${alias}.effective_to is null or ${alias}.effective_to > ${day})`;
   };
-  const parts = [`${columns.company} = ${company}`];
-
-  switch (grant.scopeKind) {
-    case 'COMPANY':
-      break;
-    case 'OWN':
-      parts.push(grant.linkedEmployeeId ? `${columns.employee} = ${params.add(grant.linkedEmployeeId)}::uuid` : 'false');
-      break;
-    case 'TEAM': {
-      // DF16: current direct reports only.
-      if (!grant.linkedEmployeeId) {
-        parts.push('false');
+  /** One assignment's row scope: its kind and its filters. `assigned` gives the condition of its assigned scope. */
+  const scopeOf = (scopeKind: ScopeKind, filters: ScopeFilters, assigned: () => string): string[] => {
+    const parts: string[] = [];
+    switch (scopeKind) {
+      case 'COMPANY':
+        break;
+      case 'OWN':
+        parts.push(grant.linkedEmployeeId ? `${columns.employee} = ${params.add(grant.linkedEmployeeId)}::uuid` : 'false');
+        break;
+      case 'TEAM': {
+        // DF16: current direct reports only.
+        if (!grant.linkedEmployeeId) {
+          parts.push('false');
+          break;
+        }
+        const manager = `${params.add(grant.linkedEmployeeId)}::uuid`;
+        parts.push(
+          `exists (select 1 from manager_assignment ma
+                    where ma.company_id = ${company} and ma.employee_id = ${columns.employee}
+                      and ma.manager_employee_id = ${manager} and ${effective('ma')})`,
+        );
         break;
       }
-      const manager = `${params.add(grant.linkedEmployeeId)}::uuid`;
-      parts.push(
-        `exists (select 1 from manager_assignment ma
-                  where ma.company_id = ${company} and ma.employee_id = ${columns.employee}
-                    and ma.manager_employee_id = ${manager} and ${effective('ma')})`,
-      );
-      break;
+      case 'ASSIGNED':
+        parts.push(assigned());
+        break;
+      default:
+        parts.push('false');
     }
-    case 'ASSIGNED':
-      parts.push(`exists (select 1 ${eligibleTasksOfGrant(grant, company, params)} and asg_bt.owner_employee_id = ${columns.employee}${options.withoutDelegatedTasks ? ' and asg_t.delegation_id is null' : ''})`);
-      break;
-    default:
-      parts.push('false');
-  }
 
-  const { departments, locations, employees } = grant.filters;
-  if (departments.length > 0 || locations.length > 0) {
-    const conditions = [];
-    if (departments.length > 0) conditions.push(`ea.department_id = any(${params.add(departments)}::uuid[])`);
-    if (locations.length > 0) conditions.push(`ea.location_id = any(${params.add(locations)}::uuid[])`);
-    parts.push(
-      `exists (select 1 from employment_assignment ea
-                where ea.company_id = ${company} and ea.employee_id = ${columns.employee}
-                  and ${effective('ea')} and ${conditions.join(' and ')})`,
-    );
+    const { departments, locations, employees } = filters;
+    if (departments.length > 0 || locations.length > 0) {
+      const conditions = [];
+      if (departments.length > 0) conditions.push(`ea.department_id = any(${params.add(departments)}::uuid[])`);
+      if (locations.length > 0) conditions.push(`ea.location_id = any(${params.add(locations)}::uuid[])`);
+      parts.push(
+        `exists (select 1 from employment_assignment ea
+                  where ea.company_id = ${company} and ea.employee_id = ${columns.employee}
+                    and ${effective('ea')} and ${conditions.join(' and ')})`,
+      );
+    }
+    if (employees.length > 0) parts.push(`${columns.employee} = any(${params.add(employees)}::uuid[])`);
+    return parts;
+  };
+
+  const parts = [
+    `${columns.company} = ${company}`,
+    ...scopeOf(grant.scopeKind, grant.filters, () => `exists (select 1 ${eligibleTasksOfGrant(grant, company, params)} and asg_bt.owner_employee_id = ${columns.employee}${options.withoutDelegatedTasks ? ' and asg_t.delegation_id is null' : ''})`),
+  ];
+  // C1: rows inside another assignment's matched DENY are out, whatever this assignment's own scope says.
+  for (const denied of grant.deniedScopes) {
+    const matched = scopeOf(denied.scopeKind, denied.filters, () => {
+      const refs = { company, assignment: `${params.add(denied.assignmentId)}::uuid`, user: `${params.add(grant.userId)}::uuid`, at: `${params.add(grant.at)}::timestamptz` };
+      return `exists (select 1 ${eligibleTasksOf(refs)} and asg_bt.owner_employee_id = ${columns.employee})`;
+    });
+    parts.push(matched.length > 0 ? `not (${matched.join(' and ')})` : 'false');
   }
-  if (employees.length > 0) parts.push(`${columns.employee} = any(${params.add(employees)}::uuid[])`);
 
   return `(${parts.join(' and ')})`;
 }

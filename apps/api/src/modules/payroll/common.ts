@@ -30,11 +30,6 @@ export const addDays = (d: string, n: number): string => new Date(Date.parse(`${
 
 export const holds = (grant: AccessGrant, group: string): boolean => grant.allowedFieldGroups.includes(group);
 
-/** The guard allows a read when any one group is granted; this insists on one of them. */
-export function requireGroup(grant: AccessGrant, group: string): void {
-  if (!holds(grant, group)) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
-}
-
 /** Company-wide configuration needs an unrestricted company-scope assignment. */
 export function requireCompanyScope(grant: AccessGrant): void {
   if (!unrestricted(grant)) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');

@@ -15,7 +15,7 @@ import { api, ApiError, download, fileToBase64, idempotencyKey, pinSession } fro
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
-import { HeldBatchCheck, ImportBatches, type ImportJob, type ImportRow, TemplateDownload, useBatchFollowUp } from './records';
+import { HELD_BATCH_NOTE, HeldBatchCheck, ImportBatches, type ImportJob, type ImportRow, TemplateDownload, useBatchFollowUp } from './records';
 
 const IMPORT = 'attendance.import.operational';
 const MANAGE = 'attendance_policy.manage.operational';
@@ -122,7 +122,7 @@ function PunchJobView({ job, base, pending, onAction, error }: { job: ImportJob;
       <p>
         <StateBadge state={job.state} /> {job.state === 'UPLOADED' ? null : count(job.rowCount ?? job.rows.length, 'row', 'rows')}
       </p>
-      {job.state === 'UPLOADED' && <p role="status">The file is waiting for the malware scan, so nothing in it has been read yet. Check the scan again later to see the preview, or cancel the import.</p>}
+      {job.state === 'UPLOADED' && <p role="status">{HELD_BATCH_NOTE}</p>}
       {job.state === 'PREVIEWED' && (
         <p role="status">
           {count(applied.length, 'row will be applied', 'rows will be applied')}. {count(quarantined.length, 'row is', 'rows are')} quarantined for review and {count(settled.length, 'repeat adds', 'repeats add')} nothing. Nothing is stored until you apply.
@@ -184,14 +184,18 @@ export function PunchImportsPage() {
   // One idempotency key per chosen file and template: validating the same file again returns the same job.
   const uploadKey = useRef<string | null>(null);
 
-  const { resume, open, refresh } = useBatchFollowUp(template.base, {
-    show: setJob,
-    closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
-    onStart: () => {
-      upload.reset();
-      act.reset();
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    template.base,
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+      },
     },
-  });
+    job,
+  );
   const act = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'commit' | 'cancel' }) => {
       // The decision and any look at the batch after it go out under the role it was made in (BR-046).
@@ -284,7 +288,7 @@ export function PunchImportsPage() {
       {job && (
         <>
           <PunchJobView job={job} base={template.base} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
-          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
       <ImportBatches key={template.base} base={template.base} title="Your punch batches" openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />

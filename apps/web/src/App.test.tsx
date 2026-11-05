@@ -97,6 +97,43 @@ describe('the menu', () => {
     expect(onlyPayroll.every((g) => g.screens.every((s) => !s.permission || s.permission === payroll!.permission))).toBe(true);
   });
 
+  it('lists the organisation masters under their read duty and a new employee under its create duty; the record is reached by links only', () => {
+    const titles = (label: string, permission: string) => visibleModuleGroups(holds(permission)).find((g) => g.label === label)?.screens.map((s) => s.title);
+    expect(titles('Organisation', 'org_master.read.operational')).toEqual(['Company', 'Departments', 'Locations', 'Designations', 'Grades']);
+    expect(titles('Organisation', 'employee.read.operational')).toBeUndefined();
+    expect(titles('Employees', 'employee.create.operational')).toEqual(['New employee']);
+    expect(titles('Employees', 'employee.read.operational')).toBeUndefined();
+    expect(visibleModuleGroups(() => true).flatMap((g) => g.screens.map((s) => s.path))).not.toContain('/employees/:id');
+    expect(APP_ROUTE_PATHS).toEqual(expect.arrayContaining(['/organisation/departments', '/employees/new', '/employees/:id']));
+  });
+
+  it('routes /employees/new to the new-employee form and /employees/:id to the record, not to each other or to the documents page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    session.value.me = { displayName: 'Asha Synthetic', accountKey: 'asha', companyName: 'Synthetic Co', roleName: 'HR Administrator', scopeKind: 'COMPANY', employeeId: null };
+    session.value.granted = new Set();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/employees/new']}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('form', { name: 'New employee' })).toBeTruthy();
+    cleanup();
+
+    const fetched = vi.fn(async (_url: string) => new Response(JSON.stringify({ id: 'e-1', employeeCode: 'SYN-1', displayName: 'Synthetic Person', status: 'ACTIVE_CONFIRMED', employmentType: 'PERMANENT', joiningDate: '2026-01-05', confirmationDate: null, workEmail: null, assignment: null, manager: null, version: 1 }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetched);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/employees/e-1']}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Synthetic Person (SYN-1)' })).toBeTruthy();
+    expect(fetched.mock.calls.map((c) => c[0])).toContain('/v1/employees/e-1');
+  });
+
   it('names groups from the path, with a readable fallback', () => {
     expect(moduleGroupOf('/hiring/requisitions')).toBe('Hiring');
     expect(moduleGroupOf('/payroll/runs/:id')).toBe('Payroll');

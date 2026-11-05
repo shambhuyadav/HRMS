@@ -167,6 +167,35 @@ describe('delivery log (FR-061, FR-085)', () => {
     await waitFor(() => expect(logUrls(calls)).toContain(`${DELIVERY}?page=2&pageSize=25&state=FAILED&category=EXPENSE_DECIDED`));
   });
 
+  it('the period reaches the list, and the export asks for what the filters show, only with its own right and a whole period (FR-093)', async () => {
+    session.permissions = [READ_DELIVERY];
+    const plain = server();
+    renderPage(<DeliveryLogPage />);
+    await screen.findByRole('table', { name: 'Delivery log' });
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-11-01' } });
+    await waitFor(() => expect(logUrls(plain)).toContain(`${DELIVERY}?page=1&pageSize=25&from=2026-11-01`));
+    expect(screen.queryByRole('button', { name: 'Export this log' })).toBeNull();
+    cleanup();
+
+    session.permissions = [READ_DELIVERY, 'notification.export.operational'];
+    const calls = mockApi((call) => (call.method === 'POST' ? [202, { id: 'r-1', state: 'QUEUED' }] : call.url.startsWith(FAILED) ? [200, { items: [], total: 0 }] : [200, { items: [row()], total: 1 }]));
+    renderPage(<DeliveryLogPage />);
+    await screen.findByRole('table', { name: 'Delivery log' });
+    const button = screen.getByRole('button', { name: 'Export this log' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.change(screen.getAllByLabelText('State')[0]!, { target: { value: 'FAILED' } });
+    fireEvent.change(screen.getByLabelText('Event'), { target: { value: 'expense decided' } });
+    fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-11-01' } });
+    fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-11-03' } });
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    await screen.findByText('Export requested. Download it from Reports when it is ready.');
+    expect(calls.find((c) => c.method === 'POST' && c.url === '/v1/reports')!.body).toEqual({
+      reportCode: 'NOTIFICATION_DELIVERY',
+      filters: { from: '2026-11-01', to: '2026-11-03', status: 'FAILED', category: 'EXPENSE_DECIDED' },
+    });
+  });
+
   it('an event code the server would refuse is explained and not sent', async () => {
     session.permissions = [READ_DELIVERY];
     const calls = server();

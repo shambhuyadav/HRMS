@@ -11,6 +11,7 @@
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { contextCsvLines, fileContext } from '../report/context.js';
 import { audit, isCompanyWide, lockPlan, ownEmployee, PARTICIPATION_STATES, type ParticipationState, ROW_LIMIT, viewSql } from './common.js';
 import { FEEDBACK_STATUS } from './participants.js';
 import { csvLine } from './plans.js';
@@ -309,13 +310,15 @@ export async function feedbackSummary(db: Queryable, grant: AccessGrant, planId:
 export async function exportFeedback(db: Queryable, grant: AccessGrant, planId: string): Promise<{ fileName: string; content: string; rows: number }> {
   const register = await feedbackRegister(db, { ...grant, allowedFieldGroups: grant.allowedFieldGroups.filter((g) => g !== 'comment') }, planId, {});
   const items = register.items as { employeeCode: string; employeeName: string; state: string; feedbackStatus: string; submittedAt: Date | null; answers: { questionCode: string; score: number }[] }[];
+  const context = await fileContext(db, grant, {
+    title: 'Training feedback export',
+    code: 'TRAINING_FEEDBACK_EXPORT',
+    period: { from: register.plan.startDate, to: register.plan.endDate },
+    filters: { plan: `${register.plan.code} ${register.plan.title}` },
+    rowCount: items.length,
+  });
   const lines = [
-    csvLine(['Training feedback export']),
-    csvLine(['Plan', register.plan.code, register.plan.title, register.plan.startDate, register.plan.endDate]),
-    csvLine(['Scope', register.scope.kind, register.scope.companyWide ? 'company-wide' : 'filtered']),
-    csvLine(['Generated at', new Date().toISOString()]),
-    csvLine(['Rows', items.length]),
-    '',
+    ...contextCsvLines(context),
     csvLine(['Employee code', 'Employee name', 'Participation state', 'Feedback status', 'Submitted at', ...register.questions.map((q) => `Score: ${q.label}`)]),
     ...items.map((r) =>
       csvLine([

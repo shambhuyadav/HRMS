@@ -112,10 +112,15 @@ export async function provisionCompany(db: Queryable, opts: ProvisionOptions): P
         )
       ).rows[0]?.id ?? (await db.query<{ id: string }>(`select id from role where company_id = $1 and code = $2`, [opts.companyId, role.code])).rows[0]!.id;
 
+    // An approved removal stays removed (FR-067; 0132): bringing a company up to the baseline does not undo a decision. A DENY stands by the conflict clause.
     for (const key of role.ceiling) {
       await db.query(
         `insert into role_permission (company_id, role_id, permission_id, effect, created_by)
-         values ($1, $2, $3, 'ALLOW', $4) on conflict (company_id, role_id, permission_id) do nothing`,
+         select $1::uuid, $2::uuid, $3::uuid, 'ALLOW', $4::uuid
+          where (select c.change_kind from role_permission_change c
+                  where c.company_id = $1 and c.role_id = $2 and c.permission_id = $3 and c.state = 'APPROVED'
+                  order by c.decided_at desc limit 1) is distinct from 'REMOVE'
+         on conflict (company_id, role_id, permission_id) do nothing`,
         [opts.companyId, roleId, permissionId(key), opts.approvedBy],
       );
     }

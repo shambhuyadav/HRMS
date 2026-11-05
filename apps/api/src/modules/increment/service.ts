@@ -6,7 +6,7 @@ import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import { type AccessGrant, assertNotOwnRecord, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { type AccessGrant, assertNotOwnRecord, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams } from '../access/authorize.js';
 import { type Decision, decideTask, lockTransaction, startApproval } from '../workflow/engine.js';
 
 type Basis = 'MONTHLY_GROSS' | 'ANNUAL_CTC';
@@ -94,15 +94,26 @@ export async function createInitialSalary(tx: Queryable, grant: AccessGrant, emp
   return { id };
 }
 
+/**
+ * C4 "Historical financial views require an explicit history grant"; C6; 0126: the selected assignment holds the history grant
+ * of `resource`. The plain read grant answers for what is in force and later only.
+ */
+export async function holdsSalaryHistoryGrant(db: Queryable, grant: AccessGrant, resource: 'salary' | 'increment'): Promise<boolean> {
+  return (await resolveAccess(db, { userId: grant.userId, companyId: grant.companyId, assignmentId: grant.assignmentId, resource, action: 'history_read', fieldGroups: ['salary'], at: grant.at })).allowed;
+}
+
+/** The chain of arrangements: every one with the history grant, otherwise those not yet ended; `historyIncluded` says which. */
 export async function salaryHistory(db: Queryable, grant: AccessGrant, employeeId: string) {
   if (!(await canAccessEmployee(db, grant, employeeId))) throw notFound();
+  const historyIncluded = await holdsSalaryHistoryGrant(db, grant, 'salary');
   const rows = await db.query(
     `select id, effective_from as "effectiveFrom", effective_to as "effectiveTo", annual_ctc::text as "annualCtc",
             monthly_gross::text as "monthlyGross", currency_code as currency
-       from salary_arrangement where company_id = $1 and employee_id = $2 order by effective_from`,
-    [grant.companyId, employeeId],
+       from salary_arrangement where company_id = $1 and employee_id = $2 and superseded_at is null
+        and ($3::boolean or effective_to is null or effective_to > $4::date) order by effective_from`,
+    [grant.companyId, employeeId, historyIncluded, grant.businessDate],
   );
-  return { employeeId, items: rows.rows };
+  return { employeeId, historyIncluded, items: rows.rows };
 }
 
 // Cycle definitions, review openings (rosters), cycle assignment and review-date overrides: cycles.ts, roster.ts,
@@ -126,6 +137,7 @@ interface CaseRow {
   proposed_effective_date: string;
   reason: string;
   version: number;
+  corrects_history_id: string | null;
 }
 
 async function lockCase(tx: Queryable, companyId: string, column: 'id' | 'transaction_id', value: string): Promise<CaseRow> {
@@ -133,7 +145,7 @@ async function lockCase(tx: Queryable, companyId: string, column: 'id' | 'transa
     await tx.query<CaseRow>(
       `select id, employee_id, transaction_id, state, off_cycle, prepared_by, proposed_by, baseline_salary_id, compensation_basis, currency_code,
               baseline_amount::text, proposed_outcome, proposed_amount::text, proposed_counterpart::text,
-              to_char(proposed_effective_date, 'YYYY-MM-DD') as proposed_effective_date, reason, version
+              to_char(proposed_effective_date, 'YYYY-MM-DD') as proposed_effective_date, reason, version, corrects_history_id
          from increment_case where company_id = $1 and ${column} = $2 for update`,
       [companyId, value],
     )
@@ -302,6 +314,169 @@ export async function proposeOffCycle(
   return { caseId, taskId, state: 'SUBMITTED' };
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Correcting an applied increment (BR-038; DF14; FR-089; 0095)
+// ---------------------------------------------------------------------------------------------------------
+
+interface CorrectionTarget {
+  id: string;
+  employee_id: string;
+  old_salary_id: string;
+  new_salary_id: string;
+  effective_date: string;
+  compensation_basis: Basis;
+  currency_code: string;
+  before_amount: string;
+  superseded: boolean;
+  baseline_from: string;
+  baseline_to: string | null;
+  new_from: string;
+  new_to: string | null;
+  later: boolean;
+}
+
+async function correctionTarget(tx: Queryable, companyId: string, historyId: string): Promise<CorrectionTarget> {
+  const row = (
+    await tx.query<CorrectionTarget>(
+      `select h.id, h.employee_id, h.old_salary_id, h.new_salary_id, to_char(h.effective_date, 'YYYY-MM-DD') as effective_date, h.compensation_basis, h.currency_code, h.before_amount::text,
+              exists (select 1 from increment_history n where n.company_id = h.company_id and n.corrects_history_id = h.id) as superseded,
+              to_char(o.effective_from, 'YYYY-MM-DD') as baseline_from, to_char(o.effective_to, 'YYYY-MM-DD') as baseline_to,
+              to_char(s.effective_from, 'YYYY-MM-DD') as new_from, to_char(s.effective_to, 'YYYY-MM-DD') as new_to,
+              exists (select 1 from salary_arrangement x where x.company_id = s.company_id and x.employee_id = s.employee_id and x.superseded_at is null and x.effective_from > s.effective_from) as later
+         from increment_history h
+         join salary_arrangement o on o.company_id = h.company_id and o.id = h.old_salary_id
+         join salary_arrangement s on s.company_id = h.company_id and s.id = h.new_salary_id
+        where h.company_id = $1 and h.id = $2`,
+      [companyId, historyId],
+    )
+  ).rows[0];
+  if (!row) throw notFound();
+  return row;
+}
+
+/**
+ * What must hold when a correction is proposed and again when it applies. The BRD says a correction supersedes and that
+ * "Existing locked payroll is preserved; retroactive difference creates an approved arrears case" (DF15). No arrears case
+ * exists yet (FR-035 waits on the owner), so a correction that reaches a processed record is refused: nothing processed changes,
+ * and a change from a later date stays an ordinary off-cycle case. Two technical choices the BRD does not state (docs/03): only
+ * the latest change is corrected, which keeps the chain simple; and a period a live run has calculated is refused, since
+ * processing it would otherwise freeze the amount being corrected, so the correction would be lost.
+ */
+async function assertCorrectable(tx: Queryable, companyId: string, t: CorrectionTarget, effectiveDate: string): Promise<void> {
+  if (t.superseded) throw new HttpError(409, 'ALREADY_CORRECTED', 'This change has already been corrected; correct the correction instead');
+  if (t.new_to !== null || t.later) throw new HttpError(409, 'NOT_LATEST_CHANGE', 'Only the latest salary change can be corrected; a later change exists');
+  if (t.baseline_to !== t.new_from) throw new HttpError(409, 'STALE_BASELINE', 'The salary baseline of this change no longer holds');
+  if (effectiveDate <= t.baseline_from) throw new HttpError(422, 'INVALID_EFFECTIVE_DATE', 'The correction must take effect after the salary it replaces began', { after: t.baseline_from });
+  const payroll = (
+    await tx.query<{ processed_through: string | null; in_progress: boolean | null }>(
+      `select to_char(max(r.eligible_to) filter (where r.frozen_at is not null), 'YYYY-MM-DD') as processed_through, bool_or(r.frozen_at is null) as in_progress
+         from payroll_record r join payroll_run ru on ru.company_id = r.company_id and ru.id = r.run_id
+        where r.company_id = $1 and r.employee_id = $2 and r.calculation_status = 'CALCULATED' and r.eligible_to >= least($3::date, $4::date)
+          and (r.frozen_at is not null or ru.state in ('DRAFT', 'CALCULATED', 'IN_REVIEW', 'APPROVED'))`,
+      [companyId, t.employee_id, t.effective_date, effectiveDate],
+    )
+  ).rows[0]!;
+  if (payroll.processed_through) {
+    throw new HttpError(409, 'PAYROLL_PROCESSED', 'Payroll has been processed for this period and is never changed; a change from a later date is an off-cycle case', { processedThrough: payroll.processed_through });
+  }
+  if (payroll.in_progress) throw new HttpError(409, 'PAYROLL_IN_PROGRESS', 'A payroll run has calculated this period; revise or cancel that run first');
+}
+
+export interface CorrectionProposal {
+  effectiveDate: string;
+  proposedAmount: string;
+  proposedCounterpart: string;
+  components?: ComponentLine[] | undefined;
+  reason: string;
+}
+
+/** BR-038; DF15: proposed by HR and decided by a different financial Admin, like an off-cycle change. */
+export async function proposeCorrection(tx: Queryable, grant: AccessGrant, historyId: string, input: CorrectionProposal) {
+  requireCompanyScope(grant);
+  const head = (await tx.query<{ employee_id: string }>(`select employee_id from increment_history where company_id = $1 and id = $2`, [grant.companyId, historyId])).rows[0];
+  if (!head || !(await canAccessEmployee(tx, grant, head.employee_id))) throw notFound();
+  await lockSalary(tx, head.employee_id);
+  await reassertAccess(tx, grant, 'increment', 'propose', ['salary']);
+  const t = await correctionTarget(tx, grant.companyId, historyId);
+  await assertCorrectable(tx, grant.companyId, t, input.effectiveDate);
+  const open = await tx.query(`select 1 from increment_case where company_id = $1 and corrects_history_id = $2 and state = 'SUBMITTED'`, [grant.companyId, historyId]);
+  if (open.rowCount) throw new HttpError(409, 'CORRECTION_PENDING', 'A correction of this change is already waiting for a decision');
+  const same = (
+    await tx.query<{ same: boolean }>(
+      `select s.${basisColumn(t.compensation_basis)} = $3::numeric and s.${t.compensation_basis === 'MONTHLY_GROSS' ? 'annual_ctc' : 'monthly_gross'} = $4::numeric and s.effective_from = $5::date as same
+         from salary_arrangement s where s.company_id = $1 and s.id = $2`,
+      [grant.companyId, t.new_salary_id, input.proposedAmount, input.proposedCounterpart, input.effectiveDate],
+    )
+  ).rows[0]!.same;
+  if (same) throw new HttpError(422, 'NO_CHANGE', 'The correction changes nothing');
+  const bt = (
+    await tx.query<{ id: string; revision: number }>(
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by) values ($1, 'increment_case', $2, 'SUBMITTED', $3, $3) returning id, revision`,
+      [grant.companyId, t.employee_id, grant.userId],
+    )
+  ).rows[0]!;
+  const caseId = (
+    await tx.query<{ id: string }>(
+      `insert into increment_case (company_id, employee_id, transaction_id, cycle_occurrence_key, off_cycle, prepared_by, proposed_by, baseline_salary_id, compensation_basis, currency_code,
+                                   baseline_amount, proposed_outcome, proposed_amount, proposed_counterpart, proposed_effective_date, state, reason, corrects_history_id, created_by, updated_by)
+       values ($1, $2, $3, $4, true, $5, $5, $6, $7, $8, $9::numeric, 'INCREASE', $10::numeric, $11::numeric, $12, 'SUBMITTED', $13, $14, $5, $5) returning id`,
+      [
+        grant.companyId,
+        t.employee_id,
+        bt.id,
+        `CORRECTION:${bt.id}`,
+        grant.userId,
+        t.old_salary_id,
+        t.compensation_basis,
+        t.currency_code,
+        t.before_amount,
+        input.proposedAmount,
+        input.proposedCounterpart,
+        input.effectiveDate,
+        input.reason.trim(),
+        t.id,
+      ],
+    )
+  ).rows[0]!.id;
+  if (input.components) await recordComponents(tx, grant, caseId, t.old_salary_id, bt.revision, input.components);
+  const { taskId } = await startApproval(tx, { companyId: grant.companyId, kind: 'increment_case', transactionId: bt.id, ownerEmployeeId: t.employee_id, actorUserId: grant.userId, excludeUserIds: [grant.userId] });
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'increment_case',
+    recordKey: caseId,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'PROPOSE_CORRECTION',
+    newVersion: 1,
+    after: {
+      operational: { effectiveDate: input.effectiveDate, correctsHistoryId: t.id, componentCount: input.components?.length ?? 0 },
+      salary: { proposedAmount: input.proposedAmount, proposedCounterpart: input.proposedCounterpart, components: input.components ?? null },
+    },
+    reason: input.reason,
+  });
+  await enqueueEvent(tx, { companyId: grant.companyId, topic: 'increment.proposed', aggregateId: caseId, dedupeKey: `increment.proposed:${caseId}:1`, payload: { caseId, taskId } });
+  return { caseId, taskId, state: 'SUBMITTED' };
+}
+
+/** Takes the corrected arrangement out of the chain, on record with its components; the case's baseline is its predecessor again. */
+async function retireCorrected(tx: Queryable, grant: AccessGrant, c: CaseRow, reason: string): Promise<{ id: string; currency_code: string }> {
+  const t = await correctionTarget(tx, grant.companyId, c.corrects_history_id!);
+  await assertCorrectable(tx, grant.companyId, t, c.proposed_effective_date);
+  if (t.old_salary_id !== c.baseline_salary_id) throw new HttpError(409, 'STALE_BASELINE', 'The salary baseline changed while this case was pending; it must be revalidated and resubmitted');
+  await tx.query(`update salary_arrangement set effective_to = effective_from, superseded_at = now(), updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, t.new_salary_id, grant.userId]);
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'salary_arrangement',
+    recordKey: t.new_salary_id,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'SUPERSEDE',
+    after: { operational: { correctionCaseId: c.id, correctsHistoryId: t.id } },
+    reason,
+  });
+  return { id: t.old_salary_id, currency_code: t.currency_code };
+}
+
 /**
  * Independent decision and atomic application (BR-041, CI20). Approval of an increase re-validates that the
  * baseline is still the arrangement in force just before the effective date and that no later arrangement
@@ -369,19 +544,25 @@ async function apply(tx: Queryable, grant: AccessGrant, c: CaseRow, idempotencyK
     await tx.query<{ before: boolean }>(`select coalesce(hrms_exit_last_working_date($1, $2) < $3::date, false) as before`, [grant.companyId, c.employee_id, c.proposed_effective_date])
   ).rows[0]!.before;
   if (separatedBefore) throw new HttpError(422, 'SEPARATION_BEFORE_EFFECTIVE_DATE', 'The approved last working date is before the effective date');
-  const baseline = (
-    await tx.query<{ id: string; currency_code: string; later: boolean }>(
-      `select sa.id, sa.currency_code,
-              exists (select 1 from salary_arrangement x where x.company_id = sa.company_id and x.employee_id = sa.employee_id
-                         and x.effective_from >= $3::date) as later
-         from salary_arrangement sa
-        where sa.company_id = $1 and sa.employee_id = $2 and sa.effective_from < $3::date and (sa.effective_to is null or sa.effective_to >= $3::date)
-        for update`,
-      [grant.companyId, c.employee_id, c.proposed_effective_date],
-    )
-  ).rows[0];
-  if (!baseline || baseline.id !== c.baseline_salary_id || baseline.later) {
-    throw new HttpError(409, 'STALE_BASELINE', 'The salary baseline changed while this case was pending; it must be revalidated and resubmitted');
+  let baseline: { id: string; currency_code: string };
+  if (c.corrects_history_id) {
+    baseline = await retireCorrected(tx, grant, c, reason.trim());
+  } else {
+    const current = (
+      await tx.query<{ id: string; currency_code: string; later: boolean }>(
+        `select sa.id, sa.currency_code,
+                exists (select 1 from salary_arrangement x where x.company_id = sa.company_id and x.employee_id = sa.employee_id
+                           and x.superseded_at is null and x.effective_from >= $3::date) as later
+           from salary_arrangement sa
+          where sa.company_id = $1 and sa.employee_id = $2 and sa.effective_from < $3::date and (sa.effective_to is null or sa.effective_to >= $3::date)
+          for update`,
+        [grant.companyId, c.employee_id, c.proposed_effective_date],
+      )
+    ).rows[0];
+    if (!current || current.id !== c.baseline_salary_id || current.later) {
+      throw new HttpError(409, 'STALE_BASELINE', 'The salary baseline changed while this case was pending; it must be revalidated and resubmitted');
+    }
+    baseline = current;
   }
 
   await tx.query(`update salary_arrangement set effective_to = $3::date, updated_by = $4 where company_id = $1 and id = $2`, [
@@ -422,12 +603,12 @@ async function apply(tx: Queryable, grant: AccessGrant, c: CaseRow, idempotencyK
     await tx.query<{ change_percent: string | null; percent_na_reason: string | null }>(
       `insert into increment_history (company_id, employee_id, case_id, approval_decision_id, old_salary_id, new_salary_id, effective_date,
                                       compensation_basis, currency_code, before_amount, after_amount, change_amount, change_percent,
-                                      percent_na_reason, reason, applied_by, created_by, updated_by)
+                                      percent_na_reason, reason, applied_by, corrects_history_id, created_by, updated_by)
        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::numeric, $11::numeric, $11::numeric - $10::numeric,
                case when $10::numeric > 0 then round(($11::numeric - $10::numeric) / $10::numeric * 100, 2) end,
-               case when $10::numeric > 0 then null else 'ZERO_BASELINE' end, $12, $13, $13, $13)
+               case when $10::numeric > 0 then null else 'ZERO_BASELINE' end, $12, $13, $14, $13, $13)
        returning to_char(change_percent, 'FM999999990.00') as change_percent, percent_na_reason`,
-      [grant.companyId, c.employee_id, c.id, decisionId, baseline.id, newSalaryId, c.proposed_effective_date, c.compensation_basis, baseline.currency_code, c.baseline_amount, c.proposed_amount, reason.trim(), grant.userId],
+      [grant.companyId, c.employee_id, c.id, decisionId, baseline.id, newSalaryId, c.proposed_effective_date, c.compensation_basis, baseline.currency_code, c.baseline_amount, c.proposed_amount, reason.trim(), grant.userId, c.corrects_history_id],
     )
   ).rows[0]!;
   await tx.query(
@@ -440,12 +621,19 @@ async function apply(tx: Queryable, grant: AccessGrant, c: CaseRow, idempotencyK
 
 export async function incrementHistory(db: Queryable, grant: AccessGrant, employeeId: string) {
   if (!(await canAccessEmployee(db, grant, employeeId))) throw notFound();
-  const withReason = grant.allowedFieldGroups.includes('reason');
+  // The approver's free-text reason is a group of its own (DF02), on top of the history grant.
+  const withReason = (await resolveAccess(db, { userId: grant.userId, companyId: grant.companyId, assignmentId: grant.assignmentId, resource: 'increment', action: 'read', fieldGroups: ['reason'], at: grant.at })).allowed;
   const rows = await db.query(
-    `select effective_date as "effectiveDate", compensation_basis as basis, currency_code as currency,
-            before_amount::text as "beforeAmount", after_amount::text as "afterAmount", change_amount::text as "changeAmount",
-            to_char(change_percent, 'FM999999990.00') as "changePercent", percent_na_reason as "percentNaReason"${withReason ? ', reason' : ''}
-       from increment_history where company_id = $1 and employee_id = $2 order by effective_date, applied_at`,
+    `select h.id, h.effective_date as "effectiveDate", h.compensation_basis as basis, h.currency_code as currency,
+            h.before_amount::text as "beforeAmount", h.after_amount::text as "afterAmount", h.change_amount::text as "changeAmount",
+            to_char(h.change_percent, 'FM999999990.00') as "changePercent", h.percent_na_reason as "percentNaReason"${withReason ? ', h.reason' : ''},
+            h.corrects_history_id as "correctsHistoryId", n.id as "supersededByHistoryId",
+            -- Only the latest change is corrected (assertCorrectable); a screen offers it here, the route decides again.
+            (n.id is null and s.effective_to is null) as correctable
+       from increment_history h
+       join salary_arrangement s on s.company_id = h.company_id and s.id = h.new_salary_id
+       left join increment_history n on n.company_id = h.company_id and n.corrects_history_id = h.id
+      where h.company_id = $1 and h.employee_id = $2 order by h.effective_date, h.applied_at`,
     [grant.companyId, employeeId],
   );
   return { employeeId, items: rows.rows };
@@ -476,7 +664,7 @@ export async function annualGrowth(db: Queryable, grant: AccessGrant, employeeId
   const changes = await db.query(
     `select effective_date as "effectiveDate", before_amount::text as "beforeAmount", after_amount::text as "afterAmount",
             to_char(change_percent, 'FM999999990.00') as "changePercent", percent_na_reason as "percentNaReason"
-       from increment_history where company_id = $1 and employee_id = $2 and compensation_basis = $3
+       from increment_history_in_force where company_id = $1 and employee_id = $2 and compensation_basis = $3
         and effective_date between $4::date and $5::date order by effective_date`,
     [grant.companyId, employeeId, basis, row.period_start, row.period_end],
   );
@@ -509,16 +697,20 @@ export async function annualGrowth(db: Queryable, grant: AccessGrant, employeeId
   };
 }
 
-/** Case list: states for everyone with increment read; amounts only with the salary field grant (BR-044). */
+/**
+ * Case list: states for everyone with increment read; amounts only with the salary field grant (BR-044), and on a closed case
+ * only with the history grant too (C4): what was decided earlier is the financial past, what is open is current work.
+ */
 export async function listCases(db: Queryable, grant: AccessGrant, q: { state?: string | undefined }) {
   const withSalary = grant.allowedFieldGroups.includes('salary');
+  const withHistory = withSalary && (await holdsSalaryHistoryGrant(db, grant, 'increment'));
   const params = new SqlParams();
   const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, params);
   const stateFilter = q.state ? `and c.state = ${params.add(q.state)}` : '';
   const rows = await db.query(
     `select c.id, c.employee_id as "employeeId", e.employee_code as "employeeCode", c.cycle_occurrence_key as occurrence, c.off_cycle as "offCycle",
             c.state, c.proposed_outcome as "proposedOutcome", to_char(c.proposed_effective_date, 'YYYY-MM-DD') as "effectiveDate", c.version
-            , to_char(c.decision_due_on, 'YYYY-MM-DD') as "decisionDueOn"
+            , to_char(c.decision_due_on, 'YYYY-MM-DD') as "decisionDueOn", c.corrects_history_id as "correctsHistoryId"
             ${
               withSalary
                 ? `, c.baseline_amount::text as "baselineAmount", c.proposed_amount::text as "proposedAmount", c.currency_code as currency,
@@ -535,5 +727,13 @@ export async function listCases(db: Queryable, grant: AccessGrant, q: { state?: 
       where ${scope} ${stateFilter} order by e.employee_code, c.created_at`,
     params.values,
   );
-  return { items: rows.rows };
+  if (withHistory || !withSalary) return { items: rows.rows };
+  const OPEN = ['DRAFT', 'SUBMITTED', 'RETURNED'];
+  return {
+    items: rows.rows.map((r: Record<string, unknown>) => {
+      if (OPEN.includes(String(r.state))) return r;
+      const { baselineAmount: _baseline, proposedAmount: _proposed, currency: _currency, components: _components, ...kept } = r;
+      return kept;
+    }),
+  };
 }

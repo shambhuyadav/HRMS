@@ -55,7 +55,7 @@ const STEP_COLUMNS = 'id, workflow_id, sequence, permission_id, selection_rule, 
  * reviewer for a step whose permission the assignment holds it is true (the task about to be created confers the scope);
  * for anything else it must prove a task the assignment is already eligible for.
  */
-const scopeCovers = (company: string, emp: string, assigned = 'true') => `(
+export const scopeCovers = (company: string, emp: string, assigned = 'true') => `(
   case ra.scope_kind
     when 'COMPANY' then true
     when 'ASSIGNED' then ${assigned}
@@ -645,7 +645,7 @@ export async function myOpenTasks(db: Queryable, grant: AccessGrant, kind?: stri
   return { items: rows.rows, total: rows.rowCount ?? 0 };
 }
 
-const unrestrictedCompanyScope = (grant: AccessGrant) =>
+export const unrestrictedCompanyScope = (grant: AccessGrant) =>
   grant.scopeKind === 'COMPANY' && grant.filters.departments.length === 0 && grant.filters.locations.length === 0 && grant.filters.employees.length === 0;
 
 /**

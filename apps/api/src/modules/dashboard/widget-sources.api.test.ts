@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { resolveAccess } from '../access/authorize.js';
 import { BASELINE_ROLES, type PermissionKey } from '../access/baseline.js';
@@ -88,9 +89,9 @@ describe('every metric reconciles with the list it links to (BR-045; FR-097)', (
     expect(draft.statusCode).toBe(201);
     const pendingUser = await h.makeUser();
     await h.db.query(
-      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state)
-       select $1, $2, r.id, 'OWN', now(), 'PENDING' from role r where r.company_id = $1 and r.code = 'EMPLOYEE'`,
-      [A.id, pendingUser],
+      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, created_by)
+       select $1, $2, r.id, 'OWN', now(), 'PENDING', $3 from role r where r.company_id = $1 and r.code = 'EMPLOYEE'`,
+      [A.id, pendingUser, SYSTEM_ACTOR_ID],
     );
     await h.db.query(`insert into notification (company_id, recipient_user_id, category, state, channel, idempotency_key, body) values ($1, $2, 'SYNTHETIC', 'FAILED', 'IN_APP', $3, null), ($1, $2, 'SYNTHETIC', 'DELIVERED', 'IN_APP', $4, 'Synthetic')`, [
       A.id,
@@ -229,6 +230,13 @@ describe('every metric reconciles with the list it links to (BR-045; FR-097)', (
     );
   });
 
+  it('active employees are the three working statuses, not a draft (DF17), against the list status by status', async () => {
+    const { byCode } = await dashboardOf(hr);
+    const total = async (status: string) => (await h.call(hr, 'GET', `/v1/employees?status=${status}`)).json().total as number;
+    expect(await total('DRAFT')).toBeGreaterThan(0);
+    expect(byCode.ACTIVE_EMPLOYEES!.value).toBe((await total('ACTIVE_PROBATION')) + (await total('ACTIVE_CONFIRMED')) + (await total('NOTICE')));
+  });
+
   it('the failed runs are this month’s failed and partial ones only', async () => {
     const sa = await h.actor(A, 'SYSTEM_ADMINISTRATOR', { extra: ['biometric.read.operational'] });
     const { byCode } = await dashboardOf(sa);
@@ -327,9 +335,9 @@ describe('counts respect the assignment’s filters (FR-096 "No widget defaults 
     const finUser = await h.actor(A, 'EMPLOYEE', { employeeId: fin });
     const pending = (user: string) =>
       h.db.query(
-        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state)
-         select $1, $2, r.id, 'TEAM', now(), 'PENDING' from role r where r.company_id = $1 and r.code = 'REPORTING_MANAGER'`,
-        [A.id, user],
+        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, created_by)
+         select $1, $2, r.id, 'TEAM', now(), 'PENDING', $3 from role r where r.company_id = $1 and r.code = 'REPORTING_MANAGER'`,
+        [A.id, user, SYSTEM_ACTOR_ID],
       );
     await pending(engUser.user);
     await pending(finUser.user);

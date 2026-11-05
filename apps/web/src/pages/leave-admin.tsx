@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { api, ApiError, download, formatDate } from '../api';
-import { reportProblem } from '../report-failures';
+import { isReportRefusal, reportProblem } from '../report-failures';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
@@ -76,7 +76,7 @@ export function ReportExport({ reportCode, filters, label }: { reportCode: strin
     queryKey: ['report', id],
     enabled: !!id,
     queryFn: () => api<{ state: string; rowCount: number | null; failureCode: string | null }>(`/v1/reports/${id}`),
-    refetchInterval: (q) => (q.state.data?.state === 'QUEUED' || q.state.data?.state === 'RUNNING' ? 3000 : false),
+    refetchInterval: (q) => (!isReportRefusal(q.state.error) && (q.state.data?.state === 'QUEUED' || q.state.data?.state === 'RUNNING') ? 3000 : false),
   });
   const save = useMutation({ mutationFn: () => download(`/v1/reports/${id}/download`) });
   return (

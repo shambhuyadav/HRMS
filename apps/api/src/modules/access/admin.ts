@@ -215,6 +215,20 @@ export async function approveGrant(tx: Queryable, approver: AccessGrant, id: str
   // A proposal made before the C2 matrix was enforced is not approved outside it.
   assertRecordScope(row.role_code, row.scope_kind);
   assertWithinAdministrativeScope(approver, await loadFilters(tx, approver.companyId, id));
+  // The role's ceiling can change while a proposal waits (role-permissions.ts): an entry outside it would revive if the ceiling came back.
+  const outside = (
+    await tx.query<{ key: string }>(
+      `select p.resource || '.' || p.action || '.' || p.field_group as key
+         from role_assignment_permission rap
+         join role_assignment ra on ra.company_id = rap.company_id and ra.id = rap.role_assignment_id
+         join permission p on p.id = rap.permission_id
+        where rap.company_id = $1 and rap.role_assignment_id = $2
+          and not exists (select 1 from role_permission rp where rp.company_id = ra.company_id and rp.role_id = ra.role_id and rp.permission_id = rap.permission_id and rp.effect = 'ALLOW')
+        order by 1`,
+      [approver.companyId, id],
+    )
+  ).rows[0];
+  if (outside) throw new HttpError(422, 'OUTSIDE_ROLE_CEILING', `Role ${row.role_code} can no longer hold ${outside.key}; reject this proposal and propose it again without it`);
 
   await tx.query(
     `update role_assignment set state = 'ACTIVE', approved_by = $3, approved_at = now(), updated_by = $3
@@ -380,12 +394,15 @@ export async function listRoleCatalogue(db: Queryable, admin: AccessGrant) {
     items: rows.map((r) => {
       const baseline = BASELINE_ROLES.find((b) => b.code === r.code);
       const duties = new Set<string>(baseline?.defaultDuties ?? []);
+      const allowed = new Set((r.permissions ?? []).map((p) => p.key));
       return {
         code: r.code,
         name: r.name,
         accessClass: r.access_class,
         defaultScope: baseline?.defaultScope ?? null,
         active: r.active,
+        // What role-permission maintenance could bring back into this baseline role's ceiling (role-permissions.ts).
+        restorable: (baseline?.ceiling ?? []).filter((k) => !allowed.has(k)).sort(),
         // ownEss: confidential, but held only for the beneficiary's own record in the Employee OWN context (H1).
         permissions: (r.permissions ?? []).map((p) => ({
           key: p.key,

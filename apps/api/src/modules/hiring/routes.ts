@@ -68,7 +68,8 @@ const requisitionProperties = {
   budgetExceptionReason: { anyOf: [{ type: 'string', minLength: 1, maxLength: 2000 }, { type: 'null' }] },
 } as const;
 const requisitionRequired = ['title', 'departmentId', 'locationId', 'designationId', 'employmentType', 'vacancies', 'reasonType', 'reason', 'targetDate', 'hiringManagerId'];
-const requisitionBody = { type: 'object', additionalProperties: false, required: requisitionRequired, properties: requisitionProperties } as const;
+// DF03: only a new requisition names the rejected one it raises again; a change to a draft (PUT) cannot.
+const requisitionBody = { type: 'object', additionalProperties: false, required: requisitionRequired, properties: { ...requisitionProperties, predecessorRequestId: uuid } } as const;
 const requisitionUpdateBody = { type: 'object', additionalProperties: false, required: [...requisitionRequired, 'expectedVersion'], properties: { ...requisitionProperties, expectedVersion } } as const;
 
 export async function hiringRoutes(app: FastifyInstance, opts: { db: Database; files: FileStore; scanner: ScanProvider }): Promise<void> {
@@ -236,6 +237,15 @@ export async function hiringRoutes(app: FastifyInstance, opts: { db: Database; f
     const copy = await withTransaction(db, (tx) => copyRequisition(tx, grant, id));
     reply.status(201);
     return getRequisition(db, grant, copy);
+  });
+
+  // DF03 "a new request links to the rejected predecessor": a copy of the requester's own rejected requisition that says so.
+  app.post('/hiring/requisitions/:id/raise-again', { schema: { params: idParams } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'requisition', 'create', ['operational'], { requireAll: true, recordKey: id });
+    const raised = await withTransaction(db, (tx) => copyRequisition(tx, grant, id, { raiseAgain: true }));
+    reply.status(201);
+    return getRequisition(db, grant, raised);
   });
 
   app.post('/hiring/requisitions/:id/close', { schema: { params: idParams, body: reasonBody } }, async (request) => {

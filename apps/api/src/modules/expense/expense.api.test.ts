@@ -8,6 +8,7 @@ import type { PermissionKey } from '../access/baseline.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { METRIC_SOURCES } from '../dashboard/sources.js';
 import { EXPENSE_METRICS } from './metrics.js';
+import { prepareReady, releaseNaming } from './payment.fixtures.js';
 import { releasePayment } from './service.js';
 
 let h: Harness;
@@ -28,6 +29,7 @@ const FINANCE: PermissionKey[] = [
   'payment.read.operational',
   'payment.prepare.operational',
   'payment.release.operational',
+  'payment.confirm_outcome.operational',
   'payment.reverse.operational',
 ];
 
@@ -265,7 +267,7 @@ describe('review route and entitlement (FR-072, FR-073, C5, CI03, CI04, ZT13)', 
     await submit(employee, id);
     await decide(manager, (await taskOf(manager, id))!.taskId, { decision: 'APPROVE' });
     expect((await approveAllLines(fin1, id, (await taskOf(fin1, id))!.taskId, () => '0')).json()).toMatchObject({ state: 'APPROVED', paymentState: 'NO_PAYABLE_AMOUNT' });
-    const pay = await h.call(fin2, 'POST', '/v1/expense/payments', { claimId: id, amount: '1', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') });
+    const pay = await prepareReady(h, fin2,{ claimId: id, amount: '1', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') });
     expect(pay.statusCode).toBe(404);
   });
 
@@ -285,16 +287,16 @@ describe('review route and entitlement (FR-072, FR-073, C5, CI03, CI04, ZT13)', 
 describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
   it('DF07 example: approve 1000, pay 600, reverse 100 -> net 500, outstanding 500; pending 300 leaves 200', async () => {
     const id = await approvedClaim([line('OFFICE_SUPPLIES', '600'), line('OTHER', '400', { exceptionReason: 'Over limit approved (synthetic)' })]);
-    const pay = (amount: string, a = fin2, key = uniq('pay-key-')) => h.call(a, 'POST', '/v1/expense/payments', { claimId: id, amount, paymentDate: daysAgo(0), idempotencyKey: key });
+    const pay = (amount: string, a = fin2, key = uniq('pay-key-')) => prepareReady(h, a, { claimId: id, amount, paymentDate: daysAgo(0), idempotencyKey: key });
 
     const first = (await pay('600')).json();
     expect(first.state).toBe('PREPARED');
     expect((await pay('500')).json().error).toBe('EXCEEDS_OUTSTANDING'); // 1000 - 600 pending = 400
 
     // C4: neither the entitlement approver (fin1) nor the preparer (fin2) may release; fin3 may.
-    expect((await h.call(fin1, 'POST', `/v1/expense/payments/${first.instructionId}/release`)).statusCode).toBe(403);
-    expect((await h.call(fin2, 'POST', `/v1/expense/payments/${first.instructionId}/release`)).statusCode).toBe(403);
-    expect((await h.call(fin3, 'POST', `/v1/expense/payments/${first.instructionId}/release`)).json().state).toBe('RELEASED');
+    expect((await releaseNaming(h, fin1, first.instructionId)).statusCode).toBe(403);
+    expect((await releaseNaming(h, fin2, first.instructionId)).statusCode).toBe(403);
+    expect((await releaseNaming(h, fin3, first.instructionId)).json().state).toBe('RELEASED');
     expect((await claim(employee, id)).paymentState).toBe('UNPAID'); // released is not paid
 
     const evidence = uniq('bank-ref-');
@@ -313,7 +315,7 @@ describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
     expect(two.state).toBe('PREPARED');
 
     // A definitive failure releases its reservation once.
-    await h.call(fin3, 'POST', `/v1/expense/payments/${pending.instructionId}/release`);
+    await releaseNaming(h, fin3, pending.instructionId);
     await h.call(fin3, 'POST', `/v1/expense/payments/${pending.instructionId}/outcome`, { outcome: 'FAILED', evidenceKey: uniq('failure-key-') });
     expect((await claim(employee, id)).payment).toMatchObject({ pending: '200.0000', netPaid: '500.0000' });
   });
@@ -322,13 +324,13 @@ describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
     const id = await approvedClaim([line('OFFICE_SUPPLIES', '1000', { exceptionReason: 'Approved bulk order (synthetic)' })]);
     const key = uniq('pay-key-');
     const body = { claimId: id, amount: '600', paymentDate: daysAgo(0), idempotencyKey: key };
-    const a = (await h.call(fin2, 'POST', '/v1/expense/payments', body)).json();
-    const b = await h.call(fin2, 'POST', '/v1/expense/payments', body);
+    const a = (await prepareReady(h, fin2,body)).json();
+    const b = await prepareReady(h, fin2,body);
     expect(b.json()).toMatchObject({ instructionId: a.instructionId, replayed: true });
 
     const [r1, r2] = await Promise.all([
-      h.call(fin2, 'POST', '/v1/expense/payments', { claimId: id, amount: '400', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') }),
-      h.call(fin2, 'POST', '/v1/expense/payments', { claimId: id, amount: '400', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') }),
+      prepareReady(h, fin2,{ claimId: id, amount: '400', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') }),
+      prepareReady(h, fin2,{ claimId: id, amount: '400', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') }),
     ]);
     expect([r1.statusCode, r2.statusCode].sort()).toEqual([201, 422]);
     expect((await claim(employee, id)).payment).toMatchObject({ pending: '1000.0000', outstanding: '1000.0000' });
@@ -336,7 +338,7 @@ describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
 
   it('releases only under the authority current inside the transaction, not the one the route guard saw (docs/09 §6.5)', async () => {
     const id = await approvedClaim([line('OFFICE_SUPPLIES', '50')]);
-    const instruction = (await h.call(fin2, 'POST', '/v1/expense/payments', { claimId: id, amount: '50', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') })).json();
+    const instruction = (await prepareReady(h, fin2,{ claimId: id, amount: '50', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') })).json();
     const releaser = await h.actor(A, 'HR_ADMINISTRATOR', { extra: FINANCE });
     // What the route guard resolved just before the release transaction opened.
     const guard = (await resolveAccess(h.pool, { userId: releaser.user, companyId: A.id, assignmentId: releaser.assignment, resource: 'payment', action: 'release', fieldGroups: ['operational'] })) as AccessGrant;
@@ -348,10 +350,10 @@ describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
         [...releaseEntry, active],
       );
     await setEntry(false);
-    await expect(withTransaction(h.pool, (tx) => releasePayment(tx, guard, instruction.instructionId))).rejects.toMatchObject({ statusCode: 403 });
+    await expect(withTransaction(h.pool, (tx) => releasePayment(tx, guard, instruction.instructionId, { outcomeActorUserId: releaser.user }))).rejects.toMatchObject({ statusCode: 403 });
     expect((await h.one<{ state: string }>(`select state from payment_instruction where id = $1`, [instruction.instructionId])).state).toBe('PREPARED');
     await setEntry(true);
-    expect((await h.call(releaser, 'POST', `/v1/expense/payments/${instruction.instructionId}/release`)).json().state).toBe('RELEASED');
+    expect((await releaseNaming(h, releaser, instruction.instructionId)).json().state).toBe('RELEASED');
   });
 
   it('each expense task names its own claim, even with two pending claims from one employee', async () => {
@@ -368,7 +370,7 @@ describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
 
   it('payables and instructions reconcile with the claim ledger; the claimant cannot see the payment queue', async () => {
     const id = await approvedClaim([line('OTHER', '300', { exceptionReason: 'Over limit approved (synthetic)' })]);
-    await h.call(fin2, 'POST', '/v1/expense/payments', { claimId: id, amount: '120', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') });
+    await prepareReady(h, fin2,{ claimId: id, amount: '120', paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') });
     const payable = ((await h.call(fin2, 'GET', '/v1/expense/payables')).json().items as { claimId: string }[]).find((p) => p.claimId === id);
     expect(payable).toMatchObject({ approvedAmount: '300.00', netPaid: '0.00', pending: '120.00', allocatable: '180.00', currency: 'INR' });
     const instructions = (await h.call(fin2, 'GET', `/v1/expense/claims/${id}/payments`)).json().items;
@@ -388,8 +390,8 @@ describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
       const id = await approvedClaim([line('OFFICE_SUPPLIES', '600')]);
       const ids = [] as string[];
       for (const amount of ['200', '400']) {
-        const pi = (await h.call(fin2, 'POST', '/v1/expense/payments', { claimId: id, amount, paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') })).json().instructionId as string;
-        expect((await h.call(fin3, 'POST', `/v1/expense/payments/${pi}/release`)).statusCode).toBe(200);
+        const pi = (await prepareReady(h, fin2,{ claimId: id, amount, paymentDate: daysAgo(0), idempotencyKey: uniq('pay-key-') })).json().instructionId as string;
+        expect((await releaseNaming(h, fin3, pi)).statusCode).toBe(200);
         ids.push(pi);
       }
       const results = await Promise.all(ids.map((pi) => h.call(fin3, 'POST', `/v1/expense/payments/${pi}/outcome`, { outcome: 'CONFIRMED', evidenceKey: uniq('bank-ref-') })));
@@ -400,8 +402,8 @@ describe('payments (FR-076, FR-077, DF07, C4, CI05, CI06, ZT14, ZT15)', () => {
 });
 
 describe('separation of duties on the payment (DF02, DF03, C4, FR-073, FR-076, BR-018)', () => {
-  const prepare = (a: TestActor, id: string, amount: string, key = uniq('pay-key-')) => h.call(a, 'POST', '/v1/expense/payments', { claimId: id, amount, paymentDate: daysAgo(0), idempotencyKey: key });
-  const act = (a: TestActor, pi: string, path: string, body?: object) => h.call(a, 'POST', `/v1/expense/payments/${pi}/${path}`, body);
+  const prepare = (a: TestActor, id: string, amount: string, key = uniq('pay-key-')) => prepareReady(h, a, { claimId: id, amount, paymentDate: daysAgo(0), idempotencyKey: key });
+  const act = (a: TestActor, pi: string, path: string, body?: object) => (path === 'release' ? releaseNaming(h, a, pi) : h.call(a, 'POST', `/v1/expense/payments/${pi}/${path}`, body));
   const SOD = { error: 'SEGREGATION_OF_DUTIES' };
   /** A claim above the threshold: fin1 sets every line amount and fin2 gives the high-value approval. */
   async function highValueClaim() {
@@ -494,8 +496,8 @@ describe('separation of duties on the payment (DF02, DF03, C4, FR-073, FR-076, B
 });
 
 describe('a key reused for different content is refused, never answered as a replay (FR-077, BR-025, DF07, ZT15)', () => {
-  const act = (a: TestActor, pi: string, path: string, body?: object) => h.call(a, 'POST', `/v1/expense/payments/${pi}/${path}`, body);
-  const prepare = (claimId: string, amount: string, key = uniq('pay-key-'), paymentDate = daysAgo(0)) => h.call(fin2, 'POST', '/v1/expense/payments', { claimId, amount, paymentDate, idempotencyKey: key });
+  const act = (a: TestActor, pi: string, path: string, body?: object) => (path === 'release' ? releaseNaming(h, a, pi) : h.call(a, 'POST', `/v1/expense/payments/${pi}/${path}`, body));
+  const prepare = (claimId: string, amount: string, key = uniq('pay-key-'), paymentDate = daysAgo(0)) => prepareReady(h, fin2,{ claimId, amount, paymentDate, idempotencyKey: key });
   /** A claim with a confirmed payment; returns the claim, the instruction and its bank reference. */
   async function confirmedPayment(amount: string) {
     const id = await approvedClaim([line('OFFICE_SUPPLIES', amount)]);
@@ -771,6 +773,45 @@ describe('who reads a claim beyond row scope (DF02 "claimant and assigned expens
     expect(await status(operator, submitted)).toBe(200);
     expect(await status(reviewerWithoutTask, submitted)).toBe(404);
   });
+
+  it('a task held through another assignment of the same user lends this one nothing (I-52)', async () => {
+    const id = (await draft(employee, [line('OTHER', '24')])).json().claimId as string;
+    expect((await submit(employee, id)).statusCode).toBe(200);
+    expect(await status(manager, id)).toBe(200);
+    // The same person, company-wide and able to read claims, but with no decision duty of this claim's step.
+    const sameUserOtherDuty = await h.actor(A, 'HR_ADMINISTRATOR', { user: manager.user, extra: ['expense.read.operational'] });
+    expect(await status(sameUserOtherDuty, id)).toBe(404);
+    expect(await claimsOf(sameUserOtherDuty, (await claim(employee, id)).employeeId as string)).not.toContain(id);
+  });
+
+  it('a receipt opens only for someone who reads its claim: not a later manager, even with the receipt grant (DF02 attachments; I-49)', async () => {
+    const bytes = `%PDF-1.4\n% synthetic receipt beyond scope ${uniq('v')}\n%%EOF\n`;
+    const hr2 = await h.actor(A, 'HR_ADMINISTRATOR');
+    const person = async () => {
+      const personId = (await h.call(hr2, 'POST', '/v1/employees', h.newEmployeeBody(A))).json().id as string;
+      await h.setStatus(A, personId, 'ACTIVE_CONFIRMED');
+      return personId;
+    };
+    const claimantEmp = await person();
+    const claimant = await h.actor(A, 'EMPLOYEE', { employeeId: claimantEmp });
+    const routedEmp = await person();
+    const routed = await h.actor(A, 'REPORTING_MANAGER', { employeeId: routedEmp, extra: ['expense.view_receipt.receipt'] });
+    expect((await h.call(hr2, 'POST', `/v1/employees/${claimantEmp}/manager`, { managerEmployeeId: routedEmp, effectiveFrom: '2026-01-05' })).statusCode).toBeLessThan(300);
+    const id = (await draft(claimant, [line('OTHER', '25', { receipt: await uploadReceipt(claimant, bytes) })])).json().claimId as string;
+    expect((await submit(claimant, id)).statusCode).toBe(200);
+    const lineId = (await claim(claimant, id)).lines[0].id as string;
+    const url = `/v1/expense/lines/${lineId}/receipt`;
+    expect((await h.call(routed, 'GET', url)).statusCode).toBe(200);
+
+    const laterEmp = await person();
+    const later = await h.actor(A, 'REPORTING_MANAGER', { employeeId: laterEmp, extra: ['expense.view_receipt.receipt'] });
+    expect((await h.call(hr2, 'POST', `/v1/employees/${claimantEmp}/manager`, { managerEmployeeId: laterEmp, effectiveFrom: daysAgo(1) })).statusCode).toBeLessThan(300);
+    const refused = await h.call(later, 'GET', url);
+    expect(refused.statusCode).toBe(404);
+    expect(refused.body).not.toContain('synthetic receipt');
+    const denied = await h.one<{ n: string }>(`select count(*) as n from audit_event where resource_code = 'expense_receipt' and action = 'ACCESS_DENIED' and actor_user_id = $1`, [later.user]);
+    expect(Number(denied.n)).toBe(1);
+  });
 });
 
 describe('treasury widgets reconcile with the instructions list (F2; BR-045; FR-097)', () => {
@@ -779,14 +820,14 @@ describe('treasury widgets reconcile with the instructions list (F2; BR-045; FR-
   it('each count equals GET /expense/payments under the widget’s filters, for the same actor; no amount or bank field is listed', async () => {
     const pay = async (paymentDate = daysAgo(0)) => {
       const claimId = await approvedClaim([line('OTHER', '30', { exceptionReason: 'Over limit approved (synthetic)' })]);
-      const res = await h.call(fin2, 'POST', '/v1/expense/payments', { claimId, amount: '30', paymentDate, idempotencyKey: uniq('pay-key-') });
+      const res = await prepareReady(h, fin2,{ claimId, amount: '30', paymentDate, idempotencyKey: uniq('pay-key-') });
       expect(res.statusCode, res.body).toBeLessThan(300);
       return res.json().instructionId as string;
     };
-    const release = (id: string) => h.call(fin3, 'POST', `/v1/expense/payments/${id}/release`);
+    const release = (id: string) => releaseNaming(h, fin3, id);
     const outcome = (id: string, value: string) => h.call(fin3, 'POST', `/v1/expense/payments/${id}/outcome`, { outcome: value, evidenceKey: uniq('bank-ref-') });
 
-    await pay();
+    await pay(daysAgo(-10)); // prepared, not yet due, whatever the hour of the company-local day
     await pay(daysAgo(2)); // prepared, past its date
     await release(await pay()); // awaiting its outcome
     const failed = await pay();
@@ -820,6 +861,7 @@ describe('treasury widgets reconcile with the instructions list (F2; BR-045; FR-
     // The figures carry records, and the independent releaser is the only one who may release what the preparer prepared (C4).
     expect(Number(counted.releaser!.PAYMENTS_AWAITING_RELEASE)).toBeGreaterThanOrEqual(2);
     expect(Number(counted.releaser!.PAYMENTS_RELEASE_OVERDUE)).toBeGreaterThanOrEqual(1);
+    expect(Number(counted.releaser!.PAYMENTS_RELEASE_OVERDUE)).toBeLessThan(Number(counted.releaser!.PAYMENTS_AWAITING_RELEASE));
     expect(counted.preparer!.PAYMENTS_AWAITING_RELEASE).toBe(0);
     expect(Number(counted.releaser!.PAYMENTS_AWAITING_OUTCOME)).toBeGreaterThanOrEqual(1);
     expect(Number(counted.releaser!.PAYMENTS_FAILED)).toBeGreaterThanOrEqual(1);

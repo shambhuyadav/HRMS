@@ -35,6 +35,10 @@ h2 { font-size: 1.1rem; margin: 0; }
 .row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .grid-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.75rem; align-items: end; border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; }
 .grid-form .wide { grid-column: 1 / -1; }
+/* A control never outgrows its cell: a long option or a date picker used to run under the next field. Its label wraps above it instead. */
+.grid-form > * { min-width: 0; }
+.grid-form label.inline { flex-wrap: wrap; margin-bottom: 0; }
+.grid-form label.inline > input, .grid-form label.inline > select { flex: 1 1 9rem; min-width: 0; max-width: 100%; }
 label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.9rem; color: var(--muted); }
 label.inline { flex-direction: row; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
 label.check { flex-direction: row; align-items: center; }
@@ -59,7 +63,7 @@ th { color: var(--muted); font-weight: 600; }
 .widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; }
 .widget { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; }
 .widget-title { color: var(--muted); font-size: 0.9rem; }
-.widget-value { font-size: 2rem; font-weight: 700; margin-top: 0.25rem; }
+.widget-value { font-size: 2rem; font-weight: 700; margin-top: 0.25rem; overflow-wrap: anywhere; }
 .widget-note { margin-top: 0.5rem; font-style: italic; color: var(--muted); }
 
 /* Badges always carry text; colour is a secondary cue only. */
@@ -71,6 +75,8 @@ th { color: var(--muted); font-weight: 600; }
 .tasks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.75rem; }
 .tasks li { border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; }
 .tasks li.unread { border-left: 4px solid var(--accent); }
+/* A list item stacks its children at full width; a state badge or a plain link keeps its own size. */
+.tasks li > .badge, .tasks li > button.link { align-self: flex-start; }
 .choices { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .choices button { width: 100%; text-align: left; background: #fff; color: var(--text); border-color: var(--line); }
 .hint { color: var(--muted); font-size: 0.85rem; }

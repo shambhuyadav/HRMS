@@ -5,8 +5,9 @@ import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import { type AccessGrant, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams, taskDelegationLive } from '../access/authorize.js';
-import { cancelActiveApproval, type Decision, decideTask, lockTransaction, startApproval } from '../workflow/engine.js';
+import { type AccessGrant, canAccessEmployee, eligibleTasksOf, employeeScopePredicate, resolveAccess, SqlParams, taskDelegationLive } from '../access/authorize.js';
+import { cancelActiveApproval, type Decision, decideTask, lockTransaction, scopeCovers, startApproval } from '../workflow/engine.js';
+import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
 import { expensePolicyLockKey } from './policies.js';
 
 export interface LineInput {
@@ -77,15 +78,16 @@ async function insertLines(tx: Queryable, grant: AccessGrant, employeeId: string
   }
 }
 
-export async function createDraft(tx: Queryable, grant: AccessGrant, input: DraftInput) {
+export async function createDraft(tx: Queryable, grant: AccessGrant, input: DraftInput & { predecessorRequestId?: string | undefined }) {
   const employeeId = grant.linkedEmployeeId;
   if (!employeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
   await reassertAccess(tx, grant, 'expense', 'draft', ['operational']);
+  const predecessor = await rejectedPredecessor(tx, grant.companyId, 'expense_claim', employeeId, input.predecessorRequestId);
   const transactionId = (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by)
-       values ($1, 'expense_claim', $2, 'DRAFT', $3, $3) returning id`,
-      [grant.companyId, employeeId, grant.userId],
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, predecessor_transaction_id, created_by, updated_by)
+       values ($1, 'expense_claim', $2, 'DRAFT', $4, $3, $3) returning id`,
+      [grant.companyId, employeeId, grant.userId, predecessor],
     )
   ).rows[0]!.id;
   const claimId = (
@@ -647,40 +649,60 @@ export async function listInstructions(db: Queryable, grant: AccessGrant, claimI
   // claims of one employee, CI05), so the list reconciles with the claim's ledger.
   const rows = await db.query(
     `select i.id, a.amount::numeric(19,2)::text as amount, i.currency_code as currency, i.state, i.payment_date as "paymentDate",
-            b.prepared_by as "preparedBy", i.released_by as "releasedBy",
+            b.state as "batchState", b.prepared_by as "preparedBy", i.released_by as "releasedBy", i.retry_of_id as "retryOfInstructionId",
+            i.outcome_actor_id as "outcomeActorUserId", oa.account_key as "outcomeActorAccountKey", coalesce(i.outcome_actor_id = $3, false) as "outcomeAssignedToMe",
             coalesce((select sum(e.amount) from payment_event e where e.company_id = a.company_id and e.allocation_id = a.id and e.event_kind = 'REVERSED'), 0)::numeric(19,2)::text as reversed
        from payment_allocation a
        join payment_instruction i on i.company_id = a.company_id and i.id = a.instruction_id
        join payment_batch b on b.company_id = i.company_id and b.id = i.batch_id
        join expense_obligation o on o.company_id = a.company_id and o.id = a.obligation_id
+       left join user_account oa on oa.id = i.outcome_actor_id
       where a.company_id = $1 and o.claim_id = $2 order by i.created_at`,
-    [grant.companyId, claimId],
+    [grant.companyId, claimId, grant.userId],
   );
   return { items: rows.rows };
 }
 
 /**
  * DF02 "Expense operational amounts are visible only to claimant and assigned expense reviewers/payment operators", on top
- * of row scope: the SQL condition (claim alias c) under which this assignment reads a claim of the given employee. The
- * claimant reads them all; a holder of the payment read duty every claim that was submitted; anyone else only a claim
- * whose approval route gave them a task, open or decided, so not a draft, a claim from before they became the manager or
- * one routed to a fallback reviewer. A delegated task counts only while its delegation is live (I-57).
+ * of row scope, with "data requests, attachments, exports": the SQL condition (claim alias c) under which this assignment
+ * reads a claim. The claimant reads their own; a holder of the payment read duty every claim that was submitted; anyone
+ * else only a claim whose approval route gave them a task, open or decided, so not a draft, a claim from before they became
+ * the manager or one routed to a fallback reviewer. The task must be one this assignment's role and DB109 entry can decide,
+ * so a task routed through another assignment of the same user lends it nothing (I-52), and a delegated task counts only
+ * while its delegation is live (I-57).
  */
-async function claimReadCondition(db: Queryable, grant: AccessGrant, employeeId: string, params: SqlParams): Promise<string> {
-  if (grant.linkedEmployeeId === employeeId) return 'true';
+export async function claimReadCondition(db: Queryable, grant: AccessGrant, params: SqlParams): Promise<string> {
+  const own = grant.linkedEmployeeId ? `c.employee_id = ${params.add(grant.linkedEmployeeId)}::uuid` : 'false';
   const operator = await resolveAccess(db, { userId: grant.userId, companyId: grant.companyId, assignmentId: grant.assignmentId, resource: 'payment', action: 'read', fieldGroups: ['operational'] });
-  if (operator.allowed) return `c.state <> 'DRAFT'`;
-  return `exists (select 1 from approval_instance ri join approval_task rt on rt.company_id = ri.company_id and rt.instance_id = ri.id
-                   where ri.company_id = c.company_id and ri.transaction_id = c.transaction_id
-                     and rt.assignee_user_id = ${params.add(grant.userId)}::uuid and ${taskDelegationLive('rt')})`;
+  if (operator.allowed) return `(${own} or c.state <> 'DRAFT')`;
+  const at = `${params.add(grant.at)}::timestamptz`;
+  return `(${own} or exists (
+             select 1 from approval_instance ri
+               join approval_task rt on rt.company_id = ri.company_id and rt.instance_id = ri.id
+               join workflow_step rs on rs.company_id = rt.company_id and rs.id = rt.step_id
+               join role_assignment rra on rra.company_id = rt.company_id and rra.id = ${params.add(grant.assignmentId)}::uuid
+               join role_permission rrp on rrp.company_id = rra.company_id and rrp.role_id = rra.role_id and rrp.permission_id = rs.permission_id and rrp.effect = 'ALLOW'
+               join role_assignment_permission rrap on rrap.company_id = rra.company_id and rrap.role_assignment_id = rra.id and rrap.permission_id = rs.permission_id
+                    and rrap.active and rrap.effective_from <= ${at} and (rrap.effective_to is null or rrap.effective_to > ${at})
+              where ri.company_id = c.company_id and ri.transaction_id = c.transaction_id
+                and rt.assignee_user_id = ${params.add(grant.userId)}::uuid and ${taskDelegationLive('rt')}))`;
+}
+
+/** claimReadCondition for one claim; row scope over the claimant is the caller's check. */
+export async function canReadClaim(db: Queryable, grant: AccessGrant, claimId: string): Promise<boolean> {
+  const params = new SqlParams([grant.companyId, claimId]);
+  const readable = await claimReadCondition(db, grant, params);
+  return ((await db.query(`select 1 from expense_claim c where c.company_id = $1 and c.id = $2 and ${readable}`, params.values)).rowCount ?? 0) > 0;
 }
 
 export async function listClaims(db: Queryable, grant: AccessGrant, employeeId: string) {
   if (!(await canAccessEmployee(db, grant, employeeId))) throw notFound();
   const params = new SqlParams([grant.companyId, employeeId]);
-  const readable = await claimReadCondition(db, grant, employeeId, params);
+  const readable = await claimReadCondition(db, grant, params);
   const rows = await db.query(
     `select c.id, r.purpose, c.state, c.payment_state as "paymentState", c.currency_code as currency, c.current_revision as revision, c.version,
+            ${predecessorRequestSql('expense_claim', 'c')} as "predecessorRequestId",
             (select sum(l.claimed_amount) from expense_line l where l.company_id = r.company_id and l.revision_id = r.id)::numeric(19,2)::text as "claimedTotal",
             r.submitted_at as "submittedAt"
        from expense_claim c join expense_revision r on r.company_id = c.company_id and r.claim_id = c.id and r.revision = c.current_revision
@@ -697,17 +719,16 @@ export async function listClaims(db: Queryable, grant: AccessGrant, employeeId: 
  */
 export async function getClaim(db: Queryable, grant: AccessGrant, claimId: string, withReasons = false) {
   const claim = (
-    await db.query<{ id: string; employee_id: string; purpose: string; currency: string; state: string; payment_state: string; current_revision: number; version: number }>(
-      `select c.id, c.employee_id, r.purpose, c.currency_code as currency, c.state, c.payment_state, c.current_revision, c.version
+    await db.query<{ id: string; employee_id: string; purpose: string; currency: string; state: string; payment_state: string; current_revision: number; version: number; predecessor_request_id: string | null }>(
+      `select c.id, c.employee_id, r.purpose, c.currency_code as currency, c.state, c.payment_state, c.current_revision, c.version,
+              ${predecessorRequestSql('expense_claim', 'c')} as predecessor_request_id
          from expense_claim c join expense_revision r on r.company_id = c.company_id and r.claim_id = c.id and r.revision = c.current_revision
         where c.company_id = $1 and c.id = $2`,
       [grant.companyId, claimId],
     )
   ).rows[0];
   if (!claim || !(await canAccessEmployee(db, grant, claim.employee_id))) throw notFound();
-  const readParams = new SqlParams([grant.companyId, claimId]);
-  const readable = await claimReadCondition(db, grant, claim.employee_id, readParams);
-  if (!(await db.query(`select 1 from expense_claim c where c.company_id = $1 and c.id = $2 and ${readable}`, readParams.values)).rowCount) throw notFound();
+  if (!(await canReadClaim(db, grant, claimId))) throw notFound();
   const reasonColumns =
     withReasons && grant.linkedEmployeeId !== claim.employee_id
       ? `, case when r.submitted_at is not null then l.exception_reason end as "exceptionReason",
@@ -760,6 +781,7 @@ export async function getClaim(db: Queryable, grant: AccessGrant, claimId: strin
     paymentState: claim.payment_state,
     revision: claim.current_revision,
     version: claim.version,
+    predecessorRequestId: claim.predecessor_request_id,
     lines: lines.rows,
     revisions: revisions.rows,
     payment: ledger
@@ -795,7 +817,27 @@ async function refreshPaymentState(tx: Queryable, companyId: string, obligationI
   );
 }
 
-export async function preparePayment(tx: Queryable, grant: AccessGrant, input: { claimId: string; amount: string; paymentDate: string; idempotencyKey: string }) {
+/**
+ * CI06, BR-025: a replacement names the instruction it replaces, which must be an earlier payment of this same liability, definitively
+ * failed or cancelled with no live reservation, and not replaced before. Those states are final and the caller holds the obligation's
+ * lock, so what is read here stands at commit; the database holds the same rules (0088, 0131).
+ */
+async function assertReplaceable(tx: Queryable, companyId: string, instructionId: string, obligationId: string) {
+  const replaced = (
+    await tx.query<{ state: string; retried: boolean }>(
+      `select i.state, exists (select 1 from payment_instruction r where r.company_id = i.company_id and r.retry_of_id = i.id) as retried
+         from payment_instruction i
+         join payment_allocation a on a.company_id = i.company_id and a.instruction_id = i.id and a.obligation_id = $3
+        where i.company_id = $1 and i.id = $2`,
+      [companyId, instructionId, obligationId],
+    )
+  ).rows[0];
+  if (!replaced) throw new HttpError(422, 'RETRY_NOT_SAME_LIABILITY', 'A replacement replaces an earlier payment of this same claim');
+  if (replaced.state !== 'FAILED' && replaced.state !== 'CANCELLED') throw new HttpError(409, 'RETRY_PRIOR_NOT_SETTLED', 'The earlier payment has no definitive failure recorded, so it cannot be replaced yet');
+  if (replaced.retried) throw new HttpError(409, 'ALREADY_RETRIED', 'The earlier payment has already been replaced');
+}
+
+export async function preparePayment(tx: Queryable, grant: AccessGrant, input: { claimId: string; amount: string; paymentDate: string; idempotencyKey: string; retryOfInstructionId?: string | undefined }) {
   const o = (
     await tx.query<{ id: string; employee_id: string; currency_code: string }>(
       `select id, employee_id, currency_code from expense_obligation where company_id = $1 and claim_id = $2 for update`,
@@ -813,17 +855,19 @@ export async function preparePayment(tx: Queryable, grant: AccessGrant, input: {
   // answered with the other instruction (the caller would believe this payment had been prepared). Read after the
   // obligation lock, so the same request at the same moment finds the first one's row.
   const prior = (
-    await tx.query<{ id: string; state: string; same: boolean }>(
-      `select i.id, i.state, i.amount = $4::numeric and i.payment_date = $5::date
+    await tx.query<{ id: string; state: string; batch_state: string; same: boolean }>(
+      `select i.id, i.state, b.state as batch_state, i.amount = $4::numeric and i.payment_date = $5::date and i.retry_of_id is not distinct from $6::uuid
                 and exists (select 1 from payment_allocation a where a.company_id = i.company_id and a.instruction_id = i.id and a.obligation_id = $3) as same
-         from payment_instruction i where i.company_id = $1 and i.idempotency_key = $2`,
-      [grant.companyId, input.idempotencyKey, o.id, input.amount, input.paymentDate],
+         from payment_instruction i join payment_batch b on b.company_id = i.company_id and b.id = i.batch_id
+        where i.company_id = $1 and i.idempotency_key = $2`,
+      [grant.companyId, input.idempotencyKey, o.id, input.amount, input.paymentDate, input.retryOfInstructionId ?? null],
     )
   ).rows[0];
   if (prior) {
     if (!prior.same) throw new HttpError(409, 'IDEMPOTENCY_KEY_REUSED', 'This payment key was already used for a different payment');
-    return { instructionId: prior.id, state: prior.state, replayed: true };
+    return { instructionId: prior.id, state: prior.state, batchState: prior.batch_state, replayed: true };
   }
+  if (input.retryOfInstructionId) await assertReplaceable(tx, grant.companyId, input.retryOfInstructionId, o.id);
   const enough = (
     await tx.query<{ ok: boolean }>(
       `select approved_amount - net_paid - pending >= $3::numeric as ok from expense_obligation_ledger where company_id = $1 and obligation_id = $2`,
@@ -834,21 +878,21 @@ export async function preparePayment(tx: Queryable, grant: AccessGrant, input: {
 
   const transactionId = (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, state, created_by, updated_by) values ($1, 'payment_batch', 'READY', $2, $2) returning id`,
+      `insert into business_transaction (company_id, kind, state, created_by, updated_by) values ($1, 'payment_batch', 'DRAFT', $2, $2) returning id`,
       [grant.companyId, grant.userId],
     )
   ).rows[0]!.id;
   const batchId = (
     await tx.query<{ id: string }>(
-      `insert into payment_batch (company_id, transaction_id, state, prepared_by, currency_code, created_by, updated_by) values ($1, $2, 'READY', $3, $4, $3, $3) returning id`,
+      `insert into payment_batch (company_id, transaction_id, state, prepared_by, currency_code, created_by, updated_by) values ($1, $2, 'DRAFT', $3, $4, $3, $3) returning id`,
       [grant.companyId, transactionId, grant.userId, o.currency_code],
     )
   ).rows[0]!.id;
   const instructionId = (
     await tx.query<{ id: string }>(
-      `insert into payment_instruction (company_id, batch_id, employee_id, amount, currency_code, state, idempotency_key, payment_date, created_by, updated_by)
-       values ($1, $2, $3, $4::numeric, $5, 'PREPARED', $6, $7, $8, $8) returning id`,
-      [grant.companyId, batchId, o.employee_id, input.amount, o.currency_code, input.idempotencyKey, input.paymentDate, grant.userId],
+      `insert into payment_instruction (company_id, batch_id, employee_id, amount, currency_code, state, idempotency_key, payment_date, retry_of_id, created_by, updated_by)
+       values ($1, $2, $3, $4::numeric, $5, 'PREPARED', $6, $7, $9, $8, $8) returning id`,
+      [grant.companyId, batchId, o.employee_id, input.amount, o.currency_code, input.idempotencyKey, input.paymentDate, grant.userId, input.retryOfInstructionId ?? null],
     )
   ).rows[0]!.id;
   await tx.query(
@@ -864,9 +908,9 @@ export async function preparePayment(tx: Queryable, grant: AccessGrant, input: {
     actingAssignmentId: grant.assignmentId,
     action: 'PREPARE',
     newVersion: 1,
-    after: { operational: { claimId: input.claimId, amount: input.amount, paymentDate: input.paymentDate } },
+    after: { operational: { claimId: input.claimId, amount: input.amount, paymentDate: input.paymentDate, batchState: 'DRAFT', ...(input.retryOfInstructionId ? { retryOfInstructionId: input.retryOfInstructionId } : {}) } },
   });
-  return { instructionId, state: 'PREPARED', replayed: false };
+  return { instructionId, state: 'PREPARED', batchState: 'DRAFT', replayed: false };
 }
 
 interface AllocationRow {
@@ -880,8 +924,11 @@ interface InstructionRow {
   state: string;
   amount: string;
   batch_id: string;
+  batch_state: string;
   batch_transaction_id: string;
+  prepared_by: string;
   employee_id: string;
+  outcome_actor_id: string | null;
   /** CI05: one instruction may cover several obligations of its employee (the service prepares one). */
   allocations: AllocationRow[];
 }
@@ -889,7 +936,7 @@ interface InstructionRow {
 async function lockInstruction(tx: Queryable, grant: AccessGrant, id: string): Promise<InstructionRow> {
   const row = (
     await tx.query<Omit<InstructionRow, 'allocations'>>(
-      `select i.id, i.state, i.amount::text, i.batch_id, b.transaction_id as batch_transaction_id, i.employee_id
+      `select i.id, i.state, i.amount::text, i.batch_id, b.state as batch_state, b.transaction_id as batch_transaction_id, b.prepared_by, i.employee_id, i.outcome_actor_id
          from payment_instruction i
          join payment_batch b on b.company_id = i.company_id and b.id = i.batch_id
         where i.company_id = $1 and i.id = $2 for update of i, b`,
@@ -918,12 +965,86 @@ async function assertIndependentReleaser(tx: Queryable, grant: AccessGrant, i: I
   if (conflict) throw new HttpError(403, 'SEGREGATION_OF_DUTIES', 'The preparer, the approvers of the claim and the claimant cannot release, confirm or reverse this payment');
 }
 
-export async function releasePayment(tx: Queryable, grant: AccessGrant, instructionId: string) {
+/**
+ * C5 "payment batch DRAFT then READY": the draft reserves the amount at preparation; this step offers it for release. C5 names
+ * the treasury preparer as this row's actor, and nobody but the person who prepared it can speak for what they prepared.
+ */
+export async function markPaymentReady(tx: Queryable, grant: AccessGrant, instructionId: string) {
+  const i = await lockInstruction(tx, grant, instructionId);
+  await reassertAccess(tx, grant, 'payment', 'prepare', ['operational']);
+  if (i.prepared_by !== grant.userId) throw new HttpError(403, 'NOT_THE_PREPARER', 'Only the person who prepared this payment can mark it ready');
+  if (i.batch_state !== 'DRAFT') throw new HttpError(409, 'INVALID_STATE', 'Only a draft payment can be marked ready');
+  await tx.query(`update business_transaction set state = 'READY', updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, i.batch_transaction_id, grant.userId]);
+  await tx.query(`update payment_batch set state = 'READY', ready_by = $3, ready_at = now(), updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, i.batch_id, grant.userId]);
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'payment_instruction',
+    recordKey: i.id,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'READY',
+    before: { operational: { batchState: 'DRAFT' } },
+    after: { operational: { batchState: 'READY' } },
+  });
+  return { instructionId: i.id, state: i.state, batchState: 'READY' };
+}
+
+/**
+ * C3 "confirmation actor explicitly assigned"; DF07 "independent eligible Admin": who may be named to record this instruction's
+ * outcome. One assignment must hold the duty and the row scope together (C1 "Combining the action from one assignment with
+ * the company scope from another is forbidden"); assigned scope counts only through a task it can decide today; and the
+ * release rule (I-49) excludes the preparer, the claim's deciders and the claimant. The releaser is not excluded: DF07 has the
+ * releaser confirm, and C3 separates the action, not the person.
+ */
+async function eligibleOutcomeActors(db: Queryable, companyId: string, instructionId: string, employeeId: string, onlyUserId: string | null) {
+  return (
+    await db.query<{ userId: string; accountKey: string; employeeCode: string | null; employeeName: string | null }>(
+      `with d as (select hrms_business_date($1, now()) as day)
+       select distinct u.id as "userId", u.account_key as "accountKey", e.employee_code as "employeeCode", e.display_name as "employeeName"
+         from d cross join role_assignment ra
+         join user_account u on u.id = ra.user_id and u.active
+         join role r on r.company_id = ra.company_id and r.id = ra.role_id and r.active
+         join permission p on p.resource = 'payment' and p.action = 'confirm_outcome' and p.field_group = 'operational'
+         join role_permission rp on rp.company_id = ra.company_id and rp.role_id = ra.role_id and rp.permission_id = p.id and rp.effect = 'ALLOW'
+         join role_assignment_permission rap on rap.company_id = ra.company_id and rap.role_assignment_id = ra.id and rap.permission_id = p.id and rap.active
+                                            and rap.effective_from <= now() and (rap.effective_to is null or rap.effective_to > now())
+         left join user_employee_link l on l.company_id = ra.company_id and l.user_id = ra.user_id
+                                       and l.effective_from <= d.day and (l.effective_to is null or l.effective_to > d.day)
+         left join employee e on e.company_id = l.company_id and e.id = l.employee_id
+        where ra.company_id = $1 and ra.state = 'ACTIVE' and ra.effective_from <= now() and (ra.effective_to is null or ra.effective_to > now())
+          and ($4::uuid is null or ra.user_id = $4)
+          and ${scopeCovers('$1', '$3', `exists (select 1 ${eligibleTasksOf({ company: '$1', assignment: 'ra.id', user: 'ra.user_id', at: 'now()' })} and asg_bt.owner_employee_id = $3)`)}
+          and not hrms_payment_release_conflict($1, $2, ra.user_id)
+        order by "employeeCode" nulls last, "accountKey"`,
+      [companyId, instructionId, employeeId, onlyUserId],
+    )
+  ).rows;
+}
+
+/** The people this instruction's outcome can be assigned to, for whoever may release it. */
+export async function listOutcomeActors(db: Queryable, grant: AccessGrant, instructionId: string) {
+  const i = (await db.query<{ employee_id: string }>(`select employee_id from payment_instruction where company_id = $1 and id = $2`, [grant.companyId, instructionId])).rows[0];
+  if (!i || !(await canAccessEmployee(db, grant, i.employee_id))) throw notFound();
+  return { items: await eligibleOutcomeActors(db, grant.companyId, instructionId, i.employee_id, null) };
+}
+
+async function assertOutcomeActorEligible(tx: Queryable, grant: AccessGrant, i: InstructionRow, userId: string) {
+  if ((await eligibleOutcomeActors(tx, grant.companyId, i.id, i.employee_id, userId)).length === 0) {
+    throw new HttpError(422, 'OUTCOME_ACTOR_NOT_ELIGIBLE', 'This person cannot be assigned the outcome: they need the confirmation duty over this employee and must be independent of the claim and its preparation');
+  }
+}
+
+export async function releasePayment(tx: Queryable, grant: AccessGrant, instructionId: string, input: { outcomeActorUserId: string }) {
   const i = await lockInstruction(tx, grant, instructionId);
   await reassertAccess(tx, grant, 'payment', 'release', ['operational']);
   await assertIndependentReleaser(tx, grant, i);
   if (i.state !== 'PREPARED') throw new HttpError(409, 'INVALID_STATE', 'Only prepared instructions can be released');
-  await tx.query(`update payment_instruction set state = 'RELEASED', released_by = $3, updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, i.id, grant.userId]);
+  if (i.batch_state !== 'READY') throw new HttpError(409, 'BATCH_NOT_READY', 'The preparer has not marked this payment ready yet');
+  await assertOutcomeActorEligible(tx, grant, i, input.outcomeActorUserId);
+  await tx.query(
+    `update payment_instruction set state = 'RELEASED', released_by = $3, outcome_actor_id = $4, outcome_assigned_by = $3, outcome_assigned_at = now(), updated_by = $3 where company_id = $1 and id = $2`,
+    [grant.companyId, i.id, grant.userId, input.outcomeActorUserId],
+  );
   await tx.query(`update business_transaction set state = 'RELEASED', updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, i.batch_transaction_id, grant.userId]);
   await tx.query(`update payment_batch set state = 'RELEASED', updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, i.batch_id, grant.userId]);
   await writeAudit(tx, {
@@ -933,16 +1054,49 @@ export async function releasePayment(tx: Queryable, grant: AccessGrant, instruct
     actorUserId: grant.userId,
     actingAssignmentId: grant.assignmentId,
     action: 'RELEASE',
-    after: { operational: { state: 'RELEASED' } },
+    after: { operational: { state: 'RELEASED', outcomeActorUserId: input.outcomeActorUserId } },
   });
-  return { instructionId: i.id, state: 'RELEASED' };
+  return { instructionId: i.id, state: 'RELEASED', outcomeActorUserId: input.outcomeActorUserId };
+}
+
+/**
+ * Names someone else while the outcome is awaited: the person named can leave, and an instruction released before 0131 names
+ * nobody. The BRD does not say who may do this; it stays with the independent release duty, audited with its reason.
+ */
+export async function assignOutcomeActor(tx: Queryable, grant: AccessGrant, instructionId: string, input: { outcomeActorUserId: string; reason: string }) {
+  const i = await lockInstruction(tx, grant, instructionId);
+  await reassertAccess(tx, grant, 'payment', 'release', ['operational']);
+  await assertIndependentReleaser(tx, grant, i);
+  if (i.state !== 'RELEASED') throw new HttpError(409, 'INVALID_STATE', 'Only a released payment waiting for its outcome can be reassigned');
+  if (i.outcome_actor_id === input.outcomeActorUserId) throw new HttpError(422, 'NO_CHANGE', 'This person is already assigned the outcome');
+  await assertOutcomeActorEligible(tx, grant, i, input.outcomeActorUserId);
+  await tx.query(`update payment_instruction set outcome_actor_id = $3, outcome_assigned_by = $4, outcome_assigned_at = now(), updated_by = $4 where company_id = $1 and id = $2`, [
+    grant.companyId,
+    i.id,
+    input.outcomeActorUserId,
+    grant.userId,
+  ]);
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'payment_instruction',
+    recordKey: i.id,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'ASSIGN_OUTCOME_ACTOR',
+    before: { operational: { outcomeActorUserId: i.outcome_actor_id } },
+    after: { operational: { outcomeActorUserId: input.outcomeActorUserId } },
+    reason: input.reason,
+  });
+  return { instructionId: i.id, state: i.state, outcomeActorUserId: input.outcomeActorUserId };
 }
 
 /** Confirmed/failed outcome from external evidence; an unknown outcome is simply not recorded (stays RELEASED). */
 export async function recordOutcome(tx: Queryable, grant: AccessGrant, instructionId: string, input: { outcome: 'CONFIRMED' | 'FAILED'; evidenceKey: string }) {
   const i = await lockInstruction(tx, grant, instructionId);
-  await reassertAccess(tx, grant, 'payment', 'release', ['operational']);
+  await reassertAccess(tx, grant, 'payment', 'confirm_outcome', ['operational']);
   await assertIndependentReleaser(tx, grant, i);
+  // C3 "confirmation actor explicitly assigned": holding the duty is not enough, also on a replay (C5 "authorised outcome actor").
+  if (i.outcome_actor_id !== grant.userId) throw new HttpError(403, 'OUTCOME_ACTOR_NOT_ASSIGNED', 'This payment’s outcome is assigned to someone else');
   // A replay is the same outcome of this instruction; any other use of the key is not recorded, and says so (DF07).
   // Read after the instruction lock, so the same outcome at the same moment finds the first one's event.
   const replay = (

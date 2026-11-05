@@ -2,6 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 
 let h: Harness;
@@ -96,7 +97,7 @@ describe('audit export (FR-058, DF09)', () => {
     const download = await h.call(exporter, 'GET', `/v1/reports/${id}/download`);
     expect(download.statusCode).toBe(200);
     const csv = download.body;
-    expect(csv.split('\r\n')[0]).toContain('"Operational fields"');
+    expect(csvTable(csv).split('\r\n')[0]).toContain('"Operational fields"');
     expect(csv).toContain(employeeId);
     expect(csv).not.toContain(workEmail);
     expect(csv).not.toContain('1991-07-14');
@@ -116,7 +117,7 @@ describe('audit export (FR-058, DF09)', () => {
       const status = (await h.call(exporter, 'GET', `/v1/reports/${id}`)).json();
       expect(status.state).toBe('COMPLETED');
       const body = (await h.call(exporter, 'GET', `/v1/reports/${id}/download`)).body;
-      const lines = body.trimEnd().split('\r\n').slice(1);
+      const lines = csvTable(body).trimEnd().split('\r\n').slice(1);
       expect(status.rowCount).toBe(lines.length);
       return lines.map((l: string) => JSON.parse(l.split(',')[2]!) as string).sort();
     };

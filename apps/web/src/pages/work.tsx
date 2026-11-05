@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
-import { api, download, fileToBase64, formatAmount, formatDate, idempotencyKey, localDate, pinSession } from '../api';
-import { reportProblem } from '../report-failures';
+import { api, download, fileToBase64, formatAmount, formatDate, formatUnits, idempotencyKey, localDate, pinSession } from '../api';
+import { isReportRefusal, reportProblem } from '../report-failures';
 import { MODULE_TASK_QUEUES } from '../screens-registry';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
 import { DelegatedBadge, DelegatedTasksSection } from './delegations';
 import { NotificationPreferencesPanel } from './notifications';
-import { describeWindow, type Evidence, EvidenceChoice, EvidenceError, EvidenceList, KIND_LABEL, ownRecordInScope, ownRecordNotFound, WorkTaskEvidence } from './requests';
+import { canRaiseAgain, describeWindow, type Evidence, EvidenceChoice, EvidenceError, EvidenceList, followedRequests, KIND_LABEL, ownRecordInScope, ownRecordNotFound, RaiseAgainNote, RaisedAgainHint, WorkTaskEvidence } from './requests';
 
 // ---------------------------------------------------------------------------------------------------------
 // Leave (FR-024-FR-026): balances, request form, own requests with withdrawal.
@@ -32,6 +32,7 @@ interface LeaveRequest {
   cancellationState: string | null;
   /** The supporting documents of the current revision (FR-026, FR-106). */
   evidence?: Evidence[];
+  predecessorRequestId?: string | null;
 }
 
 /** The released content of one leave evidence document, for the requester or a reviewer assigned to the request (I-22). */
@@ -133,6 +134,7 @@ export function LeavePage() {
   const requests = useQuery({ queryKey: ['leave', employeeId], enabled: own, queryFn: () => api<{ items: LeaveRequest[] }>(`/v1/employees/${employeeId}/leave-requests`) });
   const [form, setForm] = useState({ leaveType: 'ANNUAL', startDate: '', endDate: '', halfDay: false, reason: '' });
   const [evidence, setEvidence] = useState<string[]>([]);
+  const [raisingAgain, setRaisingAgain] = useState<string | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['balances'] });
     void qc.invalidateQueries({ queryKey: ['leave'] });
@@ -147,6 +149,7 @@ export function LeavePage() {
           halfDay: form.halfDay,
           ...(form.reason ? { reason: form.reason } : {}),
           ...(evidence.length ? { evidenceDocumentIds: evidence } : {}),
+          ...(raisingAgain ? { predecessorRequestId: raisingAgain } : {}),
         },
       }),
     // A submitted request starts the form clean (the private reason does not stay on screen); a refused one keeps
@@ -154,6 +157,7 @@ export function LeavePage() {
     onSuccess: () => {
       setForm((f) => ({ ...f, startDate: '', endDate: '', halfDay: false, reason: '' }));
       setEvidence([]);
+      setRaisingAgain(null);
       refresh();
     },
   });
@@ -181,9 +185,9 @@ export function LeavePage() {
                 <td>
                   {b.leaveType} {b.paid ? '' : '(unpaid)'}
                 </td>
-                <td>{b.paid ? b.available : '—'}</td>
-                <td>{b.pending}</td>
-                <td>{b.taken}</td>
+                <td>{b.paid ? formatUnits(b.available) : '—'}</td>
+                <td>{formatUnits(b.pending)}</td>
+                <td>{formatUnits(b.taken)}</td>
               </tr>
             ))}
           </tbody>
@@ -193,6 +197,7 @@ export function LeavePage() {
 
       {can('leave.submit.operational') && (
         <Section title="Request leave">
+          {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
           <form
             className="grid-form"
             onSubmit={(e: FormEvent) => {
@@ -254,9 +259,10 @@ export function LeavePage() {
                 <td>{r.leaveType}</td>
                 <td>{formatDate(r.startDate)}</td>
                 <td>{formatDate(r.endDate)}</td>
-                <td>{r.units}</td>
+                <td>{formatUnits(r.units)}</td>
                 <td>
                   <StateBadge state={r.state} />
+                  <RaisedAgainHint predecessorRequestId={r.predecessorRequestId} />
                 </td>
                 <td>
                   <EvidenceList evidence={r.evidence ?? []} openPath={(documentId) => leaveEvidencePath(r.id, documentId)} />
@@ -265,6 +271,21 @@ export function LeavePage() {
                   {(r.state === 'SUBMITTED' || r.state === 'RETURNED') && can('leave.withdraw.operational') && (
                     <button className="link" onClick={() => withdraw.mutate(r.id)}>
                       Withdraw
+                    </button>
+                  )}{' '}
+                  {canRaiseAgain(r, followedRequests(requests.data?.items ?? [])) && can('leave.submit.operational') && (
+                    <button
+                      type="button"
+                      className="link"
+                      onClick={() => {
+                        submit.reset();
+                        // The private reason is not read back: the new request states its own.
+                        setForm({ leaveType: r.leaveType, startDate: r.startDate.slice(0, 10), endDate: r.endDate.slice(0, 10), halfDay: r.halfDay, reason: '' });
+                        setEvidence([]);
+                        setRaisingAgain(r.id);
+                      }}
+                    >
+                      Raise again
                     </button>
                   )}{' '}
                   <LeaveRequestActions request={r} onChanged={refresh} />
@@ -303,11 +324,11 @@ const emptyLine = (): DraftLine => ({ category: 'OTHER', expenseDate: '', nights
 
 /** The provisioned categories (DF06), until the company's own list has loaded. */
 const DEFAULT_CATEGORIES = [
-  { code: 'TRAVEL', limitBasis: 'PER_LINE' },
-  { code: 'ACCOMMODATION', limitBasis: 'PER_NIGHT' },
-  { code: 'MEALS', limitBasis: 'PER_DAY' },
-  { code: 'OFFICE_SUPPLIES', limitBasis: 'PER_LINE' },
-  { code: 'OTHER', limitBasis: 'PER_LINE' },
+  { code: 'TRAVEL', name: 'Travel', limitBasis: 'PER_LINE' },
+  { code: 'ACCOMMODATION', name: 'Accommodation', limitBasis: 'PER_NIGHT' },
+  { code: 'MEALS', name: 'Meals', limitBasis: 'PER_DAY' },
+  { code: 'OFFICE_SUPPLIES', name: 'Office supplies', limitBasis: 'PER_LINE' },
+  { code: 'OTHER', name: 'Other', limitBasis: 'PER_LINE' },
 ];
 /** FR-074, DF03: a claim can be withdrawn at any state before its final decision. */
 const WITHDRAWABLE_CLAIM = ['DRAFT', 'RETURNED', 'MANAGER_PENDING', 'FINANCE_PENDING', 'HIGH_VALUE_PENDING'];
@@ -332,20 +353,22 @@ export function ExpensesPage() {
   const claims = useQuery({
     queryKey: ['claims', employeeId],
     enabled: !!employeeId,
-    queryFn: () => api<{ items: { id: string; purpose: string; state: string; paymentState: string; claimedTotal: string; currency: string; version: number }[] }>(`/v1/employees/${employeeId}/expense-claims`),
+    queryFn: () => api<{ items: { id: string; purpose: string; state: string; paymentState: string; claimedTotal: string; currency: string; version: number; predecessorRequestId?: string | null }[] }>(`/v1/employees/${employeeId}/expense-claims`),
   });
   const categories = useQuery({
     queryKey: ['expense-categories'],
     enabled: can('expense.draft.operational'),
     queryFn: () => api<{ items: { code: string; name: string; limitBasis: string }[] }>('/v1/expense/categories'),
   });
-  const categoryList: { code: string; limitBasis: string }[] = categories.data?.items ?? DEFAULT_CATEGORIES;
+  const categoryList: { code: string; name: string; limitBasis: string }[] = categories.data?.items ?? DEFAULT_CATEGORIES;
   const [purpose, setPurpose] = useState('');
   // Remounting the form clears the chosen receipt files after a successful submission.
   const [formKey, setFormKey] = useState(0);
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   // The state of the claim being corrected, when the form holds an existing one.
   const [correcting, setCorrecting] = useState<string | null>(null);
+  // DF03: the rejected claim this new one raises again; named once, when the claim is created.
+  const [raisingAgain, setRaisingAgain] = useState<string | null>(null);
   const [receiptDropped, setReceiptDropped] = useState(false);
   // What the server already holds from an earlier attempt: the draft claim and the uploaded receipt of each chosen
   // file. A retry after an error revises that draft and reuses those receipts, so it never leaves an orphan draft
@@ -398,7 +421,7 @@ export function ExpensesPage() {
         }
       }
       if (claimId === null) {
-        claimId = (await send<{ claimId: string }>('/v1/expense/claims', { body: claim })).claimId;
+        claimId = (await send<{ claimId: string }>('/v1/expense/claims', { body: { ...claim, ...(raisingAgain ? { predecessorRequestId: raisingAgain } : {}) } })).claimId;
         draftId.current = claimId;
         setDraftKept(true);
       }
@@ -414,11 +437,42 @@ export function ExpensesPage() {
     uploaded.current = new WeakMap();
     setDraftKept(false);
     setCorrecting(null);
+    setRaisingAgain(null);
     setReceiptDropped(false);
     setPurpose('');
     setLines([emptyLine()]);
     setFormKey((k) => k + 1);
   };
+  // A rejected claim stays as it was: the form takes its text for a new claim, whose receipts are attached afresh.
+  const raiseAgain = useMutation({
+    mutationFn: (id: string) => api<{ id: string; purpose: string; lines: OwnClaimLine[] }>(`/v1/expense/claims/${id}`),
+    onSuccess: (c) => {
+      draftId.current = null;
+      uploaded.current = new WeakMap();
+      setDraftKept(false);
+      setCorrecting(null);
+      setRaisingAgain(c.id);
+      setReceiptDropped(false);
+      setPurpose(c.purpose);
+      setLines(
+        c.lines.map((l) => ({
+          category: l.category,
+          expenseDate: l.expenseDate,
+          nights: l.nights === null ? '' : String(l.nights),
+          merchant: l.merchant,
+          invoiceReference: l.invoiceReference ?? '',
+          amount: Number(l.claimedAmount).toFixed(2),
+          gross: Number(l.grossAmount).toFixed(2),
+          description: l.description,
+          exceptionReason: '',
+          receipt: null,
+          keptReceiptId: null,
+        })),
+      );
+      setFormKey((k) => k + 1);
+      create.reset();
+    },
+  });
   // Correcting a returned claim, or going back to a kept draft: the form takes its current text and keeps its receipts. A
   // quarantined receipt is not kept: it cannot be attached again (FR-106). The claimant's own reasons are not read back
   // (DF06), so a line still flagged asks for its reason again at submission.
@@ -466,6 +520,8 @@ export function ExpensesPage() {
       {can('expense.draft.operational') && (
         <Section title={correcting === 'RETURNED' ? 'Correct returned claim' : correcting ? 'Edit draft claim' : 'New expense claim'}>
           {correcting === 'RETURNED' && <p className="hint">Submitting starts a new revision; the one already reviewed is kept as it was.</p>}
+          {raisingAgain && <p className="hint">Attach the receipts again: they stay with the rejected claim.</p>}
+          {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
           {receiptDropped && <p className="hint">A receipt on this claim failed the malware scan and was removed; attach another.</p>}
           <form
             key={formKey}
@@ -485,8 +541,11 @@ export function ExpensesPage() {
                 <label>
                   Category
                   <select value={l.category} onChange={(e) => update(i, { category: e.target.value })}>
-                    {[...categoryList.map((c) => c.code), ...(categoryList.some((c) => c.code === l.category) ? [] : [l.category])].map((c) => (
-                      <option key={c}>{c}</option>
+                    {/* The company's name for each category; the code is what is sent. A code no longer listed keeps its own text. */}
+                    {[...categoryList.map((c) => ({ code: c.code, name: c.name })), ...(categoryList.some((c) => c.code === l.category) ? [] : [{ code: l.category, name: l.category }])].map((c) => (
+                      <option key={c.code} value={c.code}>
+                        {c.name}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -564,6 +623,7 @@ export function ExpensesPage() {
                 <td>{formatAmount(c.claimedTotal, c.currency)}</td>
                 <td>
                   <StateBadge state={c.state} />
+                  <RaisedAgainHint predecessorRequestId={c.predecessorRequestId} />
                 </td>
                 <td>
                   <StateBadge state={c.paymentState === 'NOT_APPLICABLE' ? null : c.paymentState} />
@@ -572,6 +632,11 @@ export function ExpensesPage() {
                   {(c.state === 'DRAFT' || c.state === 'RETURNED') && can('expense.draft.operational') && (
                     <button className="link" disabled={correct.isPending} onClick={() => correct.mutate(c.id)}>
                       {c.state === 'RETURNED' ? 'Correct' : 'Edit'}
+                    </button>
+                  )}{' '}
+                  {canRaiseAgain(c, followedRequests(claims.data?.items ?? [])) && can('expense.draft.operational') && (
+                    <button className="link" disabled={raiseAgain.isPending} onClick={() => raiseAgain.mutate(c.id)}>
+                      Raise again
                     </button>
                   )}{' '}
                   {WITHDRAWABLE_CLAIM.includes(c.state) && can('expense.withdraw.operational') && (
@@ -585,7 +650,7 @@ export function ExpensesPage() {
           </tbody>
         </table>
         {claims.data?.items.length === 0 && <Empty>No claims yet.</Empty>}
-        <ErrorNote error={claims.error ?? correct.error ?? withdraw.error} />
+        <ErrorNote error={claims.error ?? correct.error ?? raiseAgain.error ?? withdraw.error} />
       </Section>
     </>
   );
@@ -1108,16 +1173,62 @@ export function PaymentsPage() {
   );
 }
 
+interface PaymentInstruction {
+  id: string;
+  amount: string;
+  currency: string;
+  state: string;
+  /** C5 "payment batch DRAFT then READY". */
+  batchState: string;
+  paymentDate: string;
+  reversed: string;
+  outcomeActorAccountKey: string | null;
+  outcomeAssignedToMe: boolean;
+  /** CI06: the failed instruction this one replaces. */
+  retryOfInstructionId?: string | null;
+}
+
+/** C3 "confirmation actor explicitly assigned": only people who can be named are offered (the server also refuses anyone else). */
+function OutcomeActorChoice({ instructionId, value, onChange }: { instructionId: string; value: string; onChange: (userId: string) => void }) {
+  const actors = useQuery({
+    queryKey: ['outcome-actors', instructionId],
+    queryFn: () => api<{ items: { userId: string; accountKey: string; employeeCode: string | null; employeeName: string | null }[] }>(`/v1/expense/payments/${instructionId}/outcome-actors`),
+  });
+  return (
+    <>
+      <select aria-label="Outcome recorded by" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Choose who records the outcome</option>
+        {actors.data?.items.map((a) => (
+          <option key={a.userId} value={a.userId}>
+            {a.employeeName ? `${a.employeeName} (${a.employeeCode})` : a.accountKey}
+          </option>
+        ))}
+      </select>
+      {actors.data?.items.length === 0 && <span className="hint">Nobody independent holds the confirmation duty for this payment.</span>}
+      <ErrorNote error={actors.error} />
+    </>
+  );
+}
+
 function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable | undefined }) {
+  const { can } = useSession();
   const qc = useQueryClient();
   const instructions = useQuery({
     queryKey: ['instructions', claimId],
-    queryFn: () => api<{ items: { id: string; amount: string; currency: string; state: string; paymentDate: string; reversed: string }[] }>(`/v1/expense/claims/${claimId}/payments`),
+    queryFn: () => api<{ items: PaymentInstruction[] }>(`/v1/expense/claims/${claimId}/payments`),
   });
   const [amount, setAmount] = useState('');
   const [paymentDate, setPaymentDate] = useState(() => localDate());
+  const [retryOf, setRetryOf] = useState('');
+  // CI06: a failed payment nothing has replaced yet can be named as what this one replaces. Naming it stays a choice (the owner decides
+  // whether it must be required), and a choice that has since been replaced by someone else is no longer sent.
+  const items = instructions.data?.items ?? [];
+  const replaceable = items.filter((i) => i.state === 'FAILED' && !items.some((o) => o.retryOfInstructionId === i.id));
+  const chosenRetry = replaceable.some((i) => i.id === retryOf) ? retryOf : '';
   const [evidence, setEvidence] = useState<Record<string, string>>({});
   const [reversal, setReversal] = useState<Record<string, { amount: string; reason: string }>>({});
+  const [outcomeActor, setOutcomeActor] = useState<Record<string, string>>({});
+  const [reassignReason, setReassignReason] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['instructions', claimId] });
@@ -1135,11 +1246,12 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
   const prepare = useMutation({
     mutationFn: () => {
       prepareKey.current ??= idempotencyKey('pay');
-      return api('/v1/expense/payments', { body: { claimId, amount: amount || payable?.allocatable, paymentDate, idempotencyKey: prepareKey.current } });
+      return api('/v1/expense/payments', { body: { claimId, amount: amount || payable?.allocatable, paymentDate, idempotencyKey: prepareKey.current, ...(chosenRetry ? { retryOfInstructionId: chosenRetry } : {}) } });
     },
     onSuccess: () => {
       prepareKey.current = null;
       setAmount('');
+      setRetryOf('');
     },
     // After an error too: an attempt whose answer was lost may have been prepared all the same.
     onSettled: refresh,
@@ -1192,6 +1304,25 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
             required
           />
         </label>
+        {replaceable.length > 0 && (
+          <label>
+            Replaces a failed payment
+            <select
+              value={chosenRetry}
+              onChange={(e) => {
+                setRetryOf(e.target.value);
+                prepareKey.current = null;
+              }}
+            >
+              <option value="">No, this is a new payment</option>
+              {replaceable.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {`The failed payment of ${formatAmount(i.amount, i.currency)} dated ${formatDate(i.paymentDate)}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button type="submit" disabled={prepare.isPending}>
           Prepare payment
         </button>
@@ -1215,27 +1346,69 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
               <td>{formatDate(i.paymentDate)}</td>
               <td>
                 <StateBadge state={i.state} />
+                {i.retryOfInstructionId && <span className="hint"> Replaces a failed payment</span>}
               </td>
               <td>{formatAmount(i.reversed, i.currency)}</td>
               <td>
-                {(i.state === 'RELEASED' || i.state === 'CONFIRMED') && (
+                {((i.state === 'RELEASED' && i.outcomeAssignedToMe) || i.state === 'CONFIRMED') && (
                   <input aria-label="Evidence reference" placeholder="e.g. bank reference" value={evidence[i.id] ?? ''} onChange={(e) => setEvidence({ ...evidence, [i.id]: e.target.value })} />
                 )}
               </td>
               <td className="row">
-                {i.state === 'PREPARED' && (
-                  <button disabled={act.isPending} onClick={() => act.mutate(() => api(`/v1/expense/payments/${i.id}/release`, { method: 'POST' }))}>
-                    Release
-                  </button>
+                {i.state === 'PREPARED' && i.batchState === 'DRAFT' && (
+                  <>
+                    <Badge tone="neutral">Draft</Badge>
+                    {can('payment.prepare.operational') && (
+                      <button disabled={act.isPending} onClick={() => act.mutate(() => api(`/v1/expense/payments/${i.id}/ready`, { method: 'POST' }))}>
+                        Mark ready
+                      </button>
+                    )}
+                  </>
+                )}
+                {i.state === 'PREPARED' && i.batchState === 'READY' && can('payment.release.operational') && (
+                  <>
+                    <OutcomeActorChoice instructionId={i.id} value={outcomeActor[i.id] ?? ''} onChange={(userId) => setOutcomeActor({ ...outcomeActor, [i.id]: userId })} />
+                    <button
+                      disabled={act.isPending || !outcomeActor[i.id]}
+                      onClick={() => act.mutate(() => api(`/v1/expense/payments/${i.id}/release`, { body: { outcomeActorUserId: outcomeActor[i.id] } }), { onSuccess: () => setOutcomeActor((current) => omit(current, i.id)) })}
+                    >
+                      Release
+                    </button>
+                  </>
                 )}
                 {i.state === 'RELEASED' && (
                   <>
-                    <button disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'CONFIRMED', evidenceKey: evidenceKey(i.id) })}>
-                      Confirm paid
-                    </button>
-                    <button className="danger" disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'FAILED', evidenceKey: evidenceKey(i.id) })}>
-                      Record failure
-                    </button>
+                    <span className="hint">{i.outcomeActorAccountKey ? `Outcome assigned to ${i.outcomeActorAccountKey}` : 'Nobody is assigned the outcome yet'}</span>
+                    {i.outcomeAssignedToMe && can('payment.confirm_outcome.operational') && (
+                      <>
+                        <button disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'CONFIRMED', evidenceKey: evidenceKey(i.id) })}>
+                          Confirm paid
+                        </button>
+                        <button className="danger" disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'FAILED', evidenceKey: evidenceKey(i.id) })}>
+                          Record failure
+                        </button>
+                      </>
+                    )}
+                    {can('payment.release.operational') && (
+                      <>
+                        <OutcomeActorChoice instructionId={i.id} value={outcomeActor[i.id] ?? ''} onChange={(userId) => setOutcomeActor({ ...outcomeActor, [i.id]: userId })} />
+                        <input aria-label="Reason for reassigning" placeholder="Reason" value={reassignReason[i.id] ?? ''} onChange={(e) => setReassignReason({ ...reassignReason, [i.id]: e.target.value })} />
+                        <button
+                          className="secondary"
+                          disabled={act.isPending || !outcomeActor[i.id] || !reassignReason[i.id]?.trim()}
+                          onClick={() =>
+                            act.mutate(() => api(`/v1/expense/payments/${i.id}/outcome-actor`, { body: { outcomeActorUserId: outcomeActor[i.id], reason: reassignReason[i.id]!.trim() } }), {
+                              onSuccess: () => {
+                                setOutcomeActor((current) => omit(current, i.id));
+                                setReassignReason((current) => omit(current, i.id));
+                              },
+                            })
+                          }
+                        >
+                          Reassign outcome
+                        </button>
+                      </>
+                    )}
                   </>
                 )}
                 {i.state === 'CONFIRMED' && (
@@ -1269,8 +1442,9 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
       </table>
       {instructions.data?.items.length === 0 && <Empty>No payments prepared yet.</Empty>}
       <p className="hint">
-        Evidence references need at least 8 characters, and each outcome or reversal needs its own. The preparer, the approvers of the claim and the claimant cannot release,
-        confirm or reverse. The entitlement approvers and the claimant cannot prepare.
+        A prepared payment stays a draft until its preparer marks it ready, and only a ready payment can be released. The release names who records the outcome. Evidence
+        references need at least 8 characters, and each outcome or reversal needs its own. The preparer, the approvers of the claim and the claimant cannot release, confirm or
+        reverse. The entitlement approvers and the claimant cannot prepare.
       </p>
       {notice && (
         <p role="status" className="hint">
@@ -1346,16 +1520,19 @@ export function ReportsPage() {
   const reports = useQuery({
     queryKey: ['reports', page],
     queryFn: () => api<{ items: OwnReport[]; total: number }>(`/v1/reports?${pageParams(page)}`),
-    refetchInterval: (q) => (q.state.data?.items.some((r) => r.state === 'QUEUED' || r.state === 'RUNNING') ? 3000 : false),
+    refetchInterval: (q) => (!isReportRefusal(q.state.error) && q.state.data?.items.some((r) => r.state === 'QUEUED' || r.state === 'RUNNING') ? 3000 : false),
   });
-  const def = catalogue.data?.items.find((r) => r.code === code);
+  // The server lists only the reports this role may ask for; the choice shown is the one sent, so a report not in the list is never asked for.
+  const offered = catalogue.data?.items ?? [];
+  const chosen = offered.some((r) => r.code === code) ? code : (offered[0]?.code ?? '');
+  const def = offered.find((r) => r.code === chosen);
   // A format is sent only to a report that declares it; every other report is CSV.
   const chosenFormat = def?.formats?.includes(format) ? format : 'CSV';
   const request = useMutation({
     mutationFn: () =>
       api<{ id: string }>('/v1/reports', {
         // The dates chosen for an earlier report stay in the form, but only a report with a period takes them.
-        body: { reportCode: code, filters: { ...(def?.requiresPeriod && from ? { from } : {}), ...(def?.requiresPeriod && to ? { to } : {}) }, ...(def?.formats ? { format: chosenFormat } : {}) },
+        body: { reportCode: chosen, filters: { ...(def?.requiresPeriod && from ? { from } : {}), ...(def?.requiresPeriod && to ? { to } : {}) }, ...(def?.formats ? { format: chosenFormat } : {}) },
       }),
     onSuccess: () => {
       setPage(1);
@@ -1365,6 +1542,8 @@ export function ReportsPage() {
   return (
     <>
       <Section title="Request a report">
+        {catalogue.data && offered.length === 0 && <Empty>No report can be requested in this role.</Empty>}
+        {offered.length > 0 && (
         <form
           className="grid-form"
           onSubmit={(e) => {
@@ -1375,7 +1554,7 @@ export function ReportsPage() {
           <label>
             Report
             <select
-              value={code}
+              value={chosen}
               onChange={(e) => {
                 setCode(e.target.value);
                 setFormat('CSV');
@@ -1414,8 +1593,9 @@ export function ReportsPage() {
           )}
           <button type="submit">Request</button>
         </form>
+        )}
         <p className="hint">Reports are generated in the background; downloads expire after 24 hours and re-check your access.</p>
-        <ErrorNote error={request.error} />
+        <ErrorNote error={request.error ?? catalogue.error} />
       </Section>
       <Section title={`My reports${reports.data ? ` (${reports.data.total})` : ''}`}>
         {reports.data?.total === 0 && <Empty>You have not requested any reports under this role.</Empty>}

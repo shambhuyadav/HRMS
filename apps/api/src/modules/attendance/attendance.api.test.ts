@@ -116,8 +116,11 @@ describe('policy activation and processing (FR-020, FR-022)', () => {
         where t.company_id = $1 and t.code = 'UNPAID' limit 1 returning id`,
       [A.id, e.id, TUE],
     );
-    await h.db.query(`update business_transaction set state = 'APPROVED' where id = (select transaction_id from leave_request where id = $1)`, [lr.id]);
-    await h.db.query(`update leave_request set state = 'APPROVED' where id = $1`, [lr.id]);
+    await h.db.query(
+      `with t as (update business_transaction set state = 'APPROVED' where id = (select transaction_id from leave_request where id = $1) returning id)
+       update leave_request set state = 'APPROVED' from t where leave_request.id = $1`,
+      [lr.id],
+    );
     await processDay(TUE);
     expect((await recordOn(hr, e.id, TUE)).status).toBe('LEAVE');
   });

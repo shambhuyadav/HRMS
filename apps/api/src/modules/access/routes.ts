@@ -5,6 +5,14 @@ import { forbidden } from '../../http/errors.js';
 import { auditDenial, requireAccess } from '../../http/guard.js';
 import { approveGrant, endGrant, type GrantProposal, listCompanyUsers, listGrants, listRoleCatalogue, myAssignments, proposeGrant } from './admin.js';
 import { canAccessEmployee } from './authorize.js';
+import {
+  approveRolePermissionChange,
+  listRolePermissionChanges,
+  proposeRolePermissionChange,
+  rejectRolePermissionChange,
+  type RolePermissionChangeQuery,
+  type RolePermissionProposal,
+} from './role-permissions.js';
 import { type AccountStateInput, endUserLink, type EndUserLinkInput, linkUser, listUserLinks, setAccountActive, type UserLinkInput, type UserLinkQuery } from './user-admin.js';
 
 const uuid = { type: 'string', format: 'uuid' } as const;
@@ -165,6 +173,63 @@ export async function accessRoutes(app: FastifyInstance, opts: { db: Database })
     const grant = await requireAccess(db, request, 'access', 'revoke_role', ['operational'], { requireAll: true, recordKey: id });
     await withTransaction(db, (tx) => endGrant(tx, grant, id, expectedVersion, reason, 'REVOKE'));
     return { id, state: 'REVOKED' };
+  });
+
+  // FR-066, FR-067, C3 maintain_role_permissions: a change to what a role allows is proposed and decided by someone independent.
+  app.get(
+    '/access/role-permission-changes',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { state: { type: 'string', enum: ['PROPOSED', 'APPROVED', 'REJECTED'] }, roleCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,59}$' } },
+        },
+      },
+    },
+    async (request) => {
+      const grant = await requireAccess(db, request, 'access', 'read_users', ['operational']);
+      return listRolePermissionChanges(db, grant, request.query as RolePermissionChangeQuery);
+    },
+  );
+
+  app.post(
+    '/access/role-permission-changes',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['roleCode', 'permission', 'change', 'reason'],
+          properties: {
+            roleCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,59}$' },
+            permission: { type: 'string', maxLength: 200, pattern: '^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$' },
+            change: { type: 'string', enum: ['ALLOW', 'DENY', 'REMOVE'] },
+            reason: { type: 'string', minLength: 1, maxLength: 500, pattern: '\\S' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const grant = await requireAccess(db, request, 'access', 'maintain_role_permissions', ['operational'], { requireAll: true });
+      const id = await withTransaction(db, (tx) => proposeRolePermissionChange(tx, grant, request.body as RolePermissionProposal));
+      reply.status(201);
+      return { id, state: 'PROPOSED' };
+    },
+  );
+
+  app.post('/access/role-permission-changes/:id/approve', { schema: { params: idParams, body: versionSchema } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const { expectedVersion } = request.body as { expectedVersion: number };
+    const grant = await requireAccess(db, request, 'access', 'approve_role_grant', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => approveRolePermissionChange(tx, grant, id, expectedVersion));
+  });
+
+  app.post('/access/role-permission-changes/:id/reject', { schema: { params: idParams, body: reasonSchema } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const { expectedVersion, reason } = request.body as { expectedVersion: number; reason: string };
+    const grant = await requireAccess(db, request, 'access', 'approve_role_grant', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => rejectRolePermissionChange(tx, grant, id, expectedVersion, reason));
   });
 
   // User to employee links (§5.1, DB009). A link grants no permission by itself.

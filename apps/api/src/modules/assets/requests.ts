@@ -6,8 +6,10 @@
 import { enqueueEvent } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
+import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams } from '../access/authorize.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
+import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
 import { ACTIVE_STATUSES, audit, categoryId, employeeStatus, ownEmployee } from './common.js';
 
 export const ASSET_REQUEST_KIND = 'asset_request';
@@ -17,6 +19,8 @@ export interface RequestInput {
   itemDescription?: string | undefined;
   reason: string;
   idempotencyKey: string;
+  /** DF03: the employee's own rejected request this one raises again (workflow/predecessor.ts). */
+  predecessorRequestId?: string | undefined;
 }
 
 async function setState(tx: Queryable, companyId: string, r: { id: string; transaction_id: string }, state: string, actor: string, extra = '') {
@@ -28,18 +32,19 @@ export async function submitRequest(tx: Queryable, grant: AccessGrant, input: Re
   const employeeId = ownEmployee(grant);
   // One employee's submissions serialise, so a retried submission finds the request it created.
   await tx.query(`select pg_advisory_xact_lock(hashtextextended('asset_request:' || $1 || ':' || $2, 0))`, [grant.companyId, employeeId]);
+  await reassertAccess(tx, grant, 'asset_request', 'submit', ['operational']);
   const itemDescription = input.itemDescription?.trim() || null;
   const reason = input.reason.trim();
   const prior = (
-    await tx.query<{ id: string; state: string; category_code: string; item_description: string | null; reason: string }>(
-      `select r.id, r.state, c.code as category_code, r.item_description, r.reason from asset_request r
+    await tx.query<{ id: string; state: string; category_code: string; item_description: string | null; reason: string; predecessor_request_id: string | null }>(
+      `select r.id, r.state, c.code as category_code, r.item_description, r.reason, ${predecessorRequestSql('asset_request', 'r')} as predecessor_request_id from asset_request r
          join reference_value c on c.company_id = r.company_id and c.id = r.category_id
         where r.company_id = $1 and r.employee_id = $2 and r.submit_key = $3`,
       [grant.companyId, employeeId, input.idempotencyKey],
     )
   ).rows[0];
   if (prior) {
-    if (prior.category_code !== input.categoryCode || prior.item_description !== itemDescription || prior.reason !== reason) {
+    if (prior.category_code !== input.categoryCode || prior.item_description !== itemDescription || prior.reason !== reason || prior.predecessor_request_id !== (input.predecessorRequestId ?? null)) {
       throw new HttpError(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used for another request');
     }
     return { requestId: prior.id, state: prior.state, replayed: true };
@@ -48,11 +53,12 @@ export async function submitRequest(tx: Queryable, grant: AccessGrant, input: Re
   const status = await employeeStatus(tx, grant.companyId, employeeId);
   if (!status || !(ACTIVE_STATUSES as readonly string[]).includes(status)) throw new HttpError(422, 'EMPLOYEE_NOT_ACTIVE', 'Only active employees can ask for an item');
   const category = await categoryId(tx, grant.companyId, input.categoryCode);
+  const predecessor = await rejectedPredecessor(tx, grant.companyId, 'asset_request', employeeId, input.predecessorRequestId);
 
   const transactionId = (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by) values ($1, $2, $3, 'SUBMITTED', $4, $4) returning id`,
-      [grant.companyId, ASSET_REQUEST_KIND, employeeId, grant.userId],
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, predecessor_transaction_id, created_by, updated_by) values ($1, $2, $3, 'SUBMITTED', $5, $4, $4) returning id`,
+      [grant.companyId, ASSET_REQUEST_KIND, employeeId, grant.userId, predecessor],
     )
   ).rows[0]!.id;
   const requestId = (
@@ -68,7 +74,7 @@ export async function submitRequest(tx: Queryable, grant: AccessGrant, input: Re
     recordKey: requestId,
     action: 'CREATE',
     newVersion: 1,
-    after: { category: input.categoryCode, itemDescription, reason, state: 'SUBMITTED' },
+    after: { category: input.categoryCode, itemDescription, reason, state: 'SUBMITTED', ...(input.predecessorRequestId ? { predecessorRequestId: input.predecessorRequestId } : {}) },
   });
   await enqueueEvent(tx, {
     companyId: grant.companyId,
@@ -101,6 +107,7 @@ export async function withdrawRequest(tx: Queryable, grant: AccessGrant, request
 const REQUEST_VIEW = `select r.id, r.employee_id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName",
        json_build_object('code', c.code, 'label', c.label) as category, r.item_description as "itemDescription", r.reason, r.state,
        r.created_at as "submittedAt", r.decided_at as "decidedAt", r.version,
+       ${predecessorRequestSql('asset_request', 'r')} as "predecessorRequestId",
        (select coalesce(pe.display_name, 'Reviewer')
           from approval_instance i
           join approval_task t on t.company_id = i.company_id and t.instance_id = i.id and t.state = 'PENDING'

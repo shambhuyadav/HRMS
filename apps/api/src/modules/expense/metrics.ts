@@ -22,8 +22,13 @@ const LATE_RECEIPT_FLAGS = ['LATE_SUBMISSION', 'RECEIPT_MISSING'];
 /** Payment instructions (alias pi: the row-scope predicate uses i, t and bt itself) of claimants in the caller's row scope. */
 export const instructionsInScope = (g: AccessGrant, p: SqlParams) => employeeScopePredicate(g, { company: 'pi.company_id', employee: 'pi.employee_id' }, p);
 
-/** C4, DF03 (expense/service.ts assertIndependentReleaser, the same database rule): the caller may release this instruction. */
-export const independentOf = (g: AccessGrant, p: SqlParams) => `not hrms_payment_release_conflict(pi.company_id, pi.id, ${p.add(g.userId)}::uuid)`;
+/**
+ * C4, DF03 (expense/service.ts assertIndependentReleaser, the same database rule): the caller may release this instruction, once
+ * its batch is READY (C5 "READY release"; a draft is not waiting for anyone's release).
+ */
+export const independentOf = (g: AccessGrant, p: SqlParams) =>
+  `not hrms_payment_release_conflict(pi.company_id, pi.id, ${p.add(g.userId)}::uuid)
+     and exists (select 1 from payment_batch pb where pb.company_id = pi.company_id and pb.id = pi.batch_id and pb.state = 'READY')`;
 
 /** Instruction `pi` has an event of this kind recorded on or after the company-local date. */
 export const paidEventSince = (p: SqlParams, kind: 'CONFIRMED' | 'REVERSED', from: string) =>
@@ -96,13 +101,18 @@ export const EXPENSE_METRICS: Readonly<Record<string, (db: Queryable, grant: Acc
       p,
     );
   },
-  /** Claims the caller returned in their latest approval round that still wait for the claimant's correction. */
+  /**
+   * Claims the caller returned in their latest approval round that still wait for the claimant's correction, within the assignment's row
+   * scope (BRD line 92 "counts"; BR-045). ASSIGNED scope lasts only while a task is pending, and these tasks are decided, so what is left of
+   * that scope is the assignment's own filters, as a deferred re-check reads it (sensitive-change/service.ts deferredRecheck).
+   */
   EXPENSE_RETURNED_BY_ME: (db, g) => {
     const p = new SqlParams();
+    const scope = employeeScopePredicate(g.scopeKind === 'ASSIGNED' ? { ...g, scopeKind: 'COMPANY' } : g, { company: 'c.company_id', employee: 'c.employee_id' }, p);
     return countOf(
       db,
       `select count(*) as n from expense_claim c
-        where c.company_id = ${p.add(g.companyId)}::uuid and c.state = 'RETURNED'
+        where ${scope} and c.state = 'RETURNED'
           and exists (select 1 from approval_instance i join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
                        where i.company_id = c.company_id and i.transaction_id = c.transaction_id and i.state = 'RETURNED'
                          and t.assignee_user_id = ${p.add(g.userId)}::uuid and t.state = 'RETURNED'

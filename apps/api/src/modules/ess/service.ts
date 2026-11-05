@@ -11,6 +11,7 @@ import type { PermissionKey } from '../access/baseline.js';
 import { assignmentPermissionKeys } from '../access/me.js';
 import { OWN_REQUEST_PENDING_STATES } from '../dashboard/service.js';
 import { isModuleActive, MODULE_REGISTRATIONS } from '../registry.js';
+import { anyTaxRulePackActivated, NOT_CONFIGURED_MESSAGE } from '../tax-declarations/service.js';
 
 type Section = 'Personal' | 'Financial' | 'Time and Requests' | 'Development';
 interface Link {
@@ -99,8 +100,8 @@ export const ESS_TABS: readonly CoreTab[] = [
     module: 'payroll-outputs',
     unavailable: { code: 'TAX_CERTIFICATES_NOT_ENABLED', message: 'Available once payroll and the applicable statutory template are enabled.' },
   },
-  { id: 'TN08', name: 'Tax declaration', section: 'Financial', module: 'payroll-outputs', unavailable: PAYROLL },
-  { id: 'TN09', name: 'Investment proof', section: 'Financial', module: 'payroll-outputs', unavailable: PAYROLL },
+  { id: 'TN08', name: 'Tax declaration', section: 'Financial', module: 'tax-declarations', unavailable: PAYROLL },
+  { id: 'TN09', name: 'Investment proof', section: 'Financial', module: 'tax-declarations', unavailable: PAYROLL },
   {
     id: 'TN10',
     name: 'Leave',
@@ -183,9 +184,9 @@ export const OWN_REQUEST_LIST_CAP = 200;
 export async function ownRequests(db: Queryable, grant: AccessGrant, kind?: string, paging: Paging = {}) {
   const employeeId = ownContext(grant);
   const kinds = Object.keys(OWN_REQUEST_PENDING_STATES).filter((k) => kind === undefined || k === kind);
-  const page = await pageOf<{ transactionId: string; kind: string; rootTable: string }>(
+  const page = await pageOf<{ transactionId: string; kind: string; rootTable: string; predecessorTransactionId: string | null }>(
     db,
-    `select bt.id as "transactionId", bt.kind, bt.state, bt.revision, bt.created_at as "createdAt", bt.updated_at as "updatedAt", tk.root_table as "rootTable",
+    `select bt.id as "transactionId", bt.kind, bt.state, bt.revision, bt.created_at as "createdAt", bt.updated_at as "updatedAt", tk.root_table as "rootTable", bt.predecessor_transaction_id as "predecessorTransactionId",
               (select coalesce(pe.display_name, 'Reviewer')
                  from approval_instance i join approval_task t on t.company_id = i.company_id and t.instance_id = i.id and t.state = 'PENDING'
                  left join user_employee_link l on l.company_id = t.company_id and l.user_id = t.assignee_user_id
@@ -212,14 +213,30 @@ export async function ownRequests(db: Queryable, grant: AccessGrant, kind?: stri
   const roots = new Map<string, string>();
   for (const table of new Set(rows.map((r) => r.rootTable))) {
     if (!/^[a-z][a-z0-9_]{0,62}$/.test(table)) continue;
-    const ids = rows.filter((r) => r.rootTable === table).map((r) => r.transactionId);
+    // A predecessor is of the same kind (0125), so its root is in the same table, on this page or not.
+    const ids = rows.filter((r) => r.rootTable === table).flatMap((r) => [r.transactionId, ...(r.predecessorTransactionId ? [r.predecessorTransactionId] : [])]);
     const found = await db.query<{ id: string; transaction_id: string }>(`select id, transaction_id from ${table} where company_id = $1 and transaction_id = any($2::uuid[])`, [
       grant.companyId,
       ids,
     ]);
     for (const f of found.rows) roots.set(f.transaction_id, f.id);
   }
-  return { ...page, items: rows.map(({ rootTable: _root, ...r }) => ({ ...r, requestId: roots.get(r.transactionId) ?? null })) };
+  return {
+    ...page,
+    items: rows.map(({ rootTable: _root, predecessorTransactionId, ...r }) => ({
+      ...r,
+      requestId: roots.get(r.transactionId) ?? null,
+      // DF03: the rejected request this one raises again.
+      predecessorRequestId: predecessorTransactionId ? (roots.get(predecessorTransactionId) ?? null) : null,
+    })),
+  };
+}
+
+/** One query at a time on the caller's connection, in order. */
+async function mapInOrder<T, R>(list: readonly T[], f: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (const item of list) out.push(await f(item));
+  return out;
 }
 
 export async function essIndex(db: Queryable, grant: AccessGrant) {
@@ -229,8 +246,11 @@ export async function essIndex(db: Queryable, grant: AccessGrant) {
   ).rows[0];
   const held = new Set(await assignmentPermissionKeys(db, { companyId: grant.companyId, assignmentId: grant.assignmentId, userId: grant.userId }));
   const own = (links: Link[]) => links.map((l) => ({ ...l, href: l.href.replace('{employeeId}', employeeId) }));
+  // Asked once, however many tabs need it.
+  let packActivated: boolean | undefined;
+  const taxPackActivated = async () => (packActivated ??= await anyTaxRulePackActivated(db, grant.companyId));
 
-  const tabs = ESS_TABS.map((t) => {
+  const tabs = await mapInOrder(ESS_TABS, async (t) => {
     const base = { id: t.id, name: t.name, section: t.section };
     let permissions = t.permissions ?? [];
     let links = t.links ?? [];
@@ -238,6 +258,10 @@ export async function essIndex(db: Queryable, grant: AccessGrant) {
       // A module tab is served once its module is active and declares the tab (registry-types.ts essTabs).
       const declared = isModuleActive(t.module) ? MODULE_REGISTRATIONS.find((m) => m.key === t.module)?.essTabs?.find((e) => e.tab === t.id) : undefined;
       if (!declared) return { ...base, status: 'UNAVAILABLE' as const, unavailable: t.unavailable ?? MODULE_NOT_ENABLED(t.name), links: [] };
+      // H3 TN08/TN09: regime and categories come only from an activated rule pack; without one the tab says so and links nowhere.
+      if (declared.requiresConfiguration === 'TAX_RULE_PACK' && !(await taxPackActivated())) {
+        return { ...base, status: 'UNAVAILABLE' as const, unavailable: { code: 'NOT_CONFIGURED', message: NOT_CONFIGURED_MESSAGE }, links: [] };
+      }
       permissions = declared.permissions;
       links = declared.links;
     } else if (t.unavailable) {

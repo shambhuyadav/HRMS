@@ -1,13 +1,21 @@
 // Reviewer-routing administration (DF03): HR maintains each kind's explicit fallback reviewer list. A list
 // grants no authority — every listed reviewer must already hold the kind's decision permission in an active
 // assignment — and every change is audited. Kinds that route like another kind (routing_kind) are shown with
-// the list they use; that list is maintained on the base kind.
+// the list they use; that list is maintained on the base kind. A list decides for the whole company, so changing one needs
+// an unrestricted company-scope assignment; reading follows row scope (C1 "search suggestions"), so a filtered assignment
+// sees only the people it covers, and an account linked to no employee is for an unrestricted assignment only.
 import { writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
-import type { AccessGrant } from '../access/authorize.js';
+import { reassertAccess } from '../../http/guard.js';
+import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { fanOut } from '../notification/dispatcher.js';
-import { isEligibleReviewer, rerouteTask } from './engine.js';
+import { isEligibleReviewer, rerouteTask, unrestrictedCompanyScope } from './engine.js';
+
+/** The person behind an assignment or list entry on the business date, as `alias`, joined on `user`. */
+const linkedEmployee = (alias: string, company: string, user: string) =>
+  `left join user_employee_link ${alias} on ${alias}.company_id = ${company} and ${alias}.user_id = ${user}
+        and ${alias}.effective_from <= hrms_business_date(${company}, now()) and (${alias}.effective_to is null or ${alias}.effective_to > hrms_business_date(${company}, now()))`;
 
 interface KindRow {
   kind: string;
@@ -38,11 +46,15 @@ async function kinds(db: Queryable, companyId: string, kind?: string): Promise<K
 
 export async function listRouting(db: Queryable, grant: AccessGrant) {
   const rows = await kinds(db, grant.companyId);
+  const params = new SqlParams([grant.companyId]);
+  const scope = employeeScopePredicate(grant, { company: 'f.company_id', employee: 'l.employee_id' }, params);
   const lists = (
     await db.query<{ kind: string; user_id: string; account_key: string; priority: number; active: boolean }>(
-      `select f.kind, f.user_id, u.account_key, f.priority, f.active from workflow_fallback_reviewer f join user_account u on u.id = f.user_id
-        where f.company_id = $1 and f.active order by f.kind, f.priority, f.user_id`,
-      [grant.companyId],
+      `select f.kind, f.user_id, u.account_key, f.priority, f.active
+         from workflow_fallback_reviewer f join user_account u on u.id = f.user_id
+         ${linkedEmployee('l', 'f.company_id', 'f.user_id')}
+        where f.company_id = $1 and f.active and ${scope} order by f.kind, f.priority, f.user_id`,
+      params.values,
     )
   ).rows;
   const items = [];
@@ -65,12 +77,14 @@ export async function listRouting(db: Queryable, grant: AccessGrant) {
 
 /**
  * Picker for a kind's list: users who can decide its first step right now (an active, approved assignment whose
- * role ceiling and allowlist hold the step permission). Operational identity only.
+ * role ceiling and allowlist hold the step permission), within the caller's row scope. Operational identity only.
  */
 export async function listCandidates(db: Queryable, grant: AccessGrant, kind: string) {
   const row = (await kinds(db, grant.companyId, kind))[0];
   if (!row) throw notFound();
   if (!row.first_permission_id) return { kind, items: [] };
+  const params = new SqlParams([grant.companyId, row.first_permission_id]);
+  const scope = employeeScopePredicate(grant, { company: 'ra.company_id', employee: 'l.employee_id' }, params);
   const rows = await db.query(
     `select distinct u.id as "userId", u.account_key as "accountKey", e.employee_code as "employeeCode", e.display_name as "displayName"
        from role_assignment ra
@@ -79,19 +93,20 @@ export async function listCandidates(db: Queryable, grant: AccessGrant, kind: st
        join role_permission rp on rp.company_id = ra.company_id and rp.role_id = ra.role_id and rp.permission_id = $2 and rp.effect = 'ALLOW'
        join role_assignment_permission rap on rap.company_id = ra.company_id and rap.role_assignment_id = ra.id and rap.permission_id = $2 and rap.active
             and rap.effective_from <= now() and (rap.effective_to is null or rap.effective_to > now())
-       left join user_employee_link l on l.company_id = ra.company_id and l.user_id = ra.user_id
-            and l.effective_from <= hrms_business_date(ra.company_id, now()) and (l.effective_to is null or l.effective_to > hrms_business_date(ra.company_id, now()))
+       ${linkedEmployee('l', 'ra.company_id', 'ra.user_id')}
        left join employee e on e.company_id = l.company_id and e.id = l.employee_id
-      where ra.company_id = $1 and ra.state = 'ACTIVE' and ra.effective_from <= now() and (ra.effective_to is null or ra.effective_to > now())
+      where ra.company_id = $1 and ra.state = 'ACTIVE' and ra.effective_from <= now() and (ra.effective_to is null or ra.effective_to > now()) and ${scope}
       order by u.account_key limit 500`,
-    [grant.companyId, row.first_permission_id],
+    params.values,
   );
   return { kind, items: rows.rows };
 }
 
 /** Replaces a base kind's list: listed users become active with their priority; others are deactivated (kept). */
 export async function setFallbackReviewers(tx: Queryable, grant: AccessGrant, kind: string, reviewers: { userId: string; priority: number }[]) {
-  if (grant.scopeKind !== 'COMPANY') throw new HttpError(403, 'FORBIDDEN', 'Routing administration needs company scope');
+  // A list routes tasks for employees across the company, so a filter or a narrower scope cannot change one.
+  if (!unrestrictedCompanyScope(grant)) throw new HttpError(403, 'FORBIDDEN', 'Changing a reviewer list needs an unrestricted company-wide assignment');
+  await reassertAccess(tx, grant, 'workflow', 'manage', ['operational']);
   const row = (await kinds(tx, grant.companyId, kind))[0];
   if (!row) throw notFound();
   if (row.routing_kind) throw new HttpError(422, 'SHARED_ROUTING', `This kind uses the ${row.routing_kind} list; change that list instead`);

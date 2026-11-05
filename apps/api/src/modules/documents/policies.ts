@@ -91,7 +91,7 @@ async function insertVersion(
   return { versionId, versionNumber, attachmentId };
 }
 
-/** FR-106: scans the stored upload after its transaction; a scanner error leaves it pending for the retry worker. */
+/** FR-106: after its transaction the stored upload is left to the scan worker, which audits its verdict on the attachment (NFR-S09; storage/scan.ts). */
 async function scanVersion(db: Database, scanner: ScanProvider, grant: AccessGrant, policy: { id: string; classification: Classification }, v: { versionNumber: number; attachmentId: string }, bytes: Buffer) {
   const scanState = await scanAttachment(db, scanner, { companyId: grant.companyId, id: v.attachmentId, bytes });
   if (scanState !== 'PENDING_SCAN') {

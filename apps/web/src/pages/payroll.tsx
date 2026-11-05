@@ -23,6 +23,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ComponentType, type CSSProperties, type FormEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, download, fileToBase64, formatAmount, formatDate, idempotencyKey, localDate, pinSession } from '../api';
+import { isReportRefusal } from '../report-failures';
 import type { EssPanel, ScreenRoute } from '../screens';
 import { type MeContext, useSession } from '../session';
 import { Badge, Empty, LIST_PAGE_SIZE, Pager, pageParams, Section } from '../ui';
@@ -323,7 +324,7 @@ interface BankPreview {
   currencyCode: string;
   lineCount: number;
   totalAmount: string | null;
-  excluded: { held: number; reservedOrPaid: number; nothingPayable: number };
+  excluded: { held: number; heldBySalaryStop?: number; reservedOrPaid: number; nothingPayable: number };
   errors: BankRowError[];
 }
 interface BankRowError {
@@ -352,7 +353,7 @@ interface Manifest extends ManifestRow {
   supersedesBatchId: string | null;
   paymentDate: string | null;
   manifestHash: string;
-  excluded: { held?: number; reservedOrPaid?: number; nothingPayable?: number; excludedByPreparer?: number; excludedEmployeeCodes?: string[] } | null;
+  excluded: { held?: number; heldBySalaryStop?: number; reservedOrPaid?: number; nothingPayable?: number; excludedByPreparer?: number; excludedEmployeeCodes?: string[] } | null;
   preparedBy: string;
   authorizedBy: string | null;
   contentHash: string | null;
@@ -2403,7 +2404,7 @@ function PrepareManifest({ run }: { run: RunDetail }) {
           <p style={FLUSH}>
             <Badge tone="warn">Preview, not payable</Badge> {`${preview.lineCount} lines, total ${money(preview.totalAmount, preview.currencyCode)}.`}
           </p>
-          <p className="hint">{`Left out: ${preview.excluded.held} held, ${preview.excluded.reservedOrPaid} already reserved or paid, ${preview.excluded.nothingPayable} with nothing payable.`}</p>
+          <p className="hint">{`Left out: ${preview.excluded.held} held${preview.excluded.heldBySalaryStop ? ` (${preview.excluded.heldBySalaryStop} by a salary stop)` : ''}, ${preview.excluded.reservedOrPaid} already reserved or paid, ${preview.excluded.nothingPayable} with nothing payable.`}</p>
           {preview.errors.length > 0 && (
             <ul>
               {preview.errors.map((x, i) => (
@@ -2516,7 +2517,7 @@ function ManifestView({ id }: { id: string }) {
           {b.fileName && <Fact term="File">{b.fileName}</Fact>}
           {b.cancelledAt && <Fact term="Cancelled">{formatDate(b.cancelledAt)}</Fact>}
           <Fact term="Left out">
-            {`${ex.held ?? 0} held, ${ex.reservedOrPaid ?? 0} reserved or paid, ${ex.nothingPayable ?? 0} nothing payable, ${ex.excludedByPreparer ?? 0} by the preparer`}
+            {`${ex.held ?? 0} held${ex.heldBySalaryStop ? ` (${ex.heldBySalaryStop} by a salary stop)` : ''}, ${ex.reservedOrPaid ?? 0} reserved or paid, ${ex.nothingPayable ?? 0} nothing payable, ${ex.excludedByPreparer ?? 0} by the preparer`}
             {ex.excludedEmployeeCodes && ex.excludedEmployeeCodes.length > 0 ? ` (${ex.excludedEmployeeCodes.join(', ')})` : ''}
           </Fact>
         </dl>
@@ -6070,6 +6071,7 @@ interface RegisterRow {
   employeeCode: string;
   employeeName: string;
   calculationStatus: string;
+  salaryStopMode?: string | null;
   paidUnits: string | null;
   earnings: string | null;
   reimbursements: string | null;
@@ -6090,7 +6092,8 @@ interface Register {
 }
 interface Disbursement {
   run: ReportRun;
-  totals: { payable: string; held: string; reserved: string; paid: string; ready: string; reconciles: boolean };
+  totals: { payable: string; held: string; heldBySalaryStop?: string; salaryStopHolds?: number; excludedBySalaryStop?: number; reserved: string; paid: string; ready: string; reconciles: boolean };
+  salaryStopExclusions?: { employeeCode: string; employeeName: string; mode: string }[];
   manifests: { id: string; templateCode: string; templateVersion: number; batchRevision: number; state: string; lineCount: number; totalAmount: string | null; ledger: { paymentState: string; lines: number; amount: string | null }[] }[];
   paymentStatusSource: string;
 }
@@ -6171,7 +6174,7 @@ function RunReportExportStatus({ id, name }: { id: string; name: string }) {
   const status = useQuery({
     queryKey: keys.reportExport(id),
     queryFn: () => api<ReportExecution>(`/v1/reports/${encodeURIComponent(id)}`),
-    refetchInterval: (q) => (q.state.data?.state === 'QUEUED' || q.state.data?.state === 'RUNNING' ? 3000 : false),
+    refetchInterval: (q) => (!isReportRefusal(q.state.error) && (q.state.data?.state === 'QUEUED' || q.state.data?.state === 'RUNNING') ? 3000 : false),
     retry: retryTransient,
   });
   const s = status.data;
@@ -6268,6 +6271,7 @@ function RegisterReport({ runId }: { runId: string }) {
                   <tr>
                     <th>Employee</th>
                     <th>Calculation</th>
+                    <th>Salary stop</th>
                     <th>Paid units</th>
                     <th>Earnings</th>
                     <th>Deductions</th>
@@ -6283,6 +6287,7 @@ function RegisterReport({ runId }: { runId: string }) {
                     <tr key={r.recordId}>
                       <td>{`${r.employeeCode} ${r.employeeName}`}</td>
                       <td>{readable(r.calculationStatus)}</td>
+                      <td>{r.salaryStopMode ? readable(r.salaryStopMode) : '—'}</td>
                       <td>{r.paidUnits ?? '—'}</td>
                       <td>{money(r.earnings, cur)}</td>
                       <td>{money(r.deductions, cur)}</td>
@@ -6344,9 +6349,15 @@ function DisbursementReport({ runId }: { runId: string }) {
           <dl className="kv" aria-label="Reconciliation totals">
             <Fact term="Approved payable">{money(d.totals.payable, cur)}</Fact>
             <Fact term="Held">{money(d.totals.held, cur)}</Fact>
+            {/* FR-031: what salary stops withhold, a part of Held, apart from policy holds and payment safety blocks. */}
+            {(d.totals.salaryStopHolds ?? 0) > 0 && <Fact term="Of held, by salary stop">{`${money(d.totals.heldBySalaryStop ?? '0', cur)} for ${d.totals.salaryStopHolds} ${d.totals.salaryStopHolds === 1 ? 'employee' : 'employees'}`}</Fact>}
             <Fact term="Reserved, not paid">{money(d.totals.reserved, cur)}</Fact>
             <Fact term="Paid (confirmed from bank evidence)">{money(d.totals.paid, cur)}</Fact>
             <Fact term="Ready to pay">{money(d.totals.ready, cur)}</Fact>
+            {/* FR-031: no net, so in none of the figures above. */}
+            {(d.salaryStopExclusions?.length ?? 0) > 0 && (
+              <Fact term="Excluded from calculation by a salary stop">{d.salaryStopExclusions!.map((x) => `${x.employeeCode} ${x.employeeName}`).join(', ')}</Fact>
+            )}
             <Fact term="Reconciles">
               {d.totals.reconciles ? <Badge tone="good">Yes: payable equals held, reserved, paid and ready</Badge> : <Badge tone="bad">No: the figures do not reconcile; report this</Badge>}
             </Fact>
@@ -6628,14 +6639,18 @@ function LoanUpload() {
     setFile(next);
     uploadKey.current = null;
   };
-  const { resume, open, refresh } = useBatchFollowUp(t.base, {
-    show: setJob,
-    closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
-    onStart: () => {
-      upload.reset();
-      act.reset();
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    t.base,
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+      },
     },
-  });
+    job,
+  );
   const act = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'commit' | 'cancel' }) => {
       // The decision and any look at the batch after it go out under the role it was made in (BR-046).
@@ -6717,7 +6732,7 @@ function LoanUpload() {
               Every request entered waits for an independent decision, loan by loan: someone other than you and the employee decides each one.
             </p>
           )}
-          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
       <ImportBatches base={t.base} title="Your loan request batches" openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />
@@ -8056,14 +8071,16 @@ function ArrangementList({ employeeId, chosen, onChoose }: { employeeId: string;
   const keys = useKeys();
   const history = useQuery({
     queryKey: keys.salaryHistory(employeeId),
-    queryFn: () => api<{ items: SalaryArrangementRow[] }>(`/v1/employees/${encodeURIComponent(employeeId)}/salary`),
+    queryFn: () => api<{ items: SalaryArrangementRow[]; historyIncluded?: boolean }>(`/v1/employees/${encodeURIComponent(employeeId)}/salary`),
     retry: retryTransient,
   });
+  // I-68: without the history grant the server sends only what is in force today and later, so an empty list does not mean none ever existed.
+  const withheld = history.data?.historyIncluded === false;
   return (
     <>
       {history.isPending && <p className="hint">Loading the salary arrangements…</p>}
       {history.error && <Problem error={history.error} act="read" />}
-      {history.data && history.data.items.length === 0 && <Empty>The employee has no salary arrangement yet.</Empty>}
+      {history.data && history.data.items.length === 0 && <Empty>{withheld ? 'The employee has no salary arrangement in force today or later.' : 'The employee has no salary arrangement yet.'}</Empty>}
       {history.data && history.data.items.length > 0 && (
         <div style={SCROLL}>
           <table aria-label="Salary arrangements">
@@ -8098,6 +8115,7 @@ function ArrangementList({ employeeId, chosen, onChoose }: { employeeId: string;
           </table>
         </div>
       )}
+      {withheld && <p className="hint">Earlier arrangements are not shown: the selected role has no salary history grant.</p>}
     </>
   );
 }

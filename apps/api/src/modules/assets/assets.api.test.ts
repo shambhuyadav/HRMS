@@ -4,6 +4,7 @@
 // made-up item codes and serials, example.test people.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CHECK_VIOLATION, expectSqlError, uniq } from '../../../../../db/tests/fixtures.js';
+import { revokedAfterGuard } from '../../test/after-guard.fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import type { PermissionKey } from '../access/baseline.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
@@ -397,6 +398,55 @@ describe.runIf(isModuleActive('assets'))('assets (FR-110, H3 TN16)', () => {
       expect(delivered.t).not.toContain('Synthetic reviewer note');
       expect(await actions('asset_request', requestId)).toEqual(['CREATE', 'APPROVE']);
       expect(await trail([requestId])).toContain('Synthetic reviewer note'); // the reviewer's reason is in the audit record only
+    });
+
+    it('DF03: a new request names the employee’s own rejected one, shown in their lists; anything else is refused and creates nothing', async () => {
+      const rejected = async (a: TestActor) => {
+        const id = (await ask(a)).json().requestId as string;
+        const t = (await taskFor(admin, id))!;
+        expect((await decide(admin, t.taskId, { decision: 'REJECT', reason: 'Synthetic rejection' })).json().state).toBe('REJECTED');
+        return id;
+      };
+      const first = await rejected(colleague);
+      const without = await ask(colleague);
+      expect((await myRequests(colleague, colleagueEmp)).find((r) => r.id === without.json().requestId)).toMatchObject({ predecessorRequestId: null });
+      const fromScratch = (await taskFor(admin, without.json().requestId))!;
+      expect((await decide(admin, fromScratch.taskId, { decision: 'APPROVE' })).statusCode).toBe(200);
+
+      const count = async () => (await h.one<{ n: number }>(`select count(*)::int as n from asset_request where company_id = $1`, [A.id])).n;
+      const before = await count();
+      const error = async (a: TestActor, predecessorRequestId: string) => {
+        const res = await ask(a, { predecessorRequestId });
+        return [res.statusCode, res.json().error];
+      };
+      expect(await error(employee, first)).toEqual([422, 'PREDECESSOR_NOT_FOUND']); // someone else's
+      expect(await error(colleague, '00000000-0000-4000-8000-000000000000')).toEqual([422, 'PREDECESSOR_NOT_FOUND']);
+      expect(await error(colleague, without.json().requestId)).toEqual([422, 'PREDECESSOR_NOT_REJECTED']);
+      expect(await count()).toBe(before);
+
+      const idempotencyKey = key();
+      const again = await ask(colleague, { predecessorRequestId: first, idempotencyKey });
+      expect(again.statusCode, again.body).toBe(201);
+      const raised = again.json().requestId as string;
+      expect((await myRequests(colleague, colleagueEmp)).find((r) => r.id === raised)).toMatchObject({ predecessorRequestId: first });
+      expect(await actions('asset_request', raised)).toEqual(['CREATE']);
+      expect((await h.call(colleague, 'GET', '/v1/me/requests?kind=asset_request')).json().items.find((i: { requestId: string }) => i.requestId === raised)).toMatchObject({ predecessorRequestId: first });
+      // The same key: the same request is a replay, and one naming another predecessor is a different request.
+      expect((await ask(colleague, { predecessorRequestId: first, idempotencyKey })).json()).toMatchObject({ requestId: raised, replayed: true });
+      const otherFirst = await rejected(colleague);
+      expect((await ask(colleague, { predecessorRequestId: otherFirst, idempotencyKey })).json().error).toBe('IDEMPOTENCY_KEY_REUSED');
+      // One live successor; once that one is withdrawn the rejected request can be raised again.
+      expect(await error(colleague, first)).toEqual([409, 'PREDECESSOR_ALREADY_FOLLOWED']);
+      expect((await h.call(colleague, 'POST', `/v1/me/asset-requests/${raised}/withdraw`)).statusCode).toBe(200);
+      expect((await ask(colleague, { predecessorRequestId: first })).statusCode).toBe(201);
+    });
+
+    it('a request re-checks the submit duty inside its transaction', async () => {
+      const leaving = await h.actor(A, 'EMPLOYEE', { employeeId: await person() });
+      const before = (await h.one<{ n: number }>(`select count(*)::int as n from asset_request where company_id = $1`, [A.id])).n;
+      const res = await revokedAfterGuard(h, A, leaving, () => ask(leaving));
+      expect(res.statusCode, res.body).toBe(403);
+      expect((await h.one<{ n: number }>(`select count(*)::int as n from asset_request where company_id = $1`, [A.id])).n).toBe(before);
     });
 
     it('a rejection needs a reason the employee never sees; an issue for a request not approved is refused', async () => {

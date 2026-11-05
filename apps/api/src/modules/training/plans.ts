@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, SqlParams } from '../access/authorize.js';
+import { contextCsvLines, fileContext } from '../report/context.js';
 import {
   assertCompanyWide,
   audit,
@@ -562,15 +563,15 @@ export async function exportPlans(db: Queryable, grant: AccessGrant, q: Omit<Pla
     'Cancellation reason',
     ...(cost ? ['Cost', 'Cost currency'] : []),
   ];
+  const context = await fileContext(db, grant, {
+    title: 'Training plan export',
+    code: 'TRAINING_PLAN_EXPORT',
+    period: { from: q.from, to: q.to },
+    filters: { view: q.view ?? 'all', search: q.search?.trim(), 'business date': grant.businessDate },
+    rowCount: rows.length,
+  });
   const lines = [
-    csvLine(['Training plan export']),
-    csvLine(['View', q.view ?? 'all']),
-    csvLine(['Search', q.search?.trim() || 'none']),
-    csvLine(['Period', q.from ?? 'any', q.to ?? 'any']),
-    csvLine(['Business date', grant.businessDate]),
-    csvLine(['Generated at', new Date().toISOString()]),
-    csvLine(['Rows', rows.length]),
-    '',
+    ...contextCsvLines(context),
     csvLine(headers),
     ...rows.map((r) => csvLine(columns.map((c) => r[c]))),
   ];

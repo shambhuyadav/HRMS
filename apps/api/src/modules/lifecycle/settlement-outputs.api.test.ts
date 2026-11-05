@@ -182,8 +182,14 @@ describe.runIf(isModuleActive('lifecycle'))('settlement outputs and bulk upload 
     expect(csv.headers['content-type']).toBe('text/csv; charset=utf-8');
     expect(csv.headers['content-disposition']).toContain(`filename="settlement-${s1.code}-r1.csv"`);
     const explicit = await exportOf(prep, s1.id, 'CSV');
-    const timeless = (text: string) => text.replace(/"generated_at","[^"]+"/, '"generated_at","T"');
+    const timeless = (text: string) => text.replace(/"(generated_at|Generated at)","[^"]+"/g, '"$1","T"');
     expect(timeless(explicit.body)).toBe(timeless(csv.body));
+    // DF09, FR-065: the file says what it holds, as every report file does: a leading block ended by a blank line.
+    const block = parseCsv(csv.body.split('\r\n\r\n')[0]!);
+    expect(block.map(([label]) => label)).toEqual(['Report', 'Report code', 'Company', 'Acting role', 'Row scope', 'Period', 'Filters', 'Record revision', 'Generated at', 'Rows']);
+    expect(Object.fromEntries(block)).toMatchObject({ Report: 'Settlement export', 'Report code': 'SETTLEMENT_EXPORT', 'Acting role': 'HR_ADMINISTRATOR', 'Row scope': 'COMPANY', Period: 'None', Filters: `settlement: ${s1.id}`, 'Record revision': '1', Rows: '3' });
+    expect(Object.fromEntries(block).Company).toMatch(/\(.+\)$/);
+    expect(Object.fromEntries(block)['Generated at']).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /);
 
     const res = await exportOf(prep, s1.id, 'XLSX');
     expect(res.statusCode, res.body).toBe(200);
@@ -196,18 +202,18 @@ describe.runIf(isModuleActive('lifecycle'))('settlement outputs and bulk upload 
     // Cell for cell what the CSV holds (its blank line apart), generated time aside.
     const rows = sheetRows(xml, 5).filter((r) => r.some((c) => c !== ''));
     const fromCsv = parseCsv(csv.body).map((r) => [...r, '', '', '', ''].slice(0, 5));
-    const generated = (r: string[][]) => r.map((row) => (row[0] === 'generated_at' ? ['generated_at', 'T', '', '', ''] : row));
-    expect(generated(rows)).toEqual(generated(fromCsv));
+    const generated = (r: string[][]) => r.map((row) => (row[0] === 'generated_at' || row[0] === 'Generated at' ? [row[0], 'T', '', '', ''] : row));
+    expect(generated(rows)).toEqual(generated(fromCsv.filter((r) => r.some((c) => c !== ''))));
     expect(rows.find((r) => r[0] === 'LEAVE_ENC')).toEqual(['LEAVE_ENC', `'=HYPERLINK("synthetic")`, 'EARNING', 'STANDARD', '0.0000']);
     expect(rows.at(-1)).toEqual(['NET', '', '', '', '39750.0000']);
     // The revision and the amounts are number cells; everything else is text.
     const cells = sheetCells(xml).flat();
     expect(cells.filter((c) => c.kind === 'number').map((c) => [c.ref, c.value])).toEqual([
-      ['B3', '1'],
-      ['E10', '40000.2500'],
-      ['E11', '0.0000'],
-      ['E12', '-250.2500'],
-      ['E13', '39750.0000'],
+      ['B14', '1'],
+      ['E21', '40000.2500'],
+      ['E22', '0.0000'],
+      ['E23', '-250.2500'],
+      ['E24', '39750.0000'],
     ]);
     // The workbook's total equals the approved net amount and the sum of its lines.
     expect((await get(prep, s1.id)).netAmount).toBe('39750.0000');
@@ -222,10 +228,10 @@ describe.runIf(isModuleActive('lifecycle'))('settlement outputs and bulk upload 
     const res = await exportOf(prep, s2.id, 'XLSX');
     expect(res.statusCode, res.body).toBe(200);
     const cells = sheetCells(readZip(res.rawPayload).get('xl/worksheets/sheet1.xml')!.toString('utf8')).flat();
-    expect(cells.filter((c) => c.ref.startsWith('E') && c.ref !== 'E9').map((c) => [c.ref, c.kind, c.value])).toEqual([
-      ['E10', 'text', '123456789012345.1234'],
-      ['E11', 'number', '-1.0000'],
-      ['E12', 'text', '123456789012344.1234'],
+    expect(cells.filter((c) => c.ref.startsWith('E') && c.ref !== 'E20').map((c) => [c.ref, c.kind, c.value])).toEqual([
+      ['E21', 'text', '123456789012345.1234'],
+      ['E22', 'number', '-1.0000'],
+      ['E23', 'text', '123456789012344.1234'],
     ]);
   });
 
@@ -242,8 +248,14 @@ describe.runIf(isModuleActive('lifecycle'))('settlement outputs and bulk upload 
     const lines = pdfLines(res.rawPayload);
     const generatedAt = lines.find((l) => l[0] === 'generated_at')![1]!;
     expect(Number.isNaN(Date.parse(generatedAt))).toBe(false);
+    // The same context as the other formats, first.
+    expect(lines.slice(0, 2)).toEqual([
+      ['Report', 'Settlement export'],
+      ['Report code', 'SETTLEMENT_EXPORT'],
+    ]);
+    expect(lines.find((l) => l[0] === 'Rows')).toEqual(['Rows', '3']);
     // A PDF is no spreadsheet: the component name is printed as recorded.
-    expect(lines).toEqual([
+    expect(lines.slice(lines.findIndex((l) => l[0] === 'settlement_id'))).toEqual([
       ['settlement_id', s1.id],
       ['employee_code', s1.code],
       ['revision', '1'],
@@ -270,7 +282,7 @@ describe.runIf(isModuleActive('lifecycle'))('settlement outputs and bulk upload 
     const entries = readZip(res.rawPayload);
     expect([...entries.keys()]).toEqual([`settlement-${s2.code}-r1.csv`, `settlement-${s1.code}-r1.csv`]);
     // Each file is the settlement's own CSV export.
-    const timeless = (text: string) => text.replace(/"generated_at","[^"]+"/, '"generated_at","T"');
+    const timeless = (text: string) => text.replace(/"(generated_at|Generated at)","[^"]+"/g, '"$1","T"');
     expect(timeless(entries.get(`settlement-${s1.code}-r1.csv`)!.toString('utf8'))).toBe(timeless((await exportOf(prep, s1.id)).body));
     expect(timeless(entries.get(`settlement-${s2.code}-r1.csv`)!.toString('utf8'))).toBe(timeless((await exportOf(prep, s2.id)).body));
     expect(entries.get(`settlement-${s1.code}-r1.csv`)!.toString('utf8').trim().split('\r\n').at(-1)).toBe('"NET","","","",39750.0000');

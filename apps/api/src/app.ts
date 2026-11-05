@@ -45,7 +45,7 @@ import { workRequestRoutes } from './modules/work-request/routes.js';
 import { assertCandidateIdentityKeyConfigured } from './modules/hiring/candidate.js';
 import { assertFieldKeysConfigured } from './security/field-crypto.js';
 import { type FileStore, memoryFileStore } from './storage/files.js';
-import { developmentScanner, type ScanProvider } from './storage/scan.js';
+import { developmentScanner, type ScanProvider, scanInWorker } from './storage/scan.js';
 
 export interface AppDependencies {
   db: Database;
@@ -57,8 +57,17 @@ export interface AppDependencies {
   sessions?: SessionStore;
   /** File store for documents and import files (ADR-07); tests default to memory. Production must pass its store. */
   files?: FileStore;
-  /** Malware scanner for user uploads (FR-106); development and tests use the synthetic scanner. Production must pass its scanner. */
+  /**
+   * Malware scanner (FR-106); development and tests use the synthetic scanner. Production must pass its scanner. A stored upload is
+   * never scanned in the request: it answers PENDING_SCAN and the scan worker reaches the verdict (NFR-S09). Only the uploads that are
+   * read in the request and never stored (payroll inputs, settlement lines) ask it, under a time limit and outside any transaction.
+   */
   scanner?: ScanProvider;
+  /**
+   * For a test harness only: upload routes ask the scanner in the request and answer its verdict, so a test can start from a released
+   * or quarantined file without running the scan worker. Production refuses it.
+   */
+  scanInRequest?: boolean;
   /** Development-only sign-in for synthetic accounts. Never set in production. */
   devLogin?: DevTokenConfig;
   /** Request deadlines and transaction budgets per serving class (http/deadline.ts); else the environment, else the defaults. */
@@ -125,6 +134,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   app.register(delegationRoutes, { prefix: '/v1', db: deps.db });
   app.register(orgRoutes, { prefix: '/v1', db: deps.db });
   app.register(referenceValueRoutes, { prefix: '/v1', db: deps.db });
+  if (deps.scanInRequest && process.env.NODE_ENV === 'production') throw new Error('In production uploads are scanned by the worker, never in the request (NFR-S09)');
   if (!deps.files && process.env.NODE_ENV === 'production') throw new Error('A file store must be configured in production');
   // Protected private-profile payloads (H4) cannot be sealed or opened without keys: fail at start-up, not on first use.
   // The same for the candidate duplicate-detection key (hiring): fail at start-up, not at the first contact write.
@@ -134,7 +144,8 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   }
   const files = deps.files ?? memoryFileStore();
   if (!deps.scanner && process.env.NODE_ENV === 'production') throw new Error('A malware scanner must be configured in production');
-  const scanner = deps.scanner ?? developmentScanner();
+  const configuredScanner = deps.scanner ?? developmentScanner();
+  const scanner = deps.scanInRequest ? configuredScanner : scanInWorker(configuredScanner);
   app.register(employeeRoutes, { prefix: '/v1', db: deps.db });
   app.register(employeeImportRoutes, { prefix: '/v1', db: deps.db, files, scanner });
   app.register(employeeUpdateImportRoutes, { prefix: '/v1', db: deps.db, files, scanner });

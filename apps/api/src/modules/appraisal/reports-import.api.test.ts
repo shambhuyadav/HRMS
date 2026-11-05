@@ -95,7 +95,18 @@ describe.runIf(isModuleActive('appraisal'))('appraisal: reports, export and goal
     expect(plain.statusCode, plain.body).toBe(200);
     expect(plain.headers['content-type']).toContain('text/csv');
     const plainLines = plain.body.split('\r\n');
-    expect(plainLines[1]).toBe(`"Cycle","${cycle.code}","${(await h.call(w.hr, 'GET', `/v1/appraisal-cycles/${cycle.id}`)).json().startDate}","${(await h.call(w.hr, 'GET', `/v1/appraisal-cycles/${cycle.id}`)).json().endDate}"`);
+    const { startDate, endDate } = (await h.call(w.hr, 'GET', `/v1/appraisal-cycles/${cycle.id}`)).json();
+    // DF09, FR-065, I-66: the leading block every report file carries, ended by a blank line.
+    const blank = plainLines.indexOf('');
+    const context = Object.fromEntries(plainLines.slice(0, blank).map((l) => l.replace(/^"|"$/g, '').split('","')));
+    expect(Object.keys(context)).toEqual(['Report', 'Report code', 'Company', 'Acting role', 'Row scope', 'Period', 'Filters', 'Generated at', 'Rows']);
+    expect(context).toMatchObject({ Report: 'Appraisal export', 'Report code': 'APPRAISAL_EXPORT', 'Acting role': 'HR_ADMINISTRATOR', 'Row scope': 'COMPANY', Period: `${startDate} to ${endDate}`, Filters: `cycle: ${cycle.code}; department: all in scope` });
+    expect(context['Generated at']).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /);
+    expect(plainLines[blank + 1]).toMatch(/^"Employee code"/);
+    expect(Number(context.Rows)).toBe(plainLines.slice(blank + 2).filter((l) => l !== '').length);
+    // A filtered reader's file says so.
+    const scoped = (await h.call(hrFin, 'GET', `/v1/appraisal-cycles/${cycle.id}/export`)).body;
+    expect(scoped).toContain('"Row scope","COMPANY; departments FIN"');
     const header = plainLines.find((l) => l.startsWith('"Employee code"'))!;
     expect(header).not.toContain('Final rating');
     expect(plain.body).not.toMatch(/\b4\.10\b|\b3\.00\b/);
@@ -136,6 +147,7 @@ describe.runIf(isModuleActive('appraisal'))('appraisal: reports, export and goal
       accessClass: 'ADMIN',
       scopeKind: 'COMPANY',
       filters: { departments: [], locations: [], employees: [] },
+      deniedScopes: [],
       allowedFieldGroups: ['operational'],
       ownEssFieldGroups: [],
       deniedFieldGroups: [],

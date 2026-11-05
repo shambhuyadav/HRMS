@@ -14,6 +14,7 @@ import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, SqlParams } from '../access/authorize.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
+import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
 import { type BudgetStatus, budgetFor, budgetPosition, budgetStatus } from './budget.js';
 import {
   audit,
@@ -55,6 +56,8 @@ export interface RequisitionInput {
   targetDate: string;
   hiringManagerId: string;
   budgetExceptionReason?: string | null | undefined;
+  /** DF03: the requester's own rejected requisition this one raises again (workflow/predecessor.ts); named once, at creation. */
+  predecessorRequestId?: string | undefined;
 }
 
 interface Values {
@@ -149,12 +152,13 @@ const operational = (v: Values, employmentType: string) => ({
   budgetExceptionReason: v.budgetExceptionReason,
 });
 
-async function insertRequisition(tx: Queryable, grant: AccessGrant, requesterId: string, v: Values, employmentType: string, copiedFrom: string | null) {
+async function insertRequisition(tx: Queryable, grant: AccessGrant, requesterId: string, v: Values, employmentType: string, copiedFrom: string | null, predecessorRequestId?: string) {
   if (!admitsRequisition(grant, { requesterId, hiringManagerId: v.hiringManagerId, departmentId: v.departmentId, locationId: v.locationId })) {
     throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
   }
+  const predecessor = await rejectedPredecessor(tx, grant.companyId, 'requisition', requesterId, predecessorRequestId);
   const code = await nextCode(tx, grant.companyId, 'REQUISITION', grant.userId);
-  const transactionId = await newTransaction(tx, grant.companyId, REQUISITION_KIND, requesterId, grant.userId);
+  const transactionId = await newTransaction(tx, grant.companyId, REQUISITION_KIND, requesterId, grant.userId, predecessor);
   const id = (
     await tx.query<{ id: string }>(
       `insert into requisition (company_id, code, transaction_id, requesting_employee_id, hiring_manager_id, title, department_id, location_id, designation_id,
@@ -183,18 +187,29 @@ async function insertRequisition(tx: Queryable, grant: AccessGrant, requesterId:
       ],
     )
   ).rows[0]!.id;
-  await audit(tx, grant, 'requisition', id, copiedFrom ? 'COPY' : 'CREATE', null, { code, ...operational(v, employmentType), copiedFromRequisitionId: copiedFrom, state: 'DRAFT' });
+  await audit(tx, grant, 'requisition', id, copiedFrom ? 'COPY' : 'CREATE', null, {
+    code,
+    ...operational(v, employmentType),
+    copiedFromRequisitionId: copiedFrom,
+    state: 'DRAFT',
+    ...(predecessorRequestId ? { predecessorRequestId } : {}),
+  });
   return id;
 }
 
 export async function createRequisition(tx: Queryable, grant: AccessGrant, input: RequisitionInput): Promise<string> {
+  await reassertAccess(tx, grant, 'requisition', 'create', ['operational']);
   const requesterId = await requireRequester(tx, grant);
   const v = await validate(tx, grant, input);
-  return insertRequisition(tx, grant, requesterId, v, input.employmentType, null);
+  return insertRequisition(tx, grant, requesterId, v, input.employmentType, null, input.predecessorRequestId);
 }
 
-/** FR-011: a copy keeps the permitted job details only; it gets a new reference and no approval or candidate history. */
-export async function copyRequisition(tx: Queryable, grant: AccessGrant, sourceId: string): Promise<string> {
+/**
+ * FR-011: a copy keeps the permitted job details only; it gets a new reference and no approval or candidate history. `raiseAgain`
+ * (DF03) also links it to its source, which must then be the caller's own rejected requisition with no live successor.
+ */
+export async function copyRequisition(tx: Queryable, grant: AccessGrant, sourceId: string, options: { raiseAgain?: boolean } = {}): Promise<string> {
+  await reassertAccess(tx, grant, 'requisition', 'create', ['operational']);
   const source = await readRow(tx, grant.companyId, sourceId);
   if (!source || !(await canAccessRequisition(tx, grant, sourceId))) throw notFound();
   const requesterId = await requireRequester(tx, grant);
@@ -213,7 +228,7 @@ export async function copyRequisition(tx: Queryable, grant: AccessGrant, sourceI
     // The budget exception belongs to the source's approval journey; a copy states its own if it needs one.
     budgetExceptionReason: null,
   });
-  return insertRequisition(tx, grant, requesterId, v, source.employment_type, source.id);
+  return insertRequisition(tx, grant, requesterId, v, source.employment_type, source.id, options.raiseAgain ? source.id : undefined);
 }
 
 async function readRow(db: Queryable, companyId: string, id: string, forUpdate = false): Promise<RequisitionRow | undefined> {
@@ -571,6 +586,7 @@ const VIEW_SELECT = `select r.id, r.code, r.title, r.state, r.vacancies, r.reaso
        json_build_object('id', re.id, 'employeeCode', re.employee_code, 'displayName', re.display_name) as requester,
        json_build_object('id', hm.id, 'employeeCode', hm.employee_code, 'displayName', hm.display_name) as "hiringManager",
        r.budget_id as "budgetId", r.budget_exception_reason as "budgetExceptionReason", r.current_revision as "currentRevision", r.copied_from_requisition_id as "copiedFromRequisitionId",
+       ${predecessorRequestSql('requisition', 'r')} as "predecessorRequestId",
        r.budget_exception_approved_by as "budgetExceptionApprovedBy", r.budget_exception_approved_at as "budgetExceptionApprovedAt",
        ${personSql('r.company_id', 'r.budget_exception_approved_by', 'r.budget_exception_approved_at')} as "budgetExceptionApprovedByPerson",
        r.submitted_at as "submittedAt", r.decided_by as "decidedBy", r.decided_at as "decidedAt",

@@ -401,7 +401,7 @@ describe.runIf(isModuleActive('timesheet'))('timesheet: entry, review and lockin
     const ess = (await h.call(w.employee, 'GET', '/v1/me/ess')).json();
     const tn13 = ess.tabs.find((t: { id: string }) => t.id === 'TN13');
     expect(tn13.status).toBe('AVAILABLE');
-    expect(tn13.links.map((l: { rel: string }) => l.rel)).toEqual(['timesheets', 'createTimesheet', 'allocations', 'missedReminders', 'decisionHistory']);
+    expect(tn13.links.map((l: { rel: string }) => l.rel)).toEqual(['timesheets', 'createTimesheet', 'allocations', 'missedReminders', 'decisionHistory', 'laterPayrollAdjustments']);
     const requests = (await h.call(w.employee, 'GET', '/v1/me/requests?kind=timesheet')).json().items as { requestId: string; state: string }[];
     expect(requests.find((r) => r.requestId === sheetA)).toMatchObject({ state: 'APPROVED' });
     const mine = (await h.call(w.employee, 'GET', '/v1/me/timesheets')).json().items as { id: string; approvedMinutes: number }[];

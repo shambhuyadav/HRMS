@@ -6,7 +6,7 @@ import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import { type AccessGrant, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { type AccessGrant, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams } from '../access/authorize.js';
 import { type MasterTable, requireUsableMaster } from '../org/masters.js';
 
 export const PERSONAL_FIELDS = ['dateOfBirth', 'serviceAnniversaryDate'] as const;
@@ -20,7 +20,18 @@ export interface EmployeeOperational {
   confirmationDate: string | null;
   employmentType: string;
   status: string;
-  assignment: { departmentId: string; departmentName: string; locationId: string; locationName: string; designationId: string; designationName: string; gradeId: string | null } | null;
+  assignment: {
+    departmentId: string;
+    departmentName: string;
+    locationId: string;
+    locationName: string;
+    designationId: string;
+    designationName: string;
+    gradeId: string | null;
+    /** One record only, with the grade master's read duty (see withRecordFacts). */
+    gradeCode?: string | null;
+    gradeName?: string | null;
+  } | null;
   manager: { id: string; employeeCode: string; displayName: string } | null;
   version: number;
 }
@@ -30,7 +41,13 @@ export interface EmployeePersonal {
   serviceAnniversaryDate: string | null;
 }
 
-export type EmployeeView = EmployeeOperational & Partial<EmployeePersonal>;
+/** What one record says beyond a list row (see withRecordFacts). */
+export interface EmployeeRecordFacts {
+  shift: { id: string; code: string; name: string } | null;
+  noManagerReason: string | null;
+}
+
+export type EmployeeView = EmployeeOperational & Partial<EmployeePersonal> & Partial<EmployeeRecordFacts>;
 
 interface EmployeeRow {
   id: string;
@@ -221,7 +238,39 @@ export async function getEmployee(db: Queryable, grant: AccessGrant, id: string)
   const params = new SqlParams();
   const sql = `${selectEmployees(params, grant, withPersonal)} where e.company_id = ${params.add(grant.companyId)}::uuid and e.id = ${params.add(id)}::uuid`;
   const row = (await db.query<EmployeeRow>(sql, params.values)).rows[0];
-  return row ? toView(row, withPersonal) : null;
+  return row ? withRecordFacts(db, grant, toView(row, withPersonal)) : null;
+}
+
+/**
+ * DF04's assigned shift, in force on the business date, is an operational fact of the record (DF02 "work attendance times").
+ * The other two stay with the grants that already reached them, in this same assignment, so nobody reads more than before:
+ * DF02 lists grade neither way and BR-043 defaults the unlisted to confidential, so its words need the grade master's read
+ * duty; a no-manager reason is a private reason (DF02) that the My Team history masks, and it needs the history duty that shows
+ * manager reasons on the timeline (I-64). A key left out means the assignment does not reach it (FR-095/098).
+ */
+async function withRecordFacts(db: Queryable, grant: AccessGrant, view: EmployeeView): Promise<EmployeeView> {
+  const may = async (resource: string, action: string) =>
+    (await resolveAccess(db, { userId: grant.userId, companyId: grant.companyId, assignmentId: grant.assignmentId, resource, action, fieldGroups: ['operational'], at: grant.at })).allowed;
+  const key = [grant.companyId, view.id];
+  view.shift =
+    (
+      await db.query<{ id: string; code: string; name: string }>(
+        `select s.id, s.code, s.name
+           from shift_assignment sa join shift s on s.company_id = sa.company_id and s.id = sa.shift_id
+          where sa.company_id = $1 and sa.employee_id = $2 and sa.effective_from <= $3::date and (sa.effective_to is null or sa.effective_to > $3::date)`,
+        [...key, grant.businessDate],
+      )
+    ).rows[0] ?? null;
+  if (view.assignment && (await may('org_master', 'read'))) {
+    const grade = view.assignment.gradeId ? (await db.query<{ code: string; name: string }>(`select code, name from grade where company_id = $1 and id = $2`, [grant.companyId, view.assignment.gradeId])).rows[0] : undefined;
+    view.assignment.gradeCode = grade?.code ?? null;
+    view.assignment.gradeName = grade?.name ?? null;
+  }
+  if (await may('employee', 'read_history')) {
+    // Only while nobody manages the employee: a reason given earlier stays on the timeline, not on the record.
+    view.noManagerReason = view.manager ? null : ((await db.query<{ no_manager_reason: string | null }>(`select no_manager_reason from employee where company_id = $1 and id = $2`, key)).rows[0]?.no_manager_reason ?? null);
+  }
+  return view;
 }
 
 export interface CreateEmployeeInput {
@@ -401,6 +450,8 @@ export async function updateEmployee(tx: Queryable, grant: AccessGrant, id: stri
     )
   ).rows[0];
   if (!current) throw notFound();
+  // The groups this change writes, under the authority current after the record's lock, not the one the route guard saw.
+  await reassertAccess(tx, grant, 'employee', 'update', fieldGroupsForUpdate(input));
   if (current.version !== input.expectedVersion) throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
 
   const normalise = (key: string, value: unknown) =>

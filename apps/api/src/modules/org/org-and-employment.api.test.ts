@@ -80,6 +80,9 @@ describe('effective-dated manager and assignment changes (FR-003, BR-002, BR-005
     const backdated = await setManager(employee, { managerEmployeeId: m1, effectiveFrom: '2026-02-15' });
     expect(backdated.statusCode).toBe(409);
     expect(backdated.json().error).toBe('CHANGE_NOT_LATEST');
+    // The refusal names what to do, not a correction route: none exists for these histories (DF08; owner question).
+    expect(backdated.json().message).toMatch(/must start after the latest/);
+    expect(backdated.json().message).not.toMatch(/correction/i);
 
     await h.setStatus(A, employee, 'ACTIVE_CONFIRMED');
     const cycle = await setManager(m2, { managerEmployeeId: employee, effectiveFrom: '2026-04-01' });

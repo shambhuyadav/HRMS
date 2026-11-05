@@ -86,6 +86,7 @@ export function NotificationPreferencesPanel() {
 
 /** GET /v1/notifications/delivery and .../failed-events, under one duty. */
 const READ_DELIVERY = 'notification.read_delivery.operational';
+const EXPORT_DELIVERY = 'notification.export.operational';
 
 interface DeliveryRow {
   id: string;
@@ -187,13 +188,22 @@ export function DeliveryLogPage() {
   const scopeKey = `${stored?.companyId ?? '-'}:${stored?.assignmentId ?? '-'}`;
   const [state, setState] = useState('');
   const [typed, setTyped] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
   const category = typed.trim().toUpperCase().replace(/[\s-]+/g, '_');
   const categoryInvalid = category !== '' && !EVENT_CODE.test(category);
   const log = useQuery({
-    queryKey: ['notification-delivery', scopeKey, state, category, page],
+    queryKey: ['notification-delivery', scopeKey, state, category, from, to, page],
     enabled: allowed && !categoryInvalid,
-    queryFn: () => api<PagedList<DeliveryRow>>(`/v1/notifications/delivery?${pageParams(page)}${state ? `&state=${state}` : ''}${category ? `&category=${encodeURIComponent(category)}` : ''}`),
+    queryFn: () =>
+      api<PagedList<DeliveryRow>>(
+        `/v1/notifications/delivery?${pageParams(page)}${state ? `&state=${state}` : ''}${category ? `&category=${encodeURIComponent(category)}` : ''}${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`,
+      ),
+  });
+  // FR-093: the export holds what these filters show, plus the events that failed to dispatch for the same period (below).
+  const exportLog = useMutation({
+    mutationFn: () => api<{ id: string }>('/v1/reports', { body: { reportCode: 'NOTIFICATION_DELIVERY', filters: { from, to, ...(state ? { status: state } : {}), ...(category ? { category } : {}) } } }),
   });
   if (!allowed) {
     return (
@@ -235,7 +245,37 @@ export function DeliveryLogPage() {
               }}
             />
           </label>
+          <label className="inline">
+            From{' '}
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          <label className="inline">
+            To{' '}
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          {can(EXPORT_DELIVERY) && (
+            <button type="button" className="secondary" disabled={!from || !to || categoryInvalid || exportLog.isPending} onClick={() => exportLog.mutate()}>
+              Export this log
+            </button>
+          )}
         </div>
+        {can(EXPORT_DELIVERY) && (!from || !to) && <p className="hint">An export covers a period: choose both dates.</p>}
+        {exportLog.isSuccess && <p className="ok">Export requested. Download it from Reports when it is ready.</p>}
+        <ErrorNote error={exportLog.error} />
         {categoryInvalid && <p className="hint">An event code has letters, digits and underscores and starts with a letter.</p>}
         {log.isFetching && !log.data && <p className="hint">Loading the log…</p>}
         {log.data?.items.length === 0 && <Empty>No notifications match.</Empty>}

@@ -3,6 +3,7 @@
 // approval is allowed; after approval requires HR independent decision and history"; DF03; DF08; DF12). Synthetic data.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withTransaction } from '../../db/transaction.js';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
 import { isModuleActive } from '../registry.js';
@@ -65,7 +66,7 @@ describe.runIf(isModuleActive('lifecycle'))('employee exit (FR-051, FR-055)', ()
     // Withdrawal requests share the exit list.
     expect((await h.call(hr, 'PUT', '/v1/workflows/exit_withdrawal/fallback-reviewers', { reviewers: [{ userId: hr.user, priority: 1 }] })).json().error).toBe('SHARED_ROUTING');
     today = await businessDate(h, A);
-    system = await h.makeUser();
+    system = SYSTEM_ACTOR_ID;
   });
 
   afterAll(async () => {

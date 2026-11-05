@@ -133,6 +133,47 @@ describe('correcting a returned request (web-4)', () => {
   });
 });
 
+describe('raising a rejected request again (DF03, I-66)', () => {
+  it('fills the form from the rejected request and links the new one; a changed kind drops the link', async () => {
+    session.permissions = SELF;
+    const calls = mockApi({
+      'GET /v1/employees/emp-1/work-requests': { items: [request({ id: 'wr-9', kind: 'holiday_work', state: 'REJECTED', startDate: '2026-11-08', endDate: '2026-11-08', startTime: '10:00', endTime: '14:00', purpose: 'Synthetic rejected purpose' })] },
+      'GET /v1/employees/emp-1/documents': { items: [] },
+      'POST /v1/work-requests/holiday_work': [201, { requestId: 'wr-10', state: 'SUBMITTED' }],
+      'POST /v1/work-requests/outdoor_duty': [201, { requestId: 'wr-11', state: 'SUBMITTED' }],
+    });
+    renderPage(<WorkRequestsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Raise again the rejected Work on holiday request' }));
+    const form = within(screen.getByRole('heading', { name: 'New outdoor duty or holiday work request' }).closest('section')!);
+    expect((form.getByLabelText('Kind') as HTMLSelectElement).value).toBe('holiday_work');
+    expect((form.getByLabelText('Purpose') as HTMLInputElement).value).toBe('Synthetic rejected purpose');
+    fireEvent.click(form.getByText('Submit request'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/v1/work-requests/holiday_work')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ startDate: '2026-11-08', purpose: 'Synthetic rejected purpose', predecessorRequestId: 'wr-9' });
+
+    await waitFor(() => expect((form.getByLabelText('Purpose') as HTMLInputElement).value).toBe(''));
+    fireEvent.click(screen.getByRole('button', { name: 'Raise again the rejected Work on holiday request' }));
+    expect(form.getByText('Make it an unlinked request')).toBeTruthy();
+    fireEvent.change(form.getByLabelText('Kind'), { target: { value: 'outdoor_duty' } });
+    expect(form.queryByText('Make it an unlinked request')).toBeNull();
+  });
+
+  it('is not offered for a request a live one follows, or without the submit duty; the follower says what it follows', async () => {
+    session.permissions = SELF;
+    const items = [request({ id: 'wr-9', state: 'REJECTED' }), request({ id: 'wr-10', state: 'SUBMITTED', predecessorRequestId: 'wr-9' })];
+    mockApi({ 'GET /v1/employees/emp-1/work-requests': { items }, 'GET /v1/employees/emp-1/documents': { items: [] } });
+    const first = renderPage(<WorkRequestsPage />);
+    expect(await screen.findByText('Raised again after a rejected request')).toBeTruthy();
+    expect(screen.queryByText('Raise again')).toBeNull();
+    first.unmount();
+    session.permissions = ['work_request.read.operational'];
+    mockApi({ 'GET /v1/employees/emp-1/work-requests': { items: [request({ id: 'wr-9', state: 'REJECTED' })] } });
+    renderPage(<WorkRequestsPage />);
+    expect(await screen.findByText('Synthetic site visit')).toBeTruthy();
+    expect(screen.queryByText('Raise again')).toBeNull();
+  });
+});
+
 describe('new requests (web-4)', () => {
   it('an overnight outdoor-duty window is sent as given on its start date', async () => {
     session.permissions = SELF;

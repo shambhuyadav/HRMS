@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import type { PermissionKey } from '../access/baseline.js';
 import { followUpSuite } from '../imports/follow-up.fixtures.js';
+import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 
@@ -20,7 +21,7 @@ let financeHr: TestActor; // salary grants limited to the finance department
 let auditor: TestActor;
 const emp: Record<string, { id: string; code: string }> = {};
 
-const SALARY: PermissionKey[] = ['salary.read.salary', 'salary.manage.salary', 'salary.export.salary'];
+const SALARY: PermissionKey[] = ['salary.read.salary', 'salary.history_read.salary', 'salary.manage.salary', 'salary.export.salary'];
 const INCREMENTS: PermissionKey[] = ['increment.read.salary', 'increment.propose.salary', 'increment.approve.salary'];
 const HEADER = 'employeeCode,effectiveFrom,annualCtc,monthlyGross,currency';
 const IMPORTS = '/v1/salary-master/imports';
@@ -301,7 +302,9 @@ describe('salary master list and exports (FR-029, E08, FR-056, FR-065)', () => {
 
   it('needs the salary read grant (amounts are confidential); the row scope applies', async () => {
     for (const a of [hr, auditor]) expect((await list(a, day('2026-07-01'))).statusCode).toBe(403);
-    expect((await list(reader, day('2026-07-01'))).statusCode).toBe(200);
+    // C4: the read grant answers for today and later; a past day needs the history grant (history-grants.api.test.ts).
+    expect((await list(reader, '')).statusCode).toBe(200);
+    expect((await list(reader, day('2026-07-01'))).json().error).toBe('HISTORY_GRANT_REQUIRED');
     const scoped = (await list(financeHr, '?month=2026-07')).json() as Page;
     expect(scoped.items.every((r) => r.employeeId !== people.revised!.id && r.employeeId !== people.graded!.id)).toBe(true);
     expect(ours(scoped).items.map((r) => r.employeeCode)).toEqual([people.finance!.code]);
@@ -321,7 +324,7 @@ describe('salary master list and exports (FR-029, E08, FR-056, FR-065)', () => {
       expect((await h.call(a, 'GET', `/v1/reports/${res.json().id}`)).json()).toMatchObject({ state: 'COMPLETED' });
       const file = await h.call(a, 'GET', `/v1/reports/${res.json().id}/download`);
       expect(file.statusCode).toBe(200);
-      const [header, ...lines] = file.body.trimEnd().split('\r\n').map(cells);
+      const [header, ...lines] = csvTable(file.body).trimEnd().split('\r\n').map(cells);
       return lines.map((l) => Object.fromEntries(header!.map((k, i) => [k, l[i]!])));
     }
     const money = (v: string) => Number(v).toFixed(2);
@@ -329,7 +332,11 @@ describe('salary master list and exports (FR-029, E08, FR-056, FR-065)', () => {
     const FY2026 = { from: '2026-04-01', to: '2027-03-31' };
 
     it('are catalogued and need salary.export.salary; the output is confidential and the request audited', async () => {
-      const items = (await h.call(hr, 'GET', '/v1/reports/catalogue')).json().items as { code: string; requiresPeriod: boolean; columns: string[] }[];
+      // Listed to the role holding the export grant only (reportCatalogue).
+      const items = (await h.call(hr1, 'GET', '/v1/reports/catalogue')).json().items as { code: string; requiresPeriod: boolean; columns: string[] }[];
+      const withoutGrant = ((await h.call(hr, 'GET', '/v1/reports/catalogue')).json().items as { code: string }[]).map((r) => r.code);
+      expect(withoutGrant).not.toContain('SALARY_MASTER');
+      expect(withoutGrant).not.toContain('ANNUAL_SALARY');
       const columns = ['Employee code', 'Name', 'Status', 'Grade', 'Effective from', 'Effective to (exclusive)', 'Currency', 'Annual CTC', 'Monthly gross'];
       expect(items.find((r) => r.code === 'SALARY_MASTER')).toEqual({ code: 'SALARY_MASTER', title: 'Employee salary master', requiresPeriod: true, columns });
       expect(items.find((r) => r.code === 'ANNUAL_SALARY')).toEqual({ code: 'ANNUAL_SALARY', title: 'Employee annual salary', requiresPeriod: true, columns: ['Period start', 'Period end', ...columns] });
@@ -433,7 +440,7 @@ describe('salary master list and exports (FR-029, E08, FR-056, FR-065)', () => {
     });
 
     it('access revoked after the request means nothing is generated (ZT05)', async () => {
-      const temp = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['salary.export.salary'] });
+      const temp = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['salary.export.salary', 'salary.history_read.salary'] });
       const { id } = (await request(temp, 'SALARY_MASTER', JULY)).json();
       await h.db.query(
         `update role_assignment_permission set active = false
@@ -441,7 +448,8 @@ describe('salary master list and exports (FR-029, E08, FR-056, FR-065)', () => {
         [temp.assignment],
       );
       await processReportQueue(h.pool);
-      expect((await h.call(temp, 'GET', `/v1/reports/${id}`)).json()).toMatchObject({ state: 'FAILED', failureCode: 'ACCESS_REVOKED' });
+      expect((await h.call(temp, 'GET', `/v1/reports/${id}`)).statusCode).toBe(403);
+      expect(await h.one(`select state, failure_code from report_execution where id = $1`, [id])).toEqual({ state: 'FAILED', failure_code: 'ACCESS_REVOKED' });
     });
   });
 });

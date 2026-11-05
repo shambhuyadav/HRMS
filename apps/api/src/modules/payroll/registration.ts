@@ -5,8 +5,8 @@
 // exact allowlist; every confidential group (run amounts, inputs, stops, holds and criteria) is a ceiling-only grant
 // of that role, approved per assignment, never a default duty. The payroll, finance and treasury roles of the
 // baseline keep their operational context: configuration and run status (no amounts). The Employee role gets nothing
-// here: calculation previews are never shown to employees (FR-107); own issued outputs, loans and tax records belong
-// to the payroll-outputs module (its own-ESS tabs TN06-TN09, TN15). The daily hold review job is
+// here: calculation previews are never shown to employees (FR-107); own issued outputs and loans belong to the
+// payroll-outputs module (TN06, TN15) and own tax records to tax-declarations (TN08, TN09). The daily hold review job is
 // holds.ts runPayrollHoldReviews(db, companyId, localDate, systemUserId), wired into the scheduler by the integrator.
 import type { ModuleRegistration } from '../registry-types.js';
 

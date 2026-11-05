@@ -11,7 +11,7 @@ import { type Company, type Harness, startHarness, type TestActor } from '../../
 import { isModuleActive } from '../registry.js';
 import { calculate, calendar, components, CONFIG, createRun, head, ok, person, PREPARE, record, reviewers, SALARY, salary } from './payroll.fixtures.js';
 
-const INCREMENT: PermissionKey[] = ['salary.read.salary', 'increment.read.salary', 'increment.propose.salary', 'increment.approve.salary'];
+const INCREMENT: PermissionKey[] = ['salary.read.salary', 'salary.history_read.salary', 'increment.read.salary', 'increment.history_read.salary', 'increment.propose.salary', 'increment.approve.salary'];
 
 describe.runIf(isModuleActive('payroll'))('increment breakdown applied mid-month feeds the DF05 calculation (I-33, FR-092, FR-032)', () => {
   let h: Harness;

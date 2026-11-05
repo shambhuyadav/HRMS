@@ -56,6 +56,8 @@ const submitSchema = {
     reason: { type: 'string', minLength: 1, maxLength: 1000 },
     // FR-026 attachment: the requester's own usable documents (FR-106, I-22).
     evidenceDocumentIds: { type: 'array', maxItems: MAX_EVIDENCE_DOCUMENTS, uniqueItems: true, items: uuid },
+    // DF03: the rejected request this one raises again; named once, at creation.
+    predecessorRequestId: uuid,
   },
 } as const;
 

@@ -164,7 +164,7 @@ export async function documentMappingRoutes(app: FastifyInstance, opts: { db: Da
         });
         return { id, attachmentId };
       });
-      // FR-106: quarantined until the scanner releases it; a scanner error leaves it pending (the scan worker retries).
+      // FR-106: quarantined until a scanner releases it; in every deployment that is the scan worker, not this request (NFR-S09; storage/scan.ts).
       const scanState = await scanAttachment(db, scanner, { companyId: grant.companyId, id: staged.attachmentId, bytes });
       if (scanState !== 'PENDING_SCAN') {
         await writeAudit(db, {

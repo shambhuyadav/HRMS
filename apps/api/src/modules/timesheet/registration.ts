@@ -125,8 +125,8 @@ export const timesheetRegistration: ModuleRegistration = {
       placeholders: ['periodStart', 'periodEnd', 'dueDate'],
     },
   ],
-  // H3 TN13: own period entry/submission/approval and missed reminders. Later-payroll adjustments arrive with the
-  // payroll stage (FR-100), not from this module.
+  // H3 TN13: own period entry/submission/approval, missed reminders and linked later-payroll adjustments (served by the
+  // payroll-adjustments module, FR-100).
   essTabs: [
     {
       tab: 'TN13',
@@ -137,6 +137,7 @@ export const timesheetRegistration: ModuleRegistration = {
         { rel: 'allocations', method: 'GET', href: '/v1/me/timesheet-allocations' },
         { rel: 'missedReminders', method: 'GET', href: '/v1/me/timesheet-exceptions' },
         { rel: 'decisionHistory', method: 'GET', href: '/v1/me/requests?kind=timesheet' },
+        { rel: 'laterPayrollAdjustments', method: 'GET', href: '/v1/me/payroll-adjustments' },
       ],
     },
   ],

@@ -1,0 +1,11 @@
+-- 0123 A report download re-applies the requester's current row scope (DF09 "recheck current access at download"; DF16;
+-- FR-065; ZT05). The download already re-checked the assignment, the export permission and the field group, but a stored
+-- file outlives who was in scope: an employee transferred out of a filtered exporter's department, moved to another
+-- manager or whose task has closed stayed in a file downloadable for up to 24 hours.
+--
+-- scope_members holds the employees in the assignment's row scope when the file was generated (every employee the file
+-- could hold). The download refuses the file as soon as any of them has left the current scope, so a narrowing never needs
+-- to be matched against the file's rows; a wider scope refuses nothing. It is null for a file generated in an unrestricted
+-- company scope, and for every file generated before this column existed: such a file is served only while the assignment
+-- is an unrestricted company scope (modules/report/service.ts).
+alter table report_execution add column scope_members uuid[];

@@ -17,6 +17,7 @@
     "db:migrate": "tsx db/migrate.ts",
     "db:dev": "tsx db/dev-db.ts",
     "db:seed": "tsx db/seed-dev.ts",
+    "db:check-go-live": "tsx db/pre-go-live-check.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck -w apps/web",
     "test": "vitest run && npm test -w apps/web",
     "dev:api": "tsx apps/api/src/server.ts",

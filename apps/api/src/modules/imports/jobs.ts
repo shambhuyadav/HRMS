@@ -98,10 +98,11 @@ const quarantined = () => new HttpError(422, 'FILE_QUARANTINED', 'The malware sc
 const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 
 /**
- * Upload: store the file and scan it before reading a row. A finding refuses the import (422 FILE_QUARANTINED, no
- * job). A clean file is validated row by row and the job recorded as PREVIEWED (or REJECTED if any row failed). If
- * the scanner cannot give a verdict, the job is held as UPLOADED (202) without reading the file; the same upload
- * repeated with the same idempotency key resumes it once the file is released (by that retry or the scan worker).
+ * Upload: store the file; no row is read before a verdict. In every deployment the verdict is the scan worker's (NFR-S09,
+ * storage/scan.ts), so the job is held as UPLOADED (202) without reading the file; the same upload repeated with the same
+ * idempotency key resumes it once the file is released, and a quarantined file ends it (422 FILE_QUARANTINED). A verdict
+ * already known (a test harness's scan in the request) is applied at once: a finding refuses the import with no job, and a
+ * clean file is validated row by row and the job recorded as PREVIEWED (or REJECTED if any row failed).
  */
 export async function submitBatch<C extends string>(
   db: Database,
@@ -196,7 +197,7 @@ export async function resumeBatch<C extends string>(db: Database, files: FileSto
   return { created: false, status: 200, view };
 }
 
-/** Resumes a job held for the scanner: a pending file is scanned again; once CLEAN it is validated like a new upload. */
+/** Resumes a job held for the scanner: a file still pending keeps it held (a deployment never scans in the request); once CLEAN it is validated like a new upload. */
 async function resumeHeld<C extends string>(db: Database, files: FileStore, scanner: ScanProvider, grant: AccessGrant, spec: BatchSpec<C>, id: string): Promise<Submitted> {
   const held = (
     await db.query<{ attachment_id: string; scan_state: string | null; content_reference: string; checksum: string }>(
@@ -206,6 +207,8 @@ async function resumeHeld<C extends string>(db: Database, files: FileStore, scan
     )
   ).rows[0]!;
   let scanState = held.scan_state;
+  // Still with the scan worker: the same answer without fetching a file of up to 10 MB, since an open import screen asks every few seconds.
+  if (scanState === 'PENDING_SCAN' && scanner.deferUploads) return { created: false, status: 202, view: (await jobView(db, grant, spec.kind, id))! };
   let bytes: Buffer | null = null;
   if (scanState !== 'QUARANTINED') {
     // A quarantined file is never read again.

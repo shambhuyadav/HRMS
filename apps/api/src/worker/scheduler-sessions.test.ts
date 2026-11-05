@@ -1,6 +1,7 @@
 ﻿// Sessions (DF10), reminders/escalations (DF03, DF11, BR-031) and the scheduler ledger.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../db/tests/fixtures.js';
+import { SYSTEM_ACTOR_ID } from '../audit/actors.js';
 import { MODULE_DAILY_JOBS } from '../modules/jobs-registry.js';
 import { runReminders } from '../modules/notification/reminders.js';
 import { dispatchOutbox } from '../modules/notification/dispatcher.js';
@@ -138,7 +139,8 @@ describe('scheduler ledger', () => {
   it('runs each daily job once per company-local day, only after its start hour', async () => {
     const day = new Date();
     const atLocal = (hour: number) => new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, 0) - 330 * 60_000); // Asia/Kolkata
-    const deps = { db: h.pool, providers: new Map(), systemUserId: hr.user };
+    // As worker.ts runs them: every daily job works as an account with no assignment and no employee.
+    const deps = { db: h.pool, providers: new Map(), systemUserId: SYSTEM_ACTOR_ID };
 
     // Effective-dated private profile changes and module jobs starting at midnight run first; reminders and
     // celebrations later in the day. Module jobs come from modules/jobs-registry.ts (active modules only).
@@ -167,5 +169,23 @@ describe('bulk jobs on the scheduler tick (NFR-S09)', () => {
     expect(job).toMatchObject({ state: 'COMPLETED', errorCode: null });
     expect(job.processed).toBeGreaterThan(0);
     expect((await runScheduledJobs(deps, at)).bulkChunks).toBe(0);
+  });
+});
+
+// B1 line 2800, "updated metadata on immutable rows stays equal to creation metadata". These read what the tests above left behind.
+describe('who the records say acted', () => {
+  it.each(['notification_event', 'notification', 'notification_delivery_attempt'])('everything the dispatcher wrote to %s names the system actor', async (table) => {
+    const rows = await h.one<{ total: number; other: number }>(
+      `select count(*)::int as total, count(*) filter (where created_by is distinct from $2 or updated_by is distinct from $2)::int as other from ${table} where company_id = $1`,
+      [A.id, SYSTEM_ACTOR_ID],
+    );
+    expect(rows.total).toBeGreaterThan(0);
+    expect(rows.other).toBe(0);
+  });
+
+  it('an audit row’s updated metadata equals its creation metadata', async () => {
+    const rows = await h.one<{ total: number; other: number }>(`select count(*)::int as total, count(*) filter (where updated_by is distinct from created_by or created_by is null)::int as other from audit_event where company_id = $1`, [A.id]);
+    expect(rows.total).toBeGreaterThan(0);
+    expect(rows.other).toBe(0);
   });
 });

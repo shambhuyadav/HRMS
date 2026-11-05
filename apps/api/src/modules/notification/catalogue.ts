@@ -113,6 +113,25 @@ export const EVENT_NOTICE_CATALOGUE: readonly {
     placeholders: ['roleCode', 'outcome'],
   },
   {
+    // DF12 "role-grant/security change": the role only, never the permission or the reason (access/role-permissions.ts, 0132).
+    code: 'ROLE_PERMISSION_CHANGE_PROPOSED',
+    eventType: 'ROLE_PERMISSION_CHANGE_PROPOSED',
+    selector: 'GRANT_APPROVERS',
+    optional: false,
+    subject: 'Role permission change waiting for approval',
+    body: 'A permission change to the {{roleCode}} role is waiting for your approval.',
+    placeholders: ['roleCode'],
+  },
+  {
+    code: 'ROLE_PERMISSION_CHANGE_DECIDED',
+    eventType: 'ROLE_PERMISSION_CHANGE_DECIDED',
+    selector: 'BENEFICIARY_USER',
+    optional: false,
+    subject: 'Role permission change {{outcome}}',
+    body: 'The permission change you proposed to the {{roleCode}} role was {{outcome}}.',
+    placeholders: ['roleCode', 'outcome'],
+  },
+  {
     // H7 "bank change cutoff"; H4 "Bank revisions after cutoff warn employee". Period and dates only, never a bank value.
     code: 'BANK_CHANGE_CUTOFF',
     eventType: 'BANK_CHANGE_CUTOFF',

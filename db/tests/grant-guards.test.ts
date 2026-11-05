@@ -98,8 +98,8 @@ beforeEach(async () => {
   // The approver actually holds the approval duty, in company scope.
   await f.asGrantBootstrap(async () => {
     const seat = await f.id(
-      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at) values ($1, $2, $3, 'COMPANY', '2026-01-01T00:00:00Z', 'ACTIVE', $4, now())`,
-      [a.company, approver, hrRole, await f.makeUser()],
+      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, created_by) values ($1, $2, $3, 'COMPANY', '2026-01-01T00:00:00Z', 'ACTIVE', $4, now(), $5)`,
+      [a.company, approver, hrRole, await f.makeUser(), requester],
     );
     await db.query(`insert into role_assignment_permission (company_id, role_assignment_id, permission_id, active, effective_from) values ($1, $2, $3, true, '2026-01-01T00:00:00Z')`, [a.company, seat, approveGrant]);
   });
@@ -195,11 +195,12 @@ describe('role_assignment: transitions and approval (C4 own privilege grant)', (
     await expect(db.query(`update role_assignment set purpose = 'Rewritten' where id = $1`, [active])).rejects.toThrow(FROZEN);
     // A scope change on a role C2 does not name is refused by the freeze alone.
     const custom = await f.asGrantBootstrap(() =>
-      f.id(`insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at) values ($1, $2, $3, 'TEAM', '2026-01-01T00:00:00Z', 'ACTIVE', $4, now())`, [
+      f.id(`insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, created_by) values ($1, $2, $3, 'TEAM', '2026-01-01T00:00:00Z', 'ACTIVE', $4, now(), $5)`, [
         a.company,
         beneficiary,
         otherRole,
         approver,
+        requester,
       ]),
     );
     await expect(db.query(`update role_assignment set scope_kind = 'COMPANY' where id = $1`, [custom])).rejects.toThrow(FROZEN);

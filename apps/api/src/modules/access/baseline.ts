@@ -123,6 +123,8 @@ const LEAVE_MANAGER: PermissionKey[] = [
   'attendance.approve_correction.operational',
   'confirmation.read.operational',
   'confirmation.recommend.operational',
+  // C6: a manager recommends on a case's earlier decisions; an operational duty, so it is not ceiling-only.
+  'confirmation.history_read.operational',
 ];
 // Salary and increment amounts are confidential: they are in the ceilings of eligible roles only and are
 // never default duties (each needs an independently approved assignment grant with a purpose, DF02).
@@ -136,6 +138,9 @@ const COMPENSATION_CONFIDENTIAL_HR: PermissionKey[] = [
   'increment.approve.salary',
   'increment.export.salary',
   'increment.read.reason',
+  // C4, C6: the financial past is its own grant (0126), so a new scope or manager does not bring it along.
+  'salary.history_read.salary',
+  'increment.history_read.salary',
 ];
 // DF15/FR-091 cycle management: activation and plan decisions are separate duties, and the service refuses the
 // author or proposer (and the employee concerned) for the same record (C4).
@@ -150,7 +155,7 @@ const INCREMENT_OPERATIONAL_HR: PermissionKey[] = [
   'confirmation.export.operational',
 ];
 // The increment decision reason is its own confidential group (0032), ceiling-only like the salary values.
-const COMPENSATION_CONFIDENTIAL_MANAGER: PermissionKey[] = ['increment.read.salary', 'increment.propose.salary', 'increment.read.reason'];
+const COMPENSATION_CONFIDENTIAL_MANAGER: PermissionKey[] = ['increment.read.salary', 'increment.propose.salary', 'increment.read.reason', 'increment.history_read.salary'];
 
 const TEAM_MANAGER: PermissionKey[] = ['team.list.operational', 'team.read.operational', 'dashboard.read.operational'];
 // DF16: the Employment and Reporting and History tabs are operational tabs of the direct team (protected history is masked).
@@ -177,11 +182,15 @@ const EXPENSE_FINANCE_ADMIN: PermissionKey[] = [
   'payment.read.operational',
   'payment.prepare.operational',
   'payment.release.operational',
+  // C3 "confirm_outcome ... confirmation actor explicitly assigned"; "export": their own actions (0131).
+  'payment.confirm_outcome.operational',
   'payment.reverse.operational',
+  'payment.export.operational',
 ];
 
 const CONFIRMATION_HR: PermissionKey[] = [
   'confirmation.read.operational',
+  'confirmation.history_read.operational',
   'confirmation.manage.operational',
   'confirmation.decide.operational',
   'confirmation_policy.manage.operational',
@@ -234,6 +243,12 @@ const CORE_ROLES: readonly BaselineRole[] = [
       'audit.read.operational',
       'notification.read_delivery.operational',
       'notification.manage_rules.operational',
+      // C6 "publication ... require business owner approval" (0133): an explicit grant, never the rule's author.
+      'notification.approve_rules.operational',
+      // Section 11.2 "restricted notification/support authority" and "restricted integration administrator": their exports
+      // are explicit grants, never default duties (0124).
+      'notification.export.operational',
+      'biometric.export.operational',
       ...BIOMETRIC_ADMIN,
       // FR-058 / DF08: audit export and retention controls are explicit grants, never default duties.
       ...AUDIT_RETENTION_ADMIN,
@@ -260,6 +275,10 @@ const CORE_ROLES: readonly BaselineRole[] = [
       DELEGATE_OWN_DECISIONS,
       'dashboard.read.operational',
       'expense.view_receipt.receipt',
+      // Section 11.2 "owner-approved scoped audience only": the upcoming celebrations report, never a default duty (0124).
+      'celebration.export.operational',
+      // C6 "publication ... require business owner approval" (0133): an explicit grant, never the rule's author.
+      'notification.approve_rules.operational',
       'leave.read.reason',
       // Private reasons (DF02): confidential, never default duties.
       'confirmation.read.reason',
@@ -285,8 +304,9 @@ const CORE_ROLES: readonly BaselineRole[] = [
     name: 'Employee',
     accessClass: 'OTHER',
     defaultScope: 'OWN',
-    ceiling: ['employee.read.operational', 'dashboard.read.operational', ...LEAVE_SELF, ...EXPENSE_SELF, ...EMPLOYEE_OWN_ESS],
-    defaultDuties: ['employee.read.operational', 'dashboard.read.operational', ...LEAVE_SELF, ...EXPENSE_SELF, ...EMPLOYEE_OWN_ESS],
+    // DF12 "active company employees who have celebration access" (0124).
+    ceiling: ['employee.read.operational', 'dashboard.read.operational', 'celebration.read.operational', ...LEAVE_SELF, ...EXPENSE_SELF, ...EMPLOYEE_OWN_ESS],
+    defaultDuties: ['employee.read.operational', 'dashboard.read.operational', 'celebration.read.operational', ...LEAVE_SELF, ...EXPENSE_SELF, ...EMPLOYEE_OWN_ESS],
   },
   {
     code: 'REPORTING_MANAGER',
@@ -309,6 +329,7 @@ const CORE_ROLES: readonly BaselineRole[] = [
       // FR-095, DF16, DF02: salary and identity-document access are "off by default" for this role and need an
       // independently approved grant with a named purpose, so they are ceilings, never default duties.
       'salary.read.salary',
+      'salary.history_read.salary',
       'document.read.document',
       DELEGATE_OWN_DECISIONS,
       'expense.view_receipt.receipt',
@@ -716,6 +737,8 @@ export const OPERATIONAL_FIELD_GROUPS: readonly { resource: string; fieldGroup: 
   { resource: 'confirmation', fieldGroup: 'operational' },
   { resource: 'confirmation_policy', fieldGroup: 'operational' },
   { resource: 'notification', fieldGroup: 'operational' },
+  // DF12: a celebration shows name, work department and event type only.
+  { resource: 'celebration', fieldGroup: 'operational' },
   { resource: 'increment', fieldGroup: 'operational' },
   { resource: 'increment_cycle', fieldGroup: 'operational' },
   // DF15 plan assignment and review dates (the reasons stay in the confidential increment reason group).

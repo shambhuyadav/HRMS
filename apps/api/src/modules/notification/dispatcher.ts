@@ -6,6 +6,11 @@
 // delivery time (not only at queue time), renders only approved placeholders, and records an attempt.
 // Application idempotency does not imply exactly-once delivery by any external provider (BR-034).
 // An event is described as it was raised (the revision and dates in its payload), not from a later state.
+// Everything written here is written by the dispatcher itself, whoever's request raised the event, so it names the system actor.
+// Claims take one event per company in turn (db/company-turns.ts), so a burst from one company never starves another.
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
+import { positiveIntFromEnv } from '../../db/budget.js';
+import { companyTurns } from '../../db/company-turns.js';
 import type { Queryable } from '../../db/queryable.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
 import { loadFilters, withinAdministrativeScope } from '../access/admin.js';
@@ -53,6 +58,8 @@ export interface EventSpec {
   managerAlso?: boolean | undefined;
   /** Pending role assignment whose eligible approvers GRANT_APPROVERS rules notify (access/admin.ts). */
   grantAssignmentId?: string | undefined;
+  /** Open role permission change whose eligible deciders GRANT_APPROVERS rules notify (access/role-permissions.ts). */
+  rolePermissionChangeId?: string | undefined;
   data: Record<string, string>;
 }
 
@@ -302,6 +309,24 @@ async function describe(tx: Queryable, o: OutboxRow): Promise<EventSpec | null> 
         ? { eventType: 'ACCESS_GRANT_ENDED', ...none, beneficiaryUserId: g.user_id, data: { roleCode: g.role_code, outcome } }
         : { eventType: 'ACCESS_GRANT_PROPOSED', ...none, beneficiaryUserId: null, grantAssignmentId: assignmentId, data: { roleCode: g.role_code } };
     }
+    case 'access.role_permission_proposed':
+    case 'access.role_permission_decided': {
+      // DF12 "role-grant/security change": the role's code and the outcome only, never the permission or the reason.
+      const changeId = id(p.changeId);
+      if (!changeId) return null;
+      const c = (
+        await tx.query<{ requested_by: string; role_code: string; state: string }>(
+          `select c.requested_by, r.code as role_code, c.state from role_permission_change c join role r on r.company_id = c.company_id and r.id = c.role_id
+            where c.company_id = $1 and c.id = $2`,
+          [o.company_id, changeId],
+        )
+      ).rows[0];
+      if (!c) return null;
+      const none = { subjectEmployeeId: null, transactionId: null, transactionRevision: null, taskId: null };
+      return o.topic === 'access.role_permission_decided'
+        ? { eventType: 'ROLE_PERMISSION_CHANGE_DECIDED', ...none, beneficiaryUserId: c.requested_by, data: { roleCode: c.role_code, outcome: c.state === 'APPROVED' ? 'approved' : 'rejected' } }
+        : { eventType: 'ROLE_PERMISSION_CHANGE_PROPOSED', ...none, beneficiaryUserId: null, rolePermissionChangeId: changeId, data: { roleCode: c.role_code } };
+    }
     case 'storage.scan_quarantined': {
       // H7 "scan" notice to the uploader: when it was uploaded, never its name, type or the scanner's finding.
       if (!id(p.attachmentId)) return null;
@@ -436,6 +461,23 @@ async function grantApprovers(tx: Queryable, companyId: string, assignmentId: st
   return holders.filter((u) => u !== grant.user_id && u !== grant.created_by);
 }
 
+/** Who could decide an open role permission change (access/role-permissions.ts): the whole-company approval duty, not its requester, and not holding the role. */
+async function rolePermissionDeciders(tx: Queryable, companyId: string, changeId: string, onlyUserId: string | null = null): Promise<string[]> {
+  const change = (await tx.query<{ role_id: string; requested_by: string; state: string }>(`select role_id, requested_by, state from role_permission_change where company_id = $1 and id = $2`, [companyId, changeId])).rows[0];
+  if (!change || change.state !== 'PROPOSED') return [];
+  const holders = await companyScopeHolders(tx, companyId, { resource: 'access', action: 'approve_role_grant', groups: ['operational'] }, onlyUserId, unrestricted);
+  if (holders.length === 0) return [];
+  const affected = new Set(
+    (
+      await tx.query<{ user_id: string }>(
+        `select user_id from role_assignment where company_id = $1 and role_id = $2 and user_id = any($3::uuid[]) and state in ('PENDING', 'ACTIVE') and (effective_to is null or effective_to > now())`,
+        [companyId, change.role_id, holders],
+      )
+    ).rows.map((r) => r.user_id),
+  );
+  return holders.filter((u) => u !== change.requested_by && !affected.has(u));
+}
+
 /** The subject employee's current direct managers (their linked users), by effective dates. */
 async function managerUsers(tx: Queryable, companyId: string, employeeId: string): Promise<string[]> {
   return (
@@ -446,6 +488,47 @@ async function managerUsers(tx: Queryable, companyId: string, employeeId: string
         where m.company_id = $1 and m.employee_id = $2
           and m.effective_from <= hrms_business_date($1, now()) and (m.effective_to is null or m.effective_to > hrms_business_date($1, now()))`,
       [companyId, employeeId],
+    )
+  ).rows.map((x) => x.u);
+}
+
+/** DF12's "active company employees": the employee statuses that receive and appear in celebrations (BR-032; FR-083). */
+export const ACTIVE_EMPLOYEE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'] as const;
+
+/**
+ * DF12 "active company employees who have celebration access"; section 11.2 "owner-approved scoped audience only": users
+ * linked today to an active employee of the company, who hold celebration.read in an active assignment (its role, its own
+ * DB109 entry and the group's classification, as resolveAccess reads them), so an account with no employee link, a separated
+ * employee whose assignment is still active and an assignment without the grant receive nothing. The same at fan-out and at
+ * delivery (`onlyUserId`).
+ */
+async function celebrationAudience(tx: Queryable, companyId: string, onlyUserId: string | null = null, page: { after: string | null; limit: number } | null = null): Promise<string[]> {
+  return (
+    await tx.query<{ u: string }>(
+      `with d as (select hrms_business_date($1, now()) as today)
+       select distinct ra.user_id as u
+         from d, role_assignment ra
+         join user_account ua on ua.id = ra.user_id and ua.active
+         join role r on r.company_id = ra.company_id and r.id = ra.role_id and r.active
+         join permission p on p.resource = 'celebration' and p.action = 'read' and p.field_group = 'operational'
+         join role_permission rp on rp.company_id = ra.company_id and rp.role_id = ra.role_id and rp.permission_id = p.id and rp.effect = 'ALLOW'
+         join role_assignment_permission rap on rap.company_id = ra.company_id and rap.role_assignment_id = ra.id and rap.permission_id = p.id
+              and rap.active and rap.effective_from <= now() and (rap.effective_to is null or rap.effective_to > now())
+        where ra.company_id = $1 and ra.state = 'ACTIVE' and ra.effective_from <= now() and (ra.effective_to is null or ra.effective_to > now())
+          and ($2::uuid is null or ra.user_id = $2)
+          and (r.access_class in ('ADMIN', 'MANAGER') or exists (
+                select 1 from confidential_field_policy cfp
+                 where cfp.company_id = ra.company_id and cfp.resource_code = p.resource and cfp.field_group = p.field_group and cfp.classification = 'OPERATIONAL'
+                   and cfp.effective_from <= d.today and (cfp.effective_to is null or cfp.effective_to > d.today)))
+          and exists (
+                select 1 from user_employee_link l
+                  join employee e on e.company_id = l.company_id and e.id = l.employee_id
+                  join reference_value st on st.company_id = e.company_id and st.id = e.status_id and st.code = any($3::text[])
+                 where l.company_id = ra.company_id and l.user_id = ra.user_id
+                   and l.effective_from <= d.today and (l.effective_to is null or l.effective_to > d.today))
+          and ($4::uuid is null or ra.user_id > $4)
+        order by u limit $5`,
+      [companyId, onlyUserId, ACTIVE_EMPLOYEE_STATUSES, page?.after ?? null, page?.limit ?? null],
     )
   ).rows.map((x) => x.u);
 }
@@ -486,6 +569,8 @@ async function recipients(tx: Queryable, companyId: string, selector: string, ev
     case 'BIOMETRIC_SUPPORT':
       return biometricSupport(tx, companyId);
     case 'GRANT_APPROVERS': {
+      const changeId = id(ev.rolePermissionChangeId);
+      if (changeId) return rolePermissionDeciders(tx, companyId, changeId);
       const assignmentId = id(ev.grantAssignmentId);
       return assignmentId ? grantApprovers(tx, companyId, assignmentId) : [];
     }
@@ -508,13 +593,7 @@ async function recipients(tx: Queryable, companyId: string, selector: string, ev
       return ev.subjectEmployeeId && id(ev.subjectEmployeeId) ? usersCoveringEmployee(tx, companyId, listed, ev.subjectEmployeeId) : listed;
     }
     case 'COMPANY_CELEBRATION_AUDIENCE':
-      return (
-        await tx.query<{ u: string }>(
-          `select distinct ra.user_id as u from role_assignment ra join user_account ua on ua.id = ra.user_id and ua.active
-            where ra.company_id = $1 and ra.state = 'ACTIVE' and ra.effective_from <= now() and (ra.effective_to is null or ra.effective_to > now())`,
-          [companyId],
-        )
-      ).rows.map((x) => x.u);
+      return celebrationAudience(tx, companyId);
     default:
       return [];
   }
@@ -579,7 +658,10 @@ export async function stillEligible(tx: Queryable, companyId: string, userId: st
     return versionId !== null && (await policyManagers(tx, companyId, versionId, userId)).length > 0;
   }
   if (selector === 'BIOMETRIC_SUPPORT') return (await biometricSupport(tx, companyId, userId)).length > 0;
+  if (selector === 'COMPANY_CELEBRATION_AUDIENCE') return (await celebrationAudience(tx, companyId, userId)).length > 0;
   if (selector === 'GRANT_APPROVERS') {
+    const changeId = id(ev.rolePermissionChangeId);
+    if (changeId) return (await rolePermissionDeciders(tx, companyId, changeId, userId)).length > 0;
     const assignmentId = id(ev.grantAssignmentId);
     return assignmentId !== null && (await grantApprovers(tx, companyId, assignmentId, userId)).length > 0;
   }
@@ -595,11 +677,12 @@ async function deliver(
 ): Promise<string> {
   const attempt = async (outcome: 'DELIVERED' | 'FAILED' | 'SUPPRESSED', failure: string | null) => {
     await tx.query(
-      `insert into notification_delivery_attempt (company_id, notification_id, attempt_number, outcome, outcome_at, failure_code)
-       values ($1, $2, coalesce((select max(attempt_number) from notification_delivery_attempt where company_id = $1 and notification_id = $2), 0) + 1, $3, now(), $4)`,
-      [companyId, n.id, outcome, failure],
+      `insert into notification_delivery_attempt (company_id, notification_id, attempt_number, outcome, outcome_at, failure_code, created_by, updated_by)
+       values ($1, $2, coalesce((select max(attempt_number) from notification_delivery_attempt where company_id = $1 and notification_id = $2), 0) + 1, $3, now(), $4, $5, $5)`,
+      [companyId, n.id, outcome, failure, SYSTEM_ACTOR_ID],
     );
   };
+  const settle = (state: 'SUPPRESSED' | 'FAILED') => tx.query(`update notification set state = $3, updated_by = $4 where company_id = $1 and id = $2`, [companyId, n.id, state, SYSTEM_ACTOR_ID]);
 
   if (n.optional) {
     const pref = (
@@ -609,24 +692,24 @@ async function deliver(
       )
     ).rows[0];
     if (pref && !pref.receive_optional) {
-      await tx.query(`update notification set state = 'SUPPRESSED' where company_id = $1 and id = $2`, [companyId, n.id]);
+      await settle('SUPPRESSED');
       await attempt('SUPPRESSED', 'RECIPIENT_OPTED_OUT');
       return 'SUPPRESSED';
     }
   }
   if (!(await stillEligible(tx, companyId, n.userId, n.selector, ev))) {
-    await tx.query(`update notification set state = 'SUPPRESSED' where company_id = $1 and id = $2`, [companyId, n.id]);
+    await settle('SUPPRESSED');
     await attempt('SUPPRESSED', 'RECIPIENT_NOT_ELIGIBLE');
     return 'SUPPRESSED';
   }
   const body = render(template.body, template.approved, ev.data);
   const subject = template.subject ? render(template.subject, template.approved, ev.data) : { text: null as string | null };
   if ('missing' in body || 'missing' in subject) {
-    await tx.query(`update notification set state = 'FAILED' where company_id = $1 and id = $2`, [companyId, n.id]);
+    await settle('FAILED');
     await attempt('FAILED', 'MISSING_PLACEHOLDER');
     return 'FAILED';
   }
-  await tx.query(`update notification set state = 'DELIVERED', title = $3, body = $4 where company_id = $1 and id = $2`, [companyId, n.id, subject.text, body.text]);
+  await tx.query(`update notification set state = 'DELIVERED', title = $3, body = $4, updated_by = $5 where company_id = $1 and id = $2`, [companyId, n.id, subject.text, body.text, SYSTEM_ACTOR_ID]);
   await attempt('DELIVERED', null);
   return 'DELIVERED';
 }
@@ -636,22 +719,14 @@ async function deliver(
  * false when the event key was already processed (a replay or rerun), in which case nothing is created.
  */
 export async function fanOut(tx: Queryable, companyId: string, eventKey: string, occurrenceDate: string | null, ev: EventSpec): Promise<{ created: number; recorded: boolean }> {
-  const event = (
-    await tx.query<{ id: string }>(
-      `insert into notification_event (company_id, event_key, event_type, subject_employee_id, transaction_id, transaction_revision,
-                                       occurrence_date, business_timezone, data)
-       select $1, $2, $3, $4, $5, $6, coalesce($7::date, hrms_business_date($1, now())), c.business_timezone, $8 from company c where c.id = $1
-       on conflict (company_id, event_key) do nothing returning id`,
-      [companyId, eventKey, ev.eventType, ev.subjectEmployeeId, ev.transactionId, ev.transactionRevision, occurrenceDate, ev.data],
-    )
-  ).rows[0];
-  if (!event) return { created: 0, recorded: false }; // event already processed (replay)
+  const eventId = await recordEvent(tx, companyId, eventKey, occurrenceDate, ev);
+  if (!eventId) return { created: 0, recorded: false }; // event already processed (replay)
 
   const rules = (
-    await tx.query<{ id: string; revision: number; recipient_selector: string; optional_event: boolean; subject_template: string | null; body_template: string; approved_placeholders: string[] }>(
+    await tx.query<NoticeRule>(
       `select r.id, r.revision, r.recipient_selector, r.optional_event, t.subject_template, t.body_template, t.approved_placeholders
          from notification_rule r join notification_template t on t.company_id = r.company_id and t.id = r.template_id and t.active
-        where r.company_id = $1 and r.event_type = $2 and r.active and r.effective_from <= now() and (r.effective_to is null or r.effective_to > now())`,
+        where r.company_id = $1 and r.event_type = $2 and ${RULE_IN_FORCE}`,
       [companyId, ev.eventType],
     )
   ).rows;
@@ -659,26 +734,138 @@ export async function fanOut(tx: Queryable, companyId: string, eventKey: string,
   let created = 0;
   for (const rule of rules) {
     for (const userId of await recipients(tx, companyId, rule.recipient_selector, ev)) {
-      const n = (
-        await tx.query<{ id: string }>(
-          `insert into notification (company_id, recipient_user_id, transaction_id, category, state, event_id, rule_id, channel, idempotency_key)
-           values ($1, $2, $3, $4, 'QUEUED', $5, $6, 'IN_APP', $7) on conflict (company_id, idempotency_key) do nothing returning id`,
-          [companyId, userId, ev.transactionId, ev.eventType, event.id, rule.id, `${event.id}:${userId}:IN_APP:${rule.id}:${rule.revision}`],
-        )
-      ).rows[0];
-      if (!n) continue;
-      created++;
-      await deliver(tx, companyId, { id: n.id, userId, selector: rule.recipient_selector, optional: rule.optional_event, eventType: ev.eventType }, ev, {
-        subject: rule.subject_template,
-        body: rule.body_template,
-        approved: rule.approved_placeholders,
-      });
+      if (await notifyRecipient(tx, companyId, eventId, rule, userId, ev)) created++;
     }
   }
   return { created, recorded: true };
 }
 
-/** Processes up to `limit` unpublished outbox rows, one transaction each. Returns how many were consumed. */
+interface NoticeRule {
+  id: string;
+  revision: number;
+  recipient_selector: string;
+  optional_event: boolean;
+  subject_template: string | null;
+  body_template: string;
+  approved_placeholders: string[];
+}
+
+/** A rule that applies to events recorded now (alias r). */
+const RULE_IN_FORCE = `r.active and r.publication_state = 'PUBLISHED' and r.effective_from <= now() and (r.effective_to is null or r.effective_to > now())`;
+
+/** Records the event; answers its id, or undefined when its key was already recorded. */
+async function recordEvent(tx: Queryable, companyId: string, eventKey: string, occurrenceDate: string | null, ev: EventSpec): Promise<string | undefined> {
+  return (
+    await tx.query<{ id: string }>(
+      `insert into notification_event (company_id, event_key, event_type, subject_employee_id, transaction_id, transaction_revision,
+                                       occurrence_date, business_timezone, data, created_by, updated_by)
+       select $1, $2, $3, $4, $5, $6, coalesce($7::date, hrms_business_date($1, now())), c.business_timezone, $8, $9, $9 from company c where c.id = $1
+       on conflict (company_id, event_key) do nothing returning id`,
+      [companyId, eventKey, ev.eventType, ev.subjectEmployeeId, ev.transactionId, ev.transactionRevision, occurrenceDate, ev.data, SYSTEM_ACTOR_ID],
+    )
+  ).rows[0]?.id;
+}
+
+/** One notification and its delivery. False when this recipient already has it under this rule revision (BR-034). */
+async function notifyRecipient(tx: Queryable, companyId: string, eventId: string, rule: NoticeRule, userId: string, ev: EventSpec): Promise<boolean> {
+  const n = (
+    await tx.query<{ id: string }>(
+      `insert into notification (company_id, recipient_user_id, transaction_id, category, state, event_id, rule_id, channel, idempotency_key, created_by, updated_by)
+       values ($1, $2, $3, $4, 'QUEUED', $5, $6, 'IN_APP', $7, $8, $8) on conflict (company_id, idempotency_key) do nothing returning id`,
+      [companyId, userId, ev.transactionId, ev.eventType, eventId, rule.id, `${eventId}:${userId}:IN_APP:${rule.id}:${rule.revision}`, SYSTEM_ACTOR_ID],
+    )
+  ).rows[0];
+  if (!n) return false;
+  await deliver(tx, companyId, { id: n.id, userId, selector: rule.recipient_selector, optional: rule.optional_event, eventType: ev.eventType }, ev, {
+    subject: rule.subject_template,
+    body: rule.body_template,
+    approved: rule.approved_placeholders,
+  });
+  return true;
+}
+
+/** Recipients written per transaction when an event goes to a whole company; a starting value, to be measured (G4). */
+export const celebrationRecipientBatch = (): number => positiveIntFromEnv('CELEBRATION_RECIPIENT_BATCH') ?? 200;
+
+/** The next recipients of a rule after a position, in user id order. Only the company-wide selector can be large, so only it is paged in SQL. */
+async function recipientPage(tx: Queryable, companyId: string, selector: string, ev: EventSpec, after: string | null, limit: number): Promise<string[]> {
+  if (selector === 'COMPANY_CELEBRATION_AUDIENCE') return celebrationAudience(tx, companyId, null, { after, limit });
+  const all = [...new Set(await recipients(tx, companyId, selector, ev))].sort();
+  return (after === null ? all : all.filter((u) => u > after)).slice(0, limit);
+}
+
+/** Records a new event with a position per rule in force; for an event already recorded, finds it if it still has recipients to go. */
+async function openFanOut(tx: Queryable, companyId: string, eventKey: string, occurrenceDate: string | null, ev: EventSpec): Promise<{ id: string; data: Record<string, string> } | null> {
+  const eventId = await recordEvent(tx, companyId, eventKey, occurrenceDate, ev);
+  if (eventId) {
+    await tx.query(
+      `insert into notification_fan_out (company_id, event_id, rule_id, created_by, updated_by)
+       select r.company_id, $2, r.id, $4, $4
+         from notification_rule r join notification_template t on t.company_id = r.company_id and t.id = r.template_id and t.active
+        where r.company_id = $1 and r.event_type = $3 and ${RULE_IN_FORCE}`,
+      [companyId, eventId, ev.eventType, SYSTEM_ACTOR_ID],
+    );
+    return { id: eventId, data: ev.data };
+  }
+  return (
+    (
+      await tx.query<{ id: string; data: Record<string, string> }>(
+        `select e.id, e.data from notification_event e
+          where e.company_id = $1 and e.event_key = $2
+            and exists (select 1 from notification_fan_out f where f.company_id = e.company_id and f.event_id = e.id and f.finished_at is null)`,
+        [companyId, eventKey],
+      )
+    ).rows[0] ?? null
+  );
+}
+
+/**
+ * One batch of recipients of the first rule with any to go, in one transaction: the notices and the moved position commit
+ * together, so a crash loses at most this batch and the next run starts right after the last recipient written. The position's
+ * row lock keeps a second worker off until this batch is committed; it then continues from the new position. The rules are those
+ * in force when the event was recorded, as if it had been written in one transaction; the recipient check runs at each delivery.
+ */
+async function fanOutBatch(tx: Queryable, companyId: string, eventId: string, ev: EventSpec, batchSize: number): Promise<{ created: number; done: boolean }> {
+  const position = (
+    await tx.query<NoticeRule & { after_user_id: string | null }>(
+      `select r.id, r.revision, r.recipient_selector, r.optional_event, t.subject_template, t.body_template, t.approved_placeholders, f.after_user_id
+         from notification_fan_out f
+         join notification_rule r on r.company_id = f.company_id and r.id = f.rule_id
+         join notification_template t on t.company_id = r.company_id and t.id = r.template_id
+        where f.company_id = $1 and f.event_id = $2 and f.finished_at is null
+        order by f.rule_id limit 1 for update of f`,
+      [companyId, eventId],
+    )
+  ).rows[0];
+  if (!position) return { created: 0, done: true };
+  const page = await recipientPage(tx, companyId, position.recipient_selector, ev, position.after_user_id, batchSize);
+  let created = 0;
+  for (const userId of page) if (await notifyRecipient(tx, companyId, eventId, position, userId, ev)) created++;
+  await tx.query(
+    `update notification_fan_out set after_user_id = $4, finished_at = case when $5::boolean then now() end, updated_by = $6
+      where company_id = $1 and event_id = $2 and rule_id = $3`,
+    [companyId, eventId, position.id, page.at(-1) ?? position.after_user_id, page.length < batchSize, SYSTEM_ACTOR_ID],
+  );
+  return { created, done: false };
+}
+
+/**
+ * fanOut for an event that goes to a whole company (DF12 celebrations): one notice per recipient, written in transactions of at
+ * most `batchSize` recipients, each recipient once across a crash and any rerun. `recorded` is false when the event's recipients
+ * were all done before this call. A resumed event keeps the content it was recorded with, so every recipient reads the same notice.
+ */
+export async function fanOutInBatches(db: Database, companyId: string, eventKey: string, occurrenceDate: string | null, ev: EventSpec, batchSize: number): Promise<{ created: number; recorded: boolean }> {
+  const event = await withTransaction(db, (tx) => openFanOut(tx, companyId, eventKey, occurrenceDate, ev));
+  if (!event) return { created: 0, recorded: false };
+  const recorded = { ...ev, data: event.data };
+  let created = 0;
+  for (;;) {
+    const step = await withTransaction(db, (tx) => fanOutBatch(tx, companyId, event.id, recorded, batchSize));
+    created += step.created;
+    if (step.done) return { created, recorded: true };
+  }
+}
+
 /** DF12: a failing event is retried after 1, 5 and 15 minutes, then FAILED; it never holds back the events behind it. */
 const RETRY_MINUTES = [1, 5, 15];
 
@@ -690,64 +877,90 @@ function failureCode(err: unknown): string {
   return /^[A-Za-z0-9_.:-]{1,100}$/.test(name) ? name : 'Error';
 }
 
+/**
+ * The claim: the next company's oldest ready event after a position. Within a company oldest first: ids are random UUIDs (0071),
+ * so the order is the writing transaction's start time, then `seq`, the cell-local position that keeps the order in which one
+ * transaction wrote its events. An event waiting for its retry is not in this index at all (0160), so no claim reads past one.
+ */
+export const OUTBOX_CLAIM_SQL = `select id::text, company_id, topic, aggregate_id, dedupe_key, payload, attempts from outbox_event
+            where published_at is null and failed_at is null and next_attempt_at is null and company_id > $1
+            order by company_id, created_at, seq limit 1 for update skip locked`;
+
+const outboxTurns = companyTurns();
+
+/**
+ * Up to `limit` events: one transaction each, one company at a time, so a burst from one company leaves every other company's
+ * next event within as many claims as there are companies with events ready. Retries that have fallen due first go back among
+ * the ready events, at their own place in their company's order. Returns how many were consumed.
+ */
 export async function dispatchOutbox(db: Database, limit = 100): Promise<number> {
+  await db.query(
+    `with due as (select id from outbox_event
+                   where published_at is null and failed_at is null and next_attempt_at <= now()
+                   order by next_attempt_at limit $1 for update skip locked)
+     update outbox_event e set next_attempt_at = null from due where e.id = due.id`,
+    [limit],
+  );
   let consumed = 0;
   for (let i = 0; i < limit; i++) {
-    const done = await withTransaction(db, async (tx) => {
-      // Oldest first. Ids are random UUIDs (0071), so the order is the writing transaction's start time, then `seq`,
-      // the cell-local position that keeps the order in which one transaction wrote its events.
-      const o = (
-        await tx.query<OutboxRow & { attempts: number }>(
-          `select id::text, company_id, topic, aggregate_id, dedupe_key, payload, attempts from outbox_event
-            where published_at is null and failed_at is null and (next_attempt_at is null or next_attempt_at <= now())
-            order by created_at, seq limit 1 for update skip locked`,
-        )
-      ).rows[0];
-      if (!o) return false;
-      // Each event in its own savepoint: a failure undoes only that event's partial work and is retried later.
-      await tx.query('savepoint outbox_event');
-      try {
-        const ev = await describe(tx, o);
-        if (ev) await fanOut(tx, o.company_id, `outbox:${o.dedupe_key}`, null, ev);
-        await tx.query('release savepoint outbox_event');
-        await tx.query(`update outbox_event set published_at = now(), attempts = attempts + 1, next_attempt_at = null where id = $1`, [o.id]);
-      } catch (err) {
-        await tx.query('rollback to savepoint outbox_event');
-        const attempt = o.attempts + 1;
-        const code = failureCode(err);
-        const delay = RETRY_MINUTES[attempt - 1] ?? null;
-        await tx.query(`insert into outbox_event_attempt (event_id, company_id, attempt, error_code) values ($1, $2, $3, $4)`, [o.id, o.company_id, attempt, code]);
-        await tx.query(
-          `update outbox_event set attempts = $2, last_error = $3,
-                  next_attempt_at = case when $4::int is null then null else now() + make_interval(mins => $4::int) end,
-                  failed_at = case when $4::int is null then now() end
-            where id = $1`,
-          [o.id, attempt, code, delay],
-        );
-      }
-      return true;
-    });
-    if (!done) break;
+    const claimed = await withTransaction(db, (tx) => outboxTurns.next((after) => processNextEvent(tx, after)));
+    if (!claimed) break;
     consumed++;
   }
   return consumed;
 }
 
+async function processNextEvent(tx: Queryable, after: string): Promise<{ companyId: string } | null> {
+  const o = (await tx.query<OutboxRow & { attempts: number }>(OUTBOX_CLAIM_SQL, [after])).rows[0];
+  if (!o) return null;
+  // Each event in its own savepoint: a failure undoes only that event's partial work and is retried later.
+  await tx.query('savepoint outbox_event');
+  try {
+    const ev = await describe(tx, o);
+    if (ev) await fanOut(tx, o.company_id, `outbox:${o.dedupe_key}`, null, ev);
+    await tx.query('release savepoint outbox_event');
+    await tx.query(`update outbox_event set published_at = now(), attempts = attempts + 1, next_attempt_at = null where id = $1`, [o.id]);
+  } catch (err) {
+    await tx.query('rollback to savepoint outbox_event');
+    const attempt = o.attempts + 1;
+    const code = failureCode(err);
+    const delay = RETRY_MINUTES[attempt - 1] ?? null;
+    await tx.query(`insert into outbox_event_attempt (event_id, company_id, attempt, error_code) values ($1, $2, $3, $4)`, [o.id, o.company_id, attempt, code]);
+    await tx.query(
+      `update outbox_event set attempts = $2, last_error = $3,
+              next_attempt_at = case when $4::int is null then null else now() + make_interval(mins => $4::int) end,
+              failed_at = case when $4::int is null then now() end
+        where id = $1`,
+      [o.id, attempt, code, delay],
+    );
+  }
+  return { companyId: o.company_id };
+}
+
+/** Celebrants read per page; a starting value, to be measured (G4). */
+export const celebrationPageSize = (): number => positiveIntFromEnv('CELEBRATION_PAGE_SIZE') ?? 100;
+
 /**
  * FR-083 / DF12 celebrations for a company business date: opt-in only, active employments only; content is
  * name, department and event type (never birth date, year or age). 29 Feb birthdays are observed on 28 Feb in
  * non-leap years; work anniversaries use the service base date (or joining date) with month-end clamp.
+ * Celebrants are read a page at a time and each event's notices are written in batches, never in one whole-company
+ * transaction; a rerun after a crash finishes what is left (fanOutInBatches) and repeats nothing. A celebrant no longer due on
+ * that rerun (opted out, or no longer active) is not continued.
  */
-export async function runCelebrations(db: Database, companyId: string, day: string) {
-  return withTransaction(db, async (tx) => {
-    const due = (
-      await tx.query<{ employee_id: string; kind: 'BIRTHDAY' | 'WORK_ANNIVERSARY'; name: string; department: string; year: string }>(
+export async function runCelebrations(db: Database, companyId: string, day: string, options: { pageSize?: number; recipientBatch?: number } = {}) {
+  const pageSize = options.pageSize ?? celebrationPageSize();
+  const recipientBatch = options.recipientBatch ?? celebrationRecipientBatch();
+  let events = 0;
+  let after: { employee_id: string; kind: string } | null = null;
+  for (;;) {
+    const due: { employee_id: string; kind: 'BIRTHDAY' | 'WORK_ANNIVERSARY'; name: string; department: string; year: string }[] = (
+      await db.query<{ employee_id: string; kind: 'BIRTHDAY' | 'WORK_ANNIVERSARY'; name: string; department: string; year: string }>(
         `with d as (select $2::date as day, extract(year from $2::date)::int as y)
          select e.id as employee_id, k.kind, e.display_name as name, coalesce(dep.name, 'the company') as department, d.y::text as year
            from d
            join employee e on e.company_id = $1
-           join reference_value st on st.company_id = e.company_id and st.id = e.status_id
-                                  and st.code in ('ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE')
+           join reference_value st on st.company_id = e.company_id and st.id = e.status_id and st.code = any($3::text[])
            join user_employee_link l on l.company_id = e.company_id and l.employee_id = e.id
                 and l.effective_from <= d.day and (l.effective_to is null or l.effective_to > d.day)
            cross join (values ('BIRTHDAY'), ('WORK_ANNIVERSARY')) as k (kind)
@@ -756,27 +969,37 @@ export async function runCelebrations(db: Database, companyId: string, day: stri
            left join employment_assignment ea on ea.company_id = e.company_id and ea.employee_id = e.id
                 and ea.effective_from <= d.day and (ea.effective_to is null or ea.effective_to > d.day)
            left join department dep on dep.company_id = ea.company_id and dep.id = ea.department_id
-          where (k.kind = 'BIRTHDAY' and e.date_of_birth is not null
-                 and (e.date_of_birth + make_interval(years => d.y - extract(year from e.date_of_birth)::int))::date = d.day)
-             or (k.kind = 'WORK_ANNIVERSARY' and d.y > extract(year from coalesce(e.service_anniversary_date, e.joining_date))::int
-                 and (coalesce(e.service_anniversary_date, e.joining_date)
-                      + make_interval(years => d.y - extract(year from coalesce(e.service_anniversary_date, e.joining_date))::int))::date = d.day)`,
-        [companyId, day],
+          where ((k.kind = 'BIRTHDAY' and e.date_of_birth is not null
+                  and (e.date_of_birth + make_interval(years => d.y - extract(year from e.date_of_birth)::int))::date = d.day)
+              or (k.kind = 'WORK_ANNIVERSARY' and d.y > extract(year from coalesce(e.service_anniversary_date, e.joining_date))::int
+                  and (coalesce(e.service_anniversary_date, e.joining_date)
+                       + make_interval(years => d.y - extract(year from coalesce(e.service_anniversary_date, e.joining_date))::int))::date = d.day))
+            and ($4::uuid is null or (e.id, k.kind) > ($4::uuid, $5::text))
+          order by e.id, k.kind limit $6`,
+        [companyId, day, ACTIVE_EMPLOYEE_STATUSES, after?.employee_id ?? null, after?.kind ?? null, pageSize],
       )
     ).rows;
-    let events = 0;
     for (const c of due) {
-      const result = await fanOut(tx, companyId, `${c.kind}:${c.employee_id}:${c.year}`, day, {
-        eventType: c.kind,
-        subjectEmployeeId: c.employee_id,
-        transactionId: null,
-        transactionRevision: null,
-        taskId: null,
-        beneficiaryUserId: null,
-        data: { employeeName: c.name, department: c.department },
-      });
+      const result = await fanOutInBatches(
+        db,
+        companyId,
+        `${c.kind}:${c.employee_id}:${c.year}`,
+        day,
+        {
+          eventType: c.kind,
+          subjectEmployeeId: c.employee_id,
+          transactionId: null,
+          transactionRevision: null,
+          taskId: null,
+          beneficiaryUserId: null,
+          data: { employeeName: c.name, department: c.department },
+        },
+        recipientBatch,
+      );
       if (result.created > 0) events++;
     }
-    return { day, events };
-  });
+    const last = due.at(-1);
+    if (!last || due.length < pageSize) return { day, events };
+    after = last;
+  }
 }

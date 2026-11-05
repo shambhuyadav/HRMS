@@ -18,9 +18,11 @@ import { withTransaction } from '../apps/api/src/db/transaction.js';
 import { HttpError } from '../apps/api/src/http/errors.js';
 import { type AccessGrant, resolveAccess } from '../apps/api/src/modules/access/authorize.js';
 import { BASELINE_ROLES } from '../apps/api/src/modules/access/baseline.js';
+import { SYSTEM_ACTOR_ID } from '../apps/api/src/audit/actors.js';
 import { provisionCompany, withGrantBootstrap } from '../apps/api/src/modules/access/provision.js';
 import { decideLeave, submitLeave } from '../apps/api/src/modules/leave/service.js';
 import { requestReport } from '../apps/api/src/modules/report/service.js';
+import { assertNoDevelopmentSeed, assertNotDevelopmentDatabase, databaseIdentity } from '../db/development-target.js';
 import { migrate } from '../db/migrate.js';
 import {
   type CorrectionItem,
@@ -82,8 +84,6 @@ export interface FixtureResult {
   identities: FixtureIdentity[];
 }
 
-const DEV_DB_PORT = '54329';
-const DEV_DB_NAME = 'hrms_dev';
 /** Provisioning (policies, routes, field classification) is effective from here; all fixture dates are later. */
 const PROVISION_FROM = '2023-01-01';
 const ASSIGNMENT_FROM = '2023-01-01T00:00:00Z';
@@ -112,34 +112,6 @@ const DEFAULTS: FixtureParameters = {
   batchSize: 1000,
   concurrency: 3,
 };
-
-// ---------------------------------------------------------------------------------------------------------------
-// Safety
-// ---------------------------------------------------------------------------------------------------------------
-
-function dbIdentity(url: string): { host: string | null; port: string | null; database: string | null } {
-  try {
-    const u = new URL(url);
-    return { host: u.hostname || null, port: u.port || null, database: decodeURIComponent(u.pathname.replace(/^\//, '')) || null };
-  } catch {
-    throw new Error('The database URL is not a valid URL');
-  }
-}
-
-/** Refuses the development database: its fixed port/name, and the DATABASE_URL the development API uses. */
-export function assertNotDevelopmentDatabase(url: string): void {
-  const target = dbIdentity(url);
-  if (target.port === DEV_DB_PORT || target.database === DEV_DB_NAME) {
-    throw new Error(`Refusing the development database (port ${DEV_DB_PORT} / ${DEV_DB_NAME}); create a separate load-test database`);
-  }
-  const dev = process.env.DATABASE_URL;
-  if (dev) {
-    const d = dbIdentity(dev);
-    if (d.host === target.host && (d.port ?? '5432') === (target.port ?? '5432') && d.database === target.database) {
-      throw new Error('Refusing DATABASE_URL (the development API database); use a separate load-test database');
-    }
-  }
-}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Small helpers
@@ -421,10 +393,10 @@ async function createPeople(
     await withGrantBootstrap(tx, async () => {
       await inBatches(contexts, B, (b) =>
         tx.query(
-          `insert into role_assignment (id, company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, purpose)
-           select a.id, $1, a.u, a.r, a.s, $2, 'ACTIVE', $3, now(), 'Load fixture (synthetic)'
+          `insert into role_assignment (id, company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, purpose, created_by)
+           select a.id, $1, a.u, a.r, a.s, $2, 'ACTIVE', $3, now(), 'Load fixture (synthetic)', $8
              from unnest($4::uuid[], $5::uuid[], $6::uuid[], $7::text[]) as a (id, u, r, s)`,
-          [c.id, ASSIGNMENT_FROM, approver, col(b, (x) => x.assignmentId), col(b, (x) => x.user), col(b, (x) => c.roleIds[x.role]), col(b, (x) => x.scope)],
+          [c.id, ASSIGNMENT_FROM, approver, col(b, (x) => x.assignmentId), col(b, (x) => x.user), col(b, (x) => c.roleIds[x.role]), col(b, (x) => x.scope), SYSTEM_ACTOR_ID],
         ),
       );
       // DB109 allowlists: each assignment gets its role's default duties (DF02), like the development seed.
@@ -532,7 +504,7 @@ async function createPeople(
           );
           const job = await tx.query<{ id: string }>(
             `insert into import_job (company_id, kind, state, attachment_id, submitted_by, idempotency_key, file_name, row_count, template_code, accepted_count, created_by, updated_by)
-             values ($1, 'attendance_punch', 'COMMITTED', $2, $3, $4, 'load-fixture.csv', $5, 'ATTENDANCE_PUNCH_V1', $5, $3, $3) returning id`,
+             values ($1, 'attendance_punch', 'PREVIEWED', $2, $3, $4, 'load-fixture.csv', $5, 'ATTENDANCE_PUNCH_V1', $5, $3, $3) returning id`,
             [c.id, attachment.rows[0]!.id, approver, reference, b.length],
           );
           const jobId = job.rows[0]!.id;
@@ -542,6 +514,8 @@ async function createPeople(
              select $1, $2, a.n, 'ACCEPTED', a.k, $3, $3 from unnest($4::int[], $5::text[]) as a (n, k)`,
             [c.id, jobId, approver, rows, col(b, (x) => x.key)],
           );
+          // Finished only once its rows are in, as the service does: a finished job's rows are final (0141).
+          await tx.query(`update import_job set state = 'COMMITTED', updated_by = $2 where id = $1`, [jobId, approver]);
           await tx.query(
             `insert into attendance_punch (company_id, employee_id, occurred_at, direction, source_kind, external_event_key, source_identity_key, import_job_id, import_row_number, created_by)
              select $1, a.e, a.t, a.d, 'MANUAL_IMPORT', a.k, $2, $3, a.n, $4 from unnest($5::uuid[], $6::timestamptz[], $7::text[], $8::text[], $9::int[]) as a (e, t, d, k, n)`,
@@ -823,7 +797,7 @@ export async function generateFixture(options: FixtureOptions): Promise<FixtureR
   let database: FixtureManifest['database'] = { host: null, port: null, database: null };
   if (typeof options.db === 'string') {
     assertNotDevelopmentDatabase(options.db);
-    database = dbIdentity(options.db);
+    database = databaseIdentity(options.db);
     if (options.migrate) {
       const client = new pg.Client({ connectionString: options.db });
       await client.connect();
@@ -850,9 +824,7 @@ export async function generateFixture(options: FixtureOptions): Promise<FixtureR
     const schemaFingerprint = createHash('sha256')
       .update(applied.map((r) => `${r.filename}:${r.checksum}`).join('\n'))
       .digest('hex');
-    if ((await pool.query(`select 1 from company where code = 'DEMO'`)).rowCount) {
-      throw new Error('The target database holds the development seed (company DEMO); use a separate load-test database');
-    }
+    await assertNoDevelopmentSeed(pool);
 
     const fid = randomBytes(3).toString('hex').toUpperCase();
     const rng = createRng(p.seed);

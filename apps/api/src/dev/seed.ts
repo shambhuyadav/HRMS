@@ -3,6 +3,7 @@
 // the rules require; every grant is recorded as approved by the bootstrap approver, never self-approved.
 // A seed or re-seed is one transaction, so an interrupted run leaves nothing behind.
 import type pg from 'pg';
+import { SYSTEM_ACTOR_ID } from '../audit/actors.js';
 import type { Queryable } from '../db/queryable.js';
 import { OWN_ESS_ROLE_CODES } from '../modules/access/authorize.js';
 import { BASELINE_ROLES, OPERATIONAL_FIELD_GROUPS, type PermissionKey, parsePermissionKey } from '../modules/access/baseline.js';
@@ -35,7 +36,9 @@ const FINANCE_BUNDLE: PermissionKey[] = [
   'payment.read.operational',
   'payment.prepare.operational',
   'payment.release.operational',
+  'payment.confirm_outcome.operational',
   'payment.reverse.operational',
+  'payment.export.operational',
 ];
 
 /**
@@ -136,6 +139,10 @@ const SEED_FALLBACK_REVIEWERS: readonly (readonly [kind: string, accounts: reado
   ['payroll_input_batch', ['finance']],
   ['payroll_salary_stop', ['finance']],
   ['payroll_hold', ['finance', 'payroll']],
+  // FR-100, FR-035: an independent reviewer of later-period cases. FR-036, FR-108: the reviewer of tax items (tax_proof routes through this list too).
+  ['timesheet_adjustment', ['finance', 'payroll']],
+  ['payroll_arrears_case', ['finance', 'payroll']],
+  ['tax_declaration', ['hr']],
 ];
 
 /**
@@ -318,9 +325,9 @@ async function seed(db: Queryable, code: string): Promise<{ companyId: string; a
     await withGrantBootstrap(db, async () => {
       const assignment = (
         await db.query<{ id: string }>(
-          `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, purpose)
-           select $1, $2, r.id, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now(), 'Development seed (synthetic)' from role r where r.company_id = $1 and r.code = $3 returning id`,
-          [companyId, userId, roleCode, role.defaultScope, approver],
+          `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, purpose, created_by)
+           select $1, $2, r.id, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now(), 'Development seed (synthetic)', $6 from role r where r.company_id = $1 and r.code = $3 returning id`,
+          [companyId, userId, roleCode, role.defaultScope, approver, SYSTEM_ACTOR_ID],
         )
       ).rows[0]!.id;
       for (const key of [...role.defaultDuties, ...extra]) {

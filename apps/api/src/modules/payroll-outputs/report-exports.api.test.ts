@@ -14,6 +14,10 @@ import {
   calendar,
   CONFIG,
   createRun,
+  CRITERIA,
+  criterion,
+  DOCUMENTS,
+  evidenceDocument,
   grantOf,
   grants,
   head,
@@ -29,11 +33,15 @@ import {
   reviewers,
   SALARY,
   salary,
+  STOP_DECIDE,
+  STOP_PROPOSE,
   submitAndApprove,
   verifiedBank,
+  VERIFY_DOCUMENTS,
 } from '../payroll/payroll.fixtures.js';
 import { isModuleActive } from '../registry.js';
 import { REPORTS, toCsv } from '../report/catalogue.js';
+import { csvContext, csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 import { XLSX_MEDIA_TYPE } from '../report/xlsx.js';
 import { readZip, sheetCells, sheetRows } from '../report/xlsx.fixtures.js';
@@ -64,7 +72,7 @@ const DEF = {
 };
 
 const cells = (line: string) => [...line.matchAll(/"((?:[^"]|"")*)"/g)].map((m) => m[1]!.replace(/""/g, '"'));
-const table = (csv: string) => csv.trimEnd().split('\r\n').map(cells);
+const table = (csv: string) => csvTable(csv).trimEnd().split('\r\n').map(cells);
 const column = (i: number) => String.fromCharCode(65 + i);
 
 interface Line {
@@ -181,12 +189,15 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
   });
 
   it('lists the three run reports with CSV and XLSX and needs the separate payroll report export grant (FR-002, H7)', async () => {
-    const items = (await json(hr, '/v1/reports/catalogue')).items as { code: string; title: string; requiresPeriod: boolean; columns: string[]; formats?: string[] }[];
+    // Listed to the role holding the payroll report export grant only (reportCatalogue).
+    const items = (await json(exporter, '/v1/reports/catalogue')).items as { code: string; title: string; requiresPeriod: boolean; columns: string[]; formats?: string[] }[];
+    const withoutGrant = ((await json(hr, '/v1/reports/catalogue')).items as { code: string }[]).map((r) => r.code);
+    for (const code of CODES) expect(withoutGrant, code).not.toContain(code);
     for (const code of CODES) {
       expect(items.find((r) => r.code === code), code).toEqual({ code, title: REPORTS[code]!.title, requiresPeriod: false, columns: REPORTS[code]!.columns.map((c) => c.header), formats: ['CSV', 'XLSX'] });
     }
     // The JSON columns exactly, nothing added (owner-approved samples pending, I-40 item 12).
-    expect(items.find((r) => r.code === 'PAYROLL_DISBURSEMENT')!.columns).toEqual(['Approved payable', 'Held', 'Reserved', 'Paid', 'Ready', 'Reconciles']);
+    expect(items.find((r) => r.code === 'PAYROLL_DISBURSEMENT')!.columns).toEqual(['Approved payable', 'Held', 'Of held, by salary stop', 'Salary stop holds', 'Excluded by salary stop', 'Reserved', 'Paid', 'Ready', 'Reconciles']);
     // No grant, the read grant alone (viewing is not exporting) and the Employee context are refused at request.
     for (const code of CODES) {
       for (const a of [hr, reader, people[a1]!]) expect((await request(a, code, { runId: feb })).statusCode, code).toBe(403);
@@ -217,7 +228,8 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
   it('holds exactly the rows of the JSON register, reconciliation and comparison, as CSV and as XLSX', async () => {
     const g = await grantOf(h, exporter, 'payroll_report', 'export', ['amount']);
     const disbursement = await jsonRows(exporter, 'PAYROLL_DISBURSEMENT', feb);
-    expect(disbursement).toEqual([{ payable: '75000.2500', held: '20000.0000', reserved: '0.0000', paid: '0.0000', ready: '55000.2500', reconciles: true }]);
+    // A payment safety block is held, and is no salary stop.
+    expect(disbursement).toEqual([{ payable: '75000.2500', held: '20000.0000', heldBySalaryStop: '0.0000', salaryStopHolds: 0, excludedBySalaryStop: 0, reserved: '0.0000', paid: '0.0000', ready: '55000.2500', reconciles: true }]);
     const comparison = await json(exporter, `/v1/payroll-outputs/runs/${feb}/comparison`);
     expect(comparison).toMatchObject({ basis: 'RUN', priorPeriodCode: '2026-01' });
     expect(comparison.items).toEqual([expect.objectContaining({ componentCode: 'PX_BASIC', headType: 'EARNING' })]);
@@ -229,12 +241,19 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
       expect(await def.rows(h.db, g, { runId: feb }), code).toEqual(rows);
       const csv = await generated(exporter, code, { runId: feb });
       expect(csv.rowCount).toBe(rows.length);
-      expect(csv.file.body, code).toBe(toCsv(def, rows));
+      expect(csvTable(csv.file.body), code).toBe(toCsv(def, rows));
+      // FR-065 "record the filter/run version": the file says which run revision it holds.
+      expect(csvContext(csv.file.body)['Record revision'], code).toMatch(/^Payroll period \S+, run revision \d+, state [A-Z_]+$/);
+      expect(csvContext(csv.file.body).Filters, code).toBe(`runId: ${feb}`);
       const x = await generated(exporter, code, { runId: feb }, 'XLSX');
       expect(x.file.headers['content-type']).toBe(XLSX_MEDIA_TYPE);
       expect(x.file.headers['content-disposition']).toMatch(new RegExp(`filename="${code.toLowerCase()}-[0-9a-f]{8}\\.xlsx"$`));
-      const xml = readZip(x.file.rawPayload).get('xl/worksheets/sheet1.xml')!.toString('utf8');
+      const workbook = readZip(x.file.rawPayload);
+      const xml = workbook.get('xl/worksheets/sheet1.xml')!.toString('utf8');
       expect(sheetRows(xml, def.columns.length), code).toEqual(table(csv.file.body));
+      // DF09: the workbook's second sheet carries the same context, this file's own generated time apart.
+      const onSecondSheet = Object.fromEntries(sheetRows(workbook.get('xl/worksheets/sheet2.xml')!.toString('utf8'), 2) as [string, string][]);
+      expect({ ...onSecondSheet, 'Generated at': '' }, code).toEqual({ ...csvContext(csv.file.body), 'Generated at': '' });
       // Amounts and units are number cells; identifiers, codes, states and flags stay text.
       const first = sheetCells(xml)[1]!;
       def.columns.forEach((c, i) => {
@@ -252,10 +271,10 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
     // A department-filtered exporter: the register and the comparison over its own records, as the JSON lists them.
     const own = await jsonRows(narrow, 'PAYROLL_REGISTER', feb);
     expect(own.map((r) => r.employeeId).sort()).toEqual([a1, a2].sort());
-    expect((await generated(narrow, 'PAYROLL_REGISTER', { runId: feb })).file.body).toBe(toCsv(REPORTS.PAYROLL_REGISTER!, own));
+    expect(csvTable((await generated(narrow, 'PAYROLL_REGISTER', { runId: feb })).file.body)).toBe(toCsv(REPORTS.PAYROLL_REGISTER!, own));
     expect((await json(narrow, `/v1/payroll-outputs/runs/${feb}/comparison`)).basis).toBe('SCOPE');
     const ownComparison = await jsonRows(narrow, 'PAYROLL_COMPARISON', feb);
-    expect((await generated(narrow, 'PAYROLL_COMPARISON', { runId: feb })).file.body).toBe(toCsv(REPORTS.PAYROLL_COMPARISON!, ownComparison));
+    expect(csvTable((await generated(narrow, 'PAYROLL_COMPARISON', { runId: feb })).file.body)).toBe(toCsv(REPORTS.PAYROLL_COMPARISON!, ownComparison));
     // Company figures: refused at request exactly as the JSON route refuses them.
     const route = await h.call(narrow, 'GET', `/v1/payroll-outputs/runs/${feb}/disbursement`);
     expect([route.statusCode, route.json().error]).toEqual([403, 'SCOPE_INCOMPLETE']);
@@ -280,7 +299,8 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
     );
     await processReportQueue(h.pool);
     expect(await status(narrowed, first)).toMatchObject({ state: 'FAILED', failureCode: 'SCOPE_INCOMPLETE', rowCount: null });
-    expect(await status(revoked, second)).toMatchObject({ state: 'FAILED', failureCode: 'ACCESS_REVOKED' });
+    expect((await h.call(revoked, 'GET', `/v1/reports/${second}`)).statusCode).toBe(403);
+    expect(await h.one(`select state, failure_code from report_execution where id = $1`, [second])).toEqual({ state: 'FAILED', failure_code: 'ACCESS_REVOKED' });
     expect(await status(exporter, third)).toMatchObject({ state: 'COMPLETED', rowCount: 1 });
     expect((await h.call(narrowed, 'GET', `/v1/reports/${first}/download`)).statusCode).toBe(409);
   });
@@ -297,7 +317,7 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
     expect(mine.items!.map((r) => r.employeeId).sort()).toEqual([a2, b1].sort());
     const file = await generated(self, 'PAYROLL_REGISTER', { runId: feb });
     expect(file.rowCount).toBe(2);
-    expect(file.file.body).toBe(toCsv(REPORTS.PAYROLL_REGISTER!, mine.items!));
+    expect(csvTable(file.file.body)).toBe(toCsv(REPORTS.PAYROLL_REGISTER!, mine.items!));
     expect(file.file.body).not.toContain(a1);
     // Row scope the same way: a department reader linked to one of its employees.
     const selfNarrow = await h.actor(A, 'HR_ADMINISTRATOR', { extra: EXPORT, departmentFilter: d1, user: people[a2]!.user });
@@ -410,11 +430,75 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
     // The exports hold exactly the JSON rows with these ledger positions.
     for (const code of ['PAYROLL_REGISTER', 'PAYROLL_DISBURSEMENT'] as const) {
       const rows = await jsonRows(exporter, code, feb);
-      expect((await generated(exporter, code, { runId: feb })).file.body, code).toBe(toCsv(REPORTS[code]!, rows));
+      expect(csvTable((await generated(exporter, code, { runId: feb })).file.body), code).toBe(toCsv(REPORTS[code]!, rows));
     }
     expect((await jsonRows(exporter, 'PAYROLL_REGISTER', feb)).find((r) => r.employeeId === b1)).toMatchObject({ held: '0.0000', reserved: '0.0000', paid: '19900.0000' });
     expect(await jsonRows(exporter, 'PAYROLL_DISBURSEMENT', feb)).toEqual([
-      { payable: '75000.2500', held: '0.0000', reserved: '55000.2500', paid: '19900.0000', ready: '100.0000', reconciles: true },
+      { payable: '75000.2500', held: '0.0000', heldBySalaryStop: '0.0000', salaryStopHolds: 0, excludedBySalaryStop: 0, reserved: '55000.2500', paid: '19900.0000', ready: '100.0000', reconciles: true },
     ]);
+  });
+
+  it('shows how each salary stop was read: withheld apart from other holds, excluded by name, per record (FR-031; FR-038; payroll-4)', async () => {
+    const stopMaker = await h.actor(A, 'HR_ADMINISTRATOR', { extra: grants(STOP_PROPOSE, STOP_DECIDE) });
+    const stopDecider = await h.actor(A, 'HR_ADMINISTRATOR', { extra: STOP_DECIDE });
+    const uploader = await h.actor(A, 'HR_ADMINISTRATOR', { extra: DOCUMENTS });
+    const verifier = await h.actor(A, 'HR_ADMINISTRATOR', { extra: VERIFY_DOCUMENTS });
+    await reviewers(h, hr, 'payroll_salary_stop', [stopMaker, stopDecider]);
+    const crit = await criterion(h, await h.actor(A, 'HR_ADMINISTRATOR', { extra: CRITERIA }), await h.actor(A, 'HR_ADMINISTRATOR', { extra: CRITERIA }), { scopeMode: 'FULL_ONLY' });
+    const period = (await h.one<{ id: string }>(`select id from payroll_period where company_id = $1 and period_code = '2026-03'`, [A.id])).id;
+    const dept = await department('PX_STOP');
+    const [held, excluded, plain, blocked] = [await paid(dept, '30000'), await paid(dept, '25000'), await paid(dept, '10000'), await paid(dept, '5000', 'UNVERIFIED')];
+    const approveStop = async (employeeId: string, mode: string, extra: object) => {
+      const documentId = await evidenceDocument(h, uploader, verifier, employeeId);
+      const stop = await ok<{ id: string }>(
+        await h.call(stopMaker, 'POST', `/v1/payroll/periods/${period}/salary-stops`, { employeeId, mode, reason: 'Synthetic stop reason', evidenceReference: 'SYNTH-CASE-1', evidenceDocumentIds: [documentId], ...extra }),
+        201,
+      );
+      const tasks = (await h.call(stopDecider, 'GET', '/v1/payroll/salary-stops/tasks/mine')).json().items as { taskId: string; stop: { id: string } | null }[];
+      await ok(await h.call(stopDecider, 'POST', `/v1/payroll/stop-tasks/${tasks.find((x) => x.stop?.id === stop.id)!.taskId}/decision`, { decision: 'APPROVE', confirmMode: mode, idempotencyKey: key('stop-') }));
+    };
+    await approveStop(held, 'HOLD_DISBURSEMENT', { criterionId: crit, releaseCriterion: 'Clearance done' });
+    await approveStop(excluded, 'EXCLUDE_CALCULATION', {});
+    const run = await createRun(h, preparer, period, { departmentIds: [dept] });
+    await calculate(h, preparer, run.id);
+    await submitAndApprove(h, { preparer, reviewer, approver }, run.id);
+    await processRun(h, processor, run.id);
+
+    // Withheld by the stop, within held and apart from the unverified bank block; the excluded employee is in no amount.
+    const report = await json(exporter, `/v1/payroll-outputs/runs/${run.id}/disbursement`);
+    expect(report.totals).toEqual({
+      payable: '45000.0000',
+      held: '35000.0000',
+      heldBySalaryStop: '30000.0000',
+      salaryStopHolds: 1,
+      excludedBySalaryStop: 1,
+      reserved: '0.0000',
+      paid: '0.0000',
+      ready: '10000.0000',
+      reconciles: true,
+    });
+    const code = (id: string) => h.one<{ employee_code: string; display_name: string }>(`select employee_code, display_name from employee where id = $1`, [id]);
+    const out = await code(excluded);
+    expect(report.salaryStopExclusions).toEqual([{ employeeCode: out.employee_code, employeeName: out.display_name, mode: 'EXCLUDE_CALCULATION' }]);
+    expect(JSON.stringify(report)).not.toContain('Synthetic stop reason');
+
+    // The register names the mode on each record, in the JSON and the export.
+    const rows = (await jsonRows(exporter, 'PAYROLL_REGISTER', run.id)) as { employeeId: string; salaryStopMode: string | null; calculationStatus: string }[];
+    const row = (id: string) => rows.find((r) => r.employeeId === id)!;
+    expect(row(held)).toMatchObject({ salaryStopMode: 'HOLD_DISBURSEMENT', calculationStatus: 'CALCULATED' });
+    expect(row(excluded)).toMatchObject({ salaryStopMode: 'EXCLUDE_CALCULATION', calculationStatus: 'EXCLUDED' });
+    expect(row(plain).salaryStopMode).toBeNull();
+    expect(row(blocked).salaryStopMode).toBeNull();
+    const register = await generated(exporter, 'PAYROLL_REGISTER', { runId: run.id });
+    expect(csvTable(register.file.body)).toBe(toCsv(REPORTS.PAYROLL_REGISTER!, rows));
+    expect(table(register.file.body)[0]).toContain('Salary stop mode');
+    const disbursement = table((await generated(exporter, 'PAYROLL_DISBURSEMENT', { runId: run.id })).file.body);
+    expect(Object.fromEntries(disbursement[0]!.map((column, i) => [column, disbursement[1]![i]]))).toMatchObject({ 'Of held, by salary stop': '30000.0000', 'Salary stop holds': '1', 'Excluded by salary stop': '1' });
+
+    // The manifest preview says how many it left out for a stop, among those held.
+    const template = await h.one<{ id: string }>(`select id from payroll_bank_template where company_id = $1 and template_code = 'PX_CSV'`, [A.id]);
+    const bankPrep = await h.actor(A, 'HR_ADMINISTRATOR', { extra: B_PREPARE });
+    const preview = await ok<{ excluded: { held: number; heldBySalaryStop: number } }>(await h.call(bankPrep, 'GET', `/v1/payroll-outputs/runs/${run.id}/bank-preview?templateId=${template.id}`));
+    expect(preview.excluded).toMatchObject({ held: 2, heldBySalaryStop: 1 });
   });
 });

@@ -5,6 +5,7 @@ import type pg from 'pg';
 import { uniq } from '../../../../db/tests/fixtures.js';
 import { startTestDatabase, type TestDatabase } from '../../../../db/tests/test-database.js';
 import { buildApp } from '../app.js';
+import { SYSTEM_ACTOR_ID } from '../audit/actors.js';
 import { type DevTokenConfig, devTokenVerifier, issueDevToken } from '../auth/tokens.js';
 import { createPool } from '../db/pool.js';
 import { ASSIGNMENT_HEADER, COMPANY_HEADER } from '../http/context.js';
@@ -92,7 +93,9 @@ export async function startHarness(): Promise<Harness> {
   const db = testDb.client;
   await db.query(`select set_config('hrms.grant_bootstrap', 'on', false)`);
   const pool = createPool(testDb.connectionString, 4);
-  const app = buildApp({ db: pool, verifier: devTokenVerifier(tokenConfig), serving: { read: HARNESS_SERVING, write: HARNESS_SERVING, batch: HARNESS_SERVING } });
+  // scanInRequest: an upload answers its verdict at once, so a test can start from a released or quarantined file. Every deployment
+  // leaves the verdict to the scan worker; worker/scan-worker.api.test.ts tests that path, and buildApp without this flag behaves so.
+  const app = buildApp({ db: pool, verifier: devTokenVerifier(tokenConfig), scanInRequest: true, serving: { read: HARNESS_SERVING, write: HARNESS_SERVING, batch: HARNESS_SERVING } });
 
   const one = async <T extends pg.QueryResultRow>(sql: string, params: unknown[] = []) => {
     const row = (await db.query<T>(sql, params)).rows[0];
@@ -131,10 +134,10 @@ export async function startHarness(): Promise<Harness> {
     }
     const assignment = (
       await one<{ id: string }>(
-        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at)
-         select $1, $2, r.id, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now() from role r where r.company_id = $1 and r.code = $3
+        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, created_by)
+         select $1, $2, r.id, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now(), $6 from role r where r.company_id = $1 and r.code = $3
          returning id`,
-        [company.id, user, roleCode, opts.scope ?? role.defaultScope, approver],
+        [company.id, user, roleCode, opts.scope ?? role.defaultScope, approver, SYSTEM_ACTOR_ID],
       )
     ).id;
     for (const key of [...(opts.duties ?? role.defaultDuties), ...(opts.extra ?? [])]) {
@@ -163,9 +166,9 @@ export async function startHarness(): Promise<Harness> {
     const approver = await makeUser();
     const assignment = (
       await one<{ id: string }>(
-        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at)
-         values ($1, $2, $3, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now()) returning id`,
-        [company.id, user, roleId, opts.scope, approver],
+        `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, approved_by, approved_at, created_by)
+         values ($1, $2, $3, $4, '2026-01-01T00:00:00Z', 'ACTIVE', $5, now(), $6) returning id`,
+        [company.id, user, roleId, opts.scope, approver, SYSTEM_ACTOR_ID],
       )
     ).id;
     for (const key of opts.permissions) {

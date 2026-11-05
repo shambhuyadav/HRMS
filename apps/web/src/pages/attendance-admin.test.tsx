@@ -7,6 +7,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ATTENDANCE_ADMIN_SCREENS, type AttendancePolicy } from './attendance-admin';
 
+// The automatic re-check of a waiting batch has its own tests (held-batch.test.tsx): here the manual check is on its own.
+vi.mock('../held-batch-timing', () => ({ HELD_BATCH_CHECK_INTERVAL_MS: 3_600_000, HELD_BATCH_MAX_CHECKS: 30 }));
 const session = vi.hoisted(() => ({ permissions: [] as string[] }));
 vi.mock('../session', () => ({
   useSession: () => ({ stored: { companyId: 'c-1', assignmentId: 'a-1' }, me: { employeeId: null, scopeKind: 'COMPANY' }, can: (p: string) => session.permissions.includes(p) }),

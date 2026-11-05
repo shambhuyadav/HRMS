@@ -38,6 +38,12 @@ export async function requirePayrollRun(db: Queryable, companyId: string, runId:
   await runHeader(db, companyId, runId);
 }
 
+/** FR-065 "record the filter/run version"; section 11.1 "source period, processing revision": what a run export's file comes from. */
+export async function payrollRunRevision(db: Queryable, companyId: string, runId: string): Promise<string> {
+  const run = await runHeader(db, companyId, runId);
+  return `Payroll period ${String(run.periodCode)}, run revision ${String(run.revision)}, state ${run.state}`;
+}
+
 /**
  * The register's record scope: everything for an unrestricted company assignment, else the caller's row scope; never
  * the caller's own record (H1, BRD DF02: own payroll reaches an employee only as issued outputs in the Employee context).
@@ -59,7 +65,7 @@ async function registerRecords(db: Queryable, grant: AccessGrant, runId: string,
   return (
     await db.query<Record<string, unknown> & { employeeCode: string }>(
       `select r.id as "recordId", r.employee_id as "employeeId", r.employee_code as "employeeCode", e.display_name as "employeeName", r.calculation_status as "calculationStatus",
-              r.paid_units::text as "paidUnits", r.earnings::text as earnings, r.reimbursements::text as reimbursements, r.deductions::text as deductions, r.net::text as net,
+              r.salary_stop_mode as "salaryStopMode", r.paid_units::text as "paidUnits", r.earnings::text as earnings, r.reimbursements::text as reimbursements, r.deductions::text as deductions, r.net::text as net,
               r.employer_contributions::text as "employerContributions", r.bank_status as "bankStatus", ${position('::text')}
          from payroll_record r join employee e on e.company_id = r.company_id and e.id = r.employee_id
         where r.company_id = $1 and r.run_id = $2 and ${scope} ${keyset}
@@ -113,18 +119,27 @@ export async function requireWholePayrollRun(db: Queryable, grant: AccessGrant, 
   await requireRunScope(db, grant, runId);
 }
 
-/** The disbursement reconciliation totals of a run whose records are all in scope (computed in numeric). */
+/**
+ * The disbursement reconciliation totals of a run whose records are all in scope (computed in numeric). FR-031 "salary-stop
+ * interpretation is explicit in the result and disbursement report": what approved salary stops withhold, a part of `held`
+ * and apart from policy holds and payment safety blocks, and how many employees a stop excluded from calculation. Those have no
+ * net, so they are in no other figure.
+ */
 async function disbursementTotals(db: Queryable, grant: AccessGrant, runId: string) {
   await requireRunScope(db, grant, runId);
   return (
-    await db.query<{ payable: string; held: string; reserved: string; paid: string; ready: string; reconciles: boolean }>(
+    await db.query<{ payable: string; held: string; heldBySalaryStop: string; salaryStopHolds: number; excludedBySalaryStop: number; reserved: string; paid: string; ready: string; reconciles: boolean }>(
       `with x as (
          select r.net,
                 coalesce((select sum(h.hold_amount) from payroll_hold h where h.company_id = r.company_id and h.payroll_record_id = r.id and h.state = any($3::text[])), 0) as held,
+                coalesce((select sum(h.hold_amount) from payroll_hold h where h.company_id = r.company_id and h.payroll_record_id = r.id and h.state = any($3::text[]) and h.hold_kind = 'SALARY_STOP'), 0) as stop_held,
                 coalesce((select sum(l.payable_amount) from payroll_bank_line l where l.company_id = r.company_id and l.payroll_record_id = r.id and l.payment_state = any($4::text[])), 0) as reserved,
                 coalesce((select sum(l.confirmed_amount - l.reversed_amount) from payroll_bank_line l where l.company_id = r.company_id and l.payroll_record_id = r.id), 0) as paid
            from payroll_record r where r.company_id = $1 and r.run_id = $2 and r.calculation_status = 'CALCULATED' and r.frozen_at is not null)
-       select coalesce(sum(net), 0)::numeric(19, 4)::text as payable, coalesce(sum(held), 0)::numeric(19, 4)::text as held, coalesce(sum(reserved), 0)::numeric(19, 4)::text as reserved, coalesce(sum(paid), 0)::numeric(19, 4)::text as paid,
+       select coalesce(sum(net), 0)::numeric(19, 4)::text as payable, coalesce(sum(held), 0)::numeric(19, 4)::text as held,
+              coalesce(sum(stop_held), 0)::numeric(19, 4)::text as "heldBySalaryStop", count(*) filter (where stop_held > 0)::int as "salaryStopHolds",
+              (select count(*)::int from payroll_record e where e.company_id = $1 and e.run_id = $2 and e.salary_stop_mode = 'EXCLUDE_CALCULATION') as "excludedBySalaryStop",
+              coalesce(sum(reserved), 0)::numeric(19, 4)::text as reserved, coalesce(sum(paid), 0)::numeric(19, 4)::text as paid,
               coalesce(sum(greatest(net - held - reserved - paid, 0)), 0)::numeric(19, 4)::text as ready,
               coalesce(sum(net), 0) = coalesce(sum(held), 0) + coalesce(sum(reserved), 0) + coalesce(sum(paid), 0) + coalesce(sum(greatest(net - held - reserved - paid, 0)), 0) as reconciles
          from x`,
@@ -159,7 +174,16 @@ export async function disbursementReport(db: Queryable, grant: AccessGrant, runI
       [grant.companyId, runId],
     )
   ).rows;
-  return { run, totals, manifests, paymentStatusSource: 'RECORDED_OUTCOME_EVIDENCE_ONLY' };
+  // Who a salary stop kept out of the calculation, so absent from every figure above (FR-031). The reason stays with the stop.
+  const salaryStopExclusions = (
+    await db.query(
+      `select r.employee_code as "employeeCode", e.display_name as "employeeName", r.salary_stop_mode as mode
+         from payroll_record r join employee e on e.company_id = r.company_id and e.id = r.employee_id
+        where r.company_id = $1 and r.run_id = $2 and r.salary_stop_mode = 'EXCLUDE_CALCULATION' order by r.employee_code`,
+      [grant.companyId, runId],
+    )
+  ).rows;
+  return { run, totals, salaryStopExclusions, manifests, paymentStatusSource: 'RECORDED_OUTCOME_EVIDENCE_ONLY' };
 }
 
 /** Component totals and the prior-period comparison of the payroll core (FR-033; FR-038 comparison). */

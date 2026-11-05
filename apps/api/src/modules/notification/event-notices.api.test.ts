@@ -12,6 +12,7 @@ import { type Company, type Harness, startHarness, type TestActor } from '../../
 import { type AccessGrant, resolveAccess } from '../access/authorize.js';
 import type { PermissionKey } from '../access/baseline.js';
 import { type BiometricProvider, runSync } from '../biometric/sync.js';
+import { prepareReady, releaseNaming } from '../expense/payment.fixtures.js';
 import { submitClaim, withdrawClaim } from '../expense/service.js';
 import { dispatchOutbox, type EventSpec, stillEligible } from './dispatcher.js';
 
@@ -36,6 +37,7 @@ const FINANCE: PermissionKey[] = [
   'payment.read.operational',
   'payment.prepare.operational',
   'payment.release.operational',
+  'payment.confirm_outcome.operational',
   'payment.reverse.operational',
 ];
 const INCREMENT_FINANCE: PermissionKey[] = ['salary.manage.salary', 'salary.read.salary', 'increment.read.salary', 'increment.propose.salary', 'increment.approve.salary'];
@@ -246,10 +248,10 @@ describe('expense payment status notices (DF07, DF12 "payment operational status
     await dispatch();
 
     const prepared = async (amount: string) => {
-      const res = await h.call(fin2, 'POST', '/v1/expense/payments', { claimId: id, amount, paymentDate: today, idempotencyKey: uniq('pay-key-') });
+      const res = await prepareReady(h, fin2, { claimId: id, amount, paymentDate: today, idempotencyKey: uniq('pay-key-') });
       expect(res.statusCode, res.body).toBe(201);
       const instruction = res.json().instructionId as string;
-      expect((await h.call(fin3, 'POST', `/v1/expense/payments/${instruction}/release`)).statusCode).toBe(200);
+      expect((await releaseNaming(h, fin3, instruction)).statusCode).toBe(200);
       return instruction;
     };
     const paymentText = (event: string, status: string) => `The payment of your expense claim submitted on ${today} was ${event}. Its payment status is now ${status}.`;

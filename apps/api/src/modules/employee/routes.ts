@@ -16,6 +16,7 @@ import {
   type ManagerChange,
   type ShiftChange,
 } from './changes.js';
+import { employeeTimeline } from './timeline.js';
 import {
   type CreateEmployeeInput,
   createEmployee,
@@ -224,6 +225,19 @@ export async function employeeRoutes(app: FastifyInstance, opts: { db: Database 
     if (!history) throw notFound();
     return history;
   });
+
+  // FR-089, DF14: the one timeline, with an as-of view; salary facts only with their own grants.
+  app.get(
+    '/employees/:id/timeline',
+    { schema: { params: idParams, querystring: { type: 'object', additionalProperties: false, properties: { asOf: date } } } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'employee', 'read_history', ['operational'], { recordKey: id });
+      const timeline = await employeeTimeline(db, grant, id, request.query as { asOf?: string });
+      if (!timeline) throw notFound();
+      return timeline;
+    },
+  );
 
   app.patch('/employees/:id', { schema: { params: idParams, body: updateSchema } }, async (request) => {
     const { id } = request.params as { id: string };

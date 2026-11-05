@@ -40,6 +40,7 @@ vi.mock('../session', () => ({
 const CYCLE_MANAGE = 'increment_cycle.manage.operational';
 const READ_OPERATIONAL = 'increment.read.operational';
 const READ_SALARY = 'increment.read.salary';
+const READ_HISTORY = 'increment.history_read.salary';
 const PROPOSE = 'increment.propose.salary';
 const APPROVE = 'increment.approve.salary';
 const SALARY_READ = 'salary.read.salary';
@@ -766,9 +767,117 @@ describe('employee salary panel (FR-029, FR-089, FR-090, DF14)', () => {
     expect(salaryCalls()).toHaveLength(0);
   });
 
+  describe('history grants (C4; C6)', () => {
+    it('the plain increment read grant shows no applied changes or annual growth, and asks the server for neither', async () => {
+      serve({ routes: SALARY_ROUTES });
+      renderPage([LIST_EMPLOYEES, SALARY_READ, READ_SALARY]);
+      const panel = await findSection('Employee salary');
+      await choose(panel, 'Find employee to view salary', 'Asha', 'Choose Asha Synthetic (SYN-301)');
+      await within(panel).findByRole('table', { name: 'Salary arrangements' });
+      expect(within(panel).queryByRole('heading', { name: 'Increment history' })).toBeNull();
+      expect(within(panel).queryByRole('heading', { name: 'Annual growth' })).toBeNull();
+      expect(callsTo('GET', `/v1/employees/${E_ASHA}/increment-history`)).toHaveLength(0);
+    });
+
+    it('says earlier arrangements are withheld when the server leaves them out', async () => {
+      serve({ routes: { ...SALARY_ROUTES, [`GET /v1/employees/${E_ASHA}/salary`]: [200, { employeeId: E_ASHA, historyIncluded: false, items: [{ id: 's-1', effectiveFrom: '2027-04-01', effectiveTo: null, annualCtc: '1320000.0000', monthlyGross: '110000.0000', currency: 'INR' }] }] } });
+      renderPage([LIST_EMPLOYEES, SALARY_READ]);
+      const panel = await findSection('Employee salary');
+      await choose(panel, 'Find employee to view salary', 'Asha', 'Choose Asha Synthetic (SYN-301)');
+      expect(await within(panel).findByText('Earlier arrangements are not shown: the selected role has no salary history grant.')).toBeTruthy();
+    });
+
+    it('does not claim anything is withheld when the role holds the grant', async () => {
+      serve({ routes: { ...SALARY_ROUTES, [`GET /v1/employees/${E_ASHA}/salary`]: [200, { employeeId: E_ASHA, historyIncluded: true, items: [{ id: 's-1', effectiveFrom: '2027-04-01', effectiveTo: null, annualCtc: '1320000.0000', monthlyGross: '110000.0000', currency: 'INR' }] }] } });
+      renderPage([LIST_EMPLOYEES, SALARY_READ]);
+      const panel = await findSection('Employee salary');
+      await choose(panel, 'Find employee to view salary', 'Asha', 'Choose Asha Synthetic (SYN-301)');
+      await within(panel).findByRole('table', { name: 'Salary arrangements' });
+      expect(within(panel).queryByText(/Earlier arrangements are not shown/)).toBeNull();
+    });
+  });
+
+  describe('correcting an applied change (BR-038; DF14)', () => {
+    const ROW = { basis: 'MONTHLY_GROSS', currency: 'INR', beforeAmount: '100000.0000', changeAmount: '10000.0000', changePercent: '10.00', percentNaReason: null };
+    const HISTORY = {
+      employeeId: E_ASHA,
+      items: [
+        { ...ROW, id: 'h-1', effectiveDate: '2027-04-01', afterAmount: '110000.0000', correctsHistoryId: null, supersededByHistoryId: 'h-2', correctable: false },
+        { ...ROW, id: 'h-2', effectiveDate: '2027-04-01', afterAmount: '105000.0000', correctsHistoryId: 'h-1', supersededByHistoryId: null, correctable: true },
+      ],
+    };
+    const routes = (post: Route = [201, { caseId: 'c-1', taskId: 't-1', state: 'SUBMITTED' }]) => ({
+      ...SALARY_ROUTES,
+      [`GET /v1/employees/${E_ASHA}/increment-history`]: [200, HISTORY] as Route,
+      'POST /v1/increment-history/h-2/corrections': post,
+    });
+    const open = async (permissions: string[], me: { scopeKind?: string } = {}) => {
+      renderPage(permissions, me);
+      const panel = await findSection('Employee salary');
+      await choose(panel, 'Find employee to view salary', 'Asha', 'Choose Asha Synthetic (SYN-301)');
+      return { panel, table: await within(panel).findByRole('table', { name: 'Increment history' }) };
+    };
+    const fill = (form: HTMLElement) => {
+      fireEvent.change(within(form).getByLabelText('Effective date'), { target: { value: '2027-04-01' } });
+      fireEvent.change(within(form).getByLabelText('Corrected monthly gross'), { target: { value: '106000' } });
+      fireEvent.change(within(form).getByLabelText('Corrected annual CTC'), { target: { value: '1272000' } });
+      fireEvent.change(within(form).getByLabelText('Reason (required)'), { target: { value: 'Amount entered wrongly (synthetic)' } });
+    };
+
+    it('marks the superseded record and the correction, and offers Correct only on the latest', async () => {
+      serve({ routes: routes() });
+      const { panel, table } = await open([LIST_EMPLOYEES, SALARY_READ, READ_HISTORY, 'increment.propose.salary']);
+      expect(within(table).getByText('Superseded by a correction')).toBeTruthy();
+      expect(within(table).getByText('Correction')).toBeTruthy();
+      expect(within(table).getAllByRole('button', { name: 'Correct' })).toHaveLength(1);
+      expect(within(panel).getByText('A superseded change stays on record; reports and annual growth use the correction.')).toBeTruthy();
+    });
+
+    it('needs the proposal duty and a company-wide assignment', async () => {
+      serve({ routes: routes() });
+      const reader = await open([LIST_EMPLOYEES, SALARY_READ, READ_HISTORY]);
+      expect(within(reader.table).queryByRole('button', { name: 'Correct' })).toBeNull();
+      cleanup();
+      serve({ routes: routes() });
+      const scoped = await open([LIST_EMPLOYEES, SALARY_READ, READ_HISTORY, 'increment.propose.salary'], { scopeKind: 'TEAM' });
+      expect(within(scoped.table).queryByRole('button', { name: 'Correct' })).toBeNull();
+    });
+
+    it('sends both figures as typed, proposing no value, and says it waits for a decision', async () => {
+      serve({ routes: routes() });
+      const { panel, table } = await open([LIST_EMPLOYEES, SALARY_READ, READ_HISTORY, 'increment.propose.salary']);
+      fireEvent.click(within(table).getByRole('button', { name: 'Correct' }));
+      const form = within(panel).getByRole('form', { name: /^Correct the change effective/ });
+      expect((within(form).getByLabelText('Corrected monthly gross') as HTMLInputElement).value).toBe('');
+      expect((within(form).getByLabelText('Effective date') as HTMLInputElement).value).toBe('');
+      fill(form);
+      fireEvent.click(within(form).getByRole('button', { name: 'Send correction' }));
+      await within(panel).findByText('Correction sent for an independent decision.');
+      expect(bodyOf('POST', '/v1/increment-history/h-2/corrections')).toEqual({ effectiveDate: '2027-04-01', proposedAmount: '106000', proposedCounterpart: '1272000', reason: 'Amount entered wrongly (synthetic)' });
+      expect(within(panel).queryByRole('form', { name: /^Correct the change effective/ })).toBeNull();
+    });
+
+    it('checks the amounts before sending, and explains a period payroll has processed', async () => {
+      serve({ routes: routes([409, { error: 'PAYROLL_PROCESSED', message: 'Server text', details: { processedThrough: '2027-04-30' } }]) });
+      const { panel, table } = await open([LIST_EMPLOYEES, SALARY_READ, READ_HISTORY, 'increment.propose.salary']);
+      fireEvent.click(within(table).getByRole('button', { name: 'Correct' }));
+      const form = within(panel).getByRole('form', { name: /^Correct the change effective/ });
+      fill(form);
+      fireEvent.change(within(form).getByLabelText('Corrected monthly gross'), { target: { value: '1,06,000' } });
+      fireEvent.click(within(form).getByRole('button', { name: 'Send correction' }));
+      expect((await within(form).findByRole('alert')).textContent).toContain('no commas or spaces');
+      expect(callsTo('POST', '/v1/increment-history/h-2/corrections')).toHaveLength(0);
+
+      fireEvent.change(within(form).getByLabelText('Corrected monthly gross'), { target: { value: '106000' } });
+      fireEvent.click(within(form).getByRole('button', { name: 'Send correction' }));
+      await waitFor(() => expect(within(form).getByRole('alert').textContent).toContain('processed payroll never changes'));
+      expect(within(form).getByRole('alert').textContent).not.toContain('Server text');
+    });
+  });
+
   it('shows arrangements, increment history and annual growth for the chosen financial year', async () => {
     serve({ routes: SALARY_ROUTES });
-    renderPage([LIST_EMPLOYEES, SALARY_READ, READ_SALARY]);
+    renderPage([LIST_EMPLOYEES, SALARY_READ, READ_HISTORY]);
     const panel = await findSection('Employee salary');
     await choose(panel, 'Find employee to view salary', 'Asha', 'Choose Asha Synthetic (SYN-301)');
 
@@ -805,7 +914,7 @@ describe('employee salary panel (FR-029, FR-089, FR-090, DF14)', () => {
 
   it('shows each part only with its own grant', async () => {
     serve({ routes: SALARY_ROUTES });
-    renderPage([LIST_EMPLOYEES, READ_SALARY]);
+    renderPage([LIST_EMPLOYEES, READ_HISTORY]);
     let panel = await findSection('Employee salary');
     await choose(panel, 'Find employee to view salary', 'Asha', 'Choose Asha Synthetic (SYN-301)');
     expect(await within(panel).findByRole('table', { name: 'Increment history' })).toBeTruthy();
@@ -858,7 +967,7 @@ describe('employee salary panel (FR-029, FR-089, FR-090, DF14)', () => {
 
   it('opens the panel for the employee of a case row', async () => {
     serve({ amounts: true, routes: SALARY_ROUTES });
-    renderPage([READ_OPERATIONAL, READ_SALARY, SALARY_READ]);
+    renderPage([READ_OPERATIONAL, READ_SALARY, READ_HISTORY, SALARY_READ]);
     fireEvent.click(await screen.findByRole('button', { name: 'Salary for SYN-302' }));
     const panel = sectionOf('Employee salary');
     expect(within(panel).getByText('SYN-302')).toBeTruthy();
@@ -898,7 +1007,7 @@ describe('employee salary panel (FR-029, FR-089, FR-090, DF14)', () => {
         ],
       },
     });
-    renderPage([LIST_EMPLOYEES, READ_SALARY]);
+    renderPage([LIST_EMPLOYEES, READ_HISTORY]);
     const panel = await findSection('Employee salary');
     await choose(panel, 'Find employee to view salary', 'Asha', 'Choose Asha Synthetic (SYN-301)');
     fireEvent.change(within(panel).getByLabelText('Financial year from April'), { target: { value: '2029' } });

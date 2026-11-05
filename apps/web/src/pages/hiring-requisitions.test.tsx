@@ -1197,6 +1197,30 @@ describe('one requisition', () => {
     expect(await within(await findSection('Actions')).findByRole('button', { name: 'Edit draft' })).toBeTruthy();
   });
 
+  it('DF03: the requester raises a rejected requisition again as a linked draft; nobody else is offered it, nor on another state', async () => {
+    const raisedBody = { state: 'DRAFT', id: R_COPY, code: 'REQ-000105', predecessorRequestId: R_DRAFT };
+    serve({ [`POST /v1/hiring/requisitions/${R_DRAFT}/raise-again`]: () => [201, { ...db.requisitions.get(R_DRAFT), ...raisedBody }] });
+    db.requisitions.set(R_DRAFT, { ...db.requisitions.get(R_DRAFT)!, state: 'REJECTED' });
+    db.requisitions.set(R_COPY, { ...db.requisitions.get(R_DRAFT)!, ...raisedBody });
+    renderAt(`/hiring/requisitions/${R_DRAFT}`, [READ, CREATE]);
+    const actions = await findSection('Actions');
+    fireEvent.click(button(actions, 'Raise again'));
+    await waitFor(() => expect(bodiesTo('POST', `/v1/hiring/requisitions/${R_DRAFT}/raise-again`)).toEqual([undefined]));
+    expect((await screen.findByRole('status')).textContent).toBe('Raised again as REQ-000105, a new draft linked to the rejected requisition. Review it, then submit it for approval.');
+    expect((await screen.findByRole('link', { name: 'The rejected requisition' })).getAttribute('href')).toBe(`/hiring/requisitions/${R_DRAFT}`);
+    cleanup();
+
+    serve();
+    renderAt(`/hiring/requisitions/${R_APPROVED}`, [READ, CREATE]);
+    expect(within(await findSection('Actions')).queryByRole('button', { name: 'Raise again' })).toBeNull();
+    cleanup();
+
+    serve();
+    db.requisitions.set(R_TEAM, { ...db.requisitions.get(R_TEAM)!, state: 'REJECTED' });
+    renderAt(`/hiring/requisitions/${R_TEAM}`, [READ, CREATE]);
+    expect(within(await findSection('Actions')).queryByRole('button', { name: 'Raise again' })).toBeNull(); // another requester's
+  });
+
   it('says why a requisition cannot be copied in words that fit a copy', async () => {
     let refusal: Reply = [422, { error: 'INVALID_HIRING_MANAGER', message: 'The hiring manager must be an active employee of this company', details: { field: 'hiringManagerId' } }];
     serve({ [`POST /v1/hiring/requisitions/${R_APPROVED}/copy`]: () => refusal });

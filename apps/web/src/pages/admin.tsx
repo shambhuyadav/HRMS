@@ -640,14 +640,18 @@ interface RuleRevision {
   subjectTemplate: string | null;
   bodyTemplate: string;
   approvedPlaceholders: string[];
-  /** Worked out by the server from its clock: IN_FORCE, SCHEDULED or SUPERSEDED. */
+  proposalReason?: string | null;
+  decisionReason?: string | null;
+  /** Worked out by the server: PROPOSED or REJECTED until published; then from its clock, IN_FORCE, SCHEDULED or SUPERSEDED. */
   status: string;
 }
 
-const RULE_STATUS: Record<string, { label: string; tone: 'good' | 'warn' | 'neutral' }> = {
+const RULE_STATUS: Record<string, { label: string; tone: 'good' | 'warn' | 'bad' | 'neutral' }> = {
   IN_FORCE: { label: 'in force', tone: 'good' },
   SCHEDULED: { label: 'scheduled', tone: 'warn' },
   SUPERSEDED: { label: 'superseded', tone: 'neutral' },
+  PROPOSED: { label: 'waiting for approval', tone: 'warn' },
+  REJECTED: { label: 'rejected', tone: 'bad' },
 };
 
 const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
@@ -675,6 +679,8 @@ function revisionRefusal(error: unknown): string | null {
       return 'This notification is mandatory and cannot be switched off.';
     case 'NO_CHANGE':
       return 'This revision changes nothing: the wording and whether the notification is sent are as they are now.';
+    case 'REVISION_PENDING':
+      return 'A change to this rule is already waiting for approval. It has to be decided before another can be proposed.';
     case 'PLACEHOLDER_NOT_APPROVED': {
       const placeholder = (error.details as { placeholder?: string } | undefined)?.placeholder;
       return `The wording uses ${placeholder ? `{{${placeholder}}}` : 'a placeholder'}, which is not approved for this message. Use only the approved placeholders.`;
@@ -717,8 +723,9 @@ export function NotificationRulesPage() {
   return (
     <Section title="Notification rules">
       <p className="hint">
-        A change is a new revision that takes effect from a future date and time; the revision before it ends at that moment, so one revision is in force at a time. Only the
-        wording and, for an optional notification, whether it is sent can change. The event, channel, recipients, timing and retry ceiling carry over unchanged.
+        A change is a new revision that takes effect from a future date and time once someone other than its author approves it; the revision before it then ends at that moment, so
+        one revision is in force at a time. Only the wording and, for an optional notification, whether it is sent can change. The event, channel, recipients, timing and retry
+        ceiling carry over unchanged.
       </p>
       {scheduled && (
         <p className="ok" role="status">
@@ -730,7 +737,9 @@ export function NotificationRulesPage() {
       {rules.data && groups.length === 0 && <Empty>No notification rules are configured.</Empty>}
       <ul className="tasks">
         {groups.map(({ code, revisions }) => {
-          const latest = revisions[revisions.length - 1]!;
+          // A rejected revision was never in force: the next change builds on what came before it.
+          const latest = [...revisions].reverse().find((r) => r.status !== 'REJECTED') ?? revisions[revisions.length - 1]!;
+          const pending = latest.status === 'PROPOSED';
           const inForce = revisions.find((r) => r.status === 'IN_FORCE');
           return (
             <li key={code} aria-label={`Rule ${code}`}>
@@ -778,6 +787,7 @@ export function NotificationRulesPage() {
                         </td>
                         <td>
                           <Badge tone={status.tone}>{status.label}</Badge>
+                          {r.status === 'REJECTED' && r.decisionReason ? <div className="hint">{r.decisionReason}</div> : null}
                         </td>
                         <td>{localDateTime(r.effectiveFrom)}</td>
                         <td>{localDateTime(r.effectiveTo)}</td>
@@ -800,6 +810,8 @@ export function NotificationRulesPage() {
                     void qc.invalidateQueries({ queryKey: key });
                   }}
                 />
+              ) : pending ? (
+                <p className="hint">A change is waiting for approval; it has to be decided before another can be proposed.</p>
               ) : (
                 <div className="row">
                   <button
@@ -848,7 +860,7 @@ function RuleRevisionForm({ latest, onScheduled, onStale, onCancel }: { latest: 
           ...(bodyChanged ? { bodyTemplate: body } : {}),
         },
       }),
-    onSuccess: (r) => onScheduled(`Revision ${r.revision} of ${latest.code} is scheduled to take effect from ${localDateTime(r.effectiveFrom)}.`),
+    onSuccess: (r) => onScheduled(`Revision ${r.revision} of ${latest.code} is waiting for approval. Once approved it takes effect from ${localDateTime(r.effectiveFrom)}.`),
     onError: (error) => {
       if (error instanceof ApiError && error.code === 'STALE_VERSION') onStale();
     },
@@ -894,7 +906,7 @@ function RuleRevisionForm({ latest, onScheduled, onStale, onCancel }: { latest: 
       </label>
       <div className="row wide">
         <button type="submit" disabled={!ready}>
-          Schedule change
+          Propose change
         </button>
         <button type="button" className="secondary" onClick={onCancel}>
           Cancel
@@ -915,8 +927,119 @@ function RuleRevisionForm({ latest, onScheduled, onStale, onCancel }: { latest: 
   );
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// C6 "publication and mandatory notification settings require business owner approval" (0133): someone other than the author
+// publishes a proposed change before its date, or rejects it with a reason.
+// ---------------------------------------------------------------------------------------------------------
+
+const APPROVE_RULES = 'notification.approve_rules.operational';
+
+interface RuleProposal {
+  id: string;
+  code: string;
+  revision: number;
+  version: number;
+  effectiveFrom: string;
+  active: boolean;
+  optionalEvent: boolean;
+  proposalReason: string | null;
+  proposedByAccountKey: string | null;
+  subjectTemplate: string | null;
+  bodyTemplate: string;
+  currentActive: boolean | null;
+  currentSubjectTemplate: string | null;
+  currentBodyTemplate: string | null;
+}
+
+function RuleProposalDecision({ proposal, onDone }: { proposal: RuleProposal; onDone: () => void }) {
+  const [reason, setReason] = useState('');
+  const decide = useMutation({
+    mutationFn: (path: 'publish' | 'reject') =>
+      api(`/v1/notifications/rules/proposals/${proposal.id}/${path}`, { body: path === 'publish' ? { expectedVersion: proposal.version } : { expectedVersion: proposal.version, reason: reason.trim() } }),
+    onSuccess: onDone,
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === 'STALE_VERSION') onDone();
+    },
+  });
+  return (
+    <div className="row">
+      <button type="button" disabled={decide.isPending} aria-label={`Approve ${proposal.code}`} onClick={() => decide.mutate('publish')}>
+        Approve
+      </button>
+      <input aria-label={`Reason for rejecting ${proposal.code}`} placeholder="Reason to reject" maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      <button type="button" className="danger" disabled={decide.isPending || !reason.trim()} aria-label={`Reject ${proposal.code}`} onClick={() => decide.mutate('reject')}>
+        Reject
+      </button>
+      <ErrorNote error={decide.error} />
+    </div>
+  );
+}
+
+export function NotificationRuleApprovalsPage() {
+  const { can, stored } = useSession();
+  const qc = useQueryClient();
+  const allowed = can(APPROVE_RULES);
+  const key = ['notification-rule-proposals', `${stored?.companyId ?? '-'}:${stored?.assignmentId ?? '-'}`] as const;
+  const proposals = useQuery({ queryKey: key, enabled: allowed, queryFn: () => api<{ items: RuleProposal[] }>('/v1/notifications/rules/proposals') });
+  if (!allowed) {
+    return (
+      <Section title="Notification rule approvals">
+        <Empty>The selected role cannot approve notification rules; that needs the rule approval grant.</Empty>
+      </Section>
+    );
+  }
+  return (
+    <Section title="Notification rule approvals">
+      <p className="hint">A change comes into force only once someone other than its author approves it, before its date. A date that has passed cannot be approved: reject it so that a new date can be proposed.</p>
+      <ErrorNote error={proposals.error} />
+      {proposals.data?.items.length === 0 && <Empty>No change is waiting for approval.</Empty>}
+      <ul className="tasks">
+        {proposals.data?.items.map((p) => (
+          <li key={p.id} aria-label={`Proposed change to ${p.code}`}>
+            <div>
+              <strong>{p.code}</strong> <span className="hint">revision {p.revision}, from {localDateTime(p.effectiveFrom)}, by {p.proposedByAccountKey ?? 'unknown'}</span>
+            </div>
+            <dl className="kv">
+              <div>
+                <dt>Why</dt>
+                <dd>{p.proposalReason ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>Message now</dt>
+                <dd>{p.currentBodyTemplate ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>Proposed message</dt>
+                <dd>{p.bodyTemplate}</dd>
+              </div>
+              <div>
+                <dt>Subject now</dt>
+                <dd>{p.currentSubjectTemplate ?? '—'}</dd>
+              </div>
+              <div>
+                <dt>Proposed subject</dt>
+                <dd>{p.subjectTemplate ?? '—'}</dd>
+              </div>
+              {p.optionalEvent && p.active !== p.currentActive ? (
+                <div>
+                  <dt>Sending</dt>
+                  <dd>{p.active ? 'switched on' : 'switched off'}</dd>
+                </div>
+              ) : null}
+            </dl>
+            <RuleProposalDecision proposal={p} onDone={() => void qc.invalidateQueries({ queryKey: key })} />
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
 /**
  * Screens of this file offered through the registry. The other administration pages above predate it; adding them
  * to the router and menu is part of the App.tsx wiring that waits for the owner.
  */
-export const ADMIN_SCREENS: ScreenRoute[] = [{ path: '/admin/notification-rules', title: 'Notification rules', permission: MANAGE_RULES, nav: true, component: NotificationRulesPage }];
+export const ADMIN_SCREENS: ScreenRoute[] = [
+  { path: '/admin/notification-rules', title: 'Notification rules', permission: MANAGE_RULES, nav: true, component: NotificationRulesPage },
+  { path: '/admin/notification-rule-approvals', title: 'Notification rule approvals', permission: APPROVE_RULES, nav: true, component: NotificationRuleApprovalsPage },
+];

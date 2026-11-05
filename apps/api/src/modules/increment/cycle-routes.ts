@@ -1,7 +1,6 @@
 // Increment cycle definitions, review openings, employee cycle assignment and review-date overrides (DF15; FR-091).
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { type Database, withTransaction } from '../../db/transaction.js';
-import { HttpError } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import { resolveAccess } from '../access/authorize.js';
 import { enqueueBulkJob } from '../bulk/service.js';
@@ -168,8 +167,7 @@ export async function incrementCycleRoutes(app: FastifyInstance, opts: { db: Dat
   // DB102 plan: the cycle followed, the next review, revisions and change proposals (reasons with the reason grant).
   app.get('/employees/:id/increment-plan', { schema: { params: idParams } }, async (request) => {
     const { id } = request.params as { id: string };
-    const grant = await requireAccess(db, request, 'increment', 'read', ['operational', 'reason'], { recordKey: id });
-    if (!grant.allowedFieldGroups.includes('operational')) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
+    const grant = await requireAccess(db, request, 'increment', 'read', ['operational', 'reason'], { requireGroups: ['operational'], recordKey: id });
     return employeePlan(db, grant, id);
   });
 

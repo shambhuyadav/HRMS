@@ -14,7 +14,7 @@ describe('screens registry', () => {
   });
 
   it('serves the H3 tabs of the active wave-2 modules, and only H3 tabs', () => {
-    expect(Object.keys(ESS_PANELS_BY_TAB).sort()).toEqual(['TN06', 'TN13', 'TN15', 'TN16', 'TN17', 'TN18']);
+    expect(Object.keys(ESS_PANELS_BY_TAB).sort()).toEqual(['TN06', 'TN08', 'TN09', 'TN13', 'TN15', 'TN16', 'TN17', 'TN18']);
   });
 
   it('every decision queue is gated by a permission key and has a distinct title', () => {

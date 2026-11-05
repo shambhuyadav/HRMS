@@ -10,7 +10,7 @@ import { runBulkJobs } from '../bulk/service.js';
 import { type BulkJobResult, type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { INCREMENT_REVIEW_NOTIFICATIONS, runIncrementReviewReminders } from './reminders.js';
 
-const FINANCE_GRANTS: PermissionKey[] = ['salary.manage.salary', 'salary.read.salary', 'increment.read.salary', 'increment.propose.salary', 'increment.approve.salary'];
+const FINANCE_GRANTS: PermissionKey[] = ['salary.manage.salary', 'salary.read.salary', 'salary.history_read.salary', 'increment.read.salary', 'increment.history_read.salary', 'increment.propose.salary', 'increment.approve.salary'];
 const REASON = 'Review schedule change (synthetic)';
 
 interface Org {

@@ -1,6 +1,6 @@
 // Employee documents (FR-010, FR-106; DB012; DF02; CI11; H1/BR-053). Documents are confidential by field group:
 // upload and read each need their own grant, and every content read is audited. Expired documents stay on record.
-// FR-106: every upload is quarantined until the scanner releases it; only released (CLEAN) content is served, and a
+// FR-106: every upload is quarantined until the scan worker's scanner releases it; only released (CLEAN) content is served, and a
 // document becomes verified master evidence only through an independent reviewer's verification of a released file.
 // The employee uploads and reads their own documents in the Employee OWN context (own-ESS groups).
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -84,7 +84,8 @@ export async function documentRoutes(app: FastifyInstance, opts: { db: Database;
         });
         return doc;
       });
-      // FR-106: the upload stays quarantined until the scanner releases it; a scanner error leaves it pending (retried).
+      // FR-106: the upload stays quarantined until a scanner releases it. NFR-S09: nothing waits for that here: in every deployment this
+      // answers PENDING_SCAN and the scan worker reaches the verdict and audits it (storage/scan.ts).
       const attachmentId = (await db.query<{ id: string }>(`select attachment_id as id from employee_document where company_id = $1 and id = $2`, [grant.companyId, documentId])).rows[0]!.id;
       const scanState = await scanAttachment(db, scanner, { companyId: grant.companyId, id: attachmentId, bytes });
       if (scanState !== 'PENDING_SCAN') {

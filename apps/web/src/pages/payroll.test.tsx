@@ -2302,6 +2302,7 @@ describe('payroll reports', () => {
     expect(cells(rowWith(within(register).getByRole('table', { name: 'Payroll register' }), 'SYN-001 Asha Synthetic'))).toEqual([
       'SYN-001 Asha Synthetic',
       'Calculated',
+      '—',
       '31.0000',
       'INR 47,000.00',
       'INR 3,100.00',
@@ -2313,6 +2314,8 @@ describe('payroll reports', () => {
     ]);
     const disbursement = await section('Disbursement reconciliation');
     await waitFor(() => expect(disbursement.textContent).toContain('Yes: payable equals held, reserved, paid and ready'));
+    // No stop in this run: nothing is said about stops.
+    expect(disbursement.textContent).not.toContain('salary stop');
     expect(cells(rowWith(within(disbursement).getByRole('table', { name: 'Manifests of the run' }), 'SYN_BANK version 2'))[5]).toBe('Reserved, not paid: 1 line, INR 38,900.00');
     expect(disbursement.textContent).not.toContain('Paid: confirmed');
     const comparison = await section('Prior-period comparison');
@@ -2323,6 +2326,41 @@ describe('payroll reports', () => {
     expect(callsTo('GET', `/v1/payroll-outputs/runs/${RUN}/register`)).toHaveLength(1);
     // Reading is not exporting: no export without the export key.
     expect(screen.queryByRole('form', { name: /^Export the / })).toBeNull();
+  });
+
+  it('shows how salary stops were read: withheld apart from other holds, excluded by name, the mode per record (FR-031)', async () => {
+    serve({
+      [`GET /v1/payroll-outputs/runs/${RUN}/register`]: [
+        200,
+        {
+          run: header,
+          scope: 'COMPANY',
+          totals: { records: 2, earnings: '30000.0000', reimbursements: '0.0000', deductions: '0.0000', net: '30000.0000', employerContributions: '0.0000', held: '30000.0000', reserved: '0.0000', paid: '0.0000' },
+          items: [
+            { recordId: REC_1, employeeId: E_1, employeeCode: 'SYN-001', employeeName: 'Asha Synthetic', calculationStatus: 'CALCULATED', salaryStopMode: 'HOLD_DISBURSEMENT', paidUnits: '31.0000', earnings: '30000.0000', reimbursements: '0.0000', deductions: '0.0000', net: '30000.0000', employerContributions: '0.0000', bankStatus: 'VALID', held: '30000.0000', reserved: '0.0000', paid: '0.0000' },
+          ],
+          next: null,
+        },
+      ],
+      [`GET /v1/payroll-outputs/runs/${RUN}/disbursement`]: [
+        200,
+        {
+          run: header,
+          totals: { payable: '30000.0000', held: '35000.0000', heldBySalaryStop: '30000.0000', salaryStopHolds: 1, excludedBySalaryStop: 1, reserved: '0.0000', paid: '0.0000', ready: '0.0000', reconciles: true },
+          salaryStopExclusions: [{ employeeCode: 'SYN-002', employeeName: 'Ravi Synthetic', mode: 'EXCLUDE_CALCULATION' }],
+          manifests: [],
+          paymentStatusSource: 'RECORDED_OUTCOME_EVIDENCE_ONLY',
+        },
+      ],
+      [`GET /v1/payroll-outputs/runs/${RUN}/comparison`]: [200, { runId: RUN, basis: 'RUN', priorPeriodCode: null, items: [] }],
+      [`GET /v1/payroll-outputs/runs/${RUN}/journal`]: refusal(409, 'NOT_CONFIGURED', 'No chart mapping', { code: 'JV_CHART_MAPPING_NOT_CONFIGURED' }),
+    });
+    renderScreen(`/payroll/runs/${RUN}/reports`, [REPORT_READ]);
+    const disbursement = await section('Disbursement reconciliation');
+    await waitFor(() => expect(disbursement.textContent).toContain('Of held, by salary stopINR 30,000.00 for 1 employee'));
+    expect(disbursement.textContent).toContain('Excluded from calculation by a salary stopSYN-002 Ravi Synthetic');
+    const register = await section('Payroll register');
+    await waitFor(() => expect(cells(rowWith(within(register).getByRole('table', { name: 'Payroll register' }), 'SYN-001 Asha Synthetic'))[2]).toBe('Hold disbursement'));
   });
 
   it('exports the register, the reconciliation and the comparison of the run through the report catalogue with the export key (FR-038)', async () => {
@@ -3211,5 +3249,39 @@ describe('salary components of an arrangement', () => {
     const readOnly = await openArrangement();
     await within(readOnly).findByText(/No salary components are set for this arrangement/);
     expect(within(readOnly).queryByRole('form', { name: 'Set the salary components' })).toBeNull();
+  });
+
+  describe('earlier arrangements the server withholds (I-68)', () => {
+    const NOTE = 'Earlier arrangements are not shown: the selected role has no salary history grant.';
+    async function listFor(answer: object) {
+      serve({ 'GET /v1/employees': [200, EMPLOYEES], [`GET /v1/employees/${E_1}/salary`]: [200, answer] });
+      renderScreen('/payroll/salary-components', [SALARY_READ, EMPLOYEE_LIST]);
+      const picker = await section('Salary components');
+      await chooseEmployee(picker);
+      return picker;
+    }
+
+    it('says so under the arrangements still shown', async () => {
+      const picker = await listFor({ ...ARRANGEMENTS, historyIncluded: false });
+      await within(picker).findByRole('table', { name: 'Salary arrangements' });
+      expect(within(picker).getByText(NOTE)).toBeTruthy();
+    });
+
+    it('does not say the employee never had one when every arrangement is withheld', async () => {
+      const picker = await listFor({ ...ARRANGEMENTS, items: [], historyIncluded: false });
+      await within(picker).findByText('The employee has no salary arrangement in force today or later.');
+      expect(within(picker).getByText(NOTE)).toBeTruthy();
+      expect(within(picker).queryByText('The employee has no salary arrangement yet.')).toBeNull();
+    });
+
+    it('claims nothing is withheld when the role holds the grant', async () => {
+      const picker = await listFor({ ...ARRANGEMENTS, historyIncluded: true });
+      await within(picker).findByRole('table', { name: 'Salary arrangements' });
+      expect(within(picker).queryByText(NOTE)).toBeNull();
+      cleanup();
+      const none = await listFor({ ...ARRANGEMENTS, items: [], historyIncluded: true });
+      await within(none).findByText('The employee has no salary arrangement yet.');
+      expect(within(none).queryByText(NOTE)).toBeNull();
+    });
   });
 });

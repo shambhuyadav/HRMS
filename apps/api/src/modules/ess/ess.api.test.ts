@@ -46,9 +46,13 @@ describe('My ESS index (FR-103)', () => {
     // TN06 and TN15 are served by the payroll-outputs module (own issued payslips, own loans; its own tests pin the routes).
     for (const id of ['TN06', 'TN15']) expect(by[id]!.status, id).toBe('AVAILABLE');
     // Not built yet: a named unavailable state and no link anywhere.
-    for (const id of ['TN07', 'TN08', 'TN09']) {
+    expect(by.TN07!.status).toBe('UNAVAILABLE');
+    expect(by.TN07!.unavailable?.code).toMatch(/_NOT_ENABLED$/);
+    expect(by.TN07!.links).toEqual([]);
+    // H3: regime and categories come only from an activated tax rule pack, and this company has none (tax-declarations tests the rest).
+    for (const id of ['TN08', 'TN09']) {
       expect(by[id]!.status, id).toBe('UNAVAILABLE');
-      expect(by[id]!.unavailable?.code, id).toMatch(/_NOT_ENABLED$/);
+      expect(by[id]!.unavailable?.code, id).toBe('NOT_CONFIGURED');
       expect(by[id]!.links, id).toEqual([]);
     }
     // Served by business modules (their registration's essTabs); the assets module's own tests pin TN16.

@@ -155,6 +155,14 @@ describe('salary master list (FR-029, E08)', () => {
     expect(await screen.findByText('The selected role cannot view salaries.')).toBeTruthy();
     expect(screen.queryByRole('table', { name: 'Salary master' })).toBeNull();
   });
+
+  it('a refused past date says the history grant is missing, not that salaries are closed to the role (C4)', async () => {
+    session.permissions = [READ];
+    mockApi({ 'GET /v1/salary-master?': () => [403, { error: 'HISTORY_GRANT_REQUIRED', message: 'Server text' }] });
+    renderScreen('/salary-master');
+    expect(await screen.findByText(/Earlier dates and whole months need the salary history grant/)).toBeTruthy();
+    expect(screen.queryByText('The selected role cannot view salaries.')).toBeNull();
+  });
 });
 
 describe('salary and annual salary exports (FR-029, FR-065)', () => {

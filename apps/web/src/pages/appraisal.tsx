@@ -25,7 +25,7 @@ import type { EssPanel, ScreenRoute } from '../screens';
 import { type MeContext, useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
 import { DelegatedBadge } from './delegations';
-import { ImportBatches, TemplateDownload, useBatchFollowUp } from './records';
+import { HeldBatchWatchNote, ImportBatches, TemplateDownload, useBatchFollowUp } from './records';
 
 // ---------------------------------------------------------------------------------------------------------
 // Permission keys (modules/appraisal/registration.ts, routes.ts, goal-import.ts; migration 0035) and screen paths
@@ -2554,15 +2554,19 @@ function GoalUpload() {
   const uploadKey = useRef<string | null>(null);
   // A held upload checked again from the file the server stored (POST /:id/resume), or one of the user's uploads
   // opened from the list.
-  const { resume, open, refresh } = useBatchFollowUp(GOAL_IMPORTS, {
-    show: setJob,
-    closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
-    onStart: () => {
-      upload.reset();
-      act.reset();
-      setNotice(null);
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    GOAL_IMPORTS,
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+        setNotice(null);
+      },
     },
-  });
+    job,
+  );
   const upload = useMutation({
     mutationFn: async (f: File) => api<ImportJob>(GOAL_IMPORTS, { body: { fileName: f.name, contentBase64: await fileToBase64(f), idempotencyKey: uploadKey.current! } }),
     onMutate: () => {
@@ -2649,10 +2653,11 @@ function GoalUpload() {
           {held && (
             <>
               <p role="status">
-                The file is waiting for the malware scan, so nothing in it has been read yet. Check the scan again later to see the preview, or discard the upload. The upload stays in your uploads
-                below, so it can be opened again after you leave this page.
+                The file is waiting for the malware scan, so nothing in it has been read yet. This is usually a short wait. You can discard the upload meanwhile; it stays in your uploads below, so it
+                can be opened again after you leave this page.
               </p>
               <div className="row">
+                <HeldBatchWatchNote watch={watch} />
                 <button type="button" className="secondary" disabled={busy} onClick={() => resume.mutate(job.id)}>
                   Check the scan again
                 </button>

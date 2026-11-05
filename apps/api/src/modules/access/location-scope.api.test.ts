@@ -7,6 +7,7 @@ import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { approvedRequisition, hiringWorld } from '../hiring/test-fixtures.js';
 import { isModuleActive } from '../registry.js';
+import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 
 let h: Harness;
@@ -101,7 +102,7 @@ describe('the row-scope predicate: list, detail and export', () => {
     await processReportQueue(h.pool);
     const download = await h.call(a, 'GET', `/v1/reports/${requested.json().id}/download`);
     expect(download.statusCode, download.body).toBe(200);
-    const rows = download.body.replace(/^﻿/, '').trim().split(/\r?\n/).slice(1);
+    const rows = csvTable(download.body).trim().split(/\r?\n/).slice(1);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toContain('Scope engNorth (synthetic)');
   });

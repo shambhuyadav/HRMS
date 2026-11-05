@@ -13,12 +13,13 @@ import { type Paging, pageMeta, pageOf, type Sorting, sortedBy } from '../../db/
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import type { ScanProvider } from '../../storage/scan.js';
+import type { ScanVerdict } from '../../storage/scan.js';
 import { type AccessGrant, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { CsvError, parseCsv } from '../employee/csv.js';
 import { ledgerBalances } from '../leave/service.js';
 import { outstandingLoans } from '../payroll-outputs/loans.js';
 import { isModuleActive } from '../registry.js';
+import { fileContext, type ReportContext } from '../report/context.js';
 import { PDF_MEDIA_TYPE, type PdfColumn, pdfDocument } from '../report/pdf.js';
 import { PLAIN_DECIMAL, type SheetCell, XLSX_MEDIA_TYPE, xlsxWorkbook, zipStored } from '../report/xlsx.js';
 import { decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
@@ -32,7 +33,6 @@ import {
   holds,
   isSelf,
   priorDecision,
-  requireGroups,
   setRootState,
   taskIsPending,
   taskTransaction,
@@ -264,14 +264,14 @@ export async function replaceLines(tx: Queryable, grant: AccessGrant, id: string
 export async function uploadLines(
   tx: Queryable,
   grant: AccessGrant,
-  scanner: ScanProvider,
+  verdict: ScanVerdict,
   id: string,
   input: { contentBase64: string; dryRun?: boolean | undefined; expectedVersion: number },
 ) {
   const { s, exit } = await draftForChange(tx, grant, id, input.expectedVersion);
   const bytes = Buffer.from(input.contentBase64, 'base64');
-  // FR-106: an upload is never read before the scanner has released it (as payroll inputs); the file is not stored.
-  const verdict = await scanner.scan(bytes).catch(() => ({ verdict: 'ERROR' as const }));
+  // FR-106: an upload is never read before the scanner has released it (as payroll inputs); the file is not stored. The route
+  // asked the scanner (scanInMemory) before this transaction opened.
   if (verdict.verdict === 'INFECTED') throw new HttpError(422, 'UPLOAD_QUARANTINED', 'The malware scan flagged the file; it was not read');
   if (verdict.verdict !== 'CLEAN') throw new HttpError(503, 'SCAN_UNAVAILABLE', 'The file could not be scanned now; nothing was saved, try again later');
   const text = bytes.toString('utf8');
@@ -767,22 +767,28 @@ interface ExportFile {
 type ExportDetail = Awaited<ReturnType<typeof present>>;
 
 /**
- * The approved (or release-eligible) revision an output carries: within the caller's row scope, never their own, and
- * only with the settlement amount group (the lines and the net amount are confidential).
+ * The approved (or release-eligible) revision an output carries: within the caller's row scope and never their own. The
+ * settlement amount group (the lines and the net amount are confidential) is the export grant: the routes refuse and audit
+ * without it and both callers here re-check it, so a refusal at this point could only roll back with its own audit row.
  */
 async function exportable(db: Queryable, grant: AccessGrant, id: string): Promise<ExportDetail> {
-  requireGroups(grant, ['amount']);
-  const s = (await db.query<DetailRow>(`${DETAIL_SQL} where s.company_id = $1 and s.id = $2`, [grant.companyId, id])).rows[0];
+  const s =(await db.query<DetailRow>(`${DETAIL_SQL} where s.company_id = $1 and s.id = $2`, [grant.companyId, id])).rows[0];
   if (!s || !(await canAccessEmployee(db, grant, s.employee_id))) throw notFound();
   assertNotSelf(grant, s.employee_id);
   if (s.state !== 'APPROVED' && s.state !== 'RELEASE_ELIGIBLE') throw new HttpError(409, 'NOT_APPROVED', 'Only an approved settlement is exported', { settlementId: s.id });
   return present(db, grant, s);
 }
 
+/** DF09, FR-065: what the file says about itself, as every report file does (report/context.ts). */
+const settlementFileContext = (db: Queryable, grant: AccessGrant, detail: ExportDetail): Promise<ReportContext> =>
+  fileContext(db, grant, { title: 'Settlement export', code: 'SETTLEMENT_EXPORT', filters: { settlement: detail.id }, revision: String(detail.revision), rowCount: (detail.lines ?? []).length });
+
 /** The rows every format holds, in order. */
-function outputRows(detail: ExportDetail, generatedAt: string): OutputCell[][] {
+function outputRows(detail: ExportDetail, generatedAt: string, context: ReportContext): OutputCell[][] {
   const lines = (detail.lines ?? []) as { componentCode: string; componentName: string; componentKind: string; lineKind: string; amount: string }[];
   return [
+    ...context.map(([label, value]): OutputCell[] => [label, value]),
+    [],
     ['settlement_id', detail.id],
     ['employee_code', detail.employeeCode],
     ['revision', { number: String(detail.revision) }],
@@ -797,8 +803,8 @@ function outputRows(detail: ExportDetail, generatedAt: string): OutputCell[][] {
   ];
 }
 
-function render(detail: ExportDetail, format: ExportFormat, generatedAt: string): ExportFile {
-  const rows = outputRows(detail, generatedAt);
+function render(detail: ExportDetail, format: ExportFormat, generatedAt: string, context: ReportContext): ExportFile {
+  const rows = outputRows(detail, generatedAt, context);
   const lineCount = (detail.lines ?? []).length;
   const base = `settlement-${detail.employeeCode}-r${detail.revision}`;
   if (format === 'XLSX') {
@@ -817,7 +823,7 @@ function render(detail: ExportDetail, format: ExportFormat, generatedAt: string)
 export async function exportSettlement(tx: Queryable, grant: AccessGrant, id: string, format: ExportFormat = 'CSV'): Promise<ExportFile> {
   await reassertAccess(tx, grant, 'settlement', 'export', ['amount']);
   const detail = await exportable(tx, grant, id);
-  const file = render(detail, format, new Date().toISOString());
+  const file = render(detail, format, new Date().toISOString(), await settlementFileContext(tx, grant, detail));
   await audit(tx, actorOf(grant), 'settlement', detail.id, 'EXPORT', null, { operational: { revision: detail.revision, lineCount: file.lineCount, format } });
   return file;
 }
@@ -839,7 +845,7 @@ export async function exportSettlementArchive(tx: Queryable, grant: AccessGrant,
   const entries: { name: string; data: Buffer }[] = [];
   for (const id of ids) {
     const detail = await exportable(tx, grant, id);
-    const file = render(detail, format, generatedAt);
+    const file = render(detail, format, generatedAt, await settlementFileContext(tx, grant, detail));
     // Two revisions of one employee and number (an earlier exit) never share a name: the later gets its id.
     const extension = file.fileName.slice(file.fileName.lastIndexOf('.'));
     const name = entries.some((e) => e.name === file.fileName) ? `${file.fileName.slice(0, -extension.length)}-${detail.id}${extension}` : file.fileName;

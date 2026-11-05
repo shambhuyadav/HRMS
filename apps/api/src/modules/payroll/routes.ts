@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { optionalPaging, type Paging } from '../../db/paging.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
 import { requireAccess } from '../../http/guard.js';
-import type { ScanProvider } from '../../storage/scan.js';
+import { type ScanProvider, scanInMemory } from '../../storage/scan.js';
 import { sendTemplate } from '../imports/routes.js';
 import {
   activateCalendar,
@@ -671,7 +671,10 @@ export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; 
     async (request) => {
       const { id } = request.params as { id: string };
       const grant = await input(request, 'prepare', id);
-      return withTransaction(db, (tx) => uploadBatch(tx, grant, scanner, id, request.body as { contentBase64: string; dryRun?: boolean; idempotencyKey?: string }));
+      const body = request.body as { contentBase64: string; dryRun?: boolean; idempotencyKey?: string };
+      // FR-106: asked before the transaction opens, so a slow scanner holds no connection and no service-month lock.
+      const verdict = await scanInMemory(scanner, Buffer.from(body.contentBase64, 'base64'));
+      return withTransaction(db, (tx) => uploadBatch(tx, grant, verdict, id, body));
     },
   );
 

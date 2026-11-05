@@ -19,6 +19,8 @@ const session = vi.hoisted(() => ({
   companyId: 'c0000000-0000-4000-8000-000000000001',
   assignmentId: 'a0000000-0000-4000-8000-000000000001',
 }));
+// The automatic re-check of a waiting batch has its own tests (held-batch.test.tsx): here the manual check is on its own.
+vi.mock('../held-batch-timing', () => ({ HELD_BATCH_CHECK_INTERVAL_MS: 3_600_000, HELD_BATCH_MAX_CHECKS: 30 }));
 vi.mock('../session', () => ({
   useSession: () => ({
     stored: { token: 'synthetic-token', companies: [], companyId: session.companyId, assignmentId: session.assignmentId },
@@ -709,14 +711,14 @@ describe('bulk document mapping (FR-010, DF09, I-13, FR-106)', () => {
     renderAt('/documents/bulk-mapping', [UPLOAD, IMPORT]);
     const list = await screen.findByRole('table', { name: 'Your mapping batches' });
     expect(callsTo('GET', '/v1/documents/mapping-imports')[0]!.search).toBe('?page=1&pageSize=25');
-    expect(rowOf(list, 'held.csv').textContent).toContain('held for the malware scan');
+    expect(rowOf(list, 'held.csv').textContent).toContain('waiting for the scan');
     expect(rowOf(list, 'held.csv').textContent).toContain('waiting for the malware scan');
     expect(rowOf(list, 'done.csv').textContent).toContain('committed');
     expect(rowOf(list, 'done.csv').textContent).toContain('3 mapped');
     expect(screen.queryByText(/Page 1 of/)).toBeNull();
 
     fireEvent.click(within(rowOf(list, 'held.csv')).getByRole('button', { name: /^Open held.csv/ }));
-    expect(await screen.findByText(/Check the scan again later to see the preview/)).toBeTruthy();
+    expect(await screen.findByText(/This is usually a short wait/)).toBeTruthy();
     expect(within(rowOf(screen.getByRole('table', { name: 'Your mapping batches' }), 'held.csv')).getByText('open above')).toBeTruthy();
     await checkAgain();
     expect(await screen.findByText('Still waiting for the malware scan.')).toBeTruthy();
@@ -827,7 +829,7 @@ describe('bulk document mapping (FR-010, DF09, I-13, FR-106)', () => {
     });
     renderAt('/documents/bulk-mapping', [UPLOAD, IMPORT]);
     await uploadMapping();
-    expect(await screen.findByText(/waiting for the malware scan, so nothing in it has been read yet. Check the scan again later/)).toBeTruthy();
+    expect(await screen.findByText(/waiting for the malware scan, so nothing in it has been read yet. This is usually a short wait/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Map / })).toBeNull();
     expect(screen.getByRole('button', { name: 'Cancel import' })).toBeTruthy();
     await checkAgain();

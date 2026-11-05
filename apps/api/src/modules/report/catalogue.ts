@@ -7,14 +7,18 @@ import { HttpError } from '../../http/errors.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { assertMinuteFilter, ATTENDANCE_CONTROL_FROM, attendanceControlConditions, type AttendanceControlFilters } from '../attendance/service.js';
 import { auditEventQuery } from '../audit-trail/service.js';
+import { BIOMETRIC_REPORTS } from '../biometric/reports.js';
+import { CONFIRMATION_VIEWS, type ConfirmationView, listConfirmations } from '../confirmation/service.js';
 import { type EmployeeFilters, employeeFilterConditions, employeeOrderBy } from '../employee/service.js';
-import { EXPENSE_REPORTS } from '../expense/reports.js';
+import { claimsInScope, EXPENSE_REPORTS } from '../expense/reports.js';
 import { requireDayOrMonth, SALARY_MASTER_ORDER, salaryMasterSelect } from '../increment/salary-master.js';
-import { comparisonRows, disbursementRows, payrollRegisterRows, requirePayrollRun, requireWholePayrollRun } from '../payroll-outputs/reports.js';
+import { comparisonRows, disbursementRows, payrollRegisterRows, payrollRunRevision, requirePayrollRun, requireWholePayrollRun } from '../payroll-outputs/reports.js';
+import { NOTIFICATION_REPORTS } from '../notification/reports.js';
 import { isModuleActive } from '../registry.js';
 import { CURRENT_MEMBER_STATUSES, TEAM_SORTS, teamExportRows } from '../team/service.js';
 import { ALLOCATION_STATES, allocationExportRows } from '../timesheet/allocations.js';
 import { hoursExportRows, MAX_REPORT_DAYS } from '../timesheet/reports.js';
+import { cellText, contextCsvLines, csvCell, oneLine, type ReportContext } from './context.js';
 import { PLAIN_DECIMAL, type SheetCell, xlsxWorkbook } from './xlsx.js';
 
 /** DF14 comparable compensation bases (increment/service.ts). */
@@ -28,7 +32,7 @@ export type ReportFormat = (typeof REPORT_FORMATS)[number];
  * A list's record filters (one employee, project, job or activity, or the payroll run of a run report, by id); only
  * reports that declare them accept them.
  */
-export const RECORD_FILTERS = ['employeeId', 'projectId', 'jobId', 'activityId', 'runId', 'locationId', 'shiftId', 'minuteField', 'minuteOp', 'minuteValue', 'leaveType', 'resource', 'recordKey', 'actorUserId', 'action', 'reviewDueFrom', 'reviewDueTo', 'todayAttendance', 'confirmationDueTo'] as const;
+export const RECORD_FILTERS = ['employeeId', 'projectId', 'jobId', 'activityId', 'runId', 'locationId', 'shiftId', 'minuteField', 'minuteOp', 'minuteValue', 'leaveType', 'resource', 'recordKey', 'actorUserId', 'action', 'reviewDueFrom', 'reviewDueTo', 'todayAttendance', 'confirmationDueTo', 'view', 'category', 'profileId'] as const;
 export type RecordFilter = (typeof RECORD_FILTERS)[number];
 
 export interface ReportFilters extends EmployeeFilters {
@@ -60,10 +64,16 @@ export interface ReportFilters extends EmployeeFilters {
   reviewDueTo?: string | undefined;
   todayAttendance?: string | undefined;
   confirmationDueTo?: string | undefined;
+  /** FR-082 / FR-093 the confirmation list's view. */
+  view?: string | undefined;
+  /** FR-085 / section 11.2 the delivery log's event type. */
+  category?: string | undefined;
+  /** FR-087 / section 11.2 one biometric profile. */
+  profileId?: string | undefined;
 }
 
 /** The employee list filters beyond status (FR-007); only reports that declare `employeeFilters` accept them. */
-export const EMPLOYEE_LIST_FILTERS = ['search', 'departmentId', 'joinedFrom', 'joinedTo', 'sort', 'direction'] as const;
+export const EMPLOYEE_LIST_FILTERS = ['search', 'statusGroup', 'departmentId', 'joinedFrom', 'joinedTo', 'sort', 'direction'] as const;
 export type EmployeeListFilter = (typeof EMPLOYEE_LIST_FILTERS)[number];
 
 /** The employee list filters a report accepts: every one (`employeeFilters: true`), the listed ones, or none. */
@@ -109,6 +119,10 @@ export interface ReportDefinition {
    * payroll run exists; company figures need the whole run in scope), with the status the matching JSON route answers.
    */
   checkRequest?: ((db: Queryable, grant: AccessGrant, f: ReportFilters) => Promise<void>) | undefined;
+  /** FR-065 "record the filter/run version": the record revision a file of this report comes from, shown in its context (DF09). */
+  sourceRevision?: ((db: Queryable, grant: AccessGrant, f: ReportFilters) => Promise<string>) | undefined;
+  /** C4 "Historical financial views require an explicit history grant": also needed, always or when `when` says the filters reach back. */
+  historyGrant?: { resource: string; fieldGroup: string; when?: (f: ReportFilters, today: string) => boolean } | undefined;
   /** `numeric`: an XLSX number cell when the value is a plain decimal (CSV is unchanged). */
   columns: { key: string; header: string; numeric?: boolean }[];
   rows(db: Queryable, grant: AccessGrant, f: ReportFilters): Promise<Record<string, unknown>[]>;
@@ -369,32 +383,41 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     },
   },
 
+  // FR-093; section 11.2 "Upcoming/due/overdue/extended/confirmed filtered list; planned versus actual dates and decisions": the
+  // rows of GET /confirmations for the same `view`, under the same scope and order, so an export's count is the list's. Each
+  // decision of the case's append-only history (CI17) with its date in company time; its reason is confidential (DF02) and stays out.
   CONFIRMATION_DUE: {
     code: 'CONFIRMATION_DUE',
     title: 'Confirmation due and history',
     resource: 'confirmation',
     fieldGroup: 'operational',
     requiresPeriod: false,
+    recordFilters: ['view'],
+    checkFilters(f) {
+      if (f.view !== undefined && !(CONFIRMATION_VIEWS as readonly string[]).includes(f.view)) throw new HttpError(422, 'INVALID_FILTER', `The view is one of ${CONFIRMATION_VIEWS.join(', ')}`, { field: 'view' });
+    },
     columns: [
-      { key: 'employee_code', header: 'Employee code' },
-      { key: 'start_date', header: 'Start date' },
-      { key: 'initial_due_date', header: 'Initial due date' },
-      { key: 'current_due_date', header: 'Current due date' },
-      { key: 'extension_count', header: 'Extensions' },
-      { key: 'actual_confirmation_date', header: 'Confirmed on' },
+      { key: 'employeeCode', header: 'Employee code' },
+      { key: 'startDate', header: 'Start date' },
+      { key: 'initialDueDate', header: 'Initial due date' },
+      { key: 'dueDate', header: 'Current due date' },
+      { key: 'extensionCount', header: 'Extensions' },
+      { key: 'actualConfirmationDate', header: 'Confirmed on' },
       { key: 'state', header: 'State' },
+      { key: 'view', header: 'View' },
+      { key: 'decisions', header: 'Decisions' },
     ],
-    async rows(db, grant) {
-      const p = new SqlParams();
-      const scope = scoped(grant, p, 'c.company_id', 'c.employee_id');
-      return (
-        await db.query(
-          `select e.employee_code, c.start_date, c.initial_due_date, c.current_due_date, c.extension_count, c.actual_confirmation_date, c.state
-             from employee_confirmation c join employee e on e.company_id = c.company_id and e.id = c.employee_id
-            where ${scope} order by c.current_due_date, e.employee_code`,
-          p.values,
+    async rows(db, grant, f) {
+      const { items } = await listConfirmations(db, grant, (f.view as ConfirmationView | undefined) ?? 'ALL');
+      const decisions = (
+        await db.query<{ confirmation_id: string; decisions: string }>(
+          `select a.confirmation_id, string_agg(a.action || ' ' || to_char(hrms_business_date(a.company_id, a.occurred_at), 'YYYY-MM-DD'), '; ' order by a.occurred_at, a.id) as decisions
+             from confirmation_action a where a.company_id = $1 and a.confirmation_id = any($2::uuid[]) group by a.confirmation_id`,
+          [grant.companyId, (items as { id: string }[]).map((c) => c.id)],
         )
       ).rows;
+      const byCase = new Map(decisions.map((d) => [d.confirmation_id, d.decisions]));
+      return (items as ({ id: string } & Record<string, unknown>)[]).map((c) => ({ ...c, decisions: byCase.get(c.id) ?? '' }));
     },
   },
 
@@ -418,11 +441,11 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     ],
     async rows(db, grant, f) {
       const p = new SqlParams();
-      const scope = scoped(grant, p, 'c.company_id', 'c.employee_id');
+      const scope = await claimsInScope(db, grant, p);
       // Paid totals come from confirmed outcomes only; pending reservations are never counted as paid (ZT17).
       return (
         await db.query(
-          `select e.employee_code, c.id as claim_id, c.state, r.submitted_at,
+          `select e.employee_code, c.id as claim_id, c.state, hrms_business_date(c.company_id, r.submitted_at) as submitted_at,
                   (select sum(l.claimed_amount) from expense_line l where l.company_id = r.company_id and l.revision_id = r.id)::numeric(19,2)::text as claimed_total,
                   l.approved_amount::numeric(19,2)::text as approved_amount, l.net_paid::numeric(19,2)::text as net_paid,
                   (l.approved_amount - l.net_paid)::numeric(19,2)::text as outstanding, c.payment_state, c.currency_code as currency
@@ -441,11 +464,16 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
   // FR-079, section 11: line register, approval ageing, category spend, payable ageing and payment reconciliation.
   ...EXPENSE_REPORTS,
 
+  // FR-093, section 11.2: the notification delivery log, upcoming celebrations, and the biometric sync and exception reports.
+  ...NOTIFICATION_REPORTS,
+  ...BIOMETRIC_REPORTS,
+
   INCREMENT_HISTORY: {
     code: 'INCREMENT_HISTORY',
     title: 'Increment history',
     resource: 'increment',
     fieldGroup: 'salary',
+    historyGrant: { resource: 'increment', fieldGroup: 'salary' },
     requiresPeriod: true,
     columns: [
       { key: 'employee_code', header: 'Employee code' },
@@ -465,7 +493,7 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
           `select e.employee_code, h.effective_date, h.compensation_basis as basis, h.currency_code as currency,
                   h.before_amount::numeric(19,2)::text as before_amount, h.after_amount::numeric(19,2)::text as after_amount,
                   to_char(h.change_percent, 'FM999999990.00') as change_percent, h.percent_na_reason
-             from increment_history h join employee e on e.company_id = h.company_id and e.id = h.employee_id
+             from increment_history_in_force h join employee e on e.company_id = h.company_id and e.id = h.employee_id
             where ${scope} and h.effective_date between ${p.add(f.from)}::date and ${p.add(f.to)}::date
             order by e.employee_code, h.effective_date`,
           p.values,
@@ -531,6 +559,7 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     title: 'Employee annual increment',
     resource: 'increment',
     fieldGroup: 'salary',
+    historyGrant: { resource: 'increment', fieldGroup: 'salary' },
     requiresPeriod: true,
     basisFilter: true,
     checkFilters: requireAnnualPeriod,
@@ -557,7 +586,7 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
           `select e.employee_code, to_char(${from}, 'YYYY-MM-DD') as period_start, to_char(${to}, 'YYYY-MM-DD') as period_end, ${basisParam}::text as basis,
                   coalesce(c.currency_code, o.currency_code) as currency,
                   o.amount::numeric(19,2)::text as opening_amount, c.amount::numeric(19,2)::text as closing_amount,
-                  (select count(*)::int from increment_history h where h.company_id = e.company_id and h.employee_id = e.id
+                  (select count(*)::int from increment_history_in_force h where h.company_id = e.company_id and h.employee_id = e.id
                       and h.compensation_basis = ${basisParam} and h.effective_date between ${from} and ${to}) as changes,
                   case when o.amount is not null and c.amount is not null and o.currency_code = c.currency_code and o.amount > 0
                        then to_char(round((c.amount - o.amount) / o.amount * 100, 2), 'FM999999990.00') end as annual_growth_percent,
@@ -591,6 +620,7 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     title: 'Employee salary master',
     resource: 'salary',
     fieldGroup: 'salary',
+    historyGrant: { resource: 'salary', fieldGroup: 'salary', when: (f, today) => (f.from ?? today) < today },
     requiresPeriod: true,
     employeeFilters: ['search'],
     statusFilter: true,
@@ -607,6 +637,7 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     title: 'Employee annual salary',
     resource: 'salary',
     fieldGroup: 'salary',
+    historyGrant: { resource: 'salary', fieldGroup: 'salary' },
     requiresPeriod: true,
     employeeFilters: ['search'],
     statusFilter: true,
@@ -705,12 +736,14 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     xlsx: true,
     checkFilters: requireRunOnly,
     checkRequest: (db, grant, f) => requirePayrollRun(db, grant.companyId, f.runId!),
+    sourceRevision: (db, grant, f) => payrollRunRevision(db, grant.companyId, f.runId!),
     columns: [
       { key: 'recordId', header: 'Record id' },
       { key: 'employeeId', header: 'Employee id' },
       { key: 'employeeCode', header: 'Employee code' },
       { key: 'employeeName', header: 'Employee name' },
       { key: 'calculationStatus', header: 'Calculation status' },
+      { key: 'salaryStopMode', header: 'Salary stop mode' },
       { key: 'paidUnits', header: 'Paid units', ...PAYROLL_MONEY },
       { key: 'earnings', header: 'Earnings', ...PAYROLL_MONEY },
       { key: 'reimbursements', header: 'Reimbursements', ...PAYROLL_MONEY },
@@ -739,9 +772,13 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     xlsx: true,
     checkFilters: requireRunOnly,
     checkRequest: (db, grant, f) => requireWholePayrollRun(db, grant, f.runId!),
+    sourceRevision: (db, grant, f) => payrollRunRevision(db, grant.companyId, f.runId!),
     columns: [
       { key: 'payable', header: 'Approved payable', ...PAYROLL_MONEY },
       { key: 'held', header: 'Held', ...PAYROLL_MONEY },
+      { key: 'heldBySalaryStop', header: 'Of held, by salary stop', ...PAYROLL_MONEY },
+      { key: 'salaryStopHolds', header: 'Salary stop holds', ...PAYROLL_MONEY },
+      { key: 'excludedBySalaryStop', header: 'Excluded by salary stop', ...PAYROLL_MONEY },
       { key: 'reserved', header: 'Reserved', ...PAYROLL_MONEY },
       { key: 'paid', header: 'Paid', ...PAYROLL_MONEY },
       { key: 'ready', header: 'Ready', ...PAYROLL_MONEY },
@@ -763,6 +800,7 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
     xlsx: true,
     checkFilters: requireRunOnly,
     checkRequest: (db, grant, f) => requirePayrollRun(db, grant.companyId, f.runId!),
+    sourceRevision: (db, grant, f) => payrollRunRevision(db, grant.companyId, f.runId!),
     columns: [
       { key: 'componentCode', header: 'Component code' },
       { key: 'headType', header: 'Head type' },
@@ -828,19 +866,7 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
 /** The catalogue: every report whose module is active (a module's reports are neither listed nor generated otherwise). */
 export const REPORTS: Record<string, ReportDefinition> = Object.fromEntries(Object.entries(ALL_REPORTS).filter(([, def]) => !def.module || isModuleActive(def.module)));
 
-/**
- * FR-065: a cell's text, where text that a spreadsheet could interpret as a formula (starting with = + - @, a tab or
- * a carriage return) gets a leading apostrophe so it stays text. Every output format writes cells through it.
- */
-export function cellText(value: unknown): string {
-  const text = value === null || value === undefined ? '' : value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
-  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-}
-
-/** FR-065: every cell is quoted, quotes are doubled, and formula-like text is guarded (cellText). */
-export function csvCell(value: unknown): string {
-  return `"${cellText(value).replace(/"/g, '""')}"`;
-}
+export { cellText, csvCell, type ReportContext } from './context.js';
 
 export function toCsv(def: ReportDefinition, rows: Record<string, unknown>[]): string {
   const lines = [def.columns.map((c) => csvCell(c.header)).join(',')];
@@ -855,7 +881,19 @@ function xlsxCell(column: ReportDefinition['columns'][number], value: unknown): 
   return cellText(value);
 }
 
-/** FR-046 "Export XLSX": the same header and rows as toCsv, as one worksheet named after the report. */
-export function toXlsx(def: ReportDefinition, rows: Record<string, unknown>[]): Buffer {
-  return xlsxWorkbook(def.title, [def.columns.map((c) => cellText(c.header)), ...rows.map((r) => def.columns.map((c) => xlsxCell(c, r[c.key])))]);
+/** The CSV file: the context rows (label, value), one blank line, then the report's own header and rows exactly as toCsv writes them. */
+export function toCsvOutput(def: ReportDefinition, rows: Record<string, unknown>[], context: ReportContext): string {
+  return `${contextCsvLines(context).join('\r\n')}\r\n${toCsv(def, rows)}`;
+}
+
+/**
+ * FR-046 "Export XLSX": the same header and rows as toCsv, as a worksheet named after the report with its header in row 1, and
+ * the context on a second worksheet.
+ */
+export function toXlsx(def: ReportDefinition, rows: Record<string, unknown>[], context: ReportContext = []): Buffer {
+  return xlsxWorkbook(
+    def.title,
+    [def.columns.map((c) => cellText(c.header)), ...rows.map((r) => def.columns.map((c) => xlsxCell(c, r[c.key])))],
+    context.length > 0 ? { name: 'Report context', rows: context.map(([label, value]) => [cellText(label), cellText(oneLine(value))]) } : undefined,
+  );
 }

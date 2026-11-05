@@ -2,8 +2,11 @@
 // FR-106 scanning). Synthetic employees, components, references and amounts only.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
+import { buildApp } from '../../app.js';
+import { devTokenVerifier } from '../../auth/tokens.js';
+import { ASSIGNMENT_HEADER, COMPANY_HEADER } from '../../http/context.js';
 import { EICAR_TEST_STRING } from '../../storage/scan.js';
-import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { type Company, type Harness, startHarness, type TestActor, tokenConfig } from '../../test/harness.js';
 import { isModuleActive } from '../registry.js';
 import { PAYROLL_EVENTS } from './events.js';
 import {
@@ -221,6 +224,32 @@ describe.runIf(isModuleActive('payroll'))('payroll inputs and salary stops (FR-0
     const again = await ok<{ applied: boolean; batchId: string }>(await upload(good));
     expect(again.applied).toBe(true);
     expect(again.batchId).not.toBe(applied.batchId);
+  });
+
+  it('asks the scanner with no transaction open, so a slow scanner holds no connection and no service-month lock', async () => {
+    const open: number[] = [];
+    const app = buildApp({
+      db: h.pool,
+      verifier: devTokenVerifier(tokenConfig),
+      scanner: {
+        scan: async () => {
+          open.push((await h.one<{ n: number }>(`select count(*)::int as n from pg_stat_activity where datname = current_database() and state like 'idle in transaction%'`)).n);
+          return { verdict: 'CLEAN' };
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/payroll/periods/${periods['2026-03']}/input-batches/upload`,
+        headers: { authorization: `Bearer ${preparer.token}`, [COMPANY_HEADER]: A.id, [ASSIGNMENT_HEADER]: preparer.assignment },
+        payload: { contentBase64: Buffer.from('a,b\n1,2').toString('base64'), dryRun: true },
+      });
+      expect(res.json().error).toBe('INVALID_TEMPLATE');
+    } finally {
+      await app.close();
+    }
+    expect(open).toEqual([0]);
   });
 
   it('serves the published PAYROLL_INPUTS_V1 template: exactly the header the upload accepts and no rows, under the upload grant (DF09)', async () => {

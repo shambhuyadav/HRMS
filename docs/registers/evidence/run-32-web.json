@@ -1,0 +1,2987 @@
+{
+ "label": "Run 32 web",
+ "sha256": "069eb7eee77aebd6306e7d4b3c29d30929394c0cb36af435a43a990df155f888",
+ "startedAt": "2026-11-05T12:35:09.329Z",
+ "passed": 1096,
+ "failed": 0,
+ "skipped": 0,
+ "success": true,
+ "filesWithoutResults": [],
+ "citedTests": [
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "deciding grants (FR-068, C4) > explains a pending grant that someone else decided first",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "deciding grants (FR-068, C4) > offers only the decisions the selected assignment can make",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "deciding grants (FR-068, C4) > reject and revoke need a reason and send the row version; approval refusals are shown",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "deciding grants (FR-068, C4) > reloads a grant whose version went stale, then approves with the fresh version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "deciding grants (FR-068, C4) > warns before revoking the assignment in use, then hides earlier answers once the server refuses it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "proposing a grant (FR-067, DF02) > disables confidential permissions for an Other-class role and sends no purpose",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "proposing a grant (FR-067, DF02) > sends exactly the checked permissions, and a business purpose once a confidential one is chosen",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "users and their assignments (FR-066) > lists users and shows the selected user’s assignments with confidential permissions and restrictions marked",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "users and their assignments (FR-066) > never shows answers cached for another role assignment",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "users and their assignments (FR-066) > says so when confidential permissions cannot be marked",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "users and their assignments (FR-066) > searches and pages through the users",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/access.test.tsx",
+   "name": "users and their assignments (FR-066) > tells \"not permitted\" apart from an empty list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "audit trail (FR-058) > exports the events shown: the record filters applied with the period, not what is typed and not yet shown (BR-026)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "audit trail (FR-058) > grade and payroll trace (FR-057) > asks for the employee, then shows who recorded each grade and which runs used it, with no amount",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "audit trail (FR-058) > grade and payroll trace (FR-057) > says a refusal in the section and shows nothing else",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "audit trail (FR-058) > offers no export without the export duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "audit trail (FR-058) > shows field names and recorded groups; export needs its own duty and a period",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "audit trail (FR-058) > sorts on the server by a column heading: newest first until one is chosen, the next click reverses it, a new sort starts at page 1 (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "mobile-app link review (FR-023) > approves with the row version and needs a reason to revoke",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > approvals (C6 \"publication ... require business owner approval\") > needs the approval grant, and asks the server nothing without it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > approvals (C6 \"publication ... require business owner approval\") > shows the server’s refusal of the author",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > approvals (C6 \"publication ... require business owner approval\") > shows what is proposed beside what is in force; approval carries the row version; a rejection needs its reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > C6: a change waiting for approval blocks another; a rejected one is shown with its reason and the next change builds on what came before it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > lists every revision of each rule with its status, dates and wording",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > needs the rule-management grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > schedules a wording change from a future instant with exactly the changed field, the latest revision and a reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > shows the API’s refusals in plain words, keeps what was typed and reloads a stale rule",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "notification rules (FR-085, FR-061, I-35) > switches an optional rule off with only the on/off setting",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "retention (FR-058, DF08) > a manager proposes and requests but cannot activate or decide",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/admin.test.tsx",
+   "name": "retention (FR-058, DF08) > an approver activates with the row version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "cycles (FR-040) > a cycle changes against its version and closes only when every appraisal is finished",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "cycles (FR-040) > creates a cycle with its windows and levels; a misaligned start is refused in words and keeps what was typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "cycles (FR-040) > needs appraisal_cycle.read; read-only roles see no setting or cycle forms",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "cycles (FR-040) > sets the start month with no default, then changes it against its version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "reports and export (FR-044) > reports counts by state and the exact rating distribution; the export refusal is said in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "reports and export (FR-044) > shows no distribution the API left out and no export without its key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the KRA upload (FR-041: DRAFT only) > a commit answered with the rejected job reports that nothing was applied",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the KRA upload (FR-041: DRAFT only) > a held goal file is checked again from its stored file, without a second upload, and previewed once released",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the KRA upload (FR-041: DRAFT only) > commits a previewed file into draft appraisals",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the KRA upload (FR-041: DRAFT only) > downloads the published APPRAISAL_GOALS_V1 template (DF09) beside the column list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the KRA upload (FR-041: DRAFT only) > lists the user’s own uploads; a held one is opened again, and one the scan quarantines is refused in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the KRA upload (FR-041: DRAFT only) > needs the import and goal-setting duties; a rejected file lists its row problems in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the rating queue (FR-043 step 1) > a role without the rating duty is told so; tasks of one assignment are not shown under another",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the rating queue (FR-043 step 1) > returns with a message to the employee, resending the same key after a lost answer",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the rating queue (FR-043 step 1) > saves only the changed scores against the version, then submits the saved rating with an idempotency key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the rating queue (FR-043 step 1) > the decision duty without a read key lists nothing and asks for nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the register and enrolment (FR-041, FR-044) > enrols a chosen employee in an open cycle as a draft with goals, then opens it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the register and enrolment (FR-041, FR-044) > lists within scope with the filters the API offers; results appear only when the API returns them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the register and enrolment (FR-041, FR-044) > says enrolment refusals in words and keeps the form",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the review queue (FR-043 step 2, C4) > shows no rating content the API left out",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/appraisal.test.tsx",
+   "name": "the review queue (FR-043 step 2, C4) > shows the weighted manager result exactly as returned and confirms the rating",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "attendance policies (FR-020, BR-009) > creates a draft with exactly the values entered and proposes none",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "attendance policies (FR-020, BR-009) > explains a refused activation in words, and retires with a date and a reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "attendance policies (FR-020, BR-009) > explains refused thresholds and a stale edit in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "attendance policies (FR-020, BR-009) > maps a draft through the form’s own choices, and removes a mapping under its version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "attendance policies (FR-020, BR-009) > offers activation and retirement only to whoever holds the duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "attendance policies (FR-020, BR-009) > shows a refusal of the list as such",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "attendance policies (FR-020, BR-009) > shows thresholds, mappings, period and warnings in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "punch imports (FR-019, DF09) > is a menu screen under the import duty, as is the policy screen under its own",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "punch imports (FR-019, DF09) > offers the stored error report when rows were left out, and says when nothing can be applied",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "punch imports (FR-019, DF09) > previews what will be applied, quarantined and left out, and applies only on request",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "punch imports (FR-019, DF09) > shows a refused file with the server’s reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-admin.test.tsx",
+   "name": "punch imports (FR-019, DF09) > switches template, shows a held file as held, and offers no report for it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-control.test.tsx",
+   "name": "attendance control (FR-021, E07) > a day a processed payroll used says so and offers no amendment, whatever the duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-control.test.tsx",
+   "name": "attendance control (FR-021, E07) > amends with a reason under the version shown, and shows a refusal as the server words it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-control.test.tsx",
+   "name": "attendance control (FR-021, E07) > asks for nothing before a period, sends the chosen filters, and sends a minute comparison only when whole",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-control.test.tsx",
+   "name": "attendance control (FR-021, E07) > exports with the filters shown, only with the export duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/attendance-control.test.tsx",
+   "name": "attendance control (FR-021, E07) > opens a day with its source punches, policy revision and why the status changed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/bulk-jobs.test.tsx",
+   "name": "my background jobs (NFR-S09) > an attendance job with a failure lists who was not processed and the employee it stopped on; a locked day is counted in words (FR-022)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "holiday calendar (FR-005, DF08, I-04) > a closed entry is shown with its reason on request, and offers no change",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "holiday calendar (FR-005, DF08, I-04) > a correction sends only what changed and the current version; a clash is refused in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "holiday calendar (FR-005, DF08, I-04) > a withdrawal needs a reason, sends the version and shows the dates to reprocess and which are final",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "holiday calendar (FR-005, DF08, I-04) > adds a holiday to the chosen location and lists the dates it reaches",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "holiday calendar (FR-005, DF08, I-04) > shows the calendar in force; reading offers no change",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "holiday calendar (FR-005, DF08, I-04) > without the processing duty the dates are listed but not offered; a day with nothing to reprocess offers nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "shift master (FR-005, DF05) > a change of times is a dated revision with a reason, starting from what is in force",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "shift master (FR-005, DF05) > a new change offers a date again even if an earlier change queued it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "shift master (FR-005, DF05) > refuses in words, and a stale version reloads the list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "shift master (FR-005, DF05) > renames and deactivates with the version; a new shift needs the create duty and proposes no times",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "shift master (FR-005, DF05) > shows the times in force and every revision; reading offers no change",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "weekly-off patterns (FR-005, DF05) > a week with no working day is refused in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "weekly-off patterns (FR-005, DF05) > saves whole days from a date with the latest entry seen; no half day is offered",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/calendars.test.tsx",
+   "name": "weekly-off patterns (FR-005, DF05) > shows the default and the dated entries per location; reading offers no change",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "attention list (FR-082, DF11, I-36) > is shown only with the HR manage duty, without case links for a role that cannot read cases",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "attention list (FR-082, DF11, I-36) > reads the list again after HR opens a case",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "attention list (FR-082, DF11, I-36) > reports each issue in plain words for HR review, changes nothing, and links an open case to its panel",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "attention list (FR-082, DF11, I-36) > tells \"nothing needs attention\" apart from a refusal, and says when the check stopped early",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "cancelling a review (FR-082, DF11) > a live case of an employee no longer on probation says so, offers no recommendation, and HR can cancel it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "cancelling a review (FR-082, DF11) > is offered on a live case only, to the HR duty only, and never on one’s own review",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "cancelling a review (FR-082, DF11) > sends exactly the reason and the case version, after which the case shows it is closed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "cancelling a review (FR-082, DF11) > shows a refusal in plain words, keeps the typed reason and reloads the case after a conflict, so a retry uses the new version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "cancelling a review (FR-082, DF11) > shows the private reason only when the server returned it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "case detail and history (FR-081, CI17, DF02/DF11) > shows the actual confirmation date of a confirmed case",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "case detail and history (FR-081, CI17, DF02/DF11) > shows the history without reasons when the server withholds them, and nothing hints at them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "case detail and history (FR-081, CI17, DF02/DF11) > shows the reasons only when the server returned them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > creates a policy with exactly the API’s body, once the required fields are filled, then starts a clean form",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > creates a revision from the latest one with its version, starting from its terms",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > ends a policy with exactly the date and its version, and shows why a case in use refuses an earlier date",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > is a menu screen under the policy duty, reached from the confirmations page by those who hold it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > leaves the rules to the server: its refusals are shown in its own plain words and what was typed stays",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > lists every revision with what it says, where it stands and what can be done with it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > never shows a list answered for another role assignment, even from the cache",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > reloads after a version conflict, keeps what was typed, and a retry uses the new version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > says so without the duty, and asks the server nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation policies (FR-080, BR-029, DF11) > tells a refusal of the list apart from having no policies",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation views (FR-082) > exports the view on screen with its own right, and offers nothing without it (FR-093)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation views (FR-082) > moves between the tabs with the arrow keys",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation views (FR-082) > opens the view and the case named in the address",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation views (FR-082) > shows the view tabs with counts from the list and requests the chosen view",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation views (FR-082) > tells an empty view apart from a role that may not view cases",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "confirmation views (FR-082) > the Extended view lists the live cases extended at least once, each with its own date view (I-36)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "opening a case (FR-080) > finds an employee on probation and opens a case with exactly the employee id",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "opening a case (FR-080) > shows the server’s refusal when a live case already exists",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "opening a case (FR-080) > tells \"no match\" apart from a role that cannot search employees",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "recommendation (FR-081, DF11) > offers the form again once the case is back to OPEN, without the earlier sent message",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "recommendation (FR-081, DF11) > sends exactly the CONFIRM body with the case version, after the required fields are filled",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "recommendation (FR-081, DF11) > sends exactly the EXTEND body with the case version and no confirmation date",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/confirmation.test.tsx",
+   "name": "recommendation (FR-081, DF11) > shows the server’s refusal, and reloads the case after a version conflict",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/delegations.test.tsx",
+   "name": "the \"delegated\" indication on decision tasks (FR-096) > answers for one role are not shown under another",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/delegations.test.tsx",
+   "name": "the \"delegated\" indication on decision tasks (FR-096) > every decision queue row shows it (the rule above is the same component everywhere)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/delegations.test.tsx",
+   "name": "the \"delegated\" indication on decision tasks (FR-096) > names the delegator and the role the user acts in, only on the delegated task",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/delegations.test.tsx",
+   "name": "the \"delegated\" indication on decision tasks (FR-096) > the inbox section lists them; a refusal or no delegated task shows nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > a held mapping file can be cancelled; nothing is applied",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > a mapping file naming an unknown employee code is rejected: each row’s problem in plain words, nothing mapped, no commit",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > a mapping file still waiting for the malware scan is held: nothing read, no commit; checked again from its stored file it is previewed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > a mapping file the malware scan flags is refused in plain words, also when a held batch is checked again",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > a previewed mapping is committed only on request, after which the staged files are read again",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > discards a file waiting to be mapped only after a second click; it is then listed under Discarded, never as deleted",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > downloads the published DOCUMENT_MAPPING_V1 template (DF09) beside the column list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > is not offered without the document upload grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > lists the user’s own mapping batches; a held batch is opened again, checked again and committed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > pages through the user’s mapping batches, newest first",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > pages through the user’s staged files, newest first, with the shared pager; another tab starts at its first page",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "bulk document mapping (FR-010, DF09, I-13, FR-106) > stages each chosen file in turn, reports each scan outcome or refusal, and reads the staged list again",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "company policies: the employee read view (FR-010, DF02) > a policy the API does not return reads as not available, with no hint why",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "company policies: the employee read view (FR-010, DF02) > keeps every version in the history; only released versions can be opened",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "company policies: the employee read view (FR-010, DF02) > lists the released version and expiry of each policy and downloads it through the content route",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "company policies: the employee read view (FR-010, DF02) > marks a confidential policy only when the API lists it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "company policies: the employee read view (FR-010, DF02) > says in plain words why a version cannot be opened, and when the role may not read policies",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "managing one policy (FR-010, DF02) > a stale classification change is refused in plain words and the policy reloaded",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "managing one policy (FR-010, DF02) > changes the title with only the changed field and the policy version; a confidential classification needs its grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "managing one policy (FR-010, DF02) > publishes a new version against the policy version it was loaded at; a stale view is reloaded and kept for the retry",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "policy upload (FR-010, DF02, FR-106) > is not offered without the manage duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "policy upload (FR-010, DF02, FR-106) > offers a confidential classification only with the confidential grant, and sends it as chosen",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "policy upload (FR-010, DF02, FR-106) > publishes a policy with exactly the API’s body, then starts a clean form and reads the list again",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/documents.test.tsx",
+   "name": "policy upload (FR-010, DF02, FR-106) > shows the API’s refusals in plain words and keeps what was typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a draft’s joining date and closure (BR-002, DF08) > a date conflict names what it conflicts with and keeps what was typed 0",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a draft’s joining date and closure (BR-002, DF08) > a date conflict names what it conflicts with and keeps what was typed 1",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a draft’s joining date and closure (BR-002, DF08) > a date conflict names what it conflicts with and keeps what was typed 2",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a draft’s joining date and closure (BR-002, DF08) > a date conflict names what it conflicts with and keeps what was typed 3",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a draft’s joining date and closure (BR-002, DF08) > a joining date correction sends the version, the date and the reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a draft’s joining date and closure (BR-002, DF08) > are offered for a draft only, each with its own duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a draft’s joining date and closure (BR-002, DF08) > closing a draft sends the version and the reason; an account still linked reads in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal reads in plain words and everything typed stays (400)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal reads in plain words and everything typed stays (403)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal reads in plain words and everything typed stays (409)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal reads in plain words and everything typed stays (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal reads in plain words and everything typed stays (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal reads in plain words and everything typed stays (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal reads in plain words and everything typed stays (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a refusal with no plain words shows the server’s own",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > a rehire names the ended employment, found among separated employees",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > asks for the masters valid on the joining date once it is typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > offers and sends personal fields only with their own duty, the work email and grade when given",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > offers exactly the employment types the route accepts",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "a new employee (FR-006) > sends what was typed, trimmed, without blank optional fields, then opens the new record",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "editing (FR-006, FR-008) > a refusal reads in plain words and keeps what was typed (400)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "editing (FR-006, FR-008) > a refusal reads in plain words and keeps what was typed (409)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "editing (FR-006, FR-008) > a stale version reloads the record and keeps what was typed; the next save goes against the version now shown",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "editing (FR-006, FR-008) > personal fields are offered with the duty and the server’s answer; other fields then need no operational duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "editing (FR-006, FR-008) > saving nothing asks nothing of the server",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "editing (FR-006, FR-008) > sends the version and only what changed; a blank email clears it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "employment history (FR-006) > keeps what the employee history does not carry: shift periods, the last working date and linked employments; no record ids",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "employment history (FR-006) > no shift yet says so; a refusal reads in plain words and the link stays",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "employment history (FR-006) > status history is one link to the employee history; what that screen already shows is not repeated here",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "employment history (FR-006) > without its own duty there is no link to the employee history and nothing is asked for",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > a refusal reads in plain words, and the choice and date stay (403)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > a refusal reads in plain words, and the choice and date stay (409)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > a refusal reads in plain words, and the choice and date stay (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > a refusal reads in plain words, and the choice and date stay (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > a refusal reads in plain words, and the choice and date stay (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > a role that cannot search says so and can still remove",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > offers active employees found by search, sends the choice with its date and the reason typed, and says when it applies",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "manager change (FR-003, effective-dated) > removing the manager sends null, even without a reason: the server asks for one, in plain words, and the date stays",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "private details (FR-008, under the role’s own grant) > full values carry no mark; a category with no values says so; a refusal reads in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "private details (FR-008, under the role’s own grant) > is read only when asked for; shows the categories the server sent, and marks masked bank values",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "private details (FR-008, under the role’s own grant) > without either grant nothing is offered and nothing is read",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "shift change (FR-023, effective-dated) > a refusal reads in plain words and keeps what was typed (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "shift change (FR-023, effective-dated) > a refusal reads in plain words and keeps what was typed (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "shift change (FR-023, effective-dated) > a refusal reads in plain words and keeps what was typed (422)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "shift change (FR-023, effective-dated) > a role that cannot read the shift master says so and reads nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "shift change (FR-023, effective-dated) > needs its own duty, not the employee update duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "shift change (FR-023, effective-dated) > offers active shifts only and sends the choice with its date",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > a grade the server gave no words for is not shown, even with the master’s duty and an id",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > a personal field the server left out is not shown, even with the duty to update it; one it sent is, even when blank",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > links back to the list and to documents only with their duties",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > no assignment, shift or manager on the business date reads so",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > out of scope and nonexistent read the same, and an ill-formed address reads as not found",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > says that the sections waiting on the field dictionary are not offered (I-48 item 3)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > shows the operational fields in words; a role that only reads is offered no change and asks for nothing else",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > the reason for having no manager shows when the server sent one; left out or blank, it does not",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "the record (FR-006, FR-008) > the shift and the grade read from the record, asking for nothing else; no id is shown",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "transfer (FR-006, effective-dated) > a choice a new date no longer offers stays chosen and marked; the server’s refusal gives the period and everything typed stays",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "transfer (FR-006, effective-dated) > says when nothing is valid on the date, and when the role cannot read a master list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "transfer (FR-006, effective-dated) > starts from the current assignment and asks for what is valid on the date typed; sends the change with its date",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/employee.test.tsx",
+   "name": "transfer (FR-006, effective-dated) > with no grade chosen and no reason typed, sends neither",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > after a submission shows the warning once, in the request’s row, when the list carries it (FR-105)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > drafts an address change with only the typed fields, then submits it with its version (FR-104)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > lists own requests with their decisions for a request tab (FR-109)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > offers no request form without the submit duty and shows the reviewer’s message, never a private note",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > pages own requests with the total, asking for each page (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > says when a request was raised again after a rejected one (DF03), and not otherwise",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > shows every tab with the own-record context, and a named state for an unavailable tab",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > shows no cutoff warning when the submission carries none",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > shows the cutoff warning of a pending bank change from the list, when the page is opened later (FR-105)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "My ESS (FR-103) > warns in plain words, without bank values, when a submitted bank change falls after the payroll cutoff (FR-105)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "sensitive-change review (FR-104, FR-105) > needs a private note to approve and an employee message to return; warns when the base changed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "sensitive-change review (FR-104, FR-105) > shows the payroll cutoff warning before the decision, and again with the approval once the request leaves the queue (FR-105)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/ess.test.tsx",
+   "name": "sensitive-change review (FR-104, FR-105) > starts the review before any decision",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "candidate register (FR-013) > checks required fields before sending, explains refusals in words, keeps what was typed and is disabled while in flight",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "candidate register (FR-013) > registers a candidate who came through a vendor with the exact body, then starts the form clean",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "candidate register (FR-013) > searches by code, name or skill and filters by state; registering needs the manage duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "candidate register (FR-013) > the vendor mismatch refusal is shown in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "CV search (FR-013) > needs the candidate document grant: not permitted, and nothing is requested",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "CV search (FR-013) > searches CV metadata and offers released files only; a refused download is explained in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "duplicate review (FR-013: flagged for review, never merged) > a flag reviewed meanwhile is refused in words; without the manage duty flags are shown without a review form",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "duplicate review (FR-013: flagged for review, never merged) > records a confirmed duplicate with the record to retire and a note; nothing is merged",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "handover to onboarding (FR-014: a reviewed employee DRAFT, at most once) > a second handover is refused in words with a link to the employee the offer already created; the button is disabled in flight",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "handover to onboarding (FR-014: a reviewed employee DRAFT, at most once) > an employee with no recorded hiring origin is said so in words; the employee documents are linked with a document grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "handover to onboarding (FR-014: a reviewed employee DRAFT, at most once) > creates the employee draft from the accepted offer with released documents only, then links to the employee",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "handover to onboarding (FR-014: a reviewed employee DRAFT, at most once) > needs the handover duty and the employee creation duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "handover to onboarding (FR-014: a reviewed employee DRAFT, at most once) > the employee’s hiring origin traces back to its requisition, application, offer and candidate",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "offer approvals (F1/C4: the independent eligible approver; ZT07 idempotency) > a task decided elsewhere leaves the queue with the reason in words; the offers screen shows the queue to the approver",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "offer approvals (F1/C4: the independent eligible approver; ZT07 idempotency) > disables the decision buttons while a decision is in flight",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "offer approvals (F1/C4: the independent eligible approver; ZT07 idempotency) > each new decision is a new key; a requisition no longer approved is explained in words and blocks approval",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "offer approvals (F1/C4: the independent eligible approver; ZT07 idempotency) > is not permitted without the approval grant, and nothing is requested",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "offer approvals (F1/C4: the independent eligible approver; ZT07 idempotency) > returning needs a reason; a retry after a lost answer reuses its key and is answered from what was recorded",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "offer approvals (F1/C4: the independent eligible approver; ZT07 idempotency) > shows the revision under review with the compensation as returned and approves with an idempotency key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "offers (F1: approved requisition, confidential compensation, independent approval) > explains in words why a person cannot convert twice (FR-014, FR-013), naming no other record",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > a requisition that stopped being approved is refused in words, and the candidate and the search are read again",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > applies the candidate to another approved requisition; an existing application is marked, never repeated",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > checks the file before sending and explains an unsupported file in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > lists CVs with their scan state, offers downloads of released files only, and uploads with the exact body",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > reads the private contact only when asked (each look is audited) and records a contact; new duplicate flags are flags, never merges",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > removing a recorded value sends null; an invalid phone number is refused in words and kept",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > saves only the changed fields with the record version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "one candidate (FR-013, F1, DF02) > shows the operational record only: no private contact, documents or upload without the confidential grants",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "tracker (FR-014) > needs the application read duty: not permitted, and nothing is requested",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-pipeline.test.tsx",
+   "name": "tracker (FR-014) > shows vacancies, candidates by stage, owner, pending action and ageing as returned; filters by owner and closed requisitions",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "a new requisition (FR-011 fields) > finds another hiring manager by an employee search, offered only with the employee list permission",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "a new requisition (FR-011 fields) > is not offered without the create permission or to an account without an employee record",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "a new requisition (FR-011 fields) > offers a manager the masters the server returned to it when the role cannot list them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "a new requisition (FR-011 fields) > saves the draft with the exact body, is not sent twice while in flight, and opens it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "a new requisition (FR-011 fields) > says which field is missing, and keeps what was typed when the API refuses",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "manpower budgets (FR-011) > adds a budget line with a draft first revision, starting the form clean",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "manpower budgets (FR-011) > keeps what was typed when a budget line is refused, and says why",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "manpower budgets (FR-011) > lists the budget lines with the filters the API offers, and never invents a headcount",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "manpower budgets (FR-011) > shows budgets only with the read permission, the form only with manage, and the queue only to approvers",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "requisition register (FR-012 HR view within scope) > lists the requisitions in scope and sends the filters the API offers",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "requisition register (FR-012 HR view within scope) > never shows one role assignment’s answers under another",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "requisition register (FR-012 HR view within scope) > offers the first page when the address asks for a page past the end",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "requisition register (FR-012 HR view within scope) > pages through the register",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/hiring-requisitions.test.tsx",
+   "name": "requisition register (FR-012 HR view within scope) > shows the register only with the read permission, and New requisition only to a linked employee who may raise one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > a reversed date range is the server’s to refuse: it is sent, and the refusal reads beside the list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > an export the server refuses says so",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > asks for the employee register with exactly the list’s filters and order, the active set too",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > clearing a dashboard’s status leaves the other filters in place",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > department choices come from the master, inactive ones marked; without its read duty there is no choice and nothing is asked",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > offers DF04’s statuses and the active set; each choice replaces the other, and an address opens on its own choice",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > offers the export only with its own grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > says where to collect the export; changing the list takes that away, since it no longer describes the list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list filters and export (FR-007, I-37) > sends each filter to the server and keeps it in the address; a filter returns to the first page",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list links (FR-008) > a name opens the record for a role that may read it, and is plain text for one that may not",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list sorting (FR-007) > a new sort returns to the first page, and the search stays",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list sorting (FR-007) > offers every column the server allows, each asking for that column",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list sorting (FR-007) > opened from a dashboard figure, applies its status filter and states it; clearing it lists everyone",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "employee list sorting (FR-007) > starts on the employee code and asks the server for each column, reversing on the second click",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "member detail (FR-095, DF16) > a category with no source reads differently from an empty one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "member detail (FR-095, DF16) > goals read by cycle with their task status; compensation by its granted sections; documents open on the documents page",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "member detail (FR-095, DF16) > history shows what changed, and a masked value as the server sent it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "member detail (FR-095, DF16) > shows only the tabs the server returned, under DF16’s titles",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "my team (FR-094, FR-056, DF16) > keeps the server’s order until a heading is chosen, then asks the server for that column, reversing on the second click",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "my team (FR-094, FR-056, DF16) > offers the export only with its own grant, and asks for it with the list’s filters and order",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "my team (FR-094, FR-056, DF16) > opened from a dashboard figure, applies its filter and states it; clearing it lists everyone",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "my team (FR-094, FR-056, DF16) > pages at the server in 25, 50 or 100 and shows the total; a new size returns to page one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "my team (FR-094, FR-056, DF16) > sends each filter to the server, and keeps it in the address",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "my team (FR-094, FR-056, DF16) > shows the DF16 columns: location, manager and joining date",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "role dashboard (FR-096, FR-097, DF17) > a role without a dashboard reads the neutral state, with no task list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "role dashboard (FR-096, FR-097, DF17) > lists pending tasks, each leading to the decisions, says when nothing is waiting, and marks delegated and overdue",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "role dashboard (FR-096, FR-097, DF17) > shows only the shortcuts the server listed, and none when it lists none",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "role dashboard (FR-096, FR-097, DF17) > states the role, company, scope and period; a figure links only when the server gave it a source; unavailable and unset read differently",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "the records behind a figure (FR-097, DF17 \"the same filters\") > a figure with no source, or one no longer permitted in this role, asks for nothing and says so",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "the records behind a figure (FR-097, DF17 \"the same filters\") > asks for exactly the list the widget names, with its count; shows no record references; offers the module screen",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/home.test.tsx",
+   "name": "the records behind a figure (FR-097, DF17 \"the same filters\") > each list of a split figure is asked for and labelled",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "cached answers (C1, BR-046) > never shows case amounts that another assignment left in the shared query cache",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "cached answers (C1, BR-046) > stops showing a salary the server now refuses, although an earlier answer is cached",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "cycles (FR-091, DF15) > follows the opening until it completes, then lists the cases it created and the employees it excluded with the repair path, and stops asking",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "cycles (FR-091, DF15) > queues the opening of a review for the chosen year and says plainly that it is queued (NFR-S09)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "cycles (FR-091, DF15) > says plainly why an opening stopped, and lists nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "cycles (FR-091, DF15) > shows the refusal of a review the server will not queue",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "cycles (FR-091, DF15) > starts with no review year and checks the year format before opening a review",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > correcting an applied change (BR-038; DF14) > checks the amounts before sending, and explains a period payroll has processed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > correcting an applied change (BR-038; DF14) > marks the superseded record and the correction, and offers Correct only on the latest",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > correcting an applied change (BR-038; DF14) > needs the proposal duty and a company-wide assignment",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > correcting an applied change (BR-038; DF14) > sends both figures as typed, proposing no value, and says it waits for a decision",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > does not label the opening amount with the closing currency when the currency changed in the year",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > history grants (C4; C6) > does not claim anything is withheld when the role holds the grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > history grants (C4; C6) > says earlier arrangements are withheld when the server leaves them out",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > history grants (C4; C6) > the plain increment read grant shows no applied changes or annual growth, and asks the server for neither",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > is absent without salary grants, and no salary data is requested",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > opens the panel for the employee of a case row",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > records the initial salary exactly as typed when none exists, and does not offer it otherwise",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > says not permitted when the server refuses a salary read",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > shows arrangements, increment history and annual growth for the chosen financial year",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "employee salary panel (FR-029, FR-089, FR-090, DF14) > shows each part only with its own grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "increment cases (FR-092, BR-044) > requests the chosen state and shows an empty result as empty, not as not permitted",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "increment cases (FR-092, BR-044) > shows loading, not \"not permitted\", while the role context is still arriving",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "increment cases (FR-092, BR-044) > shows no amount columns when the API returned none, even for a role holding the salary grant, and says why",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "increment cases (FR-092, BR-044) > shows not permitted instead of the case list without an increment read duty, and requests nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "increment cases (FR-092, BR-044) > shows the amount columns when the API returned amounts",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > asks for the employee before sending an off-cycle proposal",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > checks only the money format, and sends nothing until it is right",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > keeps a stale-version refusal on screen when the reloaded case is no longer open for a proposal",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > keeps the typed proposal after a stale-version refusal and resends it with the reloaded version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > offers proposals only on open cycle cases, with the propose grant and a linked employee",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > sends an increase with the case version and both amounts exactly as typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > sends no amounts for no change or defer, even after amounts were typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > sends the off-cycle body with the figures mapped to the chosen basis, exactly as typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/increments.test.tsx",
+   "name": "proposals (DF15, FR-092) > shows the server refusal as it is, without inventing a rule",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "before accrual (FR-024 acceptance) > lists employees with each unresolved type in words and pages",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "before accrual (FR-024 acceptance) > says so when everyone resolves",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "employee leave ledger (FR-025) > shows opening, credits, debits and closing per type, each movement in words, and a note only when the server sent one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "leave policies (FR-024, E06) > a refused activation names the overlapping revision and ends an earlier one only when asked",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "leave policies (FR-024, E06) > adds and removes a mapping under the version shown",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "leave policies (FR-024, E06) > creates a type and a draft with every value as entered, and filters the list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "leave policies (FR-024, E06) > exports the mapped policies under the filters shown, only with the export duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "leave policies (FR-024, E06) > offers maintenance by duty: no activation without the activation duty, no change without the manage duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "leave policies (FR-024, E06) > retires an active revision with a date and a reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/leave-admin.test.tsx",
+   "name": "leave policies (FR-024, E06) > says in words that a revision applies to nobody or overlaps another, not only in colour",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "an employee’s letters and restricted notes (FR-017, FR-018) > asks for no stored letters without the letter read grant, and for nothing about one’s own record",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "an employee’s letters and restricted notes (FR-017, FR-018) > finds an employee and links to their letters",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "an employee’s letters and restricted notes (FR-017, FR-018) > lists the stored letters with their template revision and generator, downloads one, and offers the processes to prepare a letter for",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "an employee’s letters and restricted notes (FR-017, FR-018) > says a refused download in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "an employee’s letters and restricted notes (FR-017, FR-018) > shows restricted notes only with the note grant, each text only when it was returned",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letter templates (FR-017) > creates a template with the placeholders its text uses, the optional ones marked, and starts the form clean",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letter templates (FR-017) > inserts an approved placeholder into the letter text",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letter templates (FR-017) > says a refused template in plain words and keeps what was typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letter templates (FR-017) > shows nothing of the templates without the read duty, and no new-template form without the manage duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letters for a process (FR-017, FR-018, FR-055) > generates the final letter from a ready preview, shows its template revision and generator, and downloads the stored letter",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letters for a process (FR-017, FR-018, FR-055) > offers no letter about one’s own record",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letters for a process (FR-017, FR-018, FR-055) > offers no preview or final letter without the letter grant, and no download without the letter read grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letters for a process (FR-017, FR-018, FR-055) > previews without storing or sending, names the missing mandatory values and blocks the final letter",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letters for a process (FR-017, FR-018, FR-055) > says a refused final letter in plain words, naming the missing values",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letters for a process (FR-017, FR-018, FR-055) > says in words why a relieving or experience letter cannot be previewed (FR-055)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "letters for a process (FR-017, FR-018, FR-055) > takes a template code where the role cannot list templates, and says an unpublished template in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one letter template (FR-017) > deactivates and renames the template against its version; a stale version is said in words, reloaded, and what was typed kept",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one letter template (FR-017) > offers no change to the template without the manage duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one letter template (FR-017) > saves the draft against its version and publishes the saved draft, never unsaved changes; then opens the next revision",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one letter template (FR-017) > says in words why a relieving or experience template cannot be published without the employment period (FR-055)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > cancels the draft with a reason, sending nothing without one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > checks and then uploads a lines file as the upload route takes it, with row problems in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > does not let the preparer record release eligibility, and says a dependent marker in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > downloads the published SETTLEMENT_LINES_V1 template (DF09) beside the upload’s header, without uploading anything",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > exports an approved settlement only with the export grant, as CSV, Excel (XLSX) or PDF (FR-054, FR-002)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > lets the preparer save the lines against the version, says a refused line with its number and keeps what was typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > offers the preparation actions only to the preparer of the revision",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > records release eligibility worded as no payment, and says an incomplete clearance in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > says in words when the selected role cannot download the settlement lines template",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > says when the loan module is not in use, or when there is no outstanding loan",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > shows no amount when the API omits them, and no line editor even for the preparer",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > shows the lines and the server’s net amount exactly as returned, never a sum worked out here",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > shows the remaining loan and leave balances read-only, exactly as returned (FR-034)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > starts a revision reached through its link afresh: nothing said about one revision is shown on another",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > starts the line editor again from the uploaded lines, so saving it never puts the replaced lines back",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > submits only the saved lines: changes still in the line editor block the submission until they are saved",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "one settlement revision (FR-052 to FR-054, BR-016) > submits the draft against its version, says in words when no reviewer is eligible, and sends nothing more while in flight",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > lists nothing without the settlement read duty, and says when the role cannot decide",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > lists the review tasks only, with the amounts returned, and approves a review with a fresh idempotency key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > needs a reason to return or reject, sending nothing without one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > says refused decisions in plain words: a task decided meanwhile leaves the queue, a missing approver stays explained",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > sends a decision whose answer was lost again under the same key, and disables the decision while one is in flight",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > shows both queues on the settlements screen for a role holding both decision grants, from one task list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > shows no amount in a task when the API omits them, and blocks a decision about one’s own record",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlement decision queues (FR-053; C4; ZT07) > the approval queue lists the approval tasks and decides them on the approval route; approval is not release and no payment",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > FR-002: the amount grant shows the amounts; only the separate export grant selects for the ZIP download",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > lists nothing without the settlement read duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > lists settlements with the calculation reported as not configured, and no amount when the API omits it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > lists the approved exits a settlement is prepared for, with the recorded notice period",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > never shows a list loaded for one role assignment under another, not even from the cache",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > pages the settlements with the total of every match, keeping the filters (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > says a refused ZIP download in words, naming the settlement that is no longer approved",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > says a rejected bulk lines file’s row problems in plain words, and offers no bulk upload without the preparation grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > selects approved settlements across pages and downloads them as one ZIP in the chosen format (FR-054)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > selects at most 100 settlements for one ZIP",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > shows the net amounts the server returned and filters by state, employee code and month as the API takes them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > sorts on the server by a column heading, keeps the filters and starts again at page 1; the net amount is not offered (FR-056, DF02)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "settlements (FR-052 to FR-054, BR-016) > validates and applies a bulk lines file for several drafts through the import lifecycle (FR-054)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "the settlements of one exit (FR-052, FR-054) > a correction keeps the earlier currency when left blank, and a refused revision is said in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-documents.test.tsx",
+   "name": "the settlements of one exit (FR-052, FR-054) > lists the revisions with the calculation reported, and prepares the first revision with its currency",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > allows closing only once every required task is complete, as the API counts them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > closes a task form whose task moved on meanwhile and says why at the top of the process",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > closes the process against its version, saying a refusal in words and disabling the actions while in flight",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > completes an owned task with a remark and the evidence it asks for, which waits for the malware scan",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > finds an employee in scope and starts a published template for them with the exact body",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > keeps the reason after a refused reopening of a released exit’s checklist",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > lets the owner skip an optional task with a reason, never a required one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > names the template tasks whose named owner cannot act on the employee",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > offers an HR user nothing to do on a process about themselves, whatever their duties (C4)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > offers evidence downloads only for released files and only with the evidence grant",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > offers no start form without the management duty, nor on the signed-in user’s own record",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > reassigns an open task with a reason; the prior owner stays in the history",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > reopens a closed process and cancels an open one, each with a reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > reopens a completed task with a reason, with the reopen duty only",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > says at once when the evidence failed the malware scan on completion; the required task still holds the process",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > says why a completed task of a released exit’s open checklist cannot be reopened, keeping the reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > shows each task with its owner, required flag, due date, state and completion as text, and the history",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > shows the remarks and reasons only when the server returned them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "employee processes (FR-016) > starts an exit clearance checklist only for an approved exit of the employee",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > lists the exits in scope with the contractual notice period as recorded, filtered by state",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > moves a refusal to the top when the release is gone after the reload",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > offers an HR user no notice period, clearance or release on their own exit (C4)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > records the contractual notice period against the exit version, keeping the typed value after a refusal",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > records the final release once the clearance is complete, saying the API’s refusals in words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > shows the exit, its decisions and its history with the NOTICE status change, and no reason the server did not return",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > shows the reason, and a withdrawal request’s reason, when the server returned them",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > shows the separation after the inclusive last working date as the server recorded it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > sorts the exit cases on the server by a column heading, with the state filter, starting again at page 1 (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit cases (FR-051, F1) > starts the clearance checklist from an exit template and lists the required tasks still incomplete",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit decision queues (F1; ZT07) > decides a withdrawal request with a reason, and with a message when not approving it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit decision queues (F1; ZT07) > lets an HR Administrator approve another inclusive date, or not approve with a private reason and a message",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit decision queues (F1; ZT07) > lets the manager recommend the inclusive last working date with an idempotency key, disabled while in flight",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit decision queues (F1; ZT07) > offers the reviewer’s own decision on the exit case and drops it once decided",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit decision queues (F1; ZT07) > sends the same decision again with the same key after a lost answer, and a different decision with a new key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit decision queues (F1; ZT07) > shows each queue only with the decision duty, and none without the exit read duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "exit decision queues (F1; ZT07) > takes a decided task out of the queue with the reason in words; other refusals keep it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "my process tasks queue (FR-016) > is not shown, and nothing is requested, without the completion duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "my process tasks queue (FR-016) > lists the open tasks the caller or their role owns and completes one from the queue",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "my process tasks queue (FR-016) > pages the queue, showing the total and overdue count of every task, not only the page (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > checks the code before sending, says a refusal in plain words and keeps what was typed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > creates a template with the exact body and opens its empty draft revision",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > edits the draft as ordered tasks with explicit required or optional flags, saves it against its version and publishes it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > is not offered, and nothing is requested, without the read duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > keeps unsaved tasks after a version conflict and saves them against the reloaded version",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > lists the templates with their type, status and revisions; creating one needs the manage duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > loads the version saved elsewhere when the unsaved changes are discarded",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > renames, deactivates and activates the template against its version, keeping a typed name after a refusal",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > shows a template read-only, with every revision, to a role that cannot manage templates",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "process templates (FR-015) > starts the next draft revision from the published tasks, without a version to match",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "restricted HR notes (FR-018) > lists the append-only notes, adds one linked to a process and corrects the latest note",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/lifecycle-processes.test.tsx",
+   "name": "restricted HR notes (FR-018) > shows no notes, and requests none, without the restricted grants",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/me.test.tsx",
+   "name": "My attendance (FR-059, FR-021) > DF03: a rejected correction can be raised again, linked to it; the list says what a request follows; nothing is offered once it is followed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/me.test.tsx",
+   "name": "My attendance (FR-059, FR-021) > offers corrections only for presence outcomes without a pending request, and sends the private reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/me.test.tsx",
+   "name": "My attendance (FR-059, FR-021) > offers no correction without the duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/me.test.tsx",
+   "name": "My record (FR-059) > DF03: a rejected change can be raised again from what it asked, linked to it, or sent unlinked",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/me.test.tsx",
+   "name": "My record (FR-059) > offers no change form without the self-service duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/me.test.tsx",
+   "name": "My record (FR-059) > offers no raising again without the submit duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/me.test.tsx",
+   "name": "My record (FR-059) > sends only the fields the employee filled in, and offers withdrawal of a pending request",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "delivery log (FR-061, FR-085) > a filter reaches the server and returns to the first page; a page reaches the server with the filter",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "delivery log (FR-061, FR-085) > an empty match says so, and a refusal is shown as it is",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "delivery log (FR-061, FR-085) > an event code the server would refuse is explained and not sent",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "delivery log (FR-061, FR-085) > events that failed to dispatch are listed with attempts and error class, filter by state, and show no payload",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "delivery log (FR-061, FR-085) > is one screen in the menu, under its permission, and asks nothing without it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "delivery log (FR-061, FR-085) > shows state, attempts, failure code and recipient; a row carries no message",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "delivery log (FR-061, FR-085) > the period reaches the list, and the export asks for what the filters show, only with its own right and a whole period (FR-093)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "notification preferences panel (FR-083, FR-085, DF12) > a refused save shows the refusal and leaves the box as saved",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "notification preferences panel (FR-083, FR-085, DF12) > a toggle sends only that event and that choice, and the box then shows the saved answer",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "notification preferences panel (FR-083, FR-085, DF12) > shows what is saved and that mandatory notices cannot be switched off",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/notifications.test.tsx",
+   "name": "notification preferences panel (FR-083, FR-085, DF12) > sits on the inbox, for any user",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > a stale version reloads the company and keeps what was typed; the next save goes against the version now shown",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > an administrator with a filter is told why the server refused",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > deactivating is asked twice; a company in use says what is left and stays as it was",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > once deactivated it says so and stops asking, because nobody can read the company any more",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > reads the code, name, timezone and state, and offers no change without the update duty",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > saving nothing asks nothing of the server, and the client adds no rule of its own",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > sends the version and only what changed, trimmed, then reads the company again",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the company (FR-004, DB001, DF05) > the code is never offered for editing, and a role that cannot read is told so",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the list (FR-004) > asks for inactive masters only when told to, and they read as inactive",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the list (FR-004) > says so when there are none, and reads a list it may not read in the server’s words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/org.test.tsx",
+   "name": "the list (FR-004) > shows code, name, period and state; a role that only reads is offered no change",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > 409 ALREADY_RETRIED is shown in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > 409 RETRY_PRIOR_NOT_SETTLED is shown in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > 422 RETRY_NOT_SAME_LIABILITY is shown in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > a failed payment already replaced is not offered, and its replacement says what it is",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > changing the choice is another payment with a new key: the same key under another link would be refused",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > is not offered when nothing has failed, and nothing extra is sent",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > is offered but not assumed: left alone it is an ordinary payment; chosen, the link goes with the request",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payment-retry.test.tsx",
+   "name": "a replacement names the failed payment it replaces (CI06) > someone else replaced it meanwhile: refused in plain words, then the choice goes and the next attempt carries no stale link",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "arrears (FR-035) > decides with a reason, and says the decision pays nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "arrears (FR-035) > declares its screens with their keys",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "arrears (FR-035) > names source revision and period in the register, and says nothing is paid",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "arrears (FR-035) > raises a case with the amounts as typed and one idempotency key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "late-timesheet adjustments (FR-100) > offers no opening without the propose key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "late-timesheet adjustments (FR-100) > offers return and reject but no approval while no valuation policy exists (H2)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "late-timesheet adjustments (FR-100) > says what waits on the valuation policy, and opens a case from a candidate with its source and origin",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll-adjustments.test.tsx",
+   "name": "late-timesheet adjustments (FR-100) > shows pending figures as pending, and only the maker edits or submits a draft",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll.test.tsx",
+   "name": "payroll inputs > pages the input batches with the total of every batch in scope, keeping the state filter (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll.test.tsx",
+   "name": "payroll reports > exports the register, the reconciliation and the comparison of the run through the report catalogue with the export key (FR-038)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll.test.tsx",
+   "name": "payroll reports > shows how salary stops were read: withheld apart from other holds, excluded by name, the mode per record (FR-031)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll.test.tsx",
+   "name": "payroll runs > pages the payroll runs with the total of every revision in scope, from the first page again on a new state filter (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll.test.tsx",
+   "name": "salary holds and salary stops > pages the salary holds with the total of every hold in scope, keeping the state filter (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll.test.tsx",
+   "name": "salary holds and salary stops > pages the salary stops with the total of every stop in scope (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/payroll.test.tsx",
+   "name": "TN15 own loans and advances > shows what processed payroll deducted and is not yet recognised, as the balance already counts it (FR-034)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "batch imports > a file still waiting for the malware scan is held: nothing read, no commit, and it can be cancelled (FR-106)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "document scan and verification states (FR-106) > cannot open a file the scan has not released, and says why",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "document scan and verification states (FR-106) > lets a verifier verify a released file, and reject it only with a reason",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > a commit whose answer was lost but which went through shows the committed batch, not an error",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > a refused commit leaves a still-previewed batch committable, and its error does not carry over to the next preview",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > a rejected batch says in plain words what is wrong with each row, applies nothing and offers no commit",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > a row that became invalid since the preview rejects the whole batch at commit, explained in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > after a preview the form starts clean, so a corrected file is a new upload with its own key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > after a refused commit the page shows where the batch stands now, read from the job view",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > cancelling goes to the update-import route and applies nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > commits only on request; the decision buttons and the upload wait for the answer, and a committed batch reports every row applied",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > is offered only with both the import and the update duty, next to the onboarding and shift-plan templates",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > keeps the template while an upload or a decision is on its way, so a late answer cannot bring back a batch a switch cleared",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > shows the exact template header and its rules: a blank cell changes nothing; organisation and manager changes need effectiveFrom",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/records.test.tsx",
+   "name": "employee update import (FR-009, I-20) > uploads to the update-import route and previews each row’s proposed changes as \"field: from -> to\"",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on a resubmission (FR-027, I-22) > a new choice replaces the earlier evidence with exactly the documents ticked",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on a resubmission (FR-027, I-22) > after EVIDENCE_UNUSABLE reads the request and the documents again, so the form says the earlier evidence cannot be kept",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on a resubmission (FR-027, I-22) > says in plain words when evidence kept from before can no longer be used, and keeps the correction",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on a resubmission (FR-027, I-22) > warns before resubmitting when evidence attached before was since rejected",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on a resubmission (FR-027, I-22) > without a new choice sends no evidence, so the earlier evidence is kept, and says so",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on own requests (FR-027, FR-106) > offers nothing to open without the work-request read duty the evidence route checks, and says when there is no evidence",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on own requests (FR-027, FR-106) > says in plain words when the malware scan has not released the file",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "evidence on own requests (FR-027, FR-106) > shows each document’s type, scan and verification state, and opens a released one through the request’s evidence route",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > a chosen document that the scan quarantines meanwhile stays listed, saying so, until it is unticked",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > a company-scope role whose filters leave out the own record is offered no documents and shows no error",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > a team-scope role, whose scope leaves out the own record, is offered no documents and makes no document call",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > after EVIDENCE_UNUSABLE reads the documents again, so the form says which chosen document to untick",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > lets at most 10 documents be chosen for one request",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > offers no documents without the document read duty, makes no document call and sends no evidence",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > offers own documents except quarantined or rejected ones, says which wait for the scan, and sends the chosen ids",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > says EVIDENCE_UNUSABLE in plain words and keeps what was typed and chosen",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > says INVALID_EVIDENCE in plain words and keeps what was typed and chosen",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/requests.test.tsx",
+   "name": "supporting evidence on a new request (FR-027, FR-106) > says TOO_MUCH_EVIDENCE in plain words and keeps what was typed and chosen",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary and annual salary exports (FR-029, FR-065) > an export-only role can export without viewing; a refused request reads as not permitted",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary and annual salary exports (FR-029, FR-065) > request the salary export for the applied day or month and the annual export for a financial year, with the same filters",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary master list (FR-029, E08) > a refused list reads as not permitted and shows no figures",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary master list (FR-029, E08) > a refused past date says the history grant is missing, not that salaries are closed to the role (C4)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary master list (FR-029, E08) > lists the salaries in force today by default, with the total and the E08 grid values, never an estimated in-hand",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary master list (FR-029, E08) > sends a month, the employee search and the status as list filters, and pages through the total",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary master upload (FR-029, DF09) > commits a previewed batch only on request and reports every row applied",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/salary.test.tsx",
+   "name": "salary master upload (FR-029, DF09) > shows the template and its rules, uploads to the salary master import and explains every row problem of a rejected batch",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > opens a released file and reports nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > says a quarantined file will never open",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > says why a file waiting for the scan will not open",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > scan CLEAN and verification REJECTED read as \"released, rejected by the verifier\", never as a code",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > scan CLEAN and verification UNVERIFIED read as \"released, not verified yet\", never as a code",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > scan CLEAN and verification VERIFIED read as \"released and verified\", never as a code",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > scan null and verification UNVERIFIED read as \"waiting for the malware scan\", never as a code",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > scan PENDING_SCAN and verification UNVERIFIED read as \"waiting for the malware scan\", never as a code",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > scan QUARANTINED and verification UNVERIFIED read as \"quarantined by the malware scan\", never as a code",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/tax-declarations.test.tsx",
+   "name": "review > evidence on a proof (FR-106) > shows any other refusal as the server sent it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "allocations > pages the allocations with the total of every match, back to the first page when a filter changes (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > a held batch can be cancelled, and one the scan then quarantines is closed with the refusal in plain words",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > a rejected allocation batch says each row problem in plain words, applies nothing and offers no commit",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > downloads each import’s published template (DF09) from its own route, beside the column list",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > holds a file the malware scan has not released, checks it again from its stored file (no second upload), then previews it",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > lists the user’s own batches, so a held batch is opened again after leaving the page and checked again",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > offers each import only with every key its routes require and states the exact template header",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > previews an allocation file row by row and creates the allocations only on request",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > records timesheet lines from a corrected file after a rejected one, each upload with its own key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > says file refusals in plain words; validating the same file again after a failure reuses its key",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "imports (FR-046 bulk upload, FR-047 imported entries, DF09, FR-106) > starts afresh under another role assignment, so a batch previewed under one is never committed under another",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "missed submissions > pages the missed timesheets with the total of every match in scope, from the first page again on a new filter (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "reports > pages the hours groups and the approved lines on their own, the total covering every group on every page (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/timesheet.test.tsx",
+   "name": "reports > pages the utilisation report and shows the totals of every employee in scope, not only the page (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "own claims: correcting and withdrawing (FR-074, BR-017, DF03) > a new claim sends its invoice reference and offers the company's categories, with nights for a per-night one",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "own claims: correcting and withdrawing (FR-074, BR-017, DF03) > a receipt that failed the scan is not kept, and the form says so",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "own claims: correcting and withdrawing (FR-074, BR-017, DF03) > a withdrawal is sent, the list reloads, and a refusal is said",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "own claims: correcting and withdrawing (FR-074, BR-017, DF03) > correcting a returned claim fills the form, keeps its receipt and gross, and sends a new revision before submitting",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "own claims: correcting and withdrawing (FR-074, BR-017, DF03) > leaving a correction goes back to a new claim and changes nothing",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "own claims: correcting and withdrawing (FR-074, BR-017, DF03) > offers withdrawal at every state before the final decision, and correction only of the claimant's own open work",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "own claims: correcting and withdrawing (FR-074, BR-017, DF03) > without the duty there is no withdrawal to offer",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "report requests (FR-046 Export XLSX) > keeps asking while a report is being generated, and offers its download when it is ready",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "report requests (FR-046 Export XLSX) > lists the reports already requested, with their downloads, without requesting anything: a reload loses nothing (FR-056)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "report requests (FR-046 Export XLSX) > offers the format choice only for a report that declares it and sends the chosen format",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "report requests (FR-046 Export XLSX) > pages the list with the total of every report",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "report requests (FR-046 Export XLSX) > says plainly that nothing was requested, as distinct from a failed answer",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "report requests (FR-046 Export XLSX) > shows the progress, says failures in words instead of codes, and offers no download unless the report is ready",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "supporting documents on leave (FR-026, FR-106) > a leave task lists its documents for the reviewer and opens a released one through the request’s route",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "supporting documents on leave (FR-026, FR-106) > a refused document is explained in words, and an unticked resubmission keeps the earlier documents",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "supporting documents on leave (FR-026, FR-106) > attaches chosen documents to a new request and sends none when none is chosen",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "supporting documents on leave (FR-026, FR-106) > FR-096: the inbox says which tasks the user decides as a delegate and in which role, and marks only those rows",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "work-request evidence for the assigned reviewer (FR-027, FR-106) > lists each document’s type, scan and verification state, and opens a released one through the request’s evidence route",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "work-request evidence for the assigned reviewer (FR-027, FR-106) > offers nothing to open when the task does not name its request",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "work-request evidence for the assigned reviewer (FR-027, FR-106) > reads no requests when no document has been released yet",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "work-request evidence for the assigned reviewer (FR-027, FR-106) > says in plain words when the malware scan quarantined the file",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/pages/work.test.tsx",
+   "name": "work-request evidence for the assigned reviewer (FR-027, FR-106) > without the work-request read duty lists the documents but offers nothing to open and reads no requests",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/web.test.tsx",
+   "name": "actions made of several requests (BR-046) > send under the session they started in, and nothing once the role, company or user changed",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/web.test.tsx",
+   "name": "api client (BR-046) > a 401 answered for an earlier session’s token does not end the session now in use (web-6)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/web.test.tsx",
+   "name": "api client (BR-046) > a 401 to a request sent without a token is not a sign-out (web-6)",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/web.test.tsx",
+   "name": "api client (BR-046) > omits the assignment only for role selection",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/web.test.tsx",
+   "name": "api client (BR-046) > sends the token and the selected company and assignment on every request",
+   "status": "passed"
+  },
+  {
+   "file": "apps/web/src/web.test.tsx",
+   "name": "api client (BR-046) > signs out on a 401 for the session in use and surfaces server error codes",
+   "status": "passed"
+  }
+ ]
+}

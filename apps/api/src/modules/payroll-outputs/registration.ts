@@ -10,8 +10,7 @@
 // with the confidential treasury duties held in an eligible Admin assignment. The Employee OWN context reads its own
 // issued payslips (own-ESS group `payslip`, H1/BR-053) and reads and requests its own loans (own-ESS group `loan`,
 // TN15); Form 16 (TN07) stays unavailable until an applicable statutory template exists (H8), so it is not declared.
-// Tax declarations (TN08) and investment proofs (TN09) take their regime and categories only from an active tax rule
-// pack (H3), which does not exist, so they are not declared and stay unavailable.
+// Tax declarations (TN08) and investment proofs (TN09) are the tax-declarations module's.
 import type { ModuleRegistration } from '../registry-types.js';
 
 export const payrollOutputsRegistration: ModuleRegistration = {

@@ -486,7 +486,10 @@ export async function decideChange(tx: Queryable, grant: AccessGrant, taskId: st
     }
   }
 
-  const result = await decideTask(tx, { grant, taskId, decision: input.decision, reason: input.reason, idempotencyKey: input.idempotencyKey, permission: { resource: 'sensitive_change', action: 'review' } });
+  // H4: a private note is optional on a return or rejection, whose explanation to the employee is required; that explanation is then the
+  // reason the decision records (approval_decision needs one on anything but an approval).
+  const decisionReason = input.reason?.trim() || input.employeeMessage;
+  const result = await decideTask(tx, { grant, taskId, decision: input.decision, reason: decisionReason, idempotencyKey: input.idempotencyKey, permission: { resource: 'sensitive_change', action: 'review' } });
   if (result.replayed) return { requestId: r.id, state: r.state, replayed: true };
   if (result.outcome === 'NEXT_STEP') return { requestId: r.id, state: r.state, replayed: false };
 

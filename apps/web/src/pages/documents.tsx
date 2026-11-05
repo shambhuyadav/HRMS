@@ -25,7 +25,7 @@ import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey, pinS
 import type { EssPanel, ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Pager, Section } from '../ui';
-import { type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload } from './records';
+import { HeldBatchCheck, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useHeldBatchWatch } from './records';
 
 // ---------------------------------------------------------------------------------------------------------
 // Permission keys (modules/documents/registration.ts, policies.ts, mapping.ts) and screen paths
@@ -946,7 +946,7 @@ const STAGED_TABS: { state: StagedState; label: string; table: string; empty: st
 
 /** A batch's state in plain words (imports/jobs.ts). */
 const BATCH_STATES: Record<string, { label: string; tone: 'good' | 'warn' | 'bad' | 'neutral' }> = {
-  UPLOADED: { label: 'held for the malware scan', tone: 'warn' },
+  UPLOADED: { label: 'waiting for the scan', tone: 'neutral' },
   PREVIEWED: { label: 'previewed, not committed', tone: 'warn' },
   COMMITTED: { label: 'committed', tone: 'good' },
   REJECTED: { label: 'rejected, nothing mapped', tone: 'bad' },
@@ -1182,9 +1182,9 @@ function StagedFiles() {
 
 /**
  * The mapping batch, as the employee imports run it (records.tsx): one idempotency key per chosen file, a row-by-row
- * preview, then an explicit commit or cancel. A file the scanner could not judge yet is held (UPLOADED) with nothing
- * read; checking it again resumes that batch from its stored file (no second upload, no second batch). The user's own
- * batches are listed below, so a held batch can be opened again later.
+ * preview, then an explicit commit or cancel. A file waiting for the scan worker is held (UPLOADED) with nothing read, which
+ * is the normal first answer; checking it again resumes that batch from its stored file (no second upload, no second batch),
+ * by itself while the screen is open. The user's own batches are listed below, so a held batch can be opened again later.
  */
 function MappingImport() {
   const keys = useKeys();
@@ -1268,11 +1268,14 @@ function MappingImport() {
     },
     onSuccess: (view) => setJob(view),
   });
+  // While a batch waits for the scan the screen re-checks it by itself; the button above stays for someone who comes back later.
+  const watch = useHeldBatchWatch(t.base, job, { show: setJob, closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)), refresh }, resume.isPending || open.isPending);
 
   const busy = upload.isPending || act.isPending || resume.isPending || open.isPending;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!file || busy) return;
+    watch.clearError();
     const key = (uploadKey.current ??= idempotencyKey('mapping'));
     upload.mutate({ f: file, key });
   };
@@ -1296,27 +1299,12 @@ function MappingImport() {
             </button>
           </div>
         </form>
-        <Refusal error={upload.error ?? resume.error} words={MAPPING_UPLOAD_WORDS} />
+        <Refusal error={upload.error ?? resume.error ?? watch.error} words={MAPPING_UPLOAD_WORDS} />
       </Section>
       {job && (
         <>
-          <ImportJobView
-            job={job}
-            template={t}
-            pending={act.isPending}
-            onAction={(action) => act.mutate({ id: job.id, action })}
-            error={act.error}
-            heldNote="The file is waiting for the malware scan, so nothing in it has been read yet. Check the scan again later to see the preview, or cancel the import."
-          />
-          {job.state === 'UPLOADED' && (
-            <div className="row">
-              <button type="button" className="secondary" disabled={busy} onClick={() => resume.mutate(job.id)}>
-                Check the scan again
-              </button>
-              <span className="hint">Checks the file you uploaded for this batch, without uploading it again; the batch is previewed once the scan releases it.</span>
-              {resume.data?.id === job.id && resume.data.state === 'UPLOADED' && !resume.isPending && <span role="status">Still waiting for the malware scan.</span>}
-            </div>
-          )}
+          <ImportJobView job={job} template={t} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
       <MappingBatches openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />
@@ -1338,7 +1326,7 @@ function MappingBatches({ openedId, busy, onOpen, error }: { openedId: string | 
   return (
     <Section title="Your mapping batches">
       <p className="hint">
-        Only you see the mapping files you uploaded. Open a batch to see its rows; one held for the malware scan can be checked again and then committed or cancelled.
+        Only you see the mapping files you uploaded. Open a batch to see its rows; one still waiting for its scan can be checked again and then committed or cancelled.
       </p>
       {list.isPending && <p className="hint">Loading your mapping batches…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot list mapping batches.</NotPermitted> : <ErrorNote error={list.error} />}

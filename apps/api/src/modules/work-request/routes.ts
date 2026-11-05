@@ -42,7 +42,8 @@ export async function workRequestRoutes(app: FastifyInstance, opts: { db: Databa
     return k;
   };
 
-  app.post('/work-requests/:kind', { schema: { params: kindParams, body } }, async (request, reply) => {
+  // DF03: only a new request names the rejected one it raises again; a correction of a returned request (PUT) cannot.
+  app.post('/work-requests/:kind', { schema: { params: kindParams, body: { ...body, properties: { ...fields, predecessorRequestId: uuid } } } }, async (request, reply) => {
     const grant = await requireAccess(db, request, 'work_request', 'submit', ['operational'], { requireAll: true });
     const result = await withTransaction(db, (tx) => submitWorkRequest(tx, grant, kindOf(request), request.body as WorkRequestInput));
     reply.status(201);

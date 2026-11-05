@@ -530,7 +530,8 @@ export async function payrollOutputsRoutes(app: FastifyInstance, opts: { db: Dat
     { schema: { params: { type: 'object', required: ['code'], properties: { code: { type: 'string', pattern: '^[A-Z0-9_]{2,40}$' } } } } },
     async (request) => {
       const { code } = request.params as { code: string };
-      await requireAccess(db, request, 'payroll_statutory', 'read', ['operational'], { requireAll: true, recordKey: code });
+      // No recordKey: a denial's record key is a uuid (audit_event.record_key), so a code there turned the refusal into a 400 and lost the audit row.
+      await requireAccess(db, request, 'payroll_statutory', 'read', ['operational'], { requireAll: true });
       return statutoryOutput(code);
     },
   );

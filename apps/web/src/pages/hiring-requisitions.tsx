@@ -119,6 +119,8 @@ interface Requisition {
   budgetExceptionReason: string | null;
   currentRevision: number;
   copiedFromRequisitionId: string | null;
+  /** DF03: the rejected requisition this one raises again. */
+  predecessorRequestId?: string | null;
   budgetExceptionApprovedBy: string | null;
   budgetExceptionApprovedAt: string | null;
   submittedAt: string | null;
@@ -443,6 +445,7 @@ type Act =
   | 'withdraw'
   | 'discard'
   | 'copy'
+  | 'raiseAgain'
   | 'close'
   | 'decide'
   | 'budget-create'
@@ -517,6 +520,10 @@ function refusalText(error: unknown, action: Act): string | null {
       return INVALID_STATE_TEXT[action] ?? null;
     case 'NOT_REQUESTER':
       return 'Only the requester can change, submit, withdraw or discard this requisition.';
+    case 'PREDECESSOR_ALREADY_FOLLOWED':
+      return 'A later requisition already follows this rejected one.';
+    case 'PREDECESSOR_NOT_FOUND':
+      return 'Only the requester of a rejected requisition can raise it again.';
     case 'NOT_PREPARER':
       return 'Only the HR user who prepared this revision can change, submit or withdraw it.';
     case 'REQUESTER_NOT_LINKED':
@@ -525,12 +532,12 @@ function refusalText(error: unknown, action: Act): string | null {
       return 'Only an active employee can raise or submit a requisition.';
     case 'INVALID_HIRING_MANAGER':
       // A copy takes the source's values as they are, so there is nothing to choose on this screen.
-      return action === 'copy'
+      return action === 'copy' || action === 'raiseAgain'
         ? 'This requisition cannot be copied: its hiring manager is no longer an active employee of this company.'
         : 'The hiring manager must be an active employee of this company. Choose another hiring manager.';
     case 'INVALID_REFERENCE': {
       const master = MASTER_FIELD[field];
-      if (action === 'copy') {
+      if (action === 'copy' || action === 'raiseAgain') {
         const what = master ?? (d.category === 'EMPLOYMENT_TYPE' ? 'employment type' : 'department, location, designation or employment type');
         return `This requisition cannot be copied: its ${what} is no longer active in this company.`;
       }
@@ -1474,6 +1481,11 @@ function RequisitionDetailView({ id }: { id: string }) {
                   <Link to={PATHS.requisition(r.copiedFromRequisitionId)}>The requisition it was copied from</Link>
                 </Item>
               )}
+              {r.predecessorRequestId && (
+                <Item term="Raised again after">
+                  <Link to={PATHS.requisition(r.predecessorRequestId)}>The rejected requisition</Link>
+                </Item>
+              )}
             </dl>
             {r.pendingWith && (
               <p>
@@ -1532,6 +1544,7 @@ type RequisitionCommand =
   | { kind: 'withdraw' }
   | { kind: 'discard'; reason: string }
   | { kind: 'copy' }
+  | { kind: 'raiseAgain' }
   | { kind: 'close'; reason: string };
 
 function RequisitionActions({ r, reloading, onNotice }: { r: RequisitionDetail; reloading: boolean; onNotice: (text: string | null) => void }) {
@@ -1558,6 +1571,8 @@ function RequisitionActions({ r, reloading, onNotice }: { r: RequisitionDetail; 
           return api(`${base}/discard`, { body: { reason: c.reason } });
         case 'copy':
           return api<RequisitionDetail>(`${base}/copy`, { method: 'POST' });
+        case 'raiseAgain':
+          return api<RequisitionDetail>(`${base}/raise-again`, { method: 'POST' });
         case 'close':
           return api(`${base}/close`, { body: { reason: c.reason } });
       }
@@ -1585,6 +1600,11 @@ function RequisitionActions({ r, reloading, onNotice }: { r: RequisitionDetail; 
         case 'copy': {
           const copy = result as RequisitionDetail;
           navigate(PATHS.requisition(copy.id), { state: { notice: `Copied to ${copy.code}, a new draft with no approvals or decisions. Review it, then submit it for approval.` } });
+          break;
+        }
+        case 'raiseAgain': {
+          const raised = result as RequisitionDetail;
+          navigate(PATHS.requisition(raised.id), { state: { notice: `Raised again as ${raised.code}, a new draft linked to the rejected requisition. Review it, then submit it for approval.` } });
           break;
         }
         case 'close':
@@ -1647,6 +1667,11 @@ function RequisitionActions({ r, reloading, onNotice }: { r: RequisitionDetail; 
         {mayCopy && (
           <button type="button" className="secondary" disabled={busy} onClick={() => run.mutate({ kind: 'copy' })}>
             Copy to a new requisition
+          </button>
+        )}
+        {mayChange && r.state === 'REJECTED' && (
+          <button type="button" className="secondary" disabled={busy} onClick={() => run.mutate({ kind: 'raiseAgain' })}>
+            Raise again
           </button>
         )}
         {mayClose && (

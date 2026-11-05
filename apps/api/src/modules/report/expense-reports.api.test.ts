@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import type { PermissionKey } from '../access/baseline.js';
+import { prepareReady, releaseNaming } from '../expense/payment.fixtures.js';
+import { csvTable } from './csv.fixtures.js';
 import { processReportQueue } from './service.js';
 
 let h: Harness;
@@ -39,6 +41,7 @@ const FINANCE: PermissionKey[] = [
   'payment.read.operational',
   'payment.prepare.operational',
   'payment.release.operational',
+  'payment.confirm_outcome.operational',
   'payment.reverse.operational',
 ];
 
@@ -79,12 +82,12 @@ const finalApprove = async (id: string, amount: (claimed: string) => string = (c
   await decide(fin1, id, { decision: 'APPROVE', lines: lines.map((l) => ({ lineId: l.id, allowedAmount: amount(l.claimedAmount), reason: 'Decided (synthetic)' })) });
 };
 const pay = async (claimId: string, amount: string) => {
-  const res = await h.call(fin2, 'POST', '/v1/expense/payments', { claimId, amount, paymentDate: daysAgo(0), idempotencyKey: uniq('report-pay-') });
+  const res = await prepareReady(h, fin2, { claimId, amount, paymentDate: daysAgo(0), idempotencyKey: uniq('report-pay-') });
   expect(res.statusCode, res.body).toBe(201);
   return res.json().instructionId as string;
 };
 const act = async (pi: string, path: string, body?: object) => {
-  const res = await h.call(fin3, 'POST', `/v1/expense/payments/${pi}/${path}`, body);
+  const res = path === 'release' ? await releaseNaming(h, fin3, pi) : await h.call(fin3, 'POST', `/v1/expense/payments/${pi}/${path}`, body);
   expect(res.statusCode, res.body).toBe(200);
 };
 
@@ -95,7 +98,7 @@ async function report(a: TestActor, reportCode: string, filters: object = {}): P
   await processReportQueue(h.pool);
   const res = await h.call(a, 'GET', `/v1/reports/${requested.json().id}/download`);
   expect(res.statusCode, res.body).toBe(200);
-  const [header, ...rows] = res.body.trimEnd().split('\r\n').map((row: string) => row.split(/,(?=")/).map((cell) => cell.replace(/^"|"$/g, '').replace(/""/g, '"')));
+  const [header, ...rows] = csvTable(res.body).trimEnd().split('\r\n').map((row: string) => row.split(/,(?=")/).map((cell) => cell.replace(/^"|"$/g, '').replace(/""/g, '"')));
   return rows.map((row) => Object.fromEntries(header!.map((column, i) => [column, row[i]!])));
 }
 
@@ -115,7 +118,7 @@ beforeAll(async () => {
   fin1 = await h.actor(A, 'HR_ADMINISTRATOR', { extra: FINANCE });
   fin2 = await h.actor(A, 'HR_ADMINISTRATOR', { extra: FINANCE });
   fin3 = await h.actor(A, 'HR_ADMINISTRATOR', { extra: FINANCE });
-  reader = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['expense.export.operational', 'expense.read.operational', 'payment.read.operational'] });
+  reader = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['expense.export.operational', 'payment.export.operational', 'expense.read.operational', 'payment.read.operational'] });
   await h.db.query(`insert into workflow_fallback_reviewer (company_id, kind, user_id, priority, active) values ($1, 'expense_claim', $2, 1, true)`, [A.id, fin1.user]);
   const person = async (overrides: Record<string, unknown> = {}) => {
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A, overrides))).json();
@@ -199,6 +202,33 @@ describe('the catalogue (FR-079)', () => {
       expect(refused.statusCode, code).toBe(422);
       expect(refused.json().error, code).toBe('FILTER_NOT_SUPPORTED');
     }
+  });
+
+  const CLAIM_REPORTS: [string, object][] = [
+    ['EXPENSE_REGISTER', PERIOD],
+    ['EXPENSE_LINE_REGISTER', PERIOD],
+    ['EXPENSE_APPROVAL_AGEING', {}],
+    ['EXPENSE_CATEGORY_SPEND', PERIOD],
+    ['EXPENSE_PAYABLE_AGEING', {}],
+    ['EXPENSE_PAYMENT_RECONCILIATION', PERIOD],
+  ];
+
+  it('an export right alone opens no claim: amounts are for assigned reviewers and payment operators (DF02 "exports"; decisions-2)', async () => {
+    const exportOnly = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['expense.export.operational', 'payment.export.operational'] });
+    for (const [code, filters] of CLAIM_REPORTS) {
+      expect(await report(exportOnly, code, filters), code).toEqual([]);
+      expect((await report(reader, code, filters)).length, code).toBeGreaterThan(0);
+    }
+  });
+
+  it('a reviewer’s export holds the claims their step was assigned, and no other', async () => {
+    const reviewerExport = await h.actor(A, 'HR_ADMINISTRATOR', { user: fin1.user, extra: ['expense.export.operational', 'expense.read.operational', 'expense.finance_decide.operational'] });
+    const claims = (await report(reviewerExport, 'EXPENSE_REGISTER', PERIOD)).map((r) => r.Claim);
+    // fin1 took the finance step of these; the manager step of `waitingManager` and `rejected` never reached them.
+    expect(claims).toEqual(expect.arrayContaining([paid, settled, unpaid, zero]));
+    expect(claims).not.toContain(waitingManager);
+    expect(claims).not.toContain(rejected);
+    expect(claims).not.toContain(otherDeptClaim);
   });
 });
 
@@ -295,7 +325,7 @@ describe('payment reconciliation (DF07)', () => {
 
 describe('row scope (FR-079 "same scope"; BR-026)', () => {
   it('a reader limited to one department sees only that department\'s claims, in every output', async () => {
-    const limited = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['expense.export.operational'], departmentFilter: A.financeDept });
+    const limited = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['expense.export.operational', 'payment.export.operational', 'payment.read.operational'], departmentFilter: A.financeDept });
     const lines = await report(limited, 'EXPENSE_LINE_REGISTER', PERIOD);
     expect(new Set(lines.map((r) => r['Employee code']))).toEqual(new Set([otherDeptCode]));
     const ageing = await report(limited, 'EXPENSE_APPROVAL_AGEING');

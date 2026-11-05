@@ -4,6 +4,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type CompanyFixture, fixtures, uniq } from '../../../../../db/tests/fixtures.js';
 import { startTestDatabase, type TestDatabase } from '../../../../../db/tests/test-database.js';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type AccessGrant, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams } from './authorize.js';
 
 let testDb: TestDatabase;
@@ -34,9 +35,9 @@ async function assignment(opts: {
   const c = opts.company ?? A;
   const approver = await f.makeUser();
   const id = await f.id(
-    `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, effective_to, state, approved_by, approved_at)
-     values ($1, $2, $3, $4, '2026-01-01T00:00:00Z', $5, 'ACTIVE', $6, now())`,
-    [c.company, opts.user, opts.role, opts.scope, opts.to ?? null, approver],
+    `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, effective_to, state, approved_by, approved_at, created_by)
+     values ($1, $2, $3, $4, '2026-01-01T00:00:00Z', $5, 'ACTIVE', $6, now(), $7)`,
+    [c.company, opts.user, opts.role, opts.scope, opts.to ?? null, approver, SYSTEM_ACTOR_ID],
   );
   for (const p of opts.allow) {
     await db.query(

@@ -10,7 +10,7 @@ import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import { type AccessGrant, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { type AccessGrant, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams } from '../access/authorize.js';
 import { withStatusSource } from '../employee/status.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, ownersWithoutEligibleReviewer, startApproval } from '../workflow/engine.js';
 import { POLICY_LOCK_SQL } from './policies.js';
@@ -394,7 +394,8 @@ export async function decideConfirmation(
   return { caseId: c.id, state, action, dueDate: newDue, actualConfirmationDate: actual, replayed: false };
 }
 
-export type ConfirmationView = 'UPCOMING' | 'DUE' | 'OVERDUE' | 'EXTENDED' | 'CONFIRMED' | 'ALL' | 'DUE_WITHIN_30';
+export const CONFIRMATION_VIEWS = ['UPCOMING', 'DUE', 'OVERDUE', 'EXTENDED', 'CONFIRMED', 'ALL', 'DUE_WITHIN_30'] as const;
+export type ConfirmationView = (typeof CONFIRMATION_VIEWS)[number];
 
 /**
  * One row shape for the list and the detail: the case under the caller's row scope, with its FR-082 view
@@ -534,8 +535,13 @@ export async function attentionList(db: Queryable, grant: AccessGrant) {
 export async function getConfirmation(db: Queryable, grant: AccessGrant, caseId: string) {
   const params = new SqlParams();
   const base = caseQuery(grant, params, `and c.id = ${params.add(caseId)}::uuid`);
-  const item = (await db.query(base, params.values)).rows[0];
+  const item = (await db.query<{ employeeId: string }>(base, params.values)).rows[0];
   if (!item) throw notFound();
+  // C6 confirmation_history_read: the case's earlier decisions are a duty of their own; an employee always sees their own (H1).
+  const own = grant.scopeKind === 'OWN' && grant.linkedEmployeeId === item.employeeId;
+  const historyIncluded =
+    own || (await resolveAccess(db, { userId: grant.userId, companyId: grant.companyId, assignmentId: grant.assignmentId, resource: 'confirmation', action: 'history_read', fieldGroups: ['operational'], at: grant.at })).allowed;
+  if (!historyIncluded) return { ...item, historyIncluded, actions: [] };
   // DF02/DF11: recommendation and decision reasons are private; only a granted `reason` group sees them.
   const withReason = grant.allowedFieldGroups.includes('reason');
   const actions = await db.query(
@@ -544,5 +550,5 @@ export async function getConfirmation(db: Queryable, grant: AccessGrant, caseId:
        from confirmation_action where company_id = $1 and confirmation_id = $2 order by occurred_at`,
     [grant.companyId, caseId],
   );
-  return { ...item, actions: actions.rows };
+  return { ...item, historyIncluded, actions: actions.rows };
 }

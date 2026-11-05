@@ -249,7 +249,7 @@ export async function assetsRoutes(app: FastifyInstance, opts: { db: Database })
           type: 'object',
           additionalProperties: false,
           required: ['categoryCode', 'reason', 'idempotencyKey'],
-          properties: { categoryCode: code, itemDescription: { type: 'string', maxLength: 300 }, reason: note, idempotencyKey },
+          properties: { categoryCode: code, itemDescription: { type: 'string', maxLength: 300 }, reason: note, idempotencyKey, predecessorRequestId: { type: 'string', format: 'uuid' } },
         },
       },
     },

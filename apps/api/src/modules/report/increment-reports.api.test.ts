@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import type { PermissionKey } from '../access/baseline.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { csvTable } from './csv.fixtures.js';
 import { processReportQueue } from './service.js';
 
 let h: Harness;
@@ -17,7 +18,7 @@ let financeExporter: TestActor;
 let manager: TestActor;
 const emp: Record<string, { id: string; code: string }> = {};
 
-const FINANCE: PermissionKey[] = ['salary.manage.salary', 'salary.read.salary', 'increment.read.salary', 'increment.propose.salary', 'increment.approve.salary', 'increment.export.salary'];
+const FINANCE: PermissionKey[] = ['salary.manage.salary', 'salary.read.salary', 'increment.read.salary', 'increment.history_read.salary', 'increment.propose.salary', 'increment.approve.salary', 'increment.export.salary'];
 const FY2026 = { from: '2026-04-01', to: '2027-03-31' };
 
 /** Every cell of a report CSV line (every cell is quoted; quotes are doubled). */
@@ -32,7 +33,7 @@ async function exported(a: TestActor, reportCode: string, filters: object): Prom
   expect((await h.call(a, 'GET', `/v1/reports/${res.json().id}`)).json()).toMatchObject({ state: 'COMPLETED' });
   const file = await h.call(a, 'GET', `/v1/reports/${res.json().id}/download`);
   expect(file.statusCode).toBe(200);
-  const [header, ...lines] = file.body.trimEnd().split('\r\n').map(cells);
+  const [header, ...lines] = csvTable(file.body).trimEnd().split('\r\n').map(cells);
   return lines.map((l) => Object.fromEntries(header!.map((k, i) => [k, l[i]!])));
 }
 
@@ -60,7 +61,7 @@ beforeAll(async () => {
   hr1 = await h.actor(A, 'HR_ADMINISTRATOR', { extra: FINANCE });
   hr2 = await h.actor(A, 'HR_ADMINISTRATOR', { extra: FINANCE });
   hrPlain = await h.actor(A, 'HR_ADMINISTRATOR');
-  financeExporter = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.read.salary', 'increment.export.salary'], departmentFilter: A.financeDept });
+  financeExporter = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.read.salary', 'increment.history_read.salary', 'increment.export.salary'], departmentFilter: A.financeDept });
   manager = await h.actor(A, 'REPORTING_MANAGER', { extra: ['increment.read.salary'] });
   await h.db.query(
     `insert into workflow_fallback_reviewer (company_id, kind, user_id, priority, active) values ($1, 'increment_case', $2, 1, true), ($1, 'increment_case', $3, 2, true)`,
@@ -89,7 +90,11 @@ afterAll(async () => {
 
 describe('increment reports in the catalogue (FR-093)', () => {
   it('are listed with their columns and need the increment salary export grant at request (BR-044)', async () => {
-    const items = (await h.call(hrPlain, 'GET', '/v1/reports/catalogue')).json().items as { code: string; requiresPeriod: boolean; columns: string[] }[];
+    // Listed to the role holding the increment salary export grant only (reportCatalogue).
+    const items = (await h.call(hr1, 'GET', '/v1/reports/catalogue')).json().items as { code: string; requiresPeriod: boolean; columns: string[] }[];
+    const withoutGrant = ((await h.call(hrPlain, 'GET', '/v1/reports/catalogue')).json().items as { code: string }[]).map((r) => r.code);
+    expect(withoutGrant).not.toContain('INCREMENT_DUE_DECISION');
+    expect(withoutGrant).not.toContain('ANNUAL_INCREMENT');
     expect(items.find((r) => r.code === 'INCREMENT_DUE_DECISION')).toMatchObject({ requiresPeriod: true, columns: expect.arrayContaining(['Decision due', 'State', 'Baseline', 'Approved']) });
     expect(items.find((r) => r.code === 'ANNUAL_INCREMENT')).toMatchObject({ requiresPeriod: true, columns: expect.arrayContaining(['Opening', 'Closing', 'Annual growth %', 'N/A reason']) });
     for (const code of ['INCREMENT_DUE_DECISION', 'ANNUAL_INCREMENT']) {
@@ -257,7 +262,7 @@ describe('employee annual increment (FR-090, FR-093, DF14, CI21, ZT26)', () => {
   });
 
   it('access revoked after the request means nothing is generated (ZT05)', async () => {
-    const temp = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.export.salary'] });
+    const temp = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['increment.export.salary', 'increment.history_read.salary'] });
     const { id } = (await request(temp, 'ANNUAL_INCREMENT', FY2026)).json();
     await h.db.query(
       `update role_assignment_permission set active = false
@@ -265,6 +270,7 @@ describe('employee annual increment (FR-090, FR-093, DF14, CI21, ZT26)', () => {
       [temp.assignment],
     );
     await processReportQueue(h.pool);
-    expect((await h.call(temp, 'GET', `/v1/reports/${id}`)).json()).toMatchObject({ state: 'FAILED', failureCode: 'ACCESS_REVOKED' });
+    expect((await h.call(temp, 'GET', `/v1/reports/${id}`)).statusCode).toBe(403);
+    expect(await h.one(`select state, failure_code from report_execution where id = $1`, [id])).toEqual({ state: 'FAILED', failure_code: 'ACCESS_REVOKED' });
   });
 });

@@ -2169,7 +2169,7 @@ function CompleteTaskForm({ task: t, onDone }: { task: ProcessTask; onDone: Done
       setRemark('');
       setFile(null);
       setFileKey((k) => k + 1);
-      // The file is scanned right after it is stored: the answer may already carry the verdict (FR-106).
+      // In a deployment the stored file is waiting for the scan worker, so the answer says PENDING_SCAN (FR-106, NFR-S09).
       const scan = doneTask.evidenceScanState;
       if (scan === 'QUARANTINED') {
         onDone(

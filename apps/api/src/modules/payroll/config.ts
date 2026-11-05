@@ -13,6 +13,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { holdsSalaryHistoryGrant } from '../increment/service.js';
 import { actorOf, advisoryLock, assertInScope, assertNotSelf, audit, checkAmount, requireCompanyScope, requireDate, requireText } from './common.js';
 
 /**
@@ -697,8 +698,8 @@ export async function activatePaidDayPolicy(tx: Queryable, grant: AccessGrant, i
 
 async function arrangement(db: Queryable, grant: AccessGrant, id: string) {
   const a = (
-    await db.query<{ id: string; employee_id: string; effective_from: string; effective_to: string | null; annual_ctc: string; monthly_gross: string; currency_code: string }>(
-      `select id, employee_id, effective_from, effective_to, annual_ctc, monthly_gross, currency_code from salary_arrangement where company_id = $1 and id = $2`,
+    await db.query<{ id: string; employee_id: string; effective_from: string; effective_to: string | null; annual_ctc: string; monthly_gross: string; currency_code: string; superseded_at: Date | null }>(
+      `select id, employee_id, effective_from, effective_to, annual_ctc, monthly_gross, currency_code, superseded_at from salary_arrangement where company_id = $1 and id = $2`,
       [grant.companyId, id],
     )
   ).rows[0];
@@ -710,6 +711,10 @@ async function arrangement(db: Queryable, grant: AccessGrant, id: string) {
 export async function salaryComponents(db: Queryable, grant: AccessGrant, arrangementId: string) {
   const a = await arrangement(db, grant, arrangementId);
   assertNotSelf(grant, a.employee_id);
+  // C4: an arrangement that has ended is the financial past (a retired one too), and its id must not open it without the grant.
+  if (a.effective_to !== null && a.effective_to <= grant.businessDate && !(await holdsSalaryHistoryGrant(db, grant, 'salary'))) {
+    throw new HttpError(403, 'HISTORY_GRANT_REQUIRED', 'An earlier salary arrangement needs the salary history grant');
+  }
   const components = (
     await db.query(
       `select c.code as "componentCode", c.name as "componentName", c.component_kind as "componentKind", sc.amount, sc.basis
@@ -750,6 +755,7 @@ export async function setSalaryComponents(
   assertNotSelf(grant, a.employee_id);
   await advisoryLock(tx, `salary:${a.employee_id}`);
   await reassertAccess(tx, grant, 'salary', 'manage', ['salary']);
+  if (a.superseded_at) throw new HttpError(409, 'ARRANGEMENT_SUPERSEDED', 'A correction replaced this arrangement, so no payroll reads it; set the components on the one in force');
   const existing = (await tx.query<{ n: number }>(`select count(*)::int as n from salary_component where company_id = $1 and salary_arrangement_id = $2`, [grant.companyId, arrangementId]))
     .rows[0]!.n;
   if (existing > 0) throw new HttpError(409, 'COMPONENTS_ALREADY_SET', 'The components of an arrangement are set once; a change is a new arrangement');

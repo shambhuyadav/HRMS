@@ -15,6 +15,7 @@ Prepared: 24 Oct 2026; baseline corrected 25 Oct 2026. Planning items below were
 | 06_traceability_register.md | FR-001–FR-098, BR-001–BR-046 → module, tables, permissions, gates |
 | 07_register_templates.md | Empty templates: schema constraint, access matrix, verification, navigation coverage, change record |
 | 09_capacity_plan.md | Capacity plan (Appendix G3 deliverables): cells, partition keys, cross-partition FKs, cache safety, budgets, failure domains, G4 stages, cost inputs; ZT31–ZT35 BLOCKED (not run) |
+| 10_owner_decisions.md | What remains for the owner after Run 35: decisions that unblock features, who holds which rights, readings to confirm, outside inputs, handover steps |
 
 ## Ground rules carried from the BRD
 - Source app observed under the Administrator role only. Proposed schema/RBAC are **not** extracted source facts.

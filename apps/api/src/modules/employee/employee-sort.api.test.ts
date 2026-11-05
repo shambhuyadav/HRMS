@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 import { EMPLOYEE_SORTS } from './service.js';
 
@@ -22,7 +23,7 @@ const exportOrder = async (filters: Record<string, string>, a = hr) => {
   expect(res.statusCode, res.body).toBe(202);
   await processReportQueue(h.pool);
   const body = (await h.call(a, 'GET', `/v1/reports/${res.json().id}/download`)).body;
-  return body.trimEnd().split('\r\n').slice(1).map((r) => JSON.parse(r.split(',')[0]!) as string);
+  return csvTable(body).trimEnd().split('\r\n').slice(1).map((r) => JSON.parse(r.split(',')[0]!) as string);
 };
 
 beforeAll(async () => {
@@ -111,6 +112,27 @@ describe('the register export applies the same order (FR-007, I-37)', () => {
     await exportOrder({ sort: 'joiningDate', direction: 'DESC' });
     const snapshot = await h.one<{ filter_snapshot: Record<string, string> }>(`select filter_snapshot from report_execution where company_id = $1 order by created_at desc limit 1`, [A.id]);
     expect(snapshot.filter_snapshot).toMatchObject({ sort: 'joiningDate', direction: 'DESC' });
+  });
+
+  it('a status group reaches the export: the list a dashboard figure opens and its export hold the same records (I-37)', async () => {
+    const active = codes.c!;
+    const id = (await h.call(hr, 'GET', `/v1/employees?search=${active}`)).json().items[0].id as string;
+    await h.setStatus(A, id, 'ACTIVE_CONFIRMED');
+    try {
+      const list = await listOrder('statusGroup=ACTIVE');
+      expect(list).toEqual(of('c'));
+      expect(await exportOrder({ statusGroup: 'ACTIVE' })).toEqual(list);
+      const snapshot = await h.one<{ filter_snapshot: Record<string, string> }>(`select filter_snapshot from report_execution where company_id = $1 order by created_at desc limit 1`, [A.id]);
+      expect(snapshot.filter_snapshot).toMatchObject({ statusGroup: 'ACTIVE' });
+    } finally {
+      await h.setStatus(A, id, 'DRAFT');
+    }
+  });
+
+  it('a bad status group is refused, and a report that does not apply it refuses it rather than dropping it', async () => {
+    expect((await h.call(hr, 'POST', '/v1/reports', { reportCode: 'EMPLOYEE_REGISTER', filters: { statusGroup: 'EVERYONE' } })).statusCode).toBe(400);
+    const leave = await h.call(hr, 'POST', '/v1/reports', { reportCode: 'LEAVE_REGISTER', filters: { from: '2026-01-01', to: '2026-12-31', statusGroup: 'ACTIVE' } });
+    expect([leave.statusCode, leave.json().error]).toEqual([422, 'FILTER_NOT_SUPPORTED']);
   });
 
   it('refuses a bad sort, and a report that does not apply the order refuses it rather than ignoring it', async () => {

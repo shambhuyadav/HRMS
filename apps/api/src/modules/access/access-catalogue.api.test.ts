@@ -1,6 +1,7 @@
 // Pickers for grant administration over HTTP (FR-066; C4; DF02): the role catalogue and company users.
 // Synthetic data only.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 
 let h: Harness;
@@ -96,6 +97,9 @@ describe('role catalogue (FR-066, DF02)', () => {
       // FR-034 / H3 TN15: the employee's own loan and advance requests (own record only, H1/BR-053).
       'own_loan.read.loan',
       'own_loan.request.loan',
+      // FR-108 / H3 TN08, TN09: the employee's own tax declaration and proofs (own record only, H1/BR-053).
+      'own_tax.read.tax',
+      'own_tax.submit.tax',
       // FR-107 / H3 TN06: the employee's own issued payslips (own record only, H1/BR-053).
       'payslip.read.payslip',
       // FR-104/105: the employee's own sensitive change requests.
@@ -142,6 +146,7 @@ describe('role catalogue (FR-066, DF02)', () => {
       accessClass: 'OTHER',
       defaultScope: null,
       active: false,
+      restorable: [],
       permissions: [{ key: 'employee.list.operational', confidential: false, ownEss: false, defaultDuty: false }],
     });
     const hrA = inA.find((r) => r.code === 'HR_ADMINISTRATOR')!;
@@ -198,14 +203,14 @@ describe('company users (FR-066, C4)', () => {
     await h.actor(A, 'AUDITOR', { user: shared });
     // In A also: a grant that has ended and a revoked one; neither counts.
     await h.db.query(
-      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, effective_to, state, approved_by, approved_at)
-       select $1, $2, r.id, 'COMPANY', '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', 'ACTIVE', $3, now() from role r where r.company_id = $1 and r.code = 'AUDITOR'`,
-      [A.id, shared, sysAdmin.user],
+      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, effective_to, state, approved_by, approved_at, created_by)
+       select $1, $2, r.id, 'COMPANY', '2026-01-01T00:00:00Z', '2026-02-01T00:00:00Z', 'ACTIVE', $3, now(), $4 from role r where r.company_id = $1 and r.code = 'AUDITOR'`,
+      [A.id, shared, sysAdmin.user, SYSTEM_ACTOR_ID],
     );
     await h.db.query(
-      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, decision_reason)
-       select $1, $2, r.id, 'COMPANY', '2026-01-01T00:00:00Z', 'REVOKED', 'No longer needed (synthetic)' from role r where r.company_id = $1 and r.code = 'RECRUITER'`,
-      [A.id, shared],
+      `insert into role_assignment (company_id, user_id, role_id, scope_kind, effective_from, state, decision_reason, created_by)
+       select $1, $2, r.id, 'COMPANY', '2026-01-01T00:00:00Z', 'REVOKED', 'No longer needed (synthetic)', $3 from role r where r.company_id = $1 and r.code = 'RECRUITER'`,
+      [A.id, shared, SYSTEM_ACTOR_ID],
     );
 
     expect(await rowsOf(sysAdmin, shared)).toEqual([

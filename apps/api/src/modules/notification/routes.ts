@@ -2,9 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { optionalPaging, type Paging, pageOf } from '../../db/paging.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
 import { actorOf } from '../../http/context.js';
-import { notFound } from '../../http/errors.js';
+import { HttpError, notFound } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
-import { listRules, type RuleRevisionInput, reviseRule } from './rules.js';
+import { SqlParams } from '../access/authorize.js';
+import { DELIVERY_LIST_SELECT, deliveryCondition, type DeliveryFilters, FAILED_EVENT_LIST_SELECT, FAILED_EVENT_STATES, failedEventCondition, type FailedEventFilters, NOTIFICATION_STATES } from './delivery-log.js';
+import { listRuleProposals, listRules, publishRuleRevision, rejectRuleRevision, type RuleRevisionInput, reviseRule } from './rules.js';
 
 const idParams = { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } } as const;
 
@@ -22,12 +24,16 @@ const preferenceSchema = {
   },
 } as const;
 
+const date = { type: 'string', format: 'date' } as const;
+
 const deliveryQuery = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    state: { type: 'string', enum: ['QUEUED', 'DELIVERED', 'RETRY_PENDING', 'FAILED', 'SUPPRESSED'] },
+    state: { type: 'string', enum: NOTIFICATION_STATES },
     category: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,59}$' },
+    from: date,
+    to: date,
     ...optionalPaging,
   },
 } as const;
@@ -36,7 +42,9 @@ const failedEventsQuery = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    state: { type: 'string', enum: ['FAILED', 'RETRYING'] },
+    state: { type: 'string', enum: FAILED_EVENT_STATES },
+    from: date,
+    to: date,
     ...optionalPaging,
   },
 } as const;
@@ -60,7 +68,7 @@ export async function notificationRoutes(app: FastifyInstance, opts: { db: Datab
     const actor = actorOf(request);
     const { id } = request.params as { id: string };
     const res = await db.query(
-      `update notification set read_at = coalesce(read_at, now()) where company_id = $1 and id = $2 and recipient_user_id = $3 and state = 'DELIVERED'`,
+      `update notification set read_at = coalesce(read_at, now()), updated_by = $3 where company_id = $1 and id = $2 and recipient_user_id = $3 and state = 'DELIVERED'`,
       [actor.companyId, id, actor.userId],
     );
     if (!res.rowCount) throw notFound();
@@ -108,6 +116,44 @@ export async function notificationRoutes(app: FastifyInstance, opts: { db: Datab
     },
   );
 
+  // C6 "publication ... require business owner approval": what waits for a decision, and the decision, by someone other than the author.
+  app.get('/notifications/rules/proposals', async (request) => {
+    const grant = await requireAccess(db, request, 'notification', 'approve_rules', ['operational']);
+    return listRuleProposals(db, grant);
+  });
+
+  app.post(
+    '/notifications/rules/proposals/:id/publish',
+    { schema: { params: idParams, body: { type: 'object', additionalProperties: false, required: ['expectedVersion'], properties: { expectedVersion: { type: 'integer', minimum: 1 } } } } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const { expectedVersion } = request.body as { expectedVersion: number };
+      const grant = await requireAccess(db, request, 'notification', 'approve_rules', ['operational'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => publishRuleRevision(tx, grant, id, expectedVersion));
+    },
+  );
+
+  app.post(
+    '/notifications/rules/proposals/:id/reject',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['expectedVersion', 'reason'],
+          properties: { expectedVersion: { type: 'integer', minimum: 1 }, reason: { type: 'string', minLength: 1, maxLength: 500, pattern: '\\S' } },
+        },
+      },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const { expectedVersion, reason } = request.body as { expectedVersion: number; reason: string };
+      const grant = await requireAccess(db, request, 'notification', 'approve_rules', ['operational'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => rejectRuleRevision(tx, grant, id, expectedVersion, reason));
+    },
+  );
+
   // A rule change is a new revision effective from a future date, audited with its reason (FR-085 acceptance).
   app.post(
     '/notifications/rules/:code/revisions',
@@ -142,38 +188,19 @@ export async function notificationRoutes(app: FastifyInstance, opts: { db: Datab
   // capped first slice it always did, and `total` says how many match.
   app.get('/notifications/delivery', { schema: { querystring: deliveryQuery } }, async (request) => {
     const grant = await requireAccess(db, request, 'notification', 'read_delivery', ['operational']);
-    const q = request.query as { state?: string; category?: string } & Paging;
-    return pageOf(
-      db,
-      `select n.id, n.category, n.channel, n.state, n.recipient_user_id as "recipientUserId", u.account_key as "recipientAccount", n.occurred_at as "occurredAt",
-              (select count(*)::int from notification_delivery_attempt a where a.company_id = n.company_id and a.notification_id = n.id) as attempts,
-              (select a.failure_code from notification_delivery_attempt a where a.company_id = n.company_id and a.notification_id = n.id
-                order by a.attempt_number desc limit 1) as "lastFailureCode"
-         from notification n join user_account u on u.id = n.recipient_user_id
-        where n.company_id = $1 and ($2::text is null or n.state = $2) and ($3::text is null or n.category = $3)`,
-      [grant.companyId, q.state ?? null, q.category ?? null],
-      `"occurredAt" desc, id`,
-      q,
-      200,
-    );
+    const q = request.query as DeliveryFilters & Paging;
+    if (q.from && q.to && q.to < q.from) throw new HttpError(422, 'INVALID_PERIOD', 'The period end is before its start');
+    const p = new SqlParams([grant.companyId]);
+    return pageOf(db, `${DELIVERY_LIST_SELECT} where ${deliveryCondition('$1', p, q)}`, p.values, `"occurredAt" desc, id`, q, 200);
   });
 
   // FR-061, BR-034: an event that failed to dispatch has no notification to show in the log above, so it is listed here:
   // retrying, or given up on after its last retry. Topic, attempts and the error class only, never the payload.
   app.get('/notifications/delivery/failed-events', { schema: { querystring: failedEventsQuery } }, async (request) => {
     const grant = await requireAccess(db, request, 'notification', 'read_delivery', ['operational']);
-    const q = request.query as { state?: 'FAILED' | 'RETRYING' } & Paging;
-    return pageOf(
-      db,
-      `select e.id::text as id, e.topic, case when e.failed_at is not null then 'FAILED' else 'RETRYING' end as state, e.created_at as "occurredAt",
-              e.attempts, e.last_error as "failureCode", e.next_attempt_at as "nextAttemptAt", e.failed_at as "failedAt"
-         from outbox_event e
-        where e.company_id = $1 and e.published_at is null and e.attempts > 0
-          and ($2::text is null or ($2 = 'FAILED') = (e.failed_at is not null))`,
-      [grant.companyId, q.state ?? null],
-      `"occurredAt" desc, id`,
-      q,
-      200,
-    );
+    const q = request.query as FailedEventFilters & Paging;
+    if (q.from && q.to && q.to < q.from) throw new HttpError(422, 'INVALID_PERIOD', 'The period end is before its start');
+    const p = new SqlParams([grant.companyId]);
+    return pageOf(db, `${FAILED_EVENT_LIST_SELECT} where ${failedEventCondition('$1', p, q)}`, p.values, `"occurredAt" desc, id`, q, 200);
   });
 }

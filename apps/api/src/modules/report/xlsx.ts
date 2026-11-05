@@ -1,4 +1,5 @@
-// FR-046 "Export XLSX": a minimal, dependency-free Office Open XML workbook (ECMA-376) with one worksheet.
+// FR-046 "Export XLSX": a minimal, dependency-free Office Open XML workbook (ECMA-376) with the report's worksheet and,
+// for a generated report, a second one holding its context (DF09).
 //
 // The package is a ZIP archive of stored (uncompressed) entries, each with its CRC-32 (zlib.crc32), a local file
 // header before its data and a central directory record after all of them, closed by the end-of-central-directory
@@ -7,7 +8,7 @@
 // content always gives the same bytes.
 //
 // The parts are the minimal SpreadsheetML set: [Content_Types].xml, _rels/.rels, xl/workbook.xml,
-// xl/_rels/workbook.xml.rels and xl/worksheets/sheet1.xml. Text is written as inline strings (no shared-string
+// xl/_rels/workbook.xml.rels and xl/worksheets/sheetN.xml. Text is written as inline strings (no shared-string
 // table, no styles); a number cell holds a plain decimal only. No cell is ever a formula: the writer has no <f>
 // element, and callers pass text already guarded against formula injection (catalogue.ts cellText).
 import { crc32 } from 'node:zlib';
@@ -66,8 +67,12 @@ export function worksheetXml(rows: readonly (readonly SheetCell[])[]): string {
   return `${XML_DECLARATION}<worksheet xmlns="${MAIN_NS}"><sheetData>${body}</sheetData></worksheet>`;
 }
 
-/** The workbook package: one worksheet named after `title`, rows in order (the first is usually the header). */
-export function xlsxWorkbook(title: string, rows: readonly (readonly SheetCell[])[]): Buffer {
+/**
+ * The workbook package: a worksheet named after `title`, rows in order (the first is usually the header), and optionally a
+ * second worksheet after it (a report's context, DF09), so the first keeps its header in row 1.
+ */
+export function xlsxWorkbook(title: string, rows: readonly (readonly SheetCell[])[], second?: { name: string; rows: readonly (readonly SheetCell[])[] }): Buffer {
+  const sheets = [{ name: title, rows }, ...(second ? [second] : [])];
   const parts: [string, string][] = [
     [
       '[Content_Types].xml',
@@ -75,16 +80,19 @@ export function xlsxWorkbook(title: string, rows: readonly (readonly SheetCell[]
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
         '<Default Extension="xml" ContentType="application/xml"/>' +
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
-        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+        sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') +
         '</Types>',
     ],
     ['_rels/.rels', `${XML_DECLARATION}<Relationships xmlns="${REL_NS}"><Relationship Id="rId1" Type="${DOC_REL}/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
     [
       'xl/workbook.xml',
-      `${XML_DECLARATION}<workbook xmlns="${MAIN_NS}" xmlns:r="${DOC_REL}"><sheets><sheet name="${xmlText(sheetName(title))}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+      `${XML_DECLARATION}<workbook xmlns="${MAIN_NS}" xmlns:r="${DOC_REL}"><sheets>${sheets.map((s, i) => `<sheet name="${xmlText(sheetName(s.name))}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')}</sheets></workbook>`,
     ],
-    ['xl/_rels/workbook.xml.rels', `${XML_DECLARATION}<Relationships xmlns="${REL_NS}"><Relationship Id="rId1" Type="${DOC_REL}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`],
-    ['xl/worksheets/sheet1.xml', worksheetXml(rows)],
+    [
+      'xl/_rels/workbook.xml.rels',
+      `${XML_DECLARATION}<Relationships xmlns="${REL_NS}">${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${DOC_REL}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}</Relationships>`,
+    ],
+    ...sheets.map((s, i): [string, string] => [`xl/worksheets/sheet${i + 1}.xml`, worksheetXml(s.rows)]),
   ];
   return zipStored(parts.map(([name, xml]) => ({ name, data: Buffer.from(xml, 'utf8') })));
 }

@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import { withTransaction } from '../../db/transaction.js';
+import { revokedAfterGuard } from '../../test/after-guard.fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { type AccessGrant, resolveAccess } from '../access/authorize.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
@@ -276,6 +277,65 @@ describe.runIf(isModuleActive('hiring'))('hiring: budgets and requisitions', () 
       // DF08: the abandoned draft is kept, closed with its reason.
       expect((await h.call(requester, 'POST', `/v1/hiring/requisitions/${r.id}/discard`, { reason: 'Synthetic: not needed' })).json().state).toBe('CLOSED');
       expect(await view(requester, r.id)).toMatchObject({ state: 'CLOSED', closureReason: 'Synthetic: not needed' });
+    });
+
+    describe('DF03 "a new request links to the rejected predecessor"', () => {
+      const rejectedRequisition = async () => {
+        const r = await createReq(requester, { title: 'Synthetic rejected role', budgetExceptionReason: 'Synthetic: no budget line yet' });
+        expect((await submit(requester, r.id)).statusCode).toBe(200);
+        const t1 = (await taskFor(topManager, r.id))!;
+        expect((await decide(topManager, t1.taskId, { decision: 'REJECT', reason: 'Synthetic: not this year' })).json().state).toBe('REJECTED');
+        return r.id;
+      };
+      const raiseAgain = (a: TestActor, id: string) => h.call(a, 'POST', `/v1/hiring/requisitions/${id}/raise-again`);
+
+      it('raising again copies the job details into a draft that says what it follows, and shows the link; a plain copy has none', async () => {
+        const first = await rejectedRequisition();
+        const copy = await h.call(requester, 'POST', `/v1/hiring/requisitions/${first}/copy`);
+        expect(copy.json()).toMatchObject({ predecessorRequestId: null, copiedFromRequisitionId: first });
+        const res = await raiseAgain(requester, first);
+        expect(res.statusCode, res.body).toBe(201);
+        expect(res.json()).toMatchObject({ state: 'DRAFT', title: 'Synthetic rejected role', predecessorRequestId: first, copiedFromRequisitionId: first });
+        expect((await view(requester, res.json().id)).predecessorRequestId).toBe(first);
+      });
+
+      it('a created requisition can name it too; the same rules hold: own, rejected, one live successor, set at creation only', async () => {
+        const first = await rejectedRequisition();
+        const created = await createReq(requester, { predecessorRequestId: first });
+        expect(created.predecessorRequestId).toBe(first);
+        // One live successor, by either path.
+        const second = await h.call(requester, 'POST', '/v1/hiring/requisitions', requisitionBody({ predecessorRequestId: first }));
+        expect(second.statusCode).toBe(409);
+        expect(second.json().error).toBe('PREDECESSOR_ALREADY_FOLLOWED');
+        expect((await raiseAgain(requester, first)).json().error).toBe('PREDECESSOR_ALREADY_FOLLOWED');
+        // Not rejected, or unknown, is refused.
+        const notRejected = await h.call(requester, 'POST', '/v1/hiring/requisitions', requisitionBody({ predecessorRequestId: created.id }));
+        expect(notRejected.json().error).toBe('PREDECESSOR_NOT_REJECTED');
+        const unknown = await h.call(requester, 'POST', '/v1/hiring/requisitions', requisitionBody({ predecessorRequestId: '00000000-0000-4000-8000-000000000000' }));
+        expect(unknown.json().error).toBe('PREDECESSOR_NOT_FOUND');
+        // A draft's correction does not change it, whatever it names.
+        const another = await rejectedRequisition();
+        const put = await h.call(requester, 'PUT', `/v1/hiring/requisitions/${created.id}`, { ...requisitionBody(), expectedVersion: created.version, predecessorRequestId: another });
+        expect(put.statusCode, put.body).toBe(200);
+        expect((await view(requester, created.id)).predecessorRequestId).toBe(first);
+      });
+
+      it('someone else’s rejected requisition is not theirs to raise again, though they may copy what they can read', async () => {
+        const first = await rejectedRequisition();
+        const other = await raiseAgain(hr1, first);
+        expect(other.statusCode).toBeGreaterThanOrEqual(400);
+        const foreign = await h.call(otherManager, 'POST', `/v1/hiring/requisitions/${first}/raise-again`);
+        expect([404, 422]).toContain(foreign.statusCode);
+        expect((await h.db.query(`select 1 from business_transaction bt join requisition r on r.company_id = bt.company_id and r.transaction_id = bt.predecessor_transaction_id where r.id = $1`, [first])).rowCount).toBe(0);
+      });
+
+      it('raising again re-checks the create duty inside its transaction', async () => {
+        const first = await rejectedRequisition();
+        const seat = await h.actor(A, 'REPORTING_MANAGER', { user: requester.user });
+        const res = await revokedAfterGuard(h, A, seat, () => raiseAgain(seat, first));
+        expect(res.statusCode, res.body).toBe(403);
+        expect((await h.db.query(`select 1 from business_transaction bt join requisition r on r.company_id = bt.company_id and r.transaction_id = bt.predecessor_transaction_id where r.id = $1`, [first])).rowCount).toBe(0);
+      });
     });
 
     it('return-for-edit goes back to DRAFT; resubmission is a new immutable revision; rejection is final and recorded', async () => {

@@ -3375,14 +3375,18 @@ function SettlementBulkUpload() {
     setFile(next);
     uploadKey.current = null;
   };
-  const { resume, open, refresh } = useBatchFollowUp(t.base, {
-    show: setJob,
-    closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
-    onStart: () => {
-      upload.reset();
-      act.reset();
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    t.base,
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+      },
     },
-  });
+    job,
+  );
   const act = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'commit' | 'cancel' }) => {
       // The decision and any look at the batch after it go out under the role it was made in (BR-046).
@@ -3459,7 +3463,7 @@ function SettlementBulkUpload() {
       {job && (
         <>
           <ImportJobView job={job} template={t} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
-          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
       <ImportBatches base={t.base} title="Your settlement lines batches" openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />

@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { type Database, withTransaction } from '../../db/transaction.js';
-import { HttpError } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import type { FileStore } from '../../storage/files.js';
 import type { ScanProvider } from '../../storage/scan.js';
@@ -9,6 +8,7 @@ import { incrementCycleRoutes } from './cycle-routes.js';
 import { salaryMasterRoutes } from './salary-master.js';
 import {
   annualGrowth,
+  type CorrectionProposal,
   createInitialSalary,
   CURRENCY_PATTERN,
   decideIncrement,
@@ -18,6 +18,7 @@ import {
   MONEY_PATTERN,
   type Proposal,
   propose,
+  proposeCorrection,
   proposeOffCycle,
   salaryHistory,
 } from './service.js';
@@ -77,9 +78,8 @@ export async function incrementRoutes(app: FastifyInstance, opts: { db: Database
 
   app.get('/employees/:id/increment-history', { schema: { params: idParams } }, async (request) => {
     const { id } = request.params as { id: string };
-    // Amounts need the salary grant; the approver's free-text reason additionally needs the reason grant (DF02).
-    const grant = await requireAccess(db, request, 'increment', 'read', ['salary', 'reason'], { recordKey: id });
-    if (!grant.allowedFieldGroups.includes('salary')) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
+    // C4, C6 increment_history_read: applied changes are the financial past, whatever the plain read grant shows of open cases.
+    const grant = await requireAccess(db, request, 'increment', 'history_read', ['salary'], { requireAll: true, recordKey: id });
     return incrementHistory(db, grant, id);
   });
 
@@ -99,7 +99,7 @@ export async function incrementRoutes(app: FastifyInstance, opts: { db: Database
     async (request) => {
       const { id } = request.params as { id: string };
       const q = request.query as { financialYear: number; basis: 'MONTHLY_GROSS' | 'ANNUAL_CTC' };
-      const grant = await requireAccess(db, request, 'increment', 'read', ['salary'], { requireAll: true, recordKey: id });
+      const grant = await requireAccess(db, request, 'increment', 'history_read', ['salary'], { requireAll: true, recordKey: id });
       return annualGrowth(db, grant, id, q.financialYear, q.basis);
     },
   );
@@ -140,6 +140,29 @@ export async function incrementRoutes(app: FastifyInstance, opts: { db: Database
       const { id } = request.params as { id: string };
       const grant = await requireAccess(db, request, 'increment', 'propose', ['salary'], { requireAll: true, recordKey: id });
       return withTransaction(db, (tx) => propose(tx, grant, id, request.body as Proposal));
+    },
+  );
+
+  // BR-038; DF14: a correction of an applied change, decided independently like an off-cycle change.
+  app.post(
+    '/increment-history/:id/corrections',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['effectiveDate', 'proposedAmount', 'proposedCounterpart', 'reason'],
+          properties: { effectiveDate: date, proposedAmount: money, proposedCounterpart: money, components, reason: { ...reason, pattern: '\\S' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'increment', 'propose', ['salary'], { requireAll: true, recordKey: id });
+      const result = await withTransaction(db, (tx) => proposeCorrection(tx, grant, id, request.body as CorrectionProposal));
+      reply.status(201);
+      return result;
     },
   );
 

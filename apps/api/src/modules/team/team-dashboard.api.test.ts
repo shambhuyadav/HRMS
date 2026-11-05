@@ -68,7 +68,7 @@ describe('My Team (FR-094, FR-095, BR-042, ZT27)', () => {
     expect(detail.tabs).not.toHaveProperty('compensation');
     expect(detail.tabs).not.toHaveProperty('privateInformation');
 
-    const granted = await h.actor(A, 'REPORTING_MANAGER', { user: manager.user, extra: ['employee.read.personal', 'increment.read.salary'] });
+    const granted = await h.actor(A, 'REPORTING_MANAGER', { user: manager.user, extra: ['employee.read.personal', 'increment.history_read.salary'] });
     const withGrants = (await h.call(granted, 'GET', `/v1/my-team/${team[0]}`)).json();
     expect(withGrants.tabs).toHaveProperty('privateInformation');
     // Increment history under its own grant; salary arrangements need salary.read, which was not granted.

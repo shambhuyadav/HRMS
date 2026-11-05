@@ -256,6 +256,25 @@ describe('My ESS (FR-103)', () => {
     expect(screen.queryByRole('navigation', { name: 'Request pages' })).toBeNull();
   });
 
+  it('says when a request was raised again after a rejected one (DF03), and not otherwise', async () => {
+    mockApi({
+      'GET /v1/me/ess': INDEX,
+      'GET /v1/me/private-profile': PROFILE,
+      'GET /v1/me/requests?kind=leave_request': {
+        items: [
+          { transactionId: 't-2', requestId: 'lr-2', kind: 'leave_request', state: 'SUBMITTED', pendingWith: 'Synthetic Manager', createdAt: '2026-10-22', decisions: [], predecessorRequestId: 'lr-1' },
+          { transactionId: 't-1', requestId: 'lr-1', kind: 'leave_request', state: 'REJECTED', pendingWith: null, createdAt: '2026-10-20', decisions: [{ step: 1, decision: 'REJECT', decidedAt: '2026-10-21' }], predecessorRequestId: null },
+        ],
+        total: 2,
+        page: 1,
+        pageSize: 25,
+      },
+    });
+    renderPage(<MyEssPage />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Leave' }));
+    expect(await screen.findAllByText('Raised again after a rejected request')).toHaveLength(1);
+  });
+
   it('pages own requests with the total, asking for each page (FR-056)', async () => {
     const request = (n: number) => ({ transactionId: `t-${n}`, requestId: `lr-${n}`, kind: 'leave_request', state: 'REJECTED', pendingWith: null, createdAt: '2026-10-20', decisions: [] });
     const calls = mockApi({

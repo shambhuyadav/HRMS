@@ -11,9 +11,11 @@ import { INCREMENT_EVENTS } from './increment/events.js';
 import { LIFECYCLE_EVENTS } from './lifecycle/events.js';
 import type { EventSpec } from './notification/dispatcher.js';
 import { PAYROLL_EVENTS } from './payroll/events.js';
+import { PAYROLL_ADJUSTMENT_EVENTS } from './payroll-adjustments/events.js';
 import { PAYROLL_OUTPUTS_EVENTS } from './payroll-outputs/events.js';
 import { isModuleActive } from './registry.js';
 import { SENSITIVE_CHANGE_EVENTS } from './sensitive-change/events.js';
+import { TAX_DECLARATION_EVENTS } from './tax-declarations/events.js';
 import { TIMESHEET_EVENTS } from './timesheet/events.js';
 import { TRAINING_EVENTS } from './training/events.js';
 
@@ -35,6 +37,8 @@ const ALL_EVENTS: readonly { key: string; describers: Readonly<Record<string, Ev
   { key: 'lifecycle', describers: LIFECYCLE_EVENTS },
   { key: 'payroll', describers: PAYROLL_EVENTS },
   { key: 'payroll-outputs', describers: PAYROLL_OUTPUTS_EVENTS },
+  { key: 'payroll-adjustments', describers: PAYROLL_ADJUSTMENT_EVENTS },
+  { key: 'tax-declarations', describers: TAX_DECLARATION_EVENTS },
   { key: 'assets', describers: ASSETS_EVENTS },
 ];
 

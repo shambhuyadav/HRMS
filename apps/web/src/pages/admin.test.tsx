@@ -5,7 +5,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ADMIN_SCREENS, AuditTrailPage, MobileLinkReviewPage, NotificationRulesPage, RetentionPage, RoutingPage } from './admin';
+import { ADMIN_SCREENS, AuditTrailPage, MobileLinkReviewPage, NotificationRuleApprovalsPage, NotificationRulesPage, RetentionPage, RoutingPage } from './admin';
 
 const session = vi.hoisted(() => ({ permissions: [] as string[] }));
 vi.mock('../session', () => ({
@@ -320,8 +320,99 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
   const revisionsOf = (calls: Call[], code: string) => calls.filter((c) => c.method === 'POST' && c.url === `/v1/notifications/rules/${code}/revisions`);
   const scheduled = (call: Call): [number, unknown] => {
     const body = call.body as { effectiveFrom: string; expectedRevision: number };
-    return [201, { id: 'r-new', code: 'X', revision: body.expectedRevision + 1, templateRevision: 3, active: true, effectiveFrom: body.effectiveFrom, status: 'SCHEDULED' }];
+    return [201, { id: 'r-new', code: 'X', revision: body.expectedRevision + 1, templateRevision: 3, active: true, effectiveFrom: body.effectiveFrom, status: 'PROPOSED' }];
   };
+  const APPROVE_RULES = 'notification.approve_rules.operational';
+
+  it('C6: a change waiting for approval blocks another; a rejected one is shown with its reason and the next change builds on what came before it', async () => {
+    session.permissions = [MANAGE_RULES];
+    const calls = mockApi({
+      'GET /v1/notifications/rules': {
+        items: [
+          rule('WAITING', 1),
+          rule('WAITING', 2, { status: 'PROPOSED', effectiveFrom: '2026-12-01T00:00:00.000Z' }),
+          rule('REFUSED', 1),
+          rule('REFUSED', 2, { status: 'REJECTED', decisionReason: 'Synthetic: wrong tone', effectiveFrom: '2026-12-01T00:00:00.000Z' }),
+        ],
+      },
+      'POST /v1/notifications/rules/REFUSED/revisions': new Reply(scheduled),
+    });
+    renderPage(<NotificationRulesPage />);
+    const waiting = await screen.findByRole('listitem', { name: 'Rule WAITING' });
+    expect(within(waiting).getByText('waiting for approval')).toBeTruthy();
+    expect(within(waiting).queryByRole('button', { name: 'Change WAITING' })).toBeNull();
+    const refused = screen.getByRole('listitem', { name: 'Rule REFUSED' });
+    expect(within(refused).getByText('rejected')).toBeTruthy();
+    expect(within(refused).getByText('Synthetic: wrong tone')).toBeTruthy();
+    fireEvent.click(within(refused).getByRole('button', { name: 'Change REFUSED' }));
+    const form = screen.getByRole('form', { name: 'Change REFUSED' });
+    fireEvent.change(within(form).getByLabelText('Takes effect from'), { target: { value: AT } });
+    fireEvent.change(within(form).getByLabelText('Message'), { target: { value: 'Reworded {{roleCode}}.' } });
+    fireEvent.change(within(form).getByLabelText('Reason for the change'), { target: { value: 'Synthetic review' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Propose change' }));
+    await waitFor(() => expect(revisionsOf(calls, 'REFUSED')).toHaveLength(1));
+    expect(revisionsOf(calls, 'REFUSED')[0]!.body).toMatchObject({ expectedRevision: 1 });
+  });
+
+  describe('approvals (C6 "publication ... require business owner approval")', () => {
+    const PROPOSAL = {
+      id: 'r-9',
+      code: 'BIRTHDAY',
+      revision: 2,
+      version: 4,
+      effectiveFrom: '2026-12-01T04:00:00.000Z',
+      active: false,
+      optionalEvent: true,
+      proposalReason: 'Synthetic: pause celebrations',
+      proposedByAccountKey: 'syn.author',
+      subjectTemplate: null,
+      bodyTemplate: 'Proposed wording',
+      currentActive: true,
+      currentSubjectTemplate: null,
+      currentBodyTemplate: 'Wording now',
+    };
+
+    it('needs the approval grant, and asks the server nothing without it', async () => {
+      const calls = mockApi({});
+      renderPage(<NotificationRuleApprovalsPage />);
+      expect(screen.getByText(/cannot approve notification rules/)).toBeTruthy();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(calls).toHaveLength(0);
+    });
+
+    it('shows what is proposed beside what is in force; approval carries the row version; a rejection needs its reason', async () => {
+      session.permissions = [APPROVE_RULES];
+      const calls = mockApi({
+        'GET /v1/notifications/rules/proposals': { items: [PROPOSAL] },
+        'POST /v1/notifications/rules/proposals/r-9/publish': { id: 'r-9', status: 'SCHEDULED' },
+        'POST /v1/notifications/rules/proposals/r-9/reject': { id: 'r-9', status: 'REJECTED' },
+      });
+      renderPage(<NotificationRuleApprovalsPage />);
+      const item = await screen.findByRole('listitem', { name: 'Proposed change to BIRTHDAY' });
+      expect(within(item).getByText('Wording now')).toBeTruthy();
+      expect(within(item).getByText('Proposed wording')).toBeTruthy();
+      expect(within(item).getByText('Synthetic: pause celebrations')).toBeTruthy();
+      expect(within(item).getByText('switched off')).toBeTruthy();
+      const reject = within(item).getByRole('button', { name: 'Reject BIRTHDAY' }) as HTMLButtonElement;
+      expect(reject.disabled).toBe(true);
+      fireEvent.change(within(item).getByLabelText('Reason for rejecting BIRTHDAY'), { target: { value: 'Synthetic: not now' } });
+      fireEvent.click(reject);
+      await waitFor(() => expect(calls.find((c) => c.url.endsWith('/reject'))?.body).toEqual({ expectedVersion: 4, reason: 'Synthetic: not now' }));
+      fireEvent.click(within(item).getByRole('button', { name: 'Approve BIRTHDAY' }));
+      await waitFor(() => expect(calls.find((c) => c.url.endsWith('/publish'))?.body).toEqual({ expectedVersion: 4 }));
+    });
+
+    it('shows the server’s refusal of the author', async () => {
+      session.permissions = [APPROVE_RULES];
+      mockApi({
+        'GET /v1/notifications/rules/proposals': { items: [PROPOSAL] },
+        'POST /v1/notifications/rules/proposals/r-9/publish': new Reply(() => [403, { error: 'SELF_APPROVAL', message: 'A rule change cannot be decided by its author' }]),
+      });
+      renderPage(<NotificationRuleApprovalsPage />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Approve BIRTHDAY' }));
+      expect((await screen.findByRole('alert')).textContent).toContain('SELF_APPROVAL');
+    });
+  });
 
   it('needs the rule-management grant', async () => {
     const calls = mockApi({ 'GET /v1/notifications/rules': { items: RULES } });
@@ -329,7 +420,10 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
     expect(screen.getByText(/cannot change notification rules/)).toBeTruthy();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(calls).toHaveLength(0);
-    expect(ADMIN_SCREENS.map((s) => [s.path, s.permission, s.nav])).toEqual([['/admin/notification-rules', MANAGE_RULES, true]]);
+    expect(ADMIN_SCREENS.map((s) => [s.path, s.permission, s.nav])).toEqual([
+      ['/admin/notification-rules', MANAGE_RULES, true],
+      ['/admin/notification-rule-approvals', APPROVE_RULES, true],
+    ]);
   });
 
   it('lists every revision of each rule with its status, dates and wording', async () => {
@@ -363,7 +457,7 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
     expect(within(form).queryByLabelText('Send this notification')).toBeNull();
     expect(within(form).getByText('Mandatory: this notification cannot be switched off.')).toBeTruthy();
     expect(within(form).getByText('Approved placeholders: {{roleCode}}.')).toBeTruthy();
-    const submit = within(form).getByRole('button', { name: 'Schedule change' }) as HTMLButtonElement;
+    const submit = within(form).getByRole('button', { name: 'Propose change'}) as HTMLButtonElement;
     expect(submit.disabled).toBe(true);
     fireEvent.change(within(form).getByLabelText('Takes effect from'), { target: { value: AT } });
     fireEvent.change(within(form).getByLabelText('Message'), { target: { value: 'Your {{roleCode}} access is approved.' } });
@@ -378,7 +472,7 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
       reason: 'Wording review (synthetic)',
       bodyTemplate: 'Your {{roleCode}} access is approved.',
     });
-    expect(await screen.findByText('Revision 3 of ACCESS_GRANT_APPROVED is scheduled to take effect from 2026-12-01 09:30.')).toBeTruthy();
+    expect(await screen.findByText('Revision 3 of ACCESS_GRANT_APPROVED is waiting for approval. Once approved it takes effect from 2026-12-01 09:30.')).toBeTruthy();
     expect(screen.queryByRole('form')).toBeNull();
     await waitFor(() => expect(reads(calls)).toHaveLength(2));
   });
@@ -394,7 +488,7 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
     fireEvent.click(send);
     fireEvent.change(within(form).getByLabelText('Takes effect from'), { target: { value: AT } });
     fireEvent.change(within(form).getByLabelText('Reason for the change'), { target: { value: 'Celebrations paused (synthetic)' } });
-    fireEvent.click(within(form).getByRole('button', { name: 'Schedule change' }));
+    fireEvent.click(within(form).getByRole('button', { name: 'Propose change'}));
     await waitFor(() => expect(revisionsOf(calls, 'BIRTHDAY')).toHaveLength(1));
     expect(revisionsOf(calls, 'BIRTHDAY')[0]!.body).toEqual({ expectedRevision: 1, effectiveFrom: new Date(AT).toISOString(), reason: 'Celebrations paused (synthetic)', active: false });
   });
@@ -420,7 +514,7 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
       'A change takes effect from a future date and time only.',
       'This rule changed since the page loaded it, so nothing was saved.',
     ]) {
-      fireEvent.click(within(form).getByRole('button', { name: 'Schedule change' }));
+      fireEvent.click(within(form).getByRole('button', { name: 'Propose change'}));
       await waitFor(() => expect(within(form).getByRole('alert').textContent).toContain(words));
     }
     expect((within(form).getByLabelText('Message') as HTMLTextAreaElement).value).toBe('Access for {{reason}} approved.');

@@ -448,6 +448,20 @@ afterEach(() => {
 });
 
 describe('confirmation views (FR-082)', () => {
+  it('exports the view on screen with its own right, and offers nothing without it (FR-093)', async () => {
+    serve({ 'POST /v1/reports': [202, { id: 'r-1', state: 'QUEUED' }] });
+    renderPage([READ], '/confirmations?view=OVERDUE');
+    await screen.findByRole('tablist', { name: 'Confirmation views' });
+    expect(screen.queryByRole('button', { name: 'Export this view' })).toBeNull();
+    cleanup();
+
+    serve({ 'POST /v1/reports': [202, { id: 'r-1', state: 'QUEUED' }] });
+    renderPage([READ, 'confirmation.export.operational'], '/confirmations?view=OVERDUE');
+    fireEvent.click(await screen.findByRole('button', { name: 'Export this view' }));
+    await screen.findByText('Export requested. Download it from Reports when it is ready.');
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/v1/reports')?.body).toEqual({ reportCode: 'CONFIRMATION_DUE', filters: { view: 'OVERDUE' } });
+  });
+
   it('shows the view tabs with counts from the list and requests the chosen view', async () => {
     serve();
     renderPage([READ]);

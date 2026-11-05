@@ -31,7 +31,7 @@ import { employeeFilterConditions } from '../employee/service.js';
 import { isCalendarDate, markRepeats, MAX_BATCH_BYTES, parseTemplate, RowError, type Template } from '../imports/batch.js';
 import { type BatchSpec, cancelBatch, commitBatch, jobView, submitBatch } from '../imports/jobs.js';
 import { batchFollowUpRoutes } from '../imports/routes.js';
-import { createInitialSalary, CURRENCY_PATTERN, MONEY_PATTERN } from './service.js';
+import { createInitialSalary, CURRENCY_PATTERN, holdsSalaryHistoryGrant, MONEY_PATTERN } from './service.js';
 
 // ---------------------------------------------------------------------------------------------------------------
 // Rows: the list and the exports
@@ -83,7 +83,7 @@ export function salaryMasterSelect(grant: AccessGrant, f: SalaryMasterFilters, p
             left join lateral (select g.name from employment_assignment ea join grade g on g.company_id = ea.company_id and g.id = ea.grade_id
                                 where ea.company_id = e.company_id and ea.employee_id = e.id
                                   and ea.effective_from <= ${lastDay} and (ea.effective_to is null or ea.effective_to > ${lastDay})) gr on true
-           where ${scope} and sa.effective_from <= ${to} and (sa.effective_to is null or sa.effective_to > ${from})${filters}`;
+           where ${scope} and sa.superseded_at is null and sa.effective_from <= ${to} and (sa.effective_to is null or sa.effective_to > ${from})${filters}`;
 }
 
 /** The order of salary master rows, in the list and the exports alike. */
@@ -115,6 +115,9 @@ interface SalaryMasterRow {
 export async function listSalaryMaster(db: Queryable, grant: AccessGrant, q: SalaryMasterQuery) {
   if (q.date && q.month) throw new HttpError(422, 'FILTER_CONFLICT', 'Choose a day or a month, not both');
   const period = q.month ? monthPeriod(q.month) : { from: q.date ?? grant.businessDate, to: q.date ?? grant.businessDate };
+  if (period.from < grant.businessDate && !(await holdsSalaryHistoryGrant(db, grant, 'salary'))) {
+    throw new HttpError(403, 'HISTORY_GRANT_REQUIRED', 'Earlier salaries need the salary history grant; today and later dates do not');
+  }
   const p = new SqlParams();
   const select = salaryMasterSelect(grant, { ...period, search: q.search, status: q.status }, p);
   const total = Number((await db.query<{ n: string }>(`select count(*) as n from (${select}) x`, p.values)).rows[0]?.n ?? 0);

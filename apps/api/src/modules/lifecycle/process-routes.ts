@@ -8,7 +8,6 @@ import { HttpError } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import { downloadHeaders, type FileStore, MAX_UPLOAD_BYTES, UPLOAD_FILE_NAME } from '../../storage/files.js';
 import { type ScanProvider, scanAttachment } from '../../storage/scan.js';
-import { requireGroups } from './common.js';
 import { addNote, listNotes, type NoteInput } from './notes.js';
 import { LIFECYCLE_REFERENCE_CATEGORIES, listLifecycleReferenceValues, taskOwnerRoles } from './options.js';
 import {
@@ -219,8 +218,7 @@ export async function processRoutes(app: FastifyInstance, opts: { db: Database; 
 
   app.get('/employee-processes/:id', { schema: { params: idParams } }, async (request) => {
     const { id } = request.params as { id: string };
-    const grant = await requireAccess(db, request, 'employee_process', 'read', ['operational', 'note'], { recordKey: id });
-    requireGroups(grant, ['operational']);
+    const grant = await requireAccess(db, request, 'employee_process', 'read', ['operational', 'note'], { requireGroups: ['operational'], recordKey: id });
     return processDetail(db, grant, id);
   });
 
@@ -277,7 +275,7 @@ export async function processRoutes(app: FastifyInstance, opts: { db: Database; 
       const grant = await requireAccess(db, request, 'employee_process', 'complete_task', ['operational'], { requireAll: true, recordKey: id });
       const { evidence } = await withTransaction(db, (tx) => completeTask(tx, grant, files, id, request.body as { expectedVersion: number; remark?: string; evidence?: EvidenceInput }));
       if (evidence) {
-        // FR-106: scanned right after storing; a scanner error leaves the file PENDING_SCAN for the worker's retry.
+        // FR-106: the stored file stays PENDING_SCAN for the scan worker; in every deployment nothing is scanned in this request (NFR-S09; storage/scan.ts).
         const scanState = await scanAttachment(db, scanner, { companyId: grant.companyId, id: evidence.attachmentId, bytes: evidence.bytes });
         if (scanState !== 'PENDING_SCAN') await recordEvidenceScan(db, grant, id, scanState);
       }

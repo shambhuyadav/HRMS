@@ -27,6 +27,7 @@ import type { EssPanel, ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
 import { DelegatedBadge } from './delegations';
+import { OwnLaterAdjustments } from './payroll-adjustments';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from './records';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -2791,9 +2792,9 @@ function ImportScreen({ t }: { t: TimesheetImport }) {
 
 /**
  * Upload, row-by-row preview, then an explicit commit or cancel, as the employee imports run (records.tsx): one
- * idempotency key per chosen file. A file the scanner could not judge yet is held (UPLOADED) with nothing read; checking
- * it again resumes that batch from the file the server stored (no second upload, no second batch). The user's own
- * batches are listed below, so a held batch can be opened again after leaving the page.
+ * idempotency key per chosen file. A file waiting for the scan worker is held (UPLOADED) with nothing read, the normal first
+ * answer; checking it again, by itself while the screen is open, resumes that batch from the file the server stored (no second
+ * upload, no second batch). The user's own batches are listed below, so a held batch can be opened again after leaving the page.
  */
 function ImportBatch({ t }: { t: TimesheetImport }) {
   const keys = useKeys();
@@ -2810,14 +2811,18 @@ function ImportBatch({ t }: { t: TimesheetImport }) {
   };
 
   // A held batch checked again (POST /:id/resume), or one of the user's batches opened from the list.
-  const { resume, open, refresh } = useBatchFollowUp(t.base, {
-    show: setJob,
-    closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
-    onStart: () => {
-      upload.reset();
-      act.reset();
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    t.base,
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+      },
     },
-  });
+    job,
+  );
   const act = useMutation({
     mutationFn: async ({ id, action }: { id: string; action: 'commit' | 'cancel' }) => {
       // The decision and any look at the batch after it go out under the role it was made in (BR-046).
@@ -2896,15 +2901,8 @@ function ImportBatch({ t }: { t: TimesheetImport }) {
       </Section>
       {job && (
         <>
-          <ImportJobView
-            job={job}
-            template={t}
-            pending={act.isPending}
-            onAction={(action) => act.mutate({ id: job.id, action })}
-            error={act.error}
-            heldNote="The file is waiting for the malware scan, so nothing in it has been read yet. Check the scan again later to see the preview, or cancel the import. The batch stays in your batches below, so it can be opened again after you leave this page."
-          />
-          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} />
+          <ImportJobView job={job} template={t} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
       <ImportBatches base={t.base} title={`Your ${t.label.toLowerCase()} batches`} openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />
@@ -2926,6 +2924,7 @@ function MyTimesheetsPanel() {
       {can(TS_SUBMIT) && <MyAllocations />}
       {can(TS_READ) && <MyReminders />}
       {can(TS_READ) && <MyDecisionHistory />}
+      {can(TS_READ) && <OwnLaterAdjustments />}
     </div>
   );
 }

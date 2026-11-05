@@ -25,7 +25,7 @@ The seed prints the accounts. Sign in with an account key (development sign-in o
 | `finance@demo.test` | Finance-duty Admin context: expense decisions and payments |
 | `sys.admin@demo.test` | Access administration, delivery log |
 
-Optional: `npm run dev:worker` (with `SYSTEM_USER_ID` set to a user id) runs the scheduler: notifications, reports, reminders, celebrations, effective-dated private profile changes, upload rescans and the daily jobs of active modules (`apps/api/src/modules/jobs-registry.ts`).
+Optional: `npm run dev:worker` runs the scheduler, acting as the seeded system account: notifications, reports, reminders, celebrations, effective-dated private profile changes, upload scans and the daily jobs of active modules (`apps/api/src/modules/jobs-registry.ts`). Uploads are never scanned in the request, so without the worker they stay `PENDING_SCAN`.
 
 ## Configuration (development defaults; production must set its own)
 
@@ -54,3 +54,9 @@ Rename the migration to `.sql` and set `active: true` in one step once its tests
 npm test            # API + database suite (embedded PostgreSQL, cloned per test file) and web tests
 npm run typecheck   # API and web
 ```
+
+## Before go-live
+
+`npm run db:check-go-live` looks for stored rows the database guards cannot see until their next write: a transaction and its root apart, rows a migration kept when a new key could not be validated, rows from before a guard on new rows, and missing or unrecorded creators. It only reads, in one read-only transaction, and prints counts and row ids, never a value from a row. Its only input is `HRMS_CHECK_DATABASE_URL`; `DATABASE_URL` is never used as the target, and it refuses the development database. Exit code 0 means nothing to report, 1 something to report, 2 that it could not run. What a reported row should have said is a question for the owner of that record: the check corrects nothing.
+
+The acceptance registers in [docs/registers/](docs/registers/README.md) are generated from a full test run by `db/registers/generate.ts`.

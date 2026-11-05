@@ -193,6 +193,58 @@ const LEAVE_ROUTES = {
   'PUT /v1/leave/requests/lr-1': { requestId: 'lr-1', units: '1.0000', revision: 2, state: 'SUBMITTED' },
 };
 
+describe('raising rejected leave and claims again (DF03, I-66)', () => {
+  it('leave: fills the form from the rejected request, never its private reason, and links the new one; followed or undutied ones are not offered', async () => {
+    session.permissions = ['leave.submit.operational', 'leave.read.operational'];
+    const row = { id: 'lr-9', leaveType: 'ANNUAL', startDate: '2026-11-02', endDate: '2026-11-03', halfDay: false, units: '2.0000', state: 'REJECTED', version: 1, cancellationState: null };
+    const calls = mockApi({
+      'GET /v1/employees/emp-1/leave-balances': LEAVE_ROUTES['GET /v1/employees/emp-1/leave-balances'],
+      'GET /v1/employees/emp-1/leave-requests': { items: [row, { ...row, id: 'lr-8' }, { ...row, id: 'lr-10', state: 'SUBMITTED', predecessorRequestId: 'lr-8' }] },
+      'GET /v1/employees/emp-1/documents': { items: [] },
+      'POST /v1/leave/requests': [201, { requestId: 'lr-11', state: 'SUBMITTED' }],
+    });
+    renderPage(<LeavePage />);
+    const offers = await screen.findAllByText('Raise again');
+    expect(offers).toHaveLength(1);
+    expect(screen.getAllByText('Raised again after a rejected request')).toHaveLength(1);
+    fireEvent.click(offers[0]!);
+    expect((screen.getByLabelText('From') as HTMLInputElement).value).toBe('2026-11-02');
+    expect((screen.getByLabelText('Reason (private, optional)') as HTMLInputElement).value).toBe('');
+    fireEvent.click(screen.getByText('Submit request'));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/v1/leave/requests')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ leaveType: 'ANNUAL', startDate: '2026-11-02', endDate: '2026-11-03', halfDay: false, predecessorRequestId: 'lr-9' });
+  });
+
+  it('a claim: the form takes the rejected text with no receipt, and only the new claim names what it follows, also on a retry', async () => {
+    session.permissions = ['expense.draft.operational', 'expense.submit.operational', 'expense.read.operational'];
+    let submits = 0;
+    const calls = mockApi({
+      'GET /v1/employees/emp-1/expense-claims': { items: [{ id: 'cl-9', purpose: 'Synthetic rejected visit', state: 'REJECTED', paymentState: 'NOT_APPLICABLE', claimedTotal: '450.00', currency: 'INR', version: 2 }] },
+      'GET /v1/expense/claims/cl-9': { id: 'cl-9', state: 'REJECTED', version: 2, purpose: 'Synthetic rejected visit', currency: 'INR', lines: [{ ...LINE, nights: null, invoiceReference: null, receiptId: 'rc-old', receiptScanState: 'CLEAN' }] },
+      'POST /v1/expense/receipts': () => [201, { receiptId: 'rc-new', mediaType: 'application/pdf', byteSize: 18 }],
+      'POST /v1/expense/claims': () => [201, { claimId: 'cl-10', revision: 1, state: 'DRAFT' }],
+      'GET /v1/expense/claims/cl-10': { id: 'cl-10', state: 'DRAFT', version: 1, purpose: 'Synthetic rejected visit', currency: 'INR', lines: [] },
+      'PUT /v1/expense/claims/cl-10': { claimId: 'cl-10', revision: 1, state: 'DRAFT' },
+      'POST /v1/expense/claims/cl-10/submit': () => (++submits === 1 ? [409, { error: 'BUSY', message: 'Synthetic refusal' }] : [200, { claimId: 'cl-10', state: 'MANAGER_PENDING' }]),
+    });
+    renderPage(<ExpensesPage />);
+    fireEvent.click(await screen.findByText('Raise again'));
+    await waitFor(() => expect((screen.getByLabelText('Business purpose') as HTMLInputElement).value).toBe('Synthetic rejected visit'));
+    expect(await screen.findByText('Attach the receipts again: they stay with the rejected claim.')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Receipt (PDF, JPEG or PNG)'), { target: { files: [new File(['%PDF-1.4 synthetic'], 'cab.pdf', { type: 'application/pdf' })] } });
+    fireEvent.click(screen.getByText('Submit claim'));
+    await waitFor(() => expect(submits).toBe(1));
+    const created = calls.filter((c) => c.method === 'POST' && c.url === '/v1/expense/claims');
+    expect(created).toHaveLength(1);
+    expect(created[0]!.body).toMatchObject({ purpose: 'Synthetic rejected visit', predecessorRequestId: 'cl-9', lines: [{ receipt: { receiptId: 'rc-new' } }] });
+    // A retry revises that draft; the link was named once.
+    fireEvent.click(await screen.findByText('Submit claim'));
+    await waitFor(() => expect(submits).toBe(2));
+    expect(calls.filter((c) => c.method === 'POST' && c.url === '/v1/expense/claims')).toHaveLength(1);
+    expect(calls.find((c) => c.method === 'PUT')!.body).not.toHaveProperty('predecessorRequestId');
+  });
+});
+
 describe('resubmitting returned leave (web-3)', () => {
   it('offers an optional new private reason and sends no reason when none is typed', async () => {
     session.permissions = ['leave.read.operational', 'leave.submit.operational'];
@@ -234,6 +286,18 @@ describe('resubmitting returned leave (web-3)', () => {
 describe('supporting documents on leave (FR-026, FR-106)', () => {
   const DOC = { id: 'doc-1', documentType: 'GENERAL', fileName: 'medical-note.pdf', uploadedAt: '2026-10-01T00:00:00Z', scanState: 'CLEAN', verificationState: 'UNVERIFIED' };
   const OWN = ['leave.read.operational', 'leave.submit.operational', 'document.read.document'];
+
+  it('balances and days read without padding zeros, and nothing is rounded', async () => {
+    session.permissions = OWN;
+    mockApi({
+      'GET /v1/employees/emp-1/leave-balances': { items: [{ leaveType: 'SICK', paid: true, available: '5.0000', pending: '1.5000', taken: '1.6667' }] },
+      'GET /v1/employees/emp-1/leave-requests': { items: [{ id: 'lr-1', leaveType: 'SICK', startDate: '2026-11-02', endDate: '2026-11-03', halfDay: false, units: '2.0000', state: 'SUBMITTED' }] },
+      'GET /v1/employees/emp-1/documents': { items: [] },
+    });
+    renderPage(<LeavePage />);
+    for (const text of ['5', '1.5', '1.6667', '2']) expect(await screen.findByRole('cell', { name: text })).toBeTruthy();
+    expect(screen.queryByText(/\.0000/)).toBeNull();
+  });
 
   it('attaches chosen documents to a new request and sends none when none is chosen', async () => {
     session.permissions = OWN;
@@ -868,8 +932,10 @@ describe('own claims: correcting and withdrawing (FR-074, BR-017, DF03)', () => 
       'POST /v1/expense/claims/cl-1/submit': [200, { claimId: 'cl-1', state: 'MANAGER_PENDING' }],
     });
     renderPage(<ExpensesPage />);
-    await screen.findByRole('option', { name: 'CAMP' });
-    expect(screen.queryByRole('option', { name: 'MEALS' })).toBeNull();
+    // Each category reads as the company named it; its code is what is sent.
+    expect(((await screen.findByRole('option', { name: 'Camp' })) as HTMLOptionElement).value).toBe('CAMP');
+    expect(screen.queryByRole('option', { name: 'CAMP' })).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Meals' })).toBeNull();
     expect(screen.queryByLabelText('Nights')).toBeNull();
     await fillClaim();
     fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'CAMP' } });
@@ -1114,12 +1180,100 @@ describe('payments (DF07)', () => {
     expect(retry!.body!.idempotencyKey).not.toBe(first!.body!.idempotencyKey);
   });
 
+  describe('C5 DRAFT then READY, C3 explicitly assigned outcome actor', () => {
+    const row = (over: Record<string, unknown>) => ({ id: 'pi-1', amount: '900.00', currency: 'INR', state: 'PREPARED', batchState: 'DRAFT', outcomeAssignedToMe: false, outcomeActorAccountKey: null, paymentDate: '2026-10-20', reversed: '0.00', ...over });
+    const ACTORS = { items: [{ userId: 'u-9', accountKey: 'syn.confirmer', employeeCode: 'SYN-9', employeeName: 'Synthetic Confirmer' }] };
+
+    it('a draft is marked ready by the preparer and offers no release', async () => {
+      session.permissions = ['payment.read.operational', 'payment.prepare.operational', 'payment.release.operational'];
+      let batchState = 'DRAFT';
+      const calls = mockApi({
+        'GET /v1/expense/payables': { items: [PAYABLE] },
+        'GET /v1/expense/claims/cl-5/payments': () => [200, { items: [row({ batchState })] }],
+        'GET /v1/expense/payments/pi-1/outcome-actors': ACTORS,
+        'POST /v1/expense/payments/pi-1/ready': () => {
+          batchState = 'READY';
+          return [200, { instructionId: 'pi-1', state: 'PREPARED', batchState: 'READY' }];
+        },
+      });
+      renderPage(<PaymentsPage />);
+      fireEvent.click(await screen.findByText('Manage'));
+      fireEvent.click(await screen.findByText('Mark ready'));
+      await waitFor(() => expect(calls.some((c) => c.url.endsWith('/ready') && c.method === 'POST')).toBe(true));
+      expect(await screen.findByText('Release')).toBeTruthy();
+      expect(screen.queryByText('Mark ready')).toBeNull();
+    });
+
+    it('someone without the prepare duty sees the draft without the step; nobody is offered release before READY', async () => {
+      session.permissions = ['payment.read.operational', 'payment.release.operational'];
+      mockApi({ 'GET /v1/expense/payables': { items: [PAYABLE] }, 'GET /v1/expense/claims/cl-5/payments': { items: [row({})] } });
+      renderPage(<PaymentsPage />);
+      fireEvent.click(await screen.findByText('Manage'));
+      expect(await screen.findByText('Draft')).toBeTruthy();
+      expect(screen.queryByText('Mark ready')).toBeNull();
+      expect(screen.queryByText('Release')).toBeNull();
+    });
+
+    it('the release names the outcome actor and cannot be sent without one', async () => {
+      session.permissions = ['payment.read.operational', 'payment.release.operational'];
+      const calls = mockApi({
+        'GET /v1/expense/payables': { items: [PAYABLE] },
+        'GET /v1/expense/claims/cl-5/payments': { items: [row({ batchState: 'READY' })] },
+        'GET /v1/expense/payments/pi-1/outcome-actors': ACTORS,
+        'POST /v1/expense/payments/pi-1/release': { instructionId: 'pi-1', state: 'RELEASED', outcomeActorUserId: 'u-9' },
+      });
+      renderPage(<PaymentsPage />);
+      fireEvent.click(await screen.findByText('Manage'));
+      const release = (await screen.findByText('Release')) as HTMLButtonElement;
+      expect(release.disabled).toBe(true);
+      await screen.findByText('Synthetic Confirmer (SYN-9)');
+      fireEvent.change(screen.getByLabelText('Outcome recorded by'), { target: { value: 'u-9' } });
+      expect(release.disabled).toBe(false);
+      fireEvent.click(release);
+      await waitFor(() => expect(calls.find((c) => c.url.endsWith('/release'))?.body).toEqual({ outcomeActorUserId: 'u-9' }));
+    });
+
+    it('only the assigned person is offered the outcome; a release holder can reassign with a reason', async () => {
+      session.permissions = ['payment.read.operational', 'payment.release.operational', 'payment.confirm_outcome.operational'];
+      const calls = mockApi({
+        'GET /v1/expense/payables': { items: [PAYABLE] },
+        'GET /v1/expense/claims/cl-5/payments': { items: [row({ state: 'RELEASED', batchState: 'RELEASED', outcomeActorAccountKey: 'syn.other' })] },
+        'GET /v1/expense/payments/pi-1/outcome-actors': ACTORS,
+        'POST /v1/expense/payments/pi-1/outcome-actor': { instructionId: 'pi-1', state: 'RELEASED', outcomeActorUserId: 'u-9' },
+      });
+      renderPage(<PaymentsPage />);
+      fireEvent.click(await screen.findByText('Manage'));
+      expect(await screen.findByText('Outcome assigned to syn.other')).toBeTruthy();
+      expect(screen.queryByText('Confirm paid')).toBeNull();
+      expect(screen.queryByLabelText('Evidence reference')).toBeNull();
+      const reassign = screen.getByText('Reassign outcome') as HTMLButtonElement;
+      await screen.findByText('Synthetic Confirmer (SYN-9)');
+      fireEvent.change(screen.getByLabelText('Outcome recorded by'), { target: { value: 'u-9' } });
+      expect(reassign.disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText('Reason for reassigning'), { target: { value: 'Synthetic: first actor left' } });
+      fireEvent.click(reassign);
+      await waitFor(() => expect(calls.find((c) => c.url.endsWith('/outcome-actor'))?.body).toEqual({ outcomeActorUserId: 'u-9', reason: 'Synthetic: first actor left' }));
+    });
+
+    it('holding the duty without the assignment, or the assignment without the duty, offers no outcome', async () => {
+      session.permissions = ['payment.read.operational'];
+      mockApi({
+        'GET /v1/expense/payables': { items: [PAYABLE] },
+        'GET /v1/expense/claims/cl-5/payments': { items: [row({ state: 'RELEASED', batchState: 'RELEASED', outcomeAssignedToMe: true, outcomeActorAccountKey: 'syn.user' })] },
+      });
+      renderPage(<PaymentsPage />);
+      fireEvent.click(await screen.findByText('Manage'));
+      expect(await screen.findByText('Outcome assigned to syn.user')).toBeTruthy();
+      expect(screen.queryByText('Confirm paid')).toBeNull();
+    });
+  });
+
   it('the bank reference of a recorded outcome is not reused for a reversal', async () => {
-    session.permissions = ['payment.read.operational', 'payment.release.operational', 'payment.reverse.operational'];
+    session.permissions = ['payment.read.operational', 'payment.confirm_outcome.operational', 'payment.reverse.operational'];
     let state = 'RELEASED';
     const calls = mockApi({
       'GET /v1/expense/payables': { items: [PAYABLE] },
-      'GET /v1/expense/claims/cl-5/payments': () => [200, { items: [{ id: 'pi-1', amount: '900.00', currency: 'INR', state, paymentDate: '2026-10-20', reversed: '0.00' }] }],
+      'GET /v1/expense/claims/cl-5/payments': () => [200, { items: [{ id: 'pi-1', amount: '900.00', currency: 'INR', state, batchState: 'RELEASED', outcomeAssignedToMe: true, outcomeActorAccountKey: 'syn.user', paymentDate: '2026-10-20', reversed: '0.00' }] }],
       'POST /v1/expense/payments/pi-1/outcome': () => {
         state = 'CONFIRMED';
         return [200, { instructionId: 'pi-1', state: 'CONFIRMED', replayed: false }];
@@ -1269,6 +1423,26 @@ describe('report requests (FR-046 Export XLSX)', () => {
     expect(screen.getByRole('heading', { name: 'My reports (2)' })).toBeTruthy();
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
     expect(calls.find((c) => c.url.startsWith('/v1/reports?'))!.url).toBe('/v1/reports?page=1&pageSize=25');
+  });
+
+  it('asks for the report shown, never one this role was not offered; with none offered, says so and offers no request', async () => {
+    const offered = { items: [{ code: 'LEAVE_REGISTER', title: 'Leave register', requiresPeriod: false }, { code: 'MY_TEAM', title: 'My team', requiresPeriod: false }] };
+    const calls = mockApi({
+      'GET /v1/reports/catalogue': offered,
+      'GET /v1/reports?': { items: [], total: 0, page: 1, pageSize: 25 },
+      'POST /v1/reports': () => [202, { id: 'r-1', state: 'QUEUED', format: 'CSV' }] as Reply,
+    });
+    const view = renderPage(<ReportsPage />);
+    const choice = (await screen.findByLabelText('Report')) as HTMLSelectElement;
+    expect(choice.value).toBe('LEAVE_REGISTER');
+    fireEvent.click(screen.getByRole('button', { name: 'Request' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ reportCode: 'LEAVE_REGISTER' });
+    view.unmount();
+    mockApi({ 'GET /v1/reports/catalogue': { items: [] }, 'GET /v1/reports?': { items: [], total: 0, page: 1, pageSize: 25 } });
+    renderPage(<ReportsPage />);
+    expect(await screen.findByText('No report can be requested in this role.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Request' })).toBeNull();
   });
 
   it('says plainly that nothing was requested, as distinct from a failed answer', async () => {

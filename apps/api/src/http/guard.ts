@@ -10,6 +10,8 @@ import { forbidden } from './errors.js';
 export interface GuardOptions {
   /** Every requested field group must be allowed (writes). Reads default to "at least one". */
   requireAll?: boolean;
+  /** Groups a read must hold whatever else it asks for: another group of the same read does not open it. */
+  requireGroups?: readonly string[];
   /** Target record for the denial audit trail, when known. */
   recordKey?: string;
 }
@@ -28,7 +30,7 @@ export async function requireAccess(
     : ({ allowed: false, reason: 'ASSIGNMENT_NOT_ACTIVE', deniedFieldGroups: [] } as const);
 
   const deniedGroups = decision.deniedFieldGroups;
-  const denied = !decision.allowed || (options.requireAll === true && deniedGroups.length > 0);
+  const denied = !decision.allowed || (options.requireAll === true && deniedGroups.length > 0) || (options.requireGroups ?? []).some((g) => !decision.allowedFieldGroups.includes(g));
   if (!denied) return decision as AccessGrant;
 
   await auditDenial(db, request, {

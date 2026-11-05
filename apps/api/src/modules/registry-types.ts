@@ -46,6 +46,8 @@ export interface ModuleEssTab {
   permissions: PermissionKey[];
   /** Own-record endpoints; {employeeId} is replaced with the caller's own employee. */
   links: { rel: string; method: 'GET' | 'POST' | 'PUT'; href: string }[];
+  /** Company configuration the tab needs before it serves anything; without it the tab says NOT_CONFIGURED in plain words (ess/service.ts). */
+  requiresConfiguration?: 'TAX_RULE_PACK';
 }
 
 export interface ModuleRegistration {

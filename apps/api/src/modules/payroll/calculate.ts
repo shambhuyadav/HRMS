@@ -360,7 +360,7 @@ export async function calculateChunk(tx: Queryable, run: RunContext, policy: Pol
      select r.company_id, r.id, r.employee_id, sa.id, s.seg_start, s.seg_end, s.seg_end - s.seg_start + 1,
             coalesce(l.leave, 0), coalesce(l.att, 0), (s.seg_end - s.seg_start + 1) - coalesce(l.leave, 0) - coalesce(l.att, 0), sa.currency_code, $4
        from payroll_record r
-       join salary_arrangement sa on sa.company_id = r.company_id and sa.employee_id = r.employee_id
+       join salary_arrangement sa on sa.company_id = r.company_id and sa.employee_id = r.employee_id and sa.superseded_at is null
             and sa.effective_from <= r.eligible_to and (sa.effective_to is null or sa.effective_to > r.eligible_from)
        cross join lateral (select greatest(sa.effective_from, r.eligible_from) as seg_start,
                                   least(coalesce(sa.effective_to - 1, r.eligible_to), r.eligible_to) as seg_end) s

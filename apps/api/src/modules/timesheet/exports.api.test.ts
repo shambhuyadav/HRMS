@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 import { XLSX_MEDIA_TYPE } from '../report/xlsx.js';
 import { readZip, sheetCells, sheetRows } from '../report/xlsx.fixtures.js';
@@ -22,7 +23,7 @@ const CANCEL_REASON = '@Synthetic change of plan';
 /** The CSV writer's formula guard (FR-065), applied to what the lists return as-is. */
 const guard = (s: string) => (/^[=+\-@\t\r]/.test(s) ? `'${s}` : s);
 const cells = (line: string) => [...line.matchAll(/"((?:[^"]|"")*)"/g)].map((m) => m[1]!.replace(/""/g, '"'));
-const table = (csv: string) => csv.trimEnd().split('\r\n').map(cells);
+const table = (csv: string) => csvTable(csv).trimEnd().split('\r\n').map(cells);
 
 describe.runIf(isModuleActive('timesheet'))('timesheet exports (FR-046, FR-048)', () => {
   let h: Harness;

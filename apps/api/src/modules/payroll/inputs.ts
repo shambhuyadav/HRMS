@@ -24,7 +24,7 @@ import { type Paging, pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import type { ScanProvider } from '../../storage/scan.js';
+import type { ScanVerdict } from '../../storage/scan.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { CsvError, parseCsv } from '../employee/csv.js';
 import { cancelActiveApproval, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
@@ -303,7 +303,7 @@ export async function createEntryBatch(tx: Queryable, grant: AccessGrant, period
 export async function uploadBatch(
   tx: Queryable,
   grant: AccessGrant,
-  scanner: ScanProvider,
+  verdict: ScanVerdict,
   periodId: string,
   input: { contentBase64: string; dryRun?: boolean | undefined; idempotencyKey?: string | undefined },
 ) {
@@ -332,8 +332,8 @@ export async function uploadBatch(
     }
   }
   requireBeforeCutoff(grant, p);
-  // FR-106: an upload is never read before the scanner has released it; the file itself is not stored.
-  const verdict = await scanner.scan(bytes).catch(() => ({ verdict: 'ERROR' as const }));
+  // FR-106: an upload is never read before the scanner has released it; the file itself is not stored. The route asked
+  // the scanner (scanInMemory) before this transaction opened.
   if (verdict.verdict === 'INFECTED') throw new HttpError(422, 'UPLOAD_QUARANTINED', 'The malware scan flagged the file; it was not read');
   if (verdict.verdict !== 'CLEAN') throw new HttpError(503, 'SCAN_UNAVAILABLE', 'The file could not be scanned now; nothing was saved, try again later');
   let rows: string[][];

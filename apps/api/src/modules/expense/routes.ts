@@ -12,6 +12,7 @@ import { myOpenTasks } from '../workflow/engine.js';
 import { listPaymentInstructions, type PaymentListQuery } from './payment-list.js';
 import { expensePolicyRoutes } from './policies.js';
 import {
+  canReadClaim,
   createDraft,
   decideExpense,
   type DraftInput,
@@ -21,6 +22,9 @@ import {
   listInstructions,
   listPayables,
   preparePayment,
+  assignOutcomeActor,
+  listOutcomeActors,
+  markPaymentReady,
   recordOutcome,
   releasePayment,
   reversePayment,
@@ -93,7 +97,8 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
           [grant.companyId, grant.userId, grant.linkedEmployeeId, stored.reference, mediaType, stored.checksum, body.fileName.trim(), stored.byteSize],
         )
       ).rows[0]!.id;
-      // FR-106 / DF06: a receipt is quarantined until the scanner releases it.
+      // FR-106 / DF06: a receipt is quarantined until a scanner releases it. NFR-S09: nothing waits for that here: in every deployment this
+      // answers PENDING_SCAN and the scan worker reaches the verdict (storage/scan.ts).
       const scanState = await scanAttachment(db, scanner, { companyId: grant.companyId, id: receiptId, bytes });
       reply.status(201);
       return { receiptId, mediaType, byteSize: stored.byteSize, scanState };
@@ -101,15 +106,16 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
   );
 
   // Receipt content is confidential (DF02): a separate `receipt` grant, and access to the parent claim on the same
-  // assignment (FR-069): its read permission and row scope over the claimant. A never-submitted draft is still the
-  // claimant's own: nobody else opens its receipts. Every read is audited (FR-057).
+  // assignment (FR-069): its read permission, its row scope over the claimant, and who reads a claim at all (the claimant,
+  // an assigned reviewer or a payment operator). A never-submitted draft is still the claimant's own: nobody else opens
+  // its receipts. Every read is audited (FR-057).
   app.get('/expense/lines/:id/receipt', { schema: { params: idParams } }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'expense', 'view_receipt', ['receipt'], { requireAll: true, recordKey: id });
     await requireAccess(db, request, 'expense', 'read', ['operational'], { requireAll: true, recordKey: id });
     const receipt = (
-      await db.query<{ id: string; claimant_id: string; submitted: boolean; content_reference: string; media_type: string; file_name: string | null; scan_state: string | null }>(
-        `select a.id, c.employee_id as claimant_id, r.submitted_at is not null as submitted, a.content_reference, a.media_type, a.file_name, a.scan_state
+      await db.query<{ id: string; claim_id: string; claimant_id: string; submitted: boolean; content_reference: string; media_type: string; file_name: string | null; scan_state: string | null }>(
+        `select a.id, c.id as claim_id, c.employee_id as claimant_id, r.submitted_at is not null as submitted, a.content_reference, a.media_type, a.file_name, a.scan_state
            from expense_receipt er join attachment a on a.company_id = er.company_id and a.id = er.attachment_id
            join expense_line l on l.company_id = er.company_id and l.id = er.line_id
            join expense_revision r on r.company_id = l.company_id and r.id = l.revision_id
@@ -120,9 +126,16 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
     ).rows[0];
     if (!receipt) throw notFound();
     const outOfScope = !(await canAccessEmployee(db, grant, receipt.claimant_id));
-    if (outOfScope || (!receipt.submitted && grant.linkedEmployeeId !== receipt.claimant_id)) {
+    const refusal = outOfScope
+      ? 'OUT_OF_SCOPE'
+      : !receipt.submitted && grant.linkedEmployeeId !== receipt.claimant_id
+        ? 'CLAIM_NOT_SUBMITTED'
+        : !(await canReadClaim(db, grant, receipt.claim_id))
+          ? 'NOT_ASSIGNED'
+          : null;
+    if (refusal) {
       // Recorded against the receipt like its reads (FR-098), then not found.
-      await auditDenial(db, request, { resource: 'expense_receipt', action: 'read', reason: outOfScope ? 'OUT_OF_SCOPE' : 'CLAIM_NOT_SUBMITTED', recordKey: receipt.id });
+      await auditDenial(db, request, { resource: 'expense_receipt', action: 'read', reason: refusal, recordKey: receipt.id });
       throw notFound();
     }
     // FR-106 / DF06 (v8.2): only a released receipt is served, to the claimant (H1) or an eligible reviewer.
@@ -143,9 +156,10 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
     return bytes;
   });
 
-  app.post('/expense/claims', { schema: { body: draftBody } }, async (request, reply) => {
+  // DF03: a new claim may name the rejected one it raises again; a later revision of a claim (PUT) cannot.
+  app.post('/expense/claims', { schema: { body: { ...draftBody, properties: { ...draftBody.properties, predecessorRequestId: uuid } } } }, async (request, reply) => {
     const grant = await requireAccess(db, request, 'expense', 'draft', ['operational'], { requireAll: true });
-    const result = await withTransaction(db, (tx) => createDraft(tx, grant, request.body as DraftInput));
+    const result = await withTransaction(db, (tx) => createDraft(tx, grant, request.body as DraftInput & { predecessorRequestId?: string }));
     reply.status(201);
     return result;
   });
@@ -284,23 +298,57 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
           type: 'object',
           additionalProperties: false,
           required: ['claimId', 'amount', 'paymentDate', 'idempotencyKey'],
-          properties: { claimId: uuid, amount: money2, paymentDate: date, idempotencyKey: key },
+          // CI06: a replacement names the failed or cancelled instruction it replaces.
+          properties: { claimId: uuid, amount: money2, paymentDate: date, idempotencyKey: key, retryOfInstructionId: uuid },
         },
       },
     },
     async (request, reply) => {
       const grant = await requireAccess(db, request, 'payment', 'prepare', ['operational'], { requireAll: true });
-      const result = await withTransaction(db, (tx) => preparePayment(tx, grant, request.body as { claimId: string; amount: string; paymentDate: string; idempotencyKey: string }));
+      const result = await withTransaction(db, (tx) => preparePayment(tx, grant, request.body as { claimId: string; amount: string; paymentDate: string; idempotencyKey: string; retryOfInstructionId?: string }));
       reply.status(result.replayed ? 200 : 201);
       return result;
     },
   );
 
-  app.post('/expense/payments/:id/release', { schema: { params: idParams } }, async (request) => {
+  // C5 "payment batch DRAFT then READY": only a ready batch can be released.
+  app.post('/expense/payments/:id/ready', { schema: { params: idParams } }, async (request) => {
     const { id } = request.params as { id: string };
-    const grant = await requireAccess(db, request, 'payment', 'release', ['operational'], { requireAll: true, recordKey: id });
-    return withTransaction(db, (tx) => releasePayment(tx, grant, id));
+    const grant = await requireAccess(db, request, 'payment', 'prepare', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => markPaymentReady(tx, grant, id));
   });
+
+  // C3 "confirmation actor explicitly assigned": the release names who records the outcome.
+  app.get('/expense/payments/:id/outcome-actors', { schema: { params: idParams } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'payment', 'release', ['operational'], { recordKey: id });
+    return listOutcomeActors(db, grant, id);
+  });
+
+  app.post(
+    '/expense/payments/:id/release',
+    { schema: { params: idParams, body: { type: 'object', additionalProperties: false, required: ['outcomeActorUserId'], properties: { outcomeActorUserId: uuid } } } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'payment', 'release', ['operational'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => releasePayment(tx, grant, id, request.body as { outcomeActorUserId: string }));
+    },
+  );
+
+  app.post(
+    '/expense/payments/:id/outcome-actor',
+    {
+      schema: {
+        params: idParams,
+        body: { type: 'object', additionalProperties: false, required: ['outcomeActorUserId', 'reason'], properties: { outcomeActorUserId: uuid, reason: { type: 'string', minLength: 1, maxLength: 500 } } },
+      },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'payment', 'release', ['operational'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => assignOutcomeActor(tx, grant, id, request.body as { outcomeActorUserId: string; reason: string }));
+    },
+  );
 
   app.post(
     '/expense/payments/:id/outcome',
@@ -312,7 +360,7 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
     },
     async (request) => {
       const { id } = request.params as { id: string };
-      const grant = await requireAccess(db, request, 'payment', 'release', ['operational'], { requireAll: true, recordKey: id });
+      const grant = await requireAccess(db, request, 'payment', 'confirm_outcome', ['operational'], { requireAll: true, recordKey: id });
       return withTransaction(db, (tx) => recordOutcome(tx, grant, id, request.body as { outcome: 'CONFIRMED' | 'FAILED'; evidenceKey: string }));
     },
   );

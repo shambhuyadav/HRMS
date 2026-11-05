@@ -10,6 +10,7 @@ import type { PermissionKey } from '../access/baseline.js';
 import { enrol, GOALS, openCycle, rate, selfAssess, type World, appraisalWorld } from '../appraisal/appraisal.fixtures.js';
 import { METRICS } from '../dashboard/service.js';
 import { attendance } from '../payroll/payroll.fixtures.js';
+import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 import { addDays, advance, businessDate, newPlan, nominated, act } from '../training/training.fixtures.js';
 import { leaveQueue, leaveTasks } from '../workflow/leave-tasks.fixtures.js';
@@ -50,7 +51,7 @@ async function exported(a: TestActor, filters: Record<string, unknown> = {}) {
   const id = res.json().id as string;
   await processReportQueue(h.pool);
   const status = (await h.call(a, 'GET', `/v1/reports/${id}`)).json() as { state: string; rowCount: number | null; failureCode: string | null };
-  const csv = status.state === 'COMPLETED' ? (await h.call(a, 'GET', `/v1/reports/${id}/download`)).body : '';
+  const csv = status.state === 'COMPLETED' ? csvTable((await h.call(a, 'GET', `/v1/reports/${id}/download`)).body) : '';
   return { id, status, csv };
 }
 
@@ -376,8 +377,11 @@ describe('Compensation and Increment History (FR-095, BR-044, DF02, DF16)', () =
     expect((await h.call(granted, 'GET', `/v1/employees/${stranger}/salary`)).statusCode).toBe(404);
   });
 
-  it('increment history stands under the increment read grant alone, and its rows are this member’s', async () => {
-    const granted = await h.actor(A, 'REPORTING_MANAGER', { user: manager.user, extra: ['increment.read.salary'] });
+  it('increment history stands under its history grant alone, and its rows are this member’s', async () => {
+    // C4: the plain read grant no longer opens it.
+    const plainRead = await h.actor(A, 'REPORTING_MANAGER', { user: manager.user, extra: ['increment.read.salary'] });
+    expect((await detailOf(plainRead, member)).tabs).not.toHaveProperty('compensation');
+    const granted = await h.actor(A, 'REPORTING_MANAGER', { user: manager.user, extra: ['increment.history_read.salary'] });
     const { tabs } = await detailOf(granted, member);
     expect(Object.keys(tabs.compensation.sections)).toEqual(['incrementHistory']);
     expect(tabs.compensation.sections.incrementHistory).toEqual({ available: true, items: [] });
@@ -511,7 +515,8 @@ describe('My Team export (DF16; ZT27; FR-098)', () => {
     const queued = await h.call(exporter, 'POST', '/v1/reports', { reportCode: 'MY_TEAM', filters: {} });
     await revoke();
     await processReportQueue(h.pool);
-    expect((await h.call(exporter, 'GET', `/v1/reports/${queued.json().id}`)).json()).toMatchObject({ state: 'FAILED', failureCode: 'ACCESS_REVOKED' });
+    expect((await h.call(exporter, 'GET', `/v1/reports/${queued.json().id}`)).statusCode).toBe(403);
+    expect(await h.one(`select state, failure_code from report_execution where id = $1`, [queued.json().id])).toEqual({ state: 'FAILED', failure_code: 'ACCESS_REVOKED' });
     expect((await h.call(exporter, 'GET', `/v1/reports/${ready.id}/download`)).statusCode).toBe(403);
   });
 

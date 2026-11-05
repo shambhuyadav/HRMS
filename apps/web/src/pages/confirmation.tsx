@@ -25,6 +25,7 @@ const READ = 'confirmation.read.operational';
 const MANAGE = 'confirmation.manage.operational';
 const RECOMMEND = 'confirmation.recommend.operational';
 const DECIDE = 'confirmation.decide.operational';
+const EXPORT = 'confirmation.export.operational';
 const PROPOSE_EXCEPTION = 'confirmation.propose_exception.operational';
 const APPROVE_EXCEPTION = 'confirmation.approve_exception.operational';
 const LIST_EMPLOYEES = 'employee.list.operational';
@@ -100,6 +101,8 @@ interface CaseAction {
 
 interface CaseDetail extends ConfirmationCase {
   actions: CaseAction[];
+  /** False when the selected role has no confirmation history grant (C6): the actions are withheld, not absent. */
+  historyIncluded?: boolean;
 }
 
 interface EmployeeHit {
@@ -466,8 +469,10 @@ function CaseRegister({
   const list = useQuery({ queryKey: keys.cases(view), queryFn: () => fetchCases(view), retry: retryTransient });
   const counts = all.data ? countByView(all.data) : null;
   const tab = TABS.find((t) => t.view === view) ?? TABS[TABS.length - 1]!;
+  // FR-093: the export holds this view's cases, with their planned and actual dates and decisions.
+  const exportView = useMutation({ mutationFn: (chosen: TabView) => api<{ id: string }>('/v1/reports', { body: { reportCode: 'CONFIRMATION_DUE', filters: { view: chosen } } }) });
 
-  const moveTab = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+  const moveTab =(event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const last = TABS.length - 1;
     const next =
       event.key === 'ArrowRight' ? (index === last ? 0 : index + 1) : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1) : event.key === 'Home' ? 0 : event.key === 'End' ? last : null;
@@ -522,6 +527,15 @@ function CaseRegister({
         {list.data && list.data.items.length === 0 && <Empty>{tab.empty}</Empty>}
         {list.data && list.data.items.length > 0 && <CaseTable items={list.data.items} showTiming={MIXED_TIMING.has(view)} selectedId={selectedId} onSelect={onSelect} />}
       </div>
+      {can(EXPORT) && (
+        <div className="row">
+          <button type="button" className="secondary" disabled={exportView.isPending} onClick={() => exportView.mutate(view)}>
+            Export this view
+          </button>
+          {exportView.isSuccess && exportView.variables === view && <p className="ok">Export requested. Download it from Reports when it is ready.</p>}
+          <ErrorNote error={exportView.error} />
+        </div>
+      )}
     </Section>
   );
 }
@@ -695,7 +709,13 @@ function CasePanel({ id, focusRequest, onClose }: { id: string; focusRequest: nu
             {c.state === 'OPEN' && !can(RECOMMEND) && c.view !== 'NOT_ON_PROBATION' && <p className="hint">Waiting for a recommendation from the employee’s direct manager.</p>}
 
             <h3 style={H3}>History</h3>
-            {c.actions.length === 0 ? <Empty>No decisions recorded yet.</Empty> : <HistoryTable actions={c.actions} withReasons={withReasons} />}
+            {c.historyIncluded === false ? (
+              <p className="hint">Earlier decisions are not shown: the selected role has no confirmation history grant.</p>
+            ) : c.actions.length === 0 ? (
+              <Empty>No decisions recorded yet.</Empty>
+            ) : (
+              <HistoryTable actions={c.actions} withReasons={withReasons} />
+            )}
 
             {justSent && (
               <p className="ok" role="status">

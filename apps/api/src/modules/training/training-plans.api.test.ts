@@ -394,9 +394,15 @@ describe.runIf(isModuleActive('training'))('training plans (FR-049, BR-015)', ()
     expect(res.statusCode, res.body).toBe(200);
     expect(res.headers['content-type']).toContain('text/csv');
     expect(res.headers['content-disposition']).toContain('attachment; filename="training-plans-');
-    expect(res.body).toContain(`"Search","${tag}"`);
-    expect(res.body).toContain('"Generated at"');
-    expect(res.body).toContain('"Rows","1"');
+    // DF09, FR-065, I-66: the leading block every report file carries, ended by a blank line.
+    const block = Object.fromEntries(res.body.split('\r\n\r\n')[0]!.split('\r\n').map((l) => l.replace(/^"|"$/g, '').split('","')));
+    expect(Object.keys(block)).toEqual(['Report', 'Report code', 'Company', 'Acting role', 'Row scope', 'Period', 'Filters', 'Generated at', 'Rows']);
+    expect(block).toMatchObject({ Report: 'Training plan export', 'Report code': 'TRAINING_PLAN_EXPORT', 'Acting role': 'TRAINING_COORDINATOR', 'Row scope': 'COMPANY', Period: 'None', Rows: '1' });
+    expect(block.Filters).toContain(`search: ${tag}`);
+    expect(block.Filters).toContain('view: all');
+    expect(block['Generated at']).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /);
+    const period = await h.call(coordinator, 'GET', `/v1/training-plans/export?search=${tag}&from=2026-01-01&to=2026-12-31`);
+    expect(period.body).toContain('"Period","2026-01-01 to 2026-12-31"');
     expect(res.body).toContain(`"'=HYPERLINK(""synthetic"") ${tag}"`);
     expect(res.body).toContain('"Cost","Cost currency"');
     expect(res.body).toContain('"75.00","INR"');
@@ -431,6 +437,7 @@ describe.runIf(isModuleActive('training'))('training plans (FR-049, BR-015)', ()
       accessClass: 'OTHER',
       scopeKind: 'COMPANY',
       filters: { departments: [], locations: [], employees: [] },
+      deniedScopes: [],
       allowedFieldGroups: ['operational'],
       ownEssFieldGroups: [],
       deniedFieldGroups: [],

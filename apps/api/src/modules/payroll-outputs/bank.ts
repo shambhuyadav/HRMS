@@ -251,6 +251,7 @@ interface Candidate {
   release_bank_revision_id: string | null;
   payable: boolean;
   has_held: boolean;
+  has_stop_hold: boolean;
   has_committed: boolean;
   releases: { holdId: string; amount: string }[];
   pay_amount: string;
@@ -263,9 +264,9 @@ async function candidates(db: Queryable, companyId: string, runId: string): Prom
     await db.query<Candidate>(
       `with rec as (
          select r.id, r.employee_id, r.employee_code, r.currency_code, r.bank_status, r.bank_revision_id, r.net,
-                coalesce(h.held, 0) as held, hrms_payroll_payment_committed(r.company_id, r.id) as committed, sb.release_bank_revision_id
+                coalesce(h.held, 0) as held, coalesce(h.stop_held, 0) as stop_held, hrms_payroll_payment_committed(r.company_id, r.id) as committed, sb.release_bank_revision_id
            from payroll_record r
-           left join lateral (select sum(x.hold_amount) as held from payroll_hold x
+           left join lateral (select sum(x.hold_amount) as held, sum(x.hold_amount) filter (where x.hold_kind = 'SALARY_STOP') as stop_held from payroll_hold x
                                where x.company_id = r.company_id and x.payroll_record_id = r.id and x.state = any($3::text[])) h on true
            left join lateral (select x.release_bank_revision_id from payroll_hold x
                                where x.company_id = r.company_id and x.payroll_record_id = r.id and x.hold_kind = 'PAYMENT_SAFETY_BLOCK' and x.state = 'RELEASED'
@@ -298,7 +299,7 @@ async function candidates(db: Queryable, companyId: string, runId: string): Prom
            from avail a
        )
        select id as record_id, employee_id, employee_code, currency_code, bank_status, bank_revision_id, release_bank_revision_id,
-              available > 0 as payable, held > 0 as has_held, committed > 0 as has_committed, releases, pay_amount::text as pay_amount, pay_amount > 0 as has_pay
+              available > 0 as payable, held > 0 as has_held, stop_held > 0 as has_stop_hold, committed > 0 as has_committed, releases, pay_amount::text as pay_amount, pay_amount > 0 as has_pay
          from split order by employee_code, id`,
       [companyId, runId, LIVE_HOLDS, PENDING],
     )
@@ -316,6 +317,8 @@ interface PlannedLine {
 
 interface ExclusionSummary {
   held: number;
+  /** FR-031: of `held`, the employees withheld by an approved salary stop. */
+  heldBySalaryStop: number;
   reservedOrPaid: number;
   nothingPayable: number;
   excludedByPreparer: number;
@@ -326,7 +329,7 @@ interface ExclusionSummary {
 function plan(cands: readonly Candidate[], excluded: ReadonlySet<string>) {
   const lines: PlannedLine[] = [];
   const errors: RowError[] = [];
-  const summary: ExclusionSummary = { held: 0, reservedOrPaid: 0, nothingPayable: 0, excludedByPreparer: 0, excludedEmployeeIds: [], excludedEmployeeCodes: [] };
+  const summary: ExclusionSummary = { held: 0, heldBySalaryStop: 0, reservedOrPaid: 0, nothingPayable: 0, excludedByPreparer: 0, excludedEmployeeIds: [], excludedEmployeeCodes: [] };
   for (const c of cands) {
     if (excluded.has(c.employee_id)) {
       summary.excludedByPreparer += 1;
@@ -335,8 +338,10 @@ function plan(cands: readonly Candidate[], excluded: ReadonlySet<string>) {
       continue;
     }
     if (!c.payable) {
-      if (c.has_held) summary.held += 1;
-      else if (c.has_committed) summary.reservedOrPaid += 1;
+      if (c.has_held) {
+        summary.held += 1;
+        if (c.has_stop_hold) summary.heldBySalaryStop += 1;
+      } else if (c.has_committed) summary.reservedOrPaid += 1;
       else summary.nothingPayable += 1;
       continue;
     }
@@ -451,7 +456,7 @@ export async function previewManifest(db: Queryable, grant: AccessGrant, runId: 
     lineCount: p.lines.length,
     totalAmount: await sumAmounts(db, p.lines.map((l) => l.amount)),
     lines: p.lines.map((l) => ({ employeeCode: l.employeeCode, kind: l.holdId ? 'HOLD_RELEASE' : 'PAYROLL_NET', holdId: l.holdId, amount: l.amount })),
-    excluded: { held: p.summary.held, reservedOrPaid: p.summary.reservedOrPaid, nothingPayable: p.summary.nothingPayable },
+    excluded: { held: p.summary.held, heldBySalaryStop: p.summary.heldBySalaryStop, reservedOrPaid: p.summary.reservedOrPaid, nothingPayable: p.summary.nothingPayable },
     errors,
   };
 }

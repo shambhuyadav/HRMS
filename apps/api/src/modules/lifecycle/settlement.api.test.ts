@@ -3,9 +3,12 @@
 // independent review and approval; release eligibility that never creates or implies a payment. Synthetic data and
 // synthetic pay components (test fixtures) only.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildApp } from '../../app.js';
+import { devTokenVerifier } from '../../auth/tokens.js';
 import { withTransaction } from '../../db/transaction.js';
+import { ASSIGNMENT_HEADER, COMPANY_HEADER } from '../../http/context.js';
 import { EICAR_TEST_STRING } from '../../storage/scan.js';
-import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { type Company, type Harness, startHarness, type TestActor, tokenConfig } from '../../test/harness.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
 import { isModuleActive } from '../registry.js';
 import { HR_SETTLEMENT, HR_SETTLEMENT_EXPORT, key, narrowedGrant, person, publishedTemplate, today as businessDate, trailText } from './lifecycle.fixtures.js';
@@ -190,6 +193,33 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
     expect(await get(hrPlain, settlementId)).not.toHaveProperty('netAmount');
     expect((await h.call(employee, 'GET', `/v1/settlements/${settlementId}`)).statusCode).toBe(403);
     expect((await h.call(hrB, 'GET', `/v1/settlements/${settlementId}`)).statusCode).toBe(404);
+  });
+
+  it('asks the scanner with no transaction open, so a slow scanner holds no connection or lock', async () => {
+    const s = await get(prep, settlementId);
+    const open: number[] = [];
+    const app = buildApp({
+      db: h.pool,
+      verifier: devTokenVerifier(tokenConfig),
+      scanner: {
+        scan: async () => {
+          open.push((await h.one<{ n: number }>(`select count(*)::int as n from pg_stat_activity where datname = current_database() and state like 'idle in transaction%'`)).n);
+          return { verdict: 'CLEAN' };
+        },
+      },
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/v1/settlements/${settlementId}/upload`,
+        headers: { authorization: `Bearer ${prep.token}`, [COMPANY_HEADER]: A.id, [ASSIGNMENT_HEADER]: prep.assignment },
+        payload: { contentBase64: csv([['employee', 'amount'], ['x', '1']]), dryRun: true, expectedVersion: s.version },
+      });
+      expect(res.json().error).toBe('INVALID_TEMPLATE');
+    } finally {
+      await app.close();
+    }
+    expect(open).toEqual([0]);
   });
 
   it('uploads lines atomically with row-level validation and reconciled counts', async () => {

@@ -108,8 +108,8 @@ beforeAll(async () => {
   manager = await h.actor(A, 'REPORTING_MANAGER', { employeeId: managerEmp, extra: ['expense.view_receipt.receipt'] });
   engClaimant = await claimantOf();
   finClaimant = await claimantOf({ departmentId: A.financeDept });
-  // A reviewer who can open the claim and holds the confidential receipt grant, filtered to the ENG department (row scope).
-  reviewerEng = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['expense.read.operational', 'expense.view_receipt.receipt'], departmentFilter: A.dept });
+  // A payment operator who can open the claim and holds the confidential receipt grant, filtered to the ENG department (row scope).
+  reviewerEng = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['expense.read.operational', 'payment.read.operational', 'expense.view_receipt.receipt'], departmentFilter: A.dept });
   const policy = (await h.call(hr, 'GET', '/v1/expense/policies')).json().items[0];
   expect((await h.call(hr, 'POST', `/v1/expense/policies/${policy.id}/activate`, { expectedVersion: policy.version })).statusCode).toBe(200);
 });

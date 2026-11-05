@@ -407,6 +407,8 @@ interface OwnRequest {
   pendingWith: string | null;
   createdAt: string;
   decisions: { step: number; decision: string; decidedAt: string }[];
+  /** DF03: the rejected request this one raises again. */
+  predecessorRequestId?: string | null;
 }
 
 /** FR-109: own requests with who they wait for and their decisions (never the reviewers' comments), a page at a time (FR-056). */
@@ -436,6 +438,7 @@ function DecisionHistory({ kind }: { kind: string }) {
               <td>
                 <StateBadge state={r.state} />
                 {r.pendingWith ? <div className="hint">with {r.pendingWith}</div> : null}
+                {r.predecessorRequestId ? <div className="hint">Raised again after a rejected request</div> : null}
               </td>
               <td>{r.decisions.length === 0 ? '—' : r.decisions.map((d) => `step ${d.step}: ${d.decision.toLowerCase()} on ${formatDate(d.decidedAt)}`).join('; ')}</td>
             </tr>

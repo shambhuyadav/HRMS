@@ -18,8 +18,8 @@ export interface AuditEntry {
 export async function writeAudit(db: Queryable, e: AuditEntry): Promise<void> {
   await db.query(
     `insert into audit_event (company_id, resource_code, record_key, actor_user_id, acting_assignment_id, action,
-                              prior_version, new_version, before_values, after_values, reason, created_by)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $4)`,
+                              prior_version, new_version, before_values, after_values, reason, created_by, updated_by)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $4, $4)`,
     [
       e.companyId,
       e.resource,

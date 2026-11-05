@@ -3,6 +3,7 @@
 // suite stays valid as time passes. Synthetic data only.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
+import { SYSTEM_ACTOR_ID } from '../../audit/actors.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 
 let h: Harness;
@@ -91,9 +92,9 @@ describe('policies (DF05, BR-010)', () => {
   it('a company-scope assignment narrowed by a department filter cannot activate a policy, which applies company-wide (DF02 row scope)', async () => {
     // A draft with no mapping, so activating it changes no employee's leave in the later tests.
     const draft = await h.one<{ id: string }>(
-      `insert into leave_policy (company_id, leave_type_id, revision, effective_from, eligibility_code, accrual_rule_code, annual_entitlement, state)
-       select $1, id, 10, '2031-01-01', 'TEST', 'NONE', 0, 'DRAFT' from leave_type where company_id = $1 and code = 'UNPAID' returning id`,
-      [A.id],
+      `insert into leave_policy (company_id, leave_type_id, revision, effective_from, eligibility_code, accrual_rule_code, annual_entitlement, state, created_by)
+       select $1, id, 10, '2031-01-01', 'TEST', 'NONE', 0, 'DRAFT', $2 from leave_type where company_id = $1 and code = 'UNPAID' returning id`,
+      [A.id, SYSTEM_ACTOR_ID],
     );
     const stateOf = async () => (await h.one<{ state: string }>(`select state from leave_policy where id = $1`, [draft.id])).state;
     const deptHr = await h.actor(A, 'HR_ADMINISTRATOR', { departmentFilter: A.dept });

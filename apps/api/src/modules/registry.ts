@@ -6,9 +6,11 @@ import { documentsRegistration } from './documents/registration.js';
 import { hiringRegistration } from './hiring/registration.js';
 import { lifecycleRegistration } from './lifecycle/registration.js';
 import { payrollRegistration } from './payroll/registration.js';
+import { payrollAdjustmentsRegistration } from './payroll-adjustments/registration.js';
 import { payrollOutputsRegistration } from './payroll-outputs/registration.js';
 import type { ModuleRegistration } from './registry-types.js';
 import { sensitiveChangeRegistration } from './sensitive-change/registration.js';
+import { taxDeclarationsRegistration } from './tax-declarations/registration.js';
 import { timesheetRegistration } from './timesheet/registration.js';
 import { trainingRegistration } from './training/registration.js';
 
@@ -21,6 +23,8 @@ const ALL_MODULES: readonly ModuleRegistration[] = [
   lifecycleRegistration,
   payrollRegistration,
   payrollOutputsRegistration,
+  payrollAdjustmentsRegistration,
+  taxDeclarationsRegistration,
   assetsRegistration,
   documentsRegistration,
 ];

@@ -64,11 +64,11 @@ export async function setRootState(
 }
 
 /** A new typed transaction in DRAFT (the deferred root check needs the root row before commit). */
-export async function newTransaction(tx: Queryable, companyId: string, kind: string, ownerEmployeeId: string | null, userId: string): Promise<string> {
+export async function newTransaction(tx: Queryable, companyId: string, kind: string, ownerEmployeeId: string | null, userId: string, predecessorTransactionId: string | null = null): Promise<string> {
   return (
     await tx.query<{ id: string }>(
-      `insert into business_transaction (company_id, kind, owner_employee_id, state, created_by, updated_by) values ($1, $2, $3, 'DRAFT', $4, $4) returning id`,
-      [companyId, kind, ownerEmployeeId, userId],
+      `insert into business_transaction (company_id, kind, owner_employee_id, state, predecessor_transaction_id, created_by, updated_by) values ($1, $2, $3, 'DRAFT', $5, $4, $4) returning id`,
+      [companyId, kind, ownerEmployeeId, userId, predecessorTransactionId],
     )
   ).rows[0]!.id;
 }
