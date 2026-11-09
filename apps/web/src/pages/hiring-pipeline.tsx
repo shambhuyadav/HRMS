@@ -12,6 +12,14 @@
 // and other candidate documents (candidate.document) and the offer compensation (offer.compensation). They are shown
 // only when the server returned them, and the private contact is read only when asked for, because every read of it
 // is audited (FR-057). Uploads wait for the malware scan; only released files are offered for download (FR-106).
+// Searchable CV content (FR-013; decided under owner delegation, 6 Nov 2026, I-82 item 4): nothing is searchable on upload.
+// An eligible Admin with the document upload grant approves the text of a released CV of a candidate whose consent is
+// given; no text extraction is configured, so the Admin types or pastes it. The approved text is read only when asked for
+// (each read is audited); the CV search matches approved text and marks such a hit, never showing the text.
+// Offer letters (FR-014, FR-017, FR-018, DF09; I-82 item 1): an eligible HR Administrator previews and generates the
+// letter from a published OFFER template and the approved or accepted offer, before the candidate is an employee. The
+// system never sends it: the issuer downloads it here, hands it to the candidate outside the system and records the
+// delivery method, date and that the recipient is the offer's candidate.
 // Money is shown as the API's decimal strings through formatAmount; nothing here adds, rounds or derives an amount.
 // The server authorises every call and decides every rule: this screen only hides what the selected assignment cannot
 // use, explains the API's refusals in plain words, and reloads after every change (no optimistic updates).
@@ -49,6 +57,10 @@ const OFFER_MANAGE = 'offer.manage.operational';
 const COMPENSATION_READ = 'offer.read.compensation';
 const COMPENSATION_MANAGE = 'offer.manage.compensation';
 const COMPENSATION_APPROVE = 'offer.approve.compensation';
+/** Confidential (F1; I-82 item 1): previewing, generating and recording the delivery of an offer letter. */
+const ISSUE_LETTER = 'offer.issue_letter.compensation';
+/** lifecycle letter-routes.ts: the letter template list and the approved placeholders of a letter type. */
+const LETTER_TEMPLATE_READ = 'letter_template.read.operational';
 /** The handover needs both the hiring handover duty and the ordinary employee creation duty. */
 const HANDOVER = 'hiring.handover.operational';
 const EMPLOYEE_CREATE = 'employee.create.operational';
@@ -75,6 +87,8 @@ const PATHS = {
   origin: (employeeId: string) => `/hiring/employees/${employeeId}/origin`,
   /** records.tsx: the employee's documents, where transferred candidate documents arrive. */
   employeeDocuments: (employeeId: string) => `/employees/${employeeId}/documents`,
+  /** lifecycle-documents.tsx: where HR writes and publishes letter templates, the OFFER ones included. */
+  letterTemplates: '/lifecycle/letter-templates',
 } as const;
 
 /** GET /v1/hiring/candidates and /v1/hiring/requisitions accept page sizes of 25, 50 or 100 only. */
@@ -90,6 +104,16 @@ const MAX_HANDOVER_DOCUMENTS = 20;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Row limits of the API's lists. */
 const LIMITS = { trackerVacancies: 500, trackerApplications: 2000, offers: 500, flags: 500, cvSearch: 200, applications: 1000 } as const;
+/** The longest searchable CV text the API accepts (hiring/cv-text.ts MAX_CV_TEXT). */
+const MAX_CV_TEXT = 100_000;
+/** The letter type of offer letter templates (lifecycle/letters.ts OFFER_LETTER_TYPE). */
+const OFFER_LETTER_TYPE = 'OFFER';
+/** The offer states whose approved revision issues a letter (hiring/offer-letter.ts); the server checks again. */
+const LETTER_ISSUING_STATES: readonly string[] = ['APPROVED', 'ACCEPTED'];
+/** A letter template code, as the letter routes accept it. */
+const TEMPLATE_CODE = /^[A-Z][A-Z0-9_]{0,39}$/;
+/** The company list of offer letter delivery methods (GET /v1/hiring/reference-values). */
+const DELIVERY_CATEGORY = 'OFFER_LETTER_DELIVERY';
 
 const enc = encodeURIComponent;
 
@@ -153,6 +177,9 @@ const EMPLOYEE_STATUS_LABEL: Record<string, string> = {
   ARCHIVED: 'Archived',
 };
 const SCAN_LABEL: Record<string, string> = { CLEAN: 'released', PENDING_SCAN: 'waiting for the malware scan', QUARANTINED: 'quarantined by the malware scan' };
+const CV_TEXT_SOURCE_LABEL: Record<string, string> = { TRANSCRIBED: 'Typed or pasted by an Admin from the released CV', EXTRACTED: 'Extracted from the released file' };
+const CV_TEXT_STATE_LABEL: Record<string, string> = { APPROVED: 'Approved', REVOKED: 'Revoked' };
+const LETTER_DELIVERY_LABEL: Record<string, string> = { NOT_DELIVERED: 'Not delivered yet', DELIVERED: 'Delivered' };
 
 /**
  * The seeded reference values of the module registration (CANDIDATE_SOURCE, CANDIDATE_DOCUMENT_TYPE). No API route
@@ -265,6 +292,29 @@ const DOWNLOAD_WORDS: Words = {
     scanStateOf(e) === 'QUARANTINED' ? 'This file was quarantined by the malware scan and can never be opened.' : 'This file has not been released by the malware scan yet.',
 };
 
+const consentOf = (error: ApiError) => (error.details as { consentStatus?: string } | undefined)?.consentStatus;
+
+/** FR-013 approved searchable CV content (hiring/cv-text.ts). */
+const CV_TEXT_WORDS: Words = {
+  NOT_A_CV: 'Only a CV has searchable text, and this document is not a CV.',
+  FILE_NOT_RELEASED: (e) =>
+    scanStateOf(e) === 'QUARANTINED'
+      ? 'This file was quarantined by the malware scan, so its text can never be approved.'
+      : 'This file has not been released by the malware scan yet, so its text cannot be approved.',
+  CONSENT_REQUIRED: (e) => {
+    const consent = consentOf(e);
+    return `${consent ? `The candidate’s consent is ${labelOf(CONSENT_LABEL, consent).toLowerCase()}. ` : ''}Nothing of a candidate becomes searchable until the candidate’s consent is recorded as given.`;
+  },
+  EXTRACTION_NOT_CONFIGURED: 'No text extraction is configured for this kind of file, so nothing was approved. Type or paste the CV’s text and approve that.',
+  NO_TEXT: 'There is no text to approve. Type or paste the CV’s text.',
+  TEXT_TOO_LONG: 'Searchable text can be at most 100,000 characters.',
+  NO_APPROVED_TEXT: 'This CV has no approved searchable text, so there is nothing to revoke.',
+  FIELD_REQUIRED: 'Enter why the searchable text is revoked.',
+  FORBIDDEN: 'Approving or revoking searchable CV text needs the candidate document upload grant in a scope covering this candidate.',
+  NOT_FOUND: 'This document is not available in the selected role’s scope.',
+  INVALID_REQUEST: 'Searchable text can be at most 100,000 characters, and a reason at most 1,000.',
+};
+
 const FLAG_WORDS: Words = {
   RETIRE_CANDIDATE_REQUIRED: 'Choose which of the two records is the duplicate to retire.',
   INVALID_STATE: 'This flag has already been reviewed.',
@@ -337,6 +387,44 @@ const HANDOVER_WORDS: Words = {
   FORBIDDEN:
     'The selected role cannot create this employee: it needs the employee creation duty in a company-wide scope covering the requisition’s department and location, and the document grants to transfer documents.',
   INVALID_REQUEST: 'Use an employee code of letters, digits, - or _ (up to 40 characters) and a valid work email address.',
+};
+
+/** Offer letter preview and final output (hiring/offer-letter.ts; lifecycle/letters.ts publishedTemplate). */
+const LETTER_ISSUE_WORDS: Words = {
+  OFFER_NOT_APPROVED: 'Only an approved or accepted offer issues an offer letter, and this offer is not approved or accepted (any more). It has been reloaded.',
+  NOT_AN_OFFER_TEMPLATE: 'This template is not an offer letter template: an offer letter uses a template of the offer letter type.',
+  TEMPLATE_INACTIVE: 'This letter template is inactive, so it cannot be used. Choose another template, or ask HR to activate it.',
+  TEMPLATE_NOT_PUBLISHED: 'This letter template has no published revision yet, so it cannot be used.',
+  INVALID_REFERENCE: 'No letter template has this code.',
+  IDEMPOTENCY_KEY_REUSED: 'Nothing was generated: this attempt was matched to a different letter. Generate it again.',
+  FORBIDDEN: 'The selected role cannot issue offer letters: that needs the offer letter grant in a scope covering this requisition.',
+  NOT_FOUND: 'This offer is not available in the selected role’s scope.',
+  INVALID_REQUEST: 'Enter a template code: a capital letter followed by capital letters, digits or _ (up to 40 characters).',
+};
+
+const generatedOnOf = (error: ApiError) => (error.details as { generatedOn?: string } | undefined)?.generatedOn;
+
+/** Recording that a letter was handed to the candidate outside the system (FR-018; DF09). */
+const DELIVERY_WORDS: Words = {
+  RECIPIENT_NOT_CONFIRMED: 'Confirm that the letter went to the offer’s candidate.',
+  INVALID_DATE: (e) => {
+    const generatedOn = generatedOnOf(e);
+    return generatedOn
+      ? `The delivery date cannot be before the letter was generated (${formatDate(generatedOn)}).`
+      : 'The delivery date must be a valid date that is not in the future and not before the letter was generated.';
+  },
+  ALREADY_DELIVERED: 'This letter’s delivery is already recorded, and a recorded delivery is final. The letters have been reloaded.',
+  LETTER_SUPERSEDED: 'This letter carries an earlier revision of the offer, so it cannot be recorded as delivered. Generate a new letter from the current revision.',
+  OFFER_NOT_APPROVED: 'The offer is no longer approved or accepted, so its letter cannot be recorded as delivered.',
+  INVALID_REFERENCE: 'This delivery method is not an active delivery method of this company. Choose another.',
+  FORBIDDEN: 'The selected role cannot record offer letter deliveries: that needs the offer letter grant in a scope covering this requisition.',
+  NOT_FOUND: 'This letter is not available in the selected role’s scope.',
+  INVALID_REQUEST: 'Choose a delivery method and enter the delivery date.',
+};
+
+const LETTER_DOWNLOAD_WORDS: Words = {
+  NOT_FOUND: 'This letter is not available in the selected role’s scope.',
+  FORBIDDEN: 'The selected role cannot open offer letters: that needs the grant that reads the offer compensation.',
 };
 
 function refusalText(error: unknown, words: Words = {}): string | null {
@@ -467,6 +555,8 @@ interface CandidateDocument {
   byteSize: number | null;
   scanState: string | null;
   uploadedAt: string;
+  /** CV search hits only (FR-013, I-82 item 4): the hit matched the approved searchable text. The text is never returned. */
+  contentMatch?: boolean;
 }
 
 interface DocumentUploaded {
@@ -474,6 +564,27 @@ interface DocumentUploaded {
   mediaType: string;
   byteSize: number;
   scanState: string;
+}
+
+/** Confidential (candidate.document): a CV's approved searchable text and its approval history; each read is audited. */
+interface CvText {
+  candidateDocumentId: string;
+  candidateId: string;
+  consentStatus: string;
+  /** Approved, the consent still given and the retention date not passed: what the CV search matches now. */
+  searchable: boolean;
+  approved: { id: string; source: string; content: string; approvedAt: string; approvedBy: string; approvedByPerson: Person | null } | null;
+  history: { id: string; state: string; source: string; approvedAt: string; approvedBy: string; approvedByPerson: Person | null; revokedAt: string | null; revocationReason: string | null }[];
+}
+
+interface CvTextApproved {
+  id: string;
+  candidateDocumentId: string;
+  candidateId: string;
+  source: string;
+  state: string;
+  length: number;
+  replacedCvTextId: string | null;
 }
 
 /** An operational identity the API names (an owner, a decider, a pending approver). */
@@ -626,6 +737,71 @@ interface OfferDecided {
   replayed: boolean;
 }
 
+/** GET /v1/letter-templates (lifecycle letters.ts listLetterTemplates). */
+interface LetterTemplateSummary {
+  id: string;
+  code: string;
+  name: string;
+  letterType: string;
+  active: boolean;
+  version: number;
+  publishedRevision: number | null;
+  draftRevision: number | null;
+}
+
+/** POST /v1/hiring/offers/:id/letter-preview: rendered for review only; nothing is stored or sent. */
+interface OfferLetterPreview {
+  offerId: string;
+  offerRevision: number;
+  templateCode: string;
+  templateRevision: number;
+  text: string;
+  missing: string[];
+  ready: boolean;
+  sent: false;
+}
+
+/** A stored offer letter (confidential, like the compensation it shows). */
+interface OfferLetter {
+  id: string;
+  offerId: string;
+  offerRevision: number;
+  templateCode: string;
+  templateRevision: number;
+  outputNumber: number;
+  checksum: string;
+  byteSize: number;
+  generatedAt: string;
+  generatedBy: string;
+  deliveryState: string;
+}
+
+interface OfferLetterListed extends OfferLetter {
+  /** Whether this letter is of the offer's current approved revision, so that its delivery can still be recorded. */
+  current: boolean;
+  delivery: { method: string; methodLabel: string | null; deliveredOn: string; recordedBy: string; recordedByPerson: Person | null; recordedAt: string } | null;
+}
+
+interface OfferLetters {
+  offerId: string;
+  offerState: string;
+  currentRevision: number | null;
+  items: OfferLetterListed[];
+}
+
+interface DeliveryRecorded {
+  id: string;
+  offerId: string;
+  deliveryState: string;
+  deliveryMethod: string;
+  deliveredOn: string;
+}
+
+interface ReferenceValues {
+  category: string;
+  items: { code: string; label: string }[];
+}
+
 interface HandoverResult {
   handoverId: string;
   employeeId: string;
@@ -709,8 +885,14 @@ function useKeys() {
       offerTasks: [...all, 'offer-tasks'] as const,
       origin: (employeeId: string) => [...all, 'origin', employeeId] as const,
       employee: (id: string) => [...all, 'employee', id] as const,
+      offerLetters: (offerId: string) => [...all, 'offer-letters', offerId] as const,
+      letterTemplates: [...all, 'letter-templates'] as const,
+      offerPlaceholders: [...all, 'offer-letter-placeholders'] as const,
+      referenceValues: (category: string) => [...all, 'reference-values', category] as const,
       /** Outside `all`: reloading after a change never reads the private contact again (each read is audited). */
       contact: (candidateId: string) => ['hiring-pipeline-contact', context, candidateId] as const,
+      /** Outside `all` too: each read of an approved CV text is audited. */
+      cvText: (documentId: string) => ['hiring-pipeline-cv-text', context, documentId] as const,
     };
   }, [context]);
 }
@@ -2299,6 +2481,7 @@ function CandidateDocuments({ candidate: c }: { candidate: CandidateView }) {
           {docs.data && docs.data.items.length === 0 && <Empty>No documents on record.</Empty>}
           {docs.data && docs.data.items.length > 0 && <DocumentTable items={docs.data.items} showCandidate={false} busy={open.isPending} onOpen={(d) => open.mutate(d)} label="Candidate documents" />}
           <Refusal error={open.error} words={DOWNLOAD_WORDS} />
+          {docs.data && <SearchableCvText documents={docs.data.items.filter((d) => d.documentType === 'CV')} />}
         </>
       ) : (
         <p className="hint">The selected role can add documents to this candidate but not read them.</p>
@@ -2311,12 +2494,15 @@ function CandidateDocuments({ candidate: c }: { candidate: CandidateView }) {
 function DocumentTable({
   items,
   showCandidate,
+  showMatch = false,
   busy,
   onOpen,
   label,
 }: {
   items: CandidateDocument[];
   showCandidate: boolean;
+  /** CV search hits: whether the hit matched the approved searchable text (never the text itself). */
+  showMatch?: boolean;
   busy: boolean;
   onOpen: (d: CandidateDocument) => void;
   label: string;
@@ -2332,6 +2518,7 @@ function DocumentTable({
             <th scope="col">File</th>
             <th scope="col">Uploaded</th>
             <th scope="col">Malware scan</th>
+            {showMatch && <th scope="col">Approved CV text</th>}
             <th scope="col">
               <span style={SR_ONLY}>Download</span>
             </th>
@@ -2347,6 +2534,7 @@ function DocumentTable({
               <td>
                 <ScanBadge state={d.scanState} />
               </td>
+              {showMatch && <td>{d.contentMatch ? <Badge tone="good">matched in approved CV text</Badge> : '—'}</td>}
               <td>
                 {d.scanState === 'CLEAN' ? (
                   <button type="button" className="secondary" disabled={busy} aria-label={`Download ${d.fileName ?? labelOf(DOCUMENT_TYPE_LABEL, d.documentType)}`} onClick={() => onOpen(d)}>
@@ -2361,6 +2549,229 @@ function DocumentTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// FR-013 approved searchable CV content (I-82 item 4): approved by an eligible Admin, read only when asked (audited)
+// ---------------------------------------------------------------------------------------------------------
+
+const PRE: CSSProperties = { whiteSpace: 'pre-wrap', fontFamily: 'inherit', border: '1px solid var(--line)', borderRadius: 6, padding: '0.75rem', margin: '0.5rem 0', maxHeight: '24rem', overflowY: 'auto' };
+
+function SearchableCvText({ documents }: { documents: CandidateDocument[] }) {
+  if (documents.length === 0) return null;
+  return (
+    <>
+      <p className="hint">
+        Searchable CV text: nothing is searchable on upload. The CV search matches only text an eligible Admin approved for a released CV of a candidate whose consent is
+        given, and it never shows that text. No text extraction is configured, so the Admin types or pastes the text from the CV. Each look at an approved text is
+        recorded in the audit trail.
+      </p>
+      {documents.map((d) => (
+        <CvTextPanel key={d.id} document={d} />
+      ))}
+    </>
+  );
+}
+
+function CvTextPanel({ document: d }: { document: CandidateDocument }) {
+  const { can } = useSession();
+  const keys = useKeys();
+  const qc = useQueryClient();
+  const refresh = useRefresh();
+  const userId = useUserId();
+  const id = useId();
+  const name = d.fileName ?? labelOf(DOCUMENT_TYPE_LABEL, d.documentType);
+  const [shown, setShown] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const text = useQuery({
+    queryKey: keys.cvText(d.id),
+    enabled: shown,
+    queryFn: () => api<CvText>(`/v1/hiring/candidate-documents/${enc(d.id)}/searchable-text`),
+    // Each read is recorded: never repeated on its own, never kept once hidden.
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+  });
+  const hide = () => {
+    setShown(false);
+    qc.removeQueries({ queryKey: keys.cvText(d.id) });
+  };
+  // What is shown was read before a change: the next look is a new, recorded read.
+  const done = (message: string) => {
+    hide();
+    setNotice(message);
+    refresh();
+  };
+  const data = shown ? text.data : undefined;
+  return (
+    <div role="region" aria-labelledby={`${id}-title`}>
+      <h3 id={`${id}-title`} style={H3}>
+        Searchable text of {name}
+      </h3>
+      <div className="row">
+        {shown ? (
+          <button type="button" className="secondary" onClick={hide}>
+            Hide searchable text
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              setNotice(null);
+              setShown(true);
+            }}
+          >
+            Show searchable text
+          </button>
+        )}
+      </div>
+      <Notice text={notice} />
+      {shown && text.isPending && <p className="hint">Loading the searchable text…</p>}
+      {shown && <Refusal error={text.error} words={CV_TEXT_WORDS} />}
+      {data && (
+        <>
+          <dl className="kv" aria-label={`Status of the searchable text of ${name}`}>
+            <Item term="Searchable now">
+              {data.searchable
+                ? 'Yes: the CV search matches this approved text'
+                : data.approved
+                  ? 'No: the text is approved, but the candidate’s consent is no longer given or the retention date has passed'
+                  : 'No: no text of this CV is approved for search'}
+            </Item>
+            <Item term="Candidate consent">{labelOf(CONSENT_LABEL, data.consentStatus)}</Item>
+            {data.approved && (
+              <>
+                <Item term="Approved">{`${formatDate(data.approved.approvedAt)}${data.approved.approvedByPerson ? ` by ${personText(data.approved.approvedByPerson, userId)}` : ''}`}</Item>
+                <Item term="Source">{labelOf(CV_TEXT_SOURCE_LABEL, data.approved.source)}</Item>
+              </>
+            )}
+          </dl>
+          {data.approved && (
+            <pre style={PRE} aria-label={`Approved searchable text of ${name}`}>
+              {data.approved.content}
+            </pre>
+          )}
+          {data.history.length > 0 && (
+            <div style={SCROLL}>
+              <table aria-label={`Approvals of the searchable text of ${name}`}>
+                <thead>
+                  <tr>
+                    <th scope="col">State</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Approved</th>
+                    <th scope="col">Revoked</th>
+                    <th scope="col">Reason for revoking</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.history.map((h) => (
+                    <tr key={h.id}>
+                      <td>{labelOf(CV_TEXT_STATE_LABEL, h.state)}</td>
+                      <td>{labelOf(CV_TEXT_SOURCE_LABEL, h.source)}</td>
+                      <td>{`${formatDate(h.approvedAt)}${h.approvedByPerson ? ` by ${personText(h.approvedByPerson, userId)}` : ''}`}</td>
+                      <td>{formatDate(h.revokedAt)}</td>
+                      <td>{h.revocationReason ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+      {can(DOCUMENT_UPLOAD) && (
+        <>
+          <CvTextApproveForm document={d} name={name} onDone={done} />
+          <CvTextRevokeForm document={d} name={name} onDone={done} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The Admin types or pastes the text; an empty submit asks the server to extract it, which is not configured. */
+function CvTextApproveForm({ document: d, name, onDone }: { document: CandidateDocument; name: string; onDone: (notice: string) => void }) {
+  const [content, setContent] = useState('');
+  const approve = useMutation({
+    mutationFn: (body: { content?: string }) => api<CvTextApproved>(`/v1/hiring/candidate-documents/${enc(d.id)}/searchable-text`, { body }),
+    onSuccess: (result) => {
+      setContent('');
+      onDone(
+        `Approved as the searchable text of ${name} (${result.length} characters)${result.replacedCvTextId ? '; the text approved before it is revoked' : ''}. The CV search matches it and never shows it.`,
+      );
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (approve.isPending) return;
+    approve.mutate(content === '' ? {} : { content });
+  };
+  return (
+    <form className="grid-form" aria-label={`Approve searchable text of ${name}`} onSubmit={submit} noValidate>
+      <label className="wide">
+        Text of the CV, typed or pasted from the released file
+        <textarea maxLength={MAX_CV_TEXT} rows={6} value={content} onChange={(e) => setContent(e.target.value)} style={TEXTAREA} />
+      </label>
+      <p className="hint wide">
+        Approving replaces any text approved before. The text is kept as approved (line breaks normalised, up to 100,000 characters); only the CV search uses it, and it
+        never appears in search results, notifications or the audit trail.
+      </p>
+      {approve.error && (
+        <div className="wide">
+          <Refusal error={approve.error} words={CV_TEXT_WORDS} />
+        </div>
+      )}
+      <div className="wide row">
+        <button type="submit" disabled={approve.isPending}>
+          Approve as searchable text
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CvTextRevokeForm({ document: d, name, onDone }: { document: CandidateDocument; name: string; onDone: (notice: string) => void }) {
+  const [reason, setReason] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const revoke = useMutation({
+    mutationFn: (body: { reason: string }) => api<{ id: string; candidateDocumentId: string; state: string }>(`/v1/hiring/candidate-documents/${enc(d.id)}/searchable-text/revoke`, { body }),
+    onSuccess: () => {
+      setReason('');
+      setProblem(null);
+      onDone(`The searchable text of ${name} is revoked: the CV search no longer matches it.`);
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (revoke.isPending) return;
+    const text = reason.trim();
+    setProblem(text ? null : 'Enter why the searchable text is revoked.');
+    if (!text) {
+      revoke.reset();
+      return;
+    }
+    revoke.mutate({ reason: text });
+  };
+  return (
+    <form className="grid-form" aria-label={`Revoke searchable text of ${name}`} onSubmit={submit} noValidate>
+      <label className="wide">
+        Reason for revoking the searchable text (required)
+        <textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
+      </label>
+      <Problem text={problem} />
+      {revoke.error && (
+        <div className="wide">
+          <Refusal error={revoke.error} words={CV_TEXT_WORDS} />
+        </div>
+      )}
+      <div className="wide row">
+        <button type="submit" className="danger" disabled={revoke.isPending}>
+          Revoke searchable text
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -2438,7 +2849,8 @@ function UploadDocumentForm({ candidateId }: { candidateId: string }) {
 }
 
 // ---------------------------------------------------------------------------------------------------------
-// FR-013 CV search: file name, document type or candidate code within the candidate scope
+// FR-013 CV search: file name, document type, candidate code and approved searchable CV text within the candidate
+// scope; a match in the approved text is marked, and the text itself is never returned (I-82 item 4)
 // ---------------------------------------------------------------------------------------------------------
 
 function CvSearchScreen() {
@@ -2466,19 +2878,19 @@ function CvSearch() {
   const open = useMutation({ mutationFn: (d: CandidateDocument) => download(`/v1/hiring/candidate-documents/${enc(d.id)}/content`) });
   const items = hits.data?.items ?? [];
   return (
-    <Section title="Search CV metadata">
+    <Section title="Search CVs">
       <form
         className="row"
         noValidate
         onSubmit={(e) => {
           e.preventDefault();
           const text = search.trim();
-          setProblem(text ? null : 'Enter a file name, document type or candidate code.');
+          setProblem(text ? null : 'Enter a file name, document type, candidate code or words from a CV.');
           if (text) setTerm(text);
         }}
       >
         <label className="inline">
-          File name, document type or candidate code
+          File name, document type, candidate code or CV text
           <input type="search" required maxLength={100} value={search} onChange={(e) => setSearch(e.target.value)} />
         </label>
         <button type="submit" className="secondary">
@@ -2490,11 +2902,15 @@ function CvSearch() {
           {problem}
         </p>
       )}
-      <p className="hint">Only the metadata is searched. Files can be opened once the malware scan releases them; each opening is recorded in the audit trail.</p>
+      <p className="hint">
+        The search covers the file name, the document type, the candidate code and the approved searchable text of CVs. Only text an eligible Admin approved for a
+        candidate whose consent is given is searched; a match in it is marked, and the text itself is never shown here. Files can be opened once the malware scan
+        releases them; each opening is recorded in the audit trail.
+      </p>
       {term !== null && hits.isPending && <p className="hint">Searching…</p>}
       <LoadProblem error={hits.error} forbidden="The selected role cannot search candidate documents." />
       {hits.data && items.length === 0 && <Empty>{`No documents match “${term ?? ''}”.`}</Empty>}
-      {items.length > 0 && <DocumentTable items={items} showCandidate busy={open.isPending} onOpen={(d) => open.mutate(d)} label="Matching documents" />}
+      {items.length > 0 && <DocumentTable items={items} showCandidate showMatch busy={open.isPending} onOpen={(d) => open.mutate(d)} label="Matching documents" />}
       {items.length >= LIMITS.cvSearch && <p className="hint">Showing the latest {LIMITS.cvSearch} matches; refine the search.</p>}
       <Refusal error={open.error} words={DOWNLOAD_WORDS} />
     </Section>
@@ -3223,6 +3639,7 @@ function OfferDetail({ id }: { id: string }) {
           )}
           {o.compensation && <CompensationView compensation={o.compensation} userId={userId} />}
           <OfferActions offer={o} busy={reloading} onDone={done} />
+          {(can(COMPENSATION_READ) || can(ISSUE_LETTER)) && <OfferLettersSection offer={o} />}
           {o.state === 'ACCEPTED' && !o.handedOverEmployeeId && can(HANDOVER) && (
             <HandoverSection offer={o} busy={reloading} onDone={(result) => done(`Employee draft created (status: ${labelOf(EMPLOYEE_STATUS_LABEL, result.employeeStatus).toLowerCase()}). It is not active.`)} />
           )}
@@ -3616,6 +4033,414 @@ function WithdrawForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
         </div>
       </form>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// FR-014, FR-017, FR-018 offer letters (I-82 item 1; DF09): issued from the approved offer before the candidate is an
+// employee, by an eligible HR Administrator; never sent by the system: downloaded, handed over, and the delivery recorded
+// ---------------------------------------------------------------------------------------------------------
+
+/** An offer placeholder by its approved label when the list is at hand, always with its key. */
+function placeholderName(labels: ReadonlyMap<string, string>, key: string): string {
+  const label = labels.get(key);
+  return label ? `${label} ({{${key}}})` : `{{${key}}}`;
+}
+
+const missingOf = (error: ApiError) => {
+  const value = (error.details as { missing?: unknown } | undefined)?.missing;
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+};
+
+function deliveryText(l: OfferLetterListed): string {
+  if (l.delivery) return `Delivered: ${l.delivery.methodLabel ?? readable(l.delivery.method)} on ${formatDate(l.delivery.deliveredOn)}`;
+  if (l.deliveryState === 'DELIVERED') return labelOf(LETTER_DELIVERY_LABEL, l.deliveryState);
+  return l.current
+    ? labelOf(LETTER_DELIVERY_LABEL, l.deliveryState)
+    : 'Not delivered, and no longer deliverable: it carries an earlier revision of the offer, or the offer is no longer approved or accepted';
+}
+
+function OfferLettersSection({ offer: o }: { offer: OfferView }) {
+  const { can } = useSession();
+  const keys = useKeys();
+  const canRead = can(COMPENSATION_READ);
+  const canIssue = can(ISSUE_LETTER);
+  const issuing = canIssue && LETTER_ISSUING_STATES.includes(o.state);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const letters = useQuery({
+    queryKey: keys.offerLetters(o.id),
+    enabled: canRead,
+    queryFn: () => api<OfferLetters>(`/v1/hiring/offers/${enc(o.id)}/letters`),
+    retry: retryTransient,
+  });
+  const open = useMutation({ mutationFn: (l: OfferLetter) => download(`/v1/hiring/offer-letters/${enc(l.id)}/content`) });
+  const items = letters.data?.items ?? [];
+  const deliverable = canIssue ? items.filter((l) => l.deliveryState === 'NOT_DELIVERED' && l.current) : [];
+  return (
+    <Section title="Offer letters (confidential)">
+      <p className="hint">
+        The system never e-mails or sends an offer letter. Download the letter here and hand it to the candidate yourself, outside the system; then record how and when it
+        was delivered.
+      </p>
+      {canRead ? (
+        <>
+          {letters.isPending && <p className="hint">Loading the offer letters…</p>}
+          <LoadProblem error={letters.error} forbidden="The selected role cannot read this offer’s letters." missing="This offer’s letters are not available in the selected role’s scope." />
+          {letters.data && items.length === 0 && <Empty>No offer letter has been generated for this offer.</Empty>}
+          {items.length > 0 && <OfferLetterTable items={items} busy={open.isPending} onOpen={(l) => open.mutate(l)} />}
+          <Refusal error={open.error} words={LETTER_DOWNLOAD_WORDS} />
+        </>
+      ) : (
+        <p className="hint">Reading and downloading stored letters, and recording their delivery, needs the grant that reads the offer compensation.</p>
+      )}
+      {message && (
+        <p className={message.ok ? 'ok' : 'error'} role={message.ok ? 'status' : 'alert'}>
+          {message.text}
+        </p>
+      )}
+      {deliverable.length > 0 && <DeliveryForms letters={deliverable} offer={o} onFinished={(text, ok) => setMessage({ text, ok })} />}
+      {issuing && <OfferLetterComposer offer={o} />}
+      {canIssue && !issuing && <p className="hint">{`Only an approved or accepted offer issues a letter. This offer’s state: ${labelOf(OFFER_STATE_LABEL, o.state)}.`}</p>}
+    </Section>
+  );
+}
+
+function OfferLetterTable({ items, busy, onOpen }: { items: OfferLetterListed[]; busy: boolean; onOpen: (l: OfferLetter) => void }) {
+  return (
+    <div style={SCROLL}>
+      <table aria-label="Offer letters">
+        <thead>
+          <tr>
+            <th scope="col">Letter number</th>
+            <th scope="col">Template</th>
+            <th scope="col">Offer revision</th>
+            <th scope="col">Generated</th>
+            <th scope="col">Delivery</th>
+            <th scope="col">
+              <span style={SR_ONLY}>Download</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((l) => (
+            <tr key={l.id}>
+              <td>{l.outputNumber}</td>
+              <td>{`${l.templateCode}, revision ${l.templateRevision}`}</td>
+              <td>{l.offerRevision}</td>
+              <td>{formatDate(l.generatedAt)}</td>
+              <td>{deliveryText(l)}</td>
+              <td>
+                <button type="button" className="secondary" disabled={busy} aria-label={`Download offer letter ${l.outputNumber}`} onClick={() => onOpen(l)}>
+                  Download
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Preview, then the final letter from a preview with every mandatory value (FR-017, FR-018). A preview stores and sends
+ * nothing. Each generation is a new user action with a new idempotency key (ZT07); only sending it again after an
+ * attempt whose answer never came back reuses that key, so the server answers with what it stored instead of a second letter.
+ */
+function OfferLetterComposer({ offer: o }: { offer: OfferView }) {
+  const { can } = useSession();
+  const keys = useKeys();
+  const refresh = useRefresh();
+  const id = useId();
+  const canTemplates = can(LETTER_TEMPLATE_READ);
+  const templates = useQuery({
+    enabled: canTemplates,
+    queryKey: keys.letterTemplates,
+    queryFn: () => api<{ items: LetterTemplateSummary[] }>('/v1/letter-templates'),
+    retry: retryTransient,
+  });
+  const placeholders = useQuery({
+    enabled: canTemplates,
+    queryKey: keys.offerPlaceholders,
+    queryFn: () => api<{ items: { key: string; label: string }[] }>(`/v1/letter-placeholders?letterType=${enc(OFFER_LETTER_TYPE)}`),
+    retry: retryTransient,
+    staleTime: 5 * 60_000,
+  });
+  const labels = useMemo(() => new Map((placeholders.data?.items ?? []).map((p) => [p.key, p.label])), [placeholders.data]);
+  const words = useMemo<Words>(
+    () => ({
+      ...LETTER_ISSUE_WORDS,
+      MISSING_PLACEHOLDER: (e) =>
+        `The final letter was not generated: mandatory values are missing from the approved offer: ${missingOf(e)
+          .map((k) => placeholderName(labels, k))
+          .join(', ')}.`,
+    }),
+    [labels],
+  );
+  const usable = (templates.data?.items ?? []).filter((t) => t.letterType === OFFER_LETTER_TYPE && t.active && t.publishedRevision !== null);
+  const [code, setCode] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const [shown, setShown] = useState<OfferLetterPreview | null>(null);
+  const [generated, setGenerated] = useState<(OfferLetter & { replayed?: boolean }) | null>(null);
+  /** The generation whose answer never came back: sending the same template again carries its key. */
+  const unanswered = useRef<{ templateCode: string; key: string } | null>(null);
+  const generate = useMutation({
+    mutationFn: (body: { templateCode: string; idempotencyKey: string }) => api<OfferLetter & { replayed?: boolean }>(`/v1/hiring/offers/${enc(o.id)}/letters`, { body }),
+    onSuccess: (letter) => {
+      unanswered.current = null;
+      setGenerated(letter);
+      setShown(null);
+      setCode('');
+      refresh();
+    },
+    onError: (error) => {
+      if (error instanceof ApiError) {
+        // Answered: nothing was stored under this key, so the next attempt is a new one.
+        unanswered.current = null;
+        if (isConflict(error)) refresh();
+      } else {
+        // No answer: the letter may have been stored; the list shows whether it was.
+        refresh();
+      }
+    },
+  });
+  const preview = useMutation({
+    mutationFn: (templateCode: string) => api<OfferLetterPreview>(`/v1/hiring/offers/${enc(o.id)}/letter-preview`, { body: { templateCode } }),
+    onMutate: () => {
+      setShown(null);
+      setGenerated(null);
+      generate.reset();
+    },
+    onSuccess: setShown,
+    onError: (error) => {
+      if (isConflict(error)) refresh();
+    },
+  });
+  const busy = preview.isPending || generate.isPending;
+  const chosen = code.trim().toUpperCase();
+  const current = shown !== null && shown.templateCode === chosen ? shown : null;
+  const canGenerate = current !== null && current.ready && current.missing.length === 0;
+
+  const choose = (next: string) => {
+    setCode(next);
+    setShown(null);
+    setProblem(null);
+    preview.reset();
+    generate.reset();
+  };
+  const runPreview = (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    if (!TEMPLATE_CODE.test(chosen)) {
+      setProblem(canTemplates ? 'Choose an offer letter template.' : 'Enter the template code: a capital letter followed by capital letters, digits or _ (up to 40 characters).');
+      preview.reset();
+      return;
+    }
+    setProblem(null);
+    preview.mutate(chosen);
+  };
+  const generateFinal = () => {
+    if (busy || !canGenerate || current === null) return;
+    const last = unanswered.current;
+    const key = last !== null && last.templateCode === current.templateCode ? last.key : idempotencyKey('offer-letter');
+    unanswered.current = { templateCode: current.templateCode, key };
+    generate.mutate({ templateCode: current.templateCode, idempotencyKey: key });
+  };
+
+  const blockedId = `${id}-blocked`;
+  return (
+    <div className="stack">
+      <h3 style={H3}>Issue an offer letter</h3>
+      <p className="hint">
+        The letter takes its values from the offer’s approved revision {o.currentRevision}: the candidate, the requisition’s post, the proposed joining date and the
+        compensation. Nothing is typed into a letter, and a missing mandatory value blocks the final letter.
+      </p>
+      <form className="row" aria-label="Choose an offer letter template" onSubmit={runPreview} noValidate>
+        {canTemplates ? (
+          <label className="inline">
+            Offer letter template{' '}
+            <select value={code} disabled={busy} onChange={(e) => choose(e.target.value)}>
+              <option value="">Choose…</option>
+              {usable.map((t) => (
+                <option key={t.id} value={t.code}>
+                  {t.name} ({t.code}, revision {t.publishedRevision})
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label className="inline">
+            Offer letter template code{' '}
+            <input value={code} maxLength={40} disabled={busy} onChange={(e) => choose(e.target.value.toUpperCase())} />
+          </label>
+        )}
+        <button type="submit" disabled={busy}>
+          Preview
+        </button>
+      </form>
+      {canTemplates && templates.data && usable.length === 0 && (
+        <p className="hint">
+          No offer letter template is active with a published revision. HR writes and publishes one of the offer letter type under{' '}
+          <Link to={PATHS.letterTemplates}>Letter templates</Link>.
+        </p>
+      )}
+      <LoadProblem error={templates.error} forbidden="The selected role cannot list letter templates." />
+      <Problem text={problem} />
+      <Refusal error={preview.error} words={words} />
+      {preview.isPending && <p className="hint">Preparing the preview…</p>}
+      {current && (
+        <div role="region" aria-label="Offer letter preview">
+          <h4 style={H3}>
+            Preview of {current.templateCode}, revision {current.templateRevision}, for offer revision {current.offerRevision}
+          </h4>
+          <p>
+            <Badge tone="warn">preview only</Badge> Nothing was stored or sent.
+          </p>
+          {current.missing.length > 0 ? (
+            <p id={blockedId} role="alert" className="error">
+              The final letter cannot be generated while the approved offer lacks these mandatory values: {current.missing.map((k) => placeholderName(labels, k)).join(', ')}.
+            </p>
+          ) : (
+            <p className="ok">Every mandatory value is present.</p>
+          )}
+          <pre style={PRE}>{current.text}</pre>
+        </div>
+      )}
+      <p className="hint">
+        Generating stores the final letter as a confidential file with its template revision, the offer revision and you as its generator. It is not sent: download it
+        from the list of offer letters and hand it to the candidate.
+      </p>
+      {current === null && !generated && <p className="hint">Preview the letter first: the final letter is offered once a preview has every mandatory value.</p>}
+      <div className="row">
+        <button type="button" disabled={busy || !canGenerate} aria-describedby={current && !canGenerate ? blockedId : undefined} onClick={generateFinal}>
+          Generate final letter
+        </button>
+      </div>
+      {generate.error instanceof ApiError ? (
+        <Refusal error={generate.error} words={words} />
+      ) : (
+        generate.error && (
+          <p role="alert" className="error">
+            No answer came back, so the letter may or may not have been stored; the offer letters have been read again. Generating it again from the same template stores
+            it at most once.
+          </p>
+        )
+      )}
+      {generated && (
+        <p className="ok" role="status">
+          {generated.replayed ? 'The letter was already stored by the earlier attempt: ' : 'Final letter stored: '}
+          {`letter number ${generated.outputNumber} (${generated.templateCode}, revision ${generated.templateRevision}; offer revision ${generated.offerRevision}). It was not sent: download it, hand it to the candidate and record the delivery.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The delivery methods of the company list, then one form per letter whose delivery can still be recorded. */
+function DeliveryForms({ letters, offer: o, onFinished }: { letters: OfferLetterListed[]; offer: OfferView; onFinished: (text: string, ok: boolean) => void }) {
+  const keys = useKeys();
+  const methods = useQuery({
+    queryKey: keys.referenceValues(DELIVERY_CATEGORY),
+    queryFn: () => api<ReferenceValues>(`/v1/hiring/reference-values?category=${enc(DELIVERY_CATEGORY)}`),
+    retry: retryTransient,
+  });
+  const choices = methods.data?.items ?? [];
+  return (
+    <>
+      {methods.isPending && <p className="hint">Loading the delivery methods…</p>}
+      <LoadProblem error={methods.error} forbidden="The selected role cannot list the delivery methods of offer letters." />
+      {methods.data && choices.length === 0 && <p className="hint">No delivery method of offer letters is active in this company. Ask HR to set one up.</p>}
+      {choices.length > 0 && letters.map((l) => <DeliveryForm key={l.id} letter={l} offer={o} methods={choices} onFinished={onFinished} />)}
+    </>
+  );
+}
+
+function DeliveryForm({
+  letter: l,
+  offer: o,
+  methods,
+  onFinished,
+}: {
+  letter: OfferLetterListed;
+  offer: OfferView;
+  methods: ReferenceValues['items'];
+  onFinished: (text: string, ok: boolean) => void;
+}) {
+  const refresh = useRefresh();
+  const id = useId();
+  const [method, setMethod] = useState('');
+  const [deliveredOn, setDeliveredOn] = useState(() => localDate());
+  const [confirmed, setConfirmed] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const recipient = `${o.candidate.fullName} (${o.candidate.candidateCode})`;
+  const record = useMutation({
+    mutationFn: (body: { deliveryMethod: string; deliveredOn: string; recipientConfirmed: true }) => api<DeliveryRecorded>(`/v1/hiring/offer-letters/${enc(l.id)}/delivery`, { body }),
+    onSuccess: (result) => {
+      const label = methods.find((m) => m.code === result.deliveryMethod)?.label ?? readable(result.deliveryMethod);
+      onFinished(`Recorded the delivery of offer letter ${l.outputNumber} to ${recipient}: ${label} on ${formatDate(result.deliveredOn)}.`, true);
+      refresh();
+    },
+    onError: (error) => {
+      // Delivered, superseded or no longer approved meanwhile: the letters are read again and this form may go.
+      if (isConflict(error)) {
+        onFinished(`Offer letter ${l.outputNumber}: ${refusalText(error, DELIVERY_WORDS) ?? error.message}`, false);
+        refresh();
+      }
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (record.isPending) return;
+    const missing = !method
+      ? 'Choose how the letter was delivered.'
+      : !deliveredOn
+        ? 'Enter the date the letter was delivered.'
+        : !confirmed
+          ? `Confirm that the letter went to the offer’s candidate, ${recipient}.`
+          : null;
+    setProblem(missing);
+    if (missing) {
+      record.reset();
+      return;
+    }
+    record.mutate({ deliveryMethod: method, deliveredOn, recipientConfirmed: true });
+  };
+  return (
+    <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+      <h3 id={`${id}-title`} className="wide" style={H3}>
+        Record the delivery of offer letter {l.outputNumber}
+      </h3>
+      <label>
+        Delivery method (required)
+        <select value={method} onChange={(e) => setMethod(e.target.value)}>
+          <option value="">Choose…</option>
+          {methods.map((m) => (
+            <option key={m.code} value={m.code}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Delivered on (required)
+        <input type="date" required value={deliveredOn} onChange={(e) => setDeliveredOn(e.target.value)} />
+      </label>
+      <label className="check wide">
+        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> The letter went to the offer’s candidate, {recipient}
+      </label>
+      <p className="hint wide">Record the delivery once the letter is in the candidate’s hands. A recorded delivery is final.</p>
+      <Problem text={problem} />
+      {record.error && !isConflict(record.error) && (
+        <div className="wide">
+          <Refusal error={record.error} words={DELIVERY_WORDS} />
+        </div>
+      )}
+      <div className="wide row">
+        <button type="submit" disabled={record.isPending}>
+          Record delivery
+        </button>
+      </div>
+    </form>
   );
 }
 

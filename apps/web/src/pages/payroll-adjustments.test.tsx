@@ -1,6 +1,7 @@
-// Later-period payroll cases (FR-035, FR-100; DB111; H2; H3 TN13), jsdom: approval of a timesheet adjustment is not offered while no
-// valuation policy exists and the reason is said in plain words, figures are entered and shown as they are, the arrear register names
-// source revision and period, and an employee sees no figures. Synthetic data only.
+// Later-period payroll cases (FR-035, FR-100; DB111; H2; H3 TN13; I-79), jsdom: figures are the server's calculation and are never typed
+// in, approval of a timesheet adjustment is offered only for a valued case under an active valuation policy (otherwise the reason is said
+// in plain words), the arrear register names source revision, period and the payroll that paid it, the valuation policy is drafted by one
+// person and activated by another, and an employee sees no figures. Synthetic data only.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -49,6 +50,8 @@ const screenOf = (path: string, permissions: string[]) => {
 };
 
 const VALUATION = { status: 'NOT_CONFIGURED', message: 'Approval, valuation and application to a later payroll wait for an activated adjustment valuation policy.' };
+const CONFIGURED = { status: 'CONFIGURED', message: 'Corrections are calculated from the processed record.' };
+const VALUED = { previousRecognizedUnits: '6.0000', correctedUnits: '7.0000', deltaAmount: '967.7400' };
 const CASE = {
   id: 'a1',
   employeeCode: 'SYN-001',
@@ -102,26 +105,55 @@ describe('late-timesheet adjustments (FR-100)', () => {
     expect(screen.queryByRole('button', { name: 'Open a case' })).toBeNull();
   });
 
-  it('shows pending figures as pending, and only the maker edits or submits a draft', async () => {
+  it('shows the calculated figures, or that a case is not valued, and the maker saves or submits only the explanation', async () => {
     serve({
-      ...lists([CASE, { ...CASE, id: 'a2', employeeCode: 'SYN-009', createdBy: 'someone-else' }], []),
+      ...lists([CASE, { ...CASE, id: 'a2', employeeCode: 'SYN-009', createdBy: 'someone-else', ...VALUED, state: 'APPLIED', targetPeriodCode: '2026-10' }], []),
       'PUT /v1/payroll/adjustments/a1': [200, CASE],
       'POST /v1/payroll/adjustments/a1/submit': [200, { ...CASE, state: 'SUBMITTED' }],
     });
     screenOf('/payroll/adjustments', [READ, PROPOSE]);
     const card = await screen.findByLabelText('Adjustment of SYN-001');
-    expect(card.textContent).toContain('previously recognised pending, corrected pending, difference pending');
+    expect(card.textContent).toContain('Not valued: no valuation policy was in effect');
     expect(card.textContent).toContain('8 hours approved');
-    expect(within(screen.getByLabelText('Adjustment of SYN-009')).queryByRole('form')).toBeNull();
+    const applied = screen.getByLabelText('Adjustment of SYN-009');
+    expect(applied.textContent).toContain('Calculated: previously recognised 6.0000, corrected 7.0000, difference INR 967.74');
+    expect(applied.textContent).toContain('Paid in payroll 2026-10');
+    expect(within(applied).queryByRole('form')).toBeNull();
     const form = within(card).getByRole('form', { name: 'Draft case of SYN-001' });
-    fireEvent.change(within(form).getByLabelText('Signed difference'), { target: { value: '-250.50' } });
+    expect(within(form).queryByLabelText('Signed difference')).toBeNull();
     fireEvent.change(within(form).getByLabelText('Explanation'), { target: { value: 'Synthetic late week' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
-    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ expectedVersion: 3, previousRecognizedUnits: null, correctedUnits: null, deltaAmount: '-250.50', explanation: 'Synthetic late week' });
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({ expectedVersion: 3, explanation: 'Synthetic late week' });
     fireEvent.click(within(form).getByRole('button', { name: 'Submit for review' }));
     await waitFor(() => expect(calls.some((c) => c.path.endsWith('/submit'))).toBe(true));
     expect(calls.find((c) => c.path.endsWith('/submit'))!.body).toEqual({ expectedVersion: 3 });
+  });
+
+  it('offers approval of a valued case under an active policy, and says why a case submitted unvalued goes back', async () => {
+    const queue = PAYROLL_ADJUSTMENT_TASK_QUEUES.find((q) => q.title === 'Late-timesheet adjustments')!;
+    serve({
+      'GET /v1/payroll/adjustments/tasks/mine': [
+        200,
+        {
+          items: [
+            { taskId: 'task1', adjustment: { ...CASE, ...VALUED, state: 'SUBMITTED', explanation: 'Synthetic' } },
+            { taskId: 'task2', adjustment: { ...CASE, id: 'a2', employeeCode: 'SYN-002', state: 'SUBMITTED', explanation: 'Synthetic' } },
+          ],
+          valuation: CONFIGURED,
+        },
+      ],
+      'POST /v1/payroll/adjustment-tasks/task1/decision': [200, { state: 'APPROVED' }],
+    });
+    session.permissions = [DECIDE];
+    render(tree(queue.component));
+    const valued = await screen.findByRole('form', { name: 'Decide the case of SYN-001' });
+    const unvalued = screen.getByRole('form', { name: 'Decide the case of SYN-002' });
+    expect(within(unvalued).queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(unvalued.textContent).toContain('return it so it is opened again and valued');
+    fireEvent.click(within(valued).getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ decision: 'APPROVE', idempotencyKey: expect.stringMatching(/^payroll-case-/) });
   });
 
   it('offers return and reject but no approval while no valuation policy exists (H2)', async () => {
@@ -160,14 +192,27 @@ describe('arrears (FR-035)', () => {
   const READ = 'payroll_arrears.read.amount';
   const PROPOSE = 'payroll_arrears.propose.amount';
   const DECIDE = 'payroll_arrears.decide.amount';
-  const REGISTER_CASE = { id: 'c1', employeeCode: 'SYN-001', employeeName: 'Asha Synthetic', sourceRevisionId: 'sa1', sourceEffectiveFrom: '2026-03-01', periodCode: '2026-03', currencyCode: 'INR', reason: 'Synthetic', state: 'APPROVED', lines: [{ componentCode: 'BASIC', amount: '6000.0000' }], totalEntered: '6000.0000' };
+  const REGISTER_CASE = {
+    id: 'c1',
+    employeeCode: 'SYN-001',
+    employeeName: 'Asha Synthetic',
+    sourceRevisionId: 'sa1',
+    sourceEffectiveFrom: '2026-03-01',
+    periodCode: '2026-03',
+    currencyCode: 'INR',
+    reason: 'Synthetic',
+    state: 'APPLIED',
+    lines: [{ componentCode: 'BASIC', amount: '6000.0000' }],
+    totalEntered: '6000.0000',
+    appliedPeriodCode: '2026-05',
+  };
   const ARR_CANDIDATE = { employeeCode: 'SYN-002', employeeName: 'Ravi Synthetic', sourceRevisionId: 'sa2', sourceEffectiveFrom: '2026-03-01', originRecordId: 'r2', periodCode: '2026-03', currencyCode: 'INR' };
   const lists = (items: unknown[] = [REGISTER_CASE], candidates: unknown[] = [ARR_CANDIDATE]) => ({
-    'GET /v1/payroll/arrears-cases': [200, { items, total: items.length, calculation: { status: 'NOT_CONFIGURED', message: 'Arrears are not calculated or paid here.' } }] as Reply,
+    'GET /v1/payroll/arrears-cases': [200, { items, total: items.length, calculation: { status: 'CALCULATED', message: 'Amounts are calculated from the processed record and the salary revision.' } }] as Reply,
     'GET /v1/payroll/arrears-cases/candidates': [200, { items: candidates, total: candidates.length }] as Reply,
   });
 
-  it('names source revision and period in the register, and says nothing is paid', async () => {
+  it('names source revision, period and the payroll that paid it in the register, and says how amounts come about', async () => {
     serve(lists());
     screenOf('/payroll/arrears', [READ]);
     const table = await screen.findByRole('table', { name: 'Arrear register' });
@@ -175,38 +220,45 @@ describe('arrears (FR-035)', () => {
     expect(row.textContent).toContain('2026-03-01');
     expect(row.textContent).toContain('2026-03');
     expect(row.textContent).toContain('BASIC INR 6,000.00');
-    expect(document.body.textContent).toContain('Arrears are not calculated or paid here.');
+    expect(row.textContent).toContain('2026-05');
+    expect(document.body.textContent).toContain('Amounts are calculated from the processed record and the salary revision.');
     expect(screen.queryByRole('button', { name: 'Raise a case' })).toBeNull();
   });
 
-  it('raises a case with the amounts as typed and one idempotency key', async () => {
+  it('says "Final settlement" for a case a final settlement paid (I-88 follow-up)', async () => {
+    serve(lists([{ ...REGISTER_CASE, appliedPeriodCode: null, appliedSettlementId: 's-1' }], []));
+    screenOf('/payroll/arrears', [READ]);
+    const table = await screen.findByRole('table', { name: 'Arrear register' });
+    expect(within(table).getAllByRole('row')[1]!.textContent).toContain('Final settlement');
+  });
+
+  it('raises a case with a reason and one idempotency key; the server calculates the amounts', async () => {
     serve({ ...lists([]), 'POST /v1/payroll/arrears-cases': [201, REGISTER_CASE] });
     screenOf('/payroll/arrears', [READ, PROPOSE]);
     fireEvent.click(await screen.findByRole('button', { name: 'Raise a case' }));
     const form = screen.getByRole('form', { name: 'Raise arrears for SYN-002 2026-03' });
     const send = within(form).getByRole('button', { name: 'Raise the case' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
-    fireEvent.change(within(form).getByLabelText(/one component per line/), { target: { value: 'BASIC 5000.00\nHRA -100.50' } });
+    expect(within(form).queryByLabelText(/one component per line/)).toBeNull();
     fireEvent.change(within(form).getByLabelText('Reason'), { target: { value: 'Retroactive revision' } });
     fireEvent.click(send);
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
-    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({
       sourceRevisionId: 'sa2',
       originRecordId: 'r2',
       reason: 'Retroactive revision',
-      lines: [{ componentCode: 'BASIC', amount: '5000.00' }, { componentCode: 'HRA', amount: '-100.50' }],
       idempotencyKey: expect.stringMatching(/^arrears-/),
     });
   });
 
-  it('decides with a reason, and says the decision pays nothing', async () => {
+  it('decides with a reason, and says what approval pays and that a processed payroll never changes', async () => {
     const queue = PAYROLL_ADJUSTMENT_TASK_QUEUES.find((q) => q.title === 'Arrears cases')!;
     expect(queue.permission).toBe(DECIDE);
     serve({ 'GET /v1/payroll/arrears-cases/tasks/mine': [200, { items: [{ taskId: 'task2', case: { ...REGISTER_CASE, state: 'SUBMITTED' } }] }], 'POST /v1/payroll/arrears-tasks/task2/decision': [409, { error: 'NOT_CONFIGURED', message: 'A negative arrear is a recovery and needs an activated recovery policy' }] });
     session.permissions = [DECIDE];
     render(tree(queue.component));
     const form = await screen.findByRole('form', { name: 'Decide the arrears of SYN-001' });
-    expect(document.body.textContent).toContain('Nothing is paid and no payroll changes.');
+    expect(document.body.textContent).toContain('A processed payroll never changes.');
     fireEvent.click(within(form).getByRole('button', { name: 'Approve' }));
     expect((await within(form).findByRole('alert')).textContent).toContain('needs an activated recovery policy');
     expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ decision: 'APPROVE' });
@@ -216,6 +268,58 @@ describe('arrears (FR-035)', () => {
     expect(PAYROLL_ADJUSTMENT_SCREENS.map((s) => [s.path, s.permission])).toEqual([
       ['/payroll/adjustments', 'payroll_adjustment.read.amount'],
       ['/payroll/arrears', 'payroll_arrears.read.amount'],
+      ['/payroll/valuation-policies', 'payroll_config.read.operational'],
     ]);
+  });
+});
+
+describe('valuation policy (I-79)', () => {
+  const READ = 'payroll_config.read.operational';
+  const MANAGE = 'payroll_config.manage.operational';
+  const ACTIVATE = 'payroll_config.activate.operational';
+  const POLICY = { id: 'p1', revision: 1, effectiveFrom: '2026-01-01', arrearsComponentCode: 'ARREARS', adjustmentComponentCode: 'LATE_TS', recoveryComponentCode: null, timesheetUnit: 'DAY', hoursPerDay: null, state: 'ACTIVE', createdBy: 'someone', version: 2 };
+
+  it('lists policies, and activates a draft only someone else drafted', async () => {
+    serve({
+      'GET /v1/payroll/valuation-policies': [
+        200,
+        {
+          items: [
+            POLICY,
+            { ...POLICY, id: 'p2', revision: 2, effectiveFrom: '2026-03-01', timesheetUnit: 'HOUR', hoursPerDay: '8.00', state: 'DRAFT', createdBy: 'someone', version: 1 },
+            { ...POLICY, id: 'p3', revision: 3, effectiveFrom: '2026-04-01', state: 'DRAFT', createdBy: 'maker-user', version: 1 },
+          ],
+        },
+      ],
+      'POST /v1/payroll/valuation-policies/p2/activate': [200, { ...POLICY, id: 'p2', state: 'ACTIVE' }],
+    });
+    screenOf('/payroll/valuation-policies', [READ, ACTIVATE]);
+    const table = await screen.findByRole('table', { name: 'Valuation policies' });
+    const [, first, second, third] = within(table).getAllByRole('row');
+    expect(first!.textContent).toContain('None');
+    expect(second!.textContent).toContain('Hour (8.00 a day)');
+    expect(within(third!).queryByRole('button', { name: 'Activate' })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'New valuation policy' })).toBeNull();
+    fireEvent.click(within(second!).getByRole('button', { name: 'Activate' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/v1/payroll/valuation-policies/p2/activate', body: { expectedVersion: 1 } });
+  });
+
+  it('drafts a policy, asking hours a day only for the hour unit', async () => {
+    serve({ 'GET /v1/payroll/valuation-policies': [200, { items: [] }], 'POST /v1/payroll/valuation-policies': [201, POLICY] });
+    screenOf('/payroll/valuation-policies', [READ, MANAGE]);
+    expect(await screen.findByText(/No valuation policy yet/)).toBeTruthy();
+    const form = screen.getByRole('form', { name: 'New valuation policy' });
+    expect(within(form).queryByLabelText('Hours a day')).toBeNull();
+    fireEvent.change(within(form).getByLabelText('Effective from'), { target: { value: '2026-12-01' } });
+    fireEvent.change(within(form).getByLabelText('Arrears component code'), { target: { value: 'ARREARS' } });
+    fireEvent.change(within(form).getByLabelText('Timesheet adjustment component code'), { target: { value: 'LATE_TS' } });
+    fireEvent.change(within(form).getByLabelText('Timesheet unit'), { target: { value: 'HOUR' } });
+    const save = within(form).getByRole('button', { name: 'Save as draft' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(within(form).getByLabelText('Hours a day'), { target: { value: '8' } });
+    fireEvent.click(save);
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ effectiveFrom: '2026-12-01', arrearsComponentCode: 'ARREARS', adjustmentComponentCode: 'LATE_TS', timesheetUnit: 'HOUR', hoursPerDay: '8' });
   });
 });

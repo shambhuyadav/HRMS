@@ -276,6 +276,102 @@ describe('"Requests in my scope" stays current (web-10)', () => {
   });
 });
 
+describe('cancelling an approved request (I-84 item 15)', () => {
+  it('offers it for an approved request still ahead, sends the reason and the version, and refreshes the lists', async () => {
+    session.permissions = SELF;
+    const calls = mockApi({
+      'GET /v1/employees/emp-1/work-requests': {
+        items: [request({ state: 'APPROVED', startDate: '2099-01-05', endDate: '2099-01-05', version: 3 }), request({ id: 'wr-2', state: 'APPROVED', startDate: '2026-01-05', endDate: '2026-01-05' })],
+      },
+      'GET /v1/work-requests/outdoor_duty?': { items: [] },
+      'POST /v1/work-requests/outdoor_duty/wr-1/cancel': { requestId: 'wr-1', state: 'CANCELLED', version: 4 },
+    });
+    renderPage(<WorkRequestsPage />);
+    const buttons = await within(own()).findAllByRole('button', { name: 'Cancel the approved Outdoor duty request' });
+    // Only the request whose first day is still ahead: a started one is corrected through attendance.
+    expect(buttons).toHaveLength(1);
+    fireEvent.click(buttons[0]!);
+    const form = within(own()).getByRole('form', { name: 'Cancel an approved request' });
+    expect((within(form).getByRole('button', { name: 'Cancel request' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(within(form).getByLabelText('Reason for cancelling'), { target: { value: '  Trip called off (synthetic)  ' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel request' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/v1/work-requests/outdoor_duty/wr-1/cancel')).toBe(true));
+    expect(calls.find((c) => c.url === '/v1/work-requests/outdoor_duty/wr-1/cancel')!.body).toStrictEqual({ reason: 'Trip called off (synthetic)', expectedVersion: 3 });
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url === '/v1/employees/emp-1/work-requests').length).toBe(2));
+  });
+
+  it('is not offered without the withdrawal duty', async () => {
+    session.permissions = ['work_request.submit.operational', 'work_request.read.operational'];
+    mockApi({
+      'GET /v1/employees/emp-1/work-requests': { items: [request({ state: 'APPROVED', startDate: '2099-01-05', endDate: '2099-01-05' })] },
+      'GET /v1/work-requests/outdoor_duty?': { items: [] },
+    });
+    renderPage(<WorkRequestsPage />);
+    expect(await within(await screen.findByRole('table')).findByText('Synthetic site visit')).toBeTruthy();
+    expect(within(own()).queryByRole('button', { name: /Cancel the approved/ })).toBeNull();
+  });
+});
+
+describe('HR cancels an employee’s approved request (I-84 item 15, I-89 item 3)', () => {
+  const HR = ['work_request.read.operational', 'work_request.cancel.operational'];
+  const scoped = () => screen.getByRole('heading', { name: 'Requests in my scope' }).closest('section')!;
+  const rows = () => [
+    request({ id: 'wr-7', employeeId: 'emp-7', employeeCode: 'SYN-7', employeeName: 'Synthetic Seven', state: 'APPROVED', version: 5 }),
+    request({ id: 'wr-8', employeeId: 'emp-8', employeeCode: 'SYN-8', employeeName: 'Synthetic Eight', state: 'SUBMITTED' }),
+    // The viewer's own approved request: the server refuses it, so it is not offered.
+    request({ id: 'wr-9', employeeId: 'emp-hr', employeeCode: 'SYN-HR', employeeName: 'Synthetic Admin', state: 'APPROVED' }),
+  ];
+  beforeEach(() => {
+    session.scopeKind = 'COMPANY';
+    session.employeeId = 'emp-hr';
+  });
+
+  it('is offered on approved rows of other employees only, and sends the reason and the version it read', async () => {
+    session.permissions = HR;
+    const calls = mockApi({
+      'GET /v1/employees/emp-hr/work-requests': { items: [] },
+      'GET /v1/work-requests/outdoor_duty?': { items: rows() },
+      'POST /v1/work-requests/outdoor_duty/wr-7/cancel-for-employee': { requestId: 'wr-7', state: 'CANCELLED', version: 6 },
+    });
+    renderPage(<WorkRequestsPage />);
+    const buttons = await within(await waitFor(scoped)).findAllByRole('button', { name: /Cancel .* approved Outdoor duty request/ });
+    expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(["Cancel Synthetic Seven's approved Outdoor duty request"]);
+    fireEvent.click(buttons[0]!);
+    const form = within(scoped()).getByRole('form', { name: "Cancel Synthetic Seven's approved request" });
+    expect((within(form).getByRole('button', { name: 'Cancel the request' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(form).getByText(/after the employee.s approved last working date/)).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText('Reason for cancelling'), { target: { value: '  Visit called off by the client (synthetic)  ' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel the request' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/v1/work-requests/outdoor_duty/wr-7/cancel-for-employee')).toBe(true));
+    expect(calls.find((c) => c.url.endsWith('/cancel-for-employee'))!.body).toStrictEqual({ reason: 'Visit called off by the client (synthetic)', expectedVersion: 5 });
+    // The register is read again.
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET' && c.url.startsWith('/v1/work-requests/outdoor_duty?')).length).toBe(2));
+  });
+
+  it('shows the server’s refusal, such as a request already under way', async () => {
+    session.permissions = HR;
+    mockApi({
+      'GET /v1/employees/emp-hr/work-requests': { items: [] },
+      'GET /v1/work-requests/outdoor_duty?': { items: rows() },
+      'POST /v1/work-requests/outdoor_duty/wr-7/cancel-for-employee': () => [409, { error: 'REQUEST_STARTED', message: 'The request has started; correct its days through an attendance amendment' }],
+    });
+    renderPage(<WorkRequestsPage />);
+    fireEvent.click(await within(await waitFor(scoped)).findByRole('button', { name: "Cancel Synthetic Seven's approved Outdoor duty request" }));
+    const form = within(scoped()).getByRole('form', { name: "Cancel Synthetic Seven's approved request" });
+    fireEvent.change(within(form).getByLabelText('Reason for cancelling'), { target: { value: 'Synthetic reason' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel the request' }));
+    expect(await within(form).findByText(/correct its days through an attendance amendment/)).toBeTruthy();
+  });
+
+  it('is not offered without the cancel duty', async () => {
+    session.permissions = ['work_request.read.operational'];
+    mockApi({ 'GET /v1/employees/emp-hr/work-requests': { items: [] }, 'GET /v1/work-requests/outdoor_duty?': { items: rows() } });
+    renderPage(<WorkRequestsPage />);
+    expect(await within(await waitFor(scoped)).findByText('SYN-7')).toBeTruthy();
+    expect(within(scoped()).queryByRole('button', { name: /Cancel .* approved/ })).toBeNull();
+  });
+});
+
 describe('own requests and the role scope (web-9)', () => {
   it('a team-scope role makes no own-record call and shows no own-record error', async () => {
     session.permissions = ['work_request.read.operational', 'leave.approve.operational'];

@@ -4,8 +4,13 @@
 // active employee, open cycle, open goal-setting window, no overlapping cycle, never the importer's own appraisal).
 // FR-041 target validations: a valid open cycle, a whole-number weight 1..100 on every goal and an employee total of
 // exactly 100. Nothing is submitted, rated or approved by an upload, and the source's upload modes 0/1/2 are not copied
-// (F1: unexplained source values are not new rules). Batches are all-or-nothing (imports/batch.ts); the caller's own
-// batches are listed and one held for the malware scan is resumed from its stored file (imports/routes.ts).
+// (F1: unexplained source values are not new rules). What an uploaded appraisal awaits follows its cycle's goal review
+// (FR-041 acceptance; I-77 item 3): without one it awaits the employee's self-entry (the meaning of mode 0); with one it
+// awaits the review of someone other than the importer, the manager or HR (the meaning of mode 1). Where the cycle requires
+// a review, an upload is never "treated as reviewed" (mode 2): F1 "upload ... never silently substitutes for human
+// approval". Batches are all-or-nothing
+// (imports/batch.ts); the caller's own batches are listed and one held for the malware scan is resumed from its stored
+// file (imports/routes.ts).
 import type { FastifyInstance } from 'fastify';
 import type { Database } from '../../db/transaction.js';
 import { notFound } from '../../http/errors.js';

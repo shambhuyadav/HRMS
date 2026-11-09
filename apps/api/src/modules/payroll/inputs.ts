@@ -56,6 +56,7 @@ import {
   usersLinkedTo,
 } from './common.js';
 import { activePeriod, type PeriodRow, periodRow } from './config.js';
+import { resolveExternalCodes } from './external-deductions.js';
 
 export const INPUT_KIND = 'payroll_input_batch';
 export const STOP_KIND = 'payroll_salary_stop';
@@ -107,7 +108,9 @@ function requireBeforeCutoff(grant: AccessGrant, p: PeriodRow): void {
 export interface InputLine {
   employeeId?: string | undefined;
   employeeCode?: string | undefined;
+  /** The pay component, or (I-91) blank when `externalCode` names an outside deduction code instead: exactly one of the two. */
   componentCode: string;
+  externalCode?: string | undefined;
   inputKind: string;
   amount: string;
   currencyCode: string;
@@ -115,9 +118,11 @@ export interface InputLine {
   reference: string;
 }
 
-interface CheckedLine {
+export interface CheckedLine {
   employeeId: string;
   componentId: string;
+  /** I-91: the outside code the line named, kept on the input for reconciliation. */
+  externalCode: string | null;
   kindId: string;
   amount: string;
   currencyCode: string;
@@ -148,6 +153,21 @@ async function checkLines(tx: Queryable, grant: AccessGrant, p: PeriodRow, lines
     byKey.set(`id:${e.id}`, e);
     byKey.set(`code:${e.employee_code}`, e);
   }
+  // I-91: an outside deduction code resolves to its component through the mapping in force on the line's effective date.
+  const externalOf = (l: InputLine) => (l.externalCode ?? '').trim().toUpperCase();
+  const resolved = await resolveExternalCodes(
+    tx,
+    grant.companyId,
+    lines.filter((l) => externalOf(l) !== '').map((l) => ({ code: externalOf(l), date: l.effectiveDate.trim() })),
+  );
+  const componentOf = (l: InputLine): { code: string } | { error: string } => {
+    const component = (l.componentCode ?? '').trim().toUpperCase();
+    const external = externalOf(l);
+    if ((component === '') === (external === '')) return { error: 'COMPONENT_OR_EXTERNAL_CODE' };
+    if (component) return { code: component };
+    const r = resolved.get(`${external}|${l.effectiveDate.trim()}`);
+    return !r ? { error: 'EXTERNAL_CODE_UNKNOWN' } : 'error' in r ? { error: r.error } : { code: r.componentCode };
+  };
   const heads = new Map(
     (
       await tx.query<{ code: string; id: string }>(
@@ -156,7 +176,7 @@ async function checkLines(tx: Queryable, grant: AccessGrant, p: PeriodRow, lines
                                where hr.company_id = c.company_id and hr.component_id = c.id and hr.state = 'ACTIVE' and hr.effective_from <= $3::date
                                order by hr.effective_from desc limit 1) h
           where c.company_id = $1 and c.code = any($2::text[]) and c.active and h.in_use and h.calculation_basis = 'INPUT'`,
-        [grant.companyId, [...new Set(lines.map((l) => l.componentCode.trim().toUpperCase()))], p.service_end],
+        [grant.companyId, [...new Set(lines.flatMap((l) => { const c = componentOf(l); return 'code' in c ? [c.code] : []; }))], p.service_end],
       )
     ).rows.map((r) => [r.code, r.id]),
   );
@@ -173,7 +193,9 @@ async function checkLines(tx: Queryable, grant: AccessGrant, p: PeriodRow, lines
     if (!e || !e.in_scope) return { error: 'UNKNOWN_EMPLOYEE' };
     if (grant.linkedEmployeeId === e.id) return { error: 'SELF_NOT_ALLOWED' };
     if (!e.employed) return { error: 'NOT_EMPLOYED_IN_PERIOD' };
-    const componentId = heads.get(line.componentCode.trim().toUpperCase());
+    const component = componentOf(line);
+    if ('error' in component) return { error: component.error };
+    const componentId = heads.get(component.code);
     if (!componentId) return { error: 'INPUT_HEAD_INVALID' };
     const kindId = kinds.get(line.inputKind.trim().toUpperCase());
     if (!kindId) return { error: 'UNKNOWN_INPUT_KIND' };
@@ -189,7 +211,7 @@ async function checkLines(tx: Queryable, grant: AccessGrant, p: PeriodRow, lines
     if (!isIsoDate(effectiveDate) || effectiveDate < p.service_start || effectiveDate > p.service_end) return { error: 'DATE_OUTSIDE_PERIOD' };
     const reference = line.reference.trim();
     if (!REFERENCE.test(reference)) return { error: 'INVALID_REFERENCE' };
-    return { employeeId: e.id, componentId, kindId, amount, currencyCode: currency, effectiveDate, reference };
+    return { employeeId: e.id, componentId, externalCode: externalOf(line) || null, kindId, amount, currencyCode: currency, effectiveDate, reference };
   });
   // Duplicates: within the batch, and against live inputs of the period (a repeated upload).
   const refs = results.flatMap((r) => ('error' in r ? [] : [r.reference]));
@@ -239,10 +261,10 @@ async function insertBatch(
   ).rows[0]!.id;
   await tx.query(
     `insert into payroll_input (company_id, batch_id, period_id, employee_id, component_id, input_kind_id, amount, currency_code, effective_date, source, reference,
-                                state, created_by, updated_by)
-     select $1, $2, $3, l.employee_id, l.component_id, l.kind_id, l.amount, l.currency_code, l.effective_date, $4, l.reference, 'DRAFT', $5, $5
-       from unnest($6::uuid[], $7::uuid[], $8::uuid[], $9::numeric[], $10::text[], $11::date[], $12::text[])
-            as l (employee_id, component_id, kind_id, amount, currency_code, effective_date, reference)`,
+                                external_code, state, created_by, updated_by)
+     select $1, $2, $3, l.employee_id, l.component_id, l.kind_id, l.amount, l.currency_code, l.effective_date, $4, l.reference, l.external_code, 'DRAFT', $5, $5
+       from unnest($6::uuid[], $7::uuid[], $8::uuid[], $9::numeric[], $10::text[], $11::date[], $12::text[], $13::text[])
+            as l (employee_id, component_id, kind_id, amount, currency_code, effective_date, reference, external_code)`,
     [
       grant.companyId,
       id,
@@ -256,6 +278,7 @@ async function insertBatch(
       lines.map((l) => l.currencyCode),
       lines.map((l) => l.effectiveDate),
       lines.map((l) => l.reference),
+      lines.map((l) => l.externalCode),
     ],
   );
   const total = (await tx.query<{ t: string }>(`select coalesce(sum(amount), 0) as t from payroll_input where company_id = $1 and batch_id = $2`, [grant.companyId, id])).rows[0]!.t;
@@ -277,6 +300,41 @@ async function replayedBatch(tx: Queryable, grant: AccessGrant, key: string | nu
 }
 
 const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
+
+/**
+ * I-91 PAYROLL_INPUTS_V2 import (input-import.ts): the active period a file names by its code, opened for a group of rows: one period
+ * of an active calendar with that code (UNKNOWN_PERIOD / PERIOD_AMBIGUOUS otherwise), before its cutoff, serialised with the service
+ * month's calculation starts as an entry is, and the preparation grant re-checked.
+ */
+export async function openImportPeriod(tx: Queryable, grant: AccessGrant, periodCode: string): Promise<PeriodRow | { error: string }> {
+  const ids = (
+    await tx.query<{ id: string }>(
+      `select p.id from payroll_period p join payroll_calendar c on c.company_id = p.company_id and c.id = p.calendar_id
+        where p.company_id = $1 and p.period_code = $2 and c.state = 'ACTIVE'`,
+      [grant.companyId, periodCode.trim().toUpperCase()],
+    )
+  ).rows;
+  if (ids.length === 0) return { error: 'UNKNOWN_PERIOD' };
+  if (ids.length > 1) return { error: 'PERIOD_AMBIGUOUS' };
+  const p = await activePeriod(tx, grant.companyId, ids[0]!.id);
+  await lockServiceMonth(tx, grant.companyId, p.service_start);
+  await reassertInput(tx, grant);
+  if (grant.businessDate > p.input_cutoff) return { error: 'INPUT_CUTOFF_PASSED' };
+  return p;
+}
+
+/** One import row checked exactly as an entered line is (checkLines): the checked line, or its error code. */
+export async function checkImportLine(tx: Queryable, grant: AccessGrant, p: PeriodRow, line: InputLine): Promise<CheckedLine | { error: string }> {
+  const r = await checkLines(tx, grant, p, [line], 1);
+  return r.errors[0] ? { error: r.errors[0].code } : r.lines[0]!;
+}
+
+/** The checked rows of one period, written as one UPLOAD batch (then submitted and approved as any other). */
+export async function writeImportBatch(tx: Queryable, grant: AccessGrant, p: PeriodRow, lines: CheckedLine[], fileHash: string): Promise<string> {
+  // An upload batch names its file (0043: file_hash = request_hash): here the file's part for this period.
+  const hash = sha256(`${fileHash}:${p.id}`);
+  return insertBatch(tx, grant, p, 'UPLOAD', lines, { request: hash, file: hash }, null);
+}
 
 export async function createEntryBatch(tx: Queryable, grant: AccessGrant, periodId: string, input: { lines: InputLine[]; idempotencyKey?: string | undefined }) {
   const p = await activePeriod(tx, grant.companyId, periodId);

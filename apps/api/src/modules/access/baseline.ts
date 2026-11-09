@@ -46,10 +46,27 @@ const ACCESS_ADMIN: PermissionKey[] = [
   'access.deactivate_user.operational',
 ];
 
-// FR-003, FR-068: ask to delegate one's own decision authority. C2 and C3 do not list this action, so it is no role's default
-// duty (DF02 "seed only the specified role duties"): a ceiling of the two reviewers DF03 names, the Reporting Manager and the
-// scoped HR Administrator, held only after an independently approved grant. Who holds it by default is an owner question.
+// FR-003, FR-068: ask to delegate one's own decision authority, for the two reviewers DF03 names, the Reporting Manager and the
+// scoped HR Administrator. I-84 item 3 (decided under owner delegation, 6 Nov 2026): a default duty of both, since it only lets
+// the holder ask; every delegation is approved by an independent approve_role_grant holder (delegation.ts).
 const DELEGATE_OWN_DECISIONS: PermissionKey = 'access.delegate.operational';
+
+// C4 "owner-approved rerouting creates new task with history" (I-52 item 1). I-84 item 1: the HR Administrator, who keeps the
+// approval routes (workflow.manage), reroutes a stranded task as a default duty within row scope; the rule picks the new reviewer,
+// never the person rerouting, and nobody reroutes their own request (workflow/engine.ts).
+const REROUTE_STRANDED_TASK: PermissionKey = 'workflow.reroute_task.operational';
+
+// I-84 items 2 and 6: an HR Administrator assignment may be granted the access approval duty (ceiling only, never a default duty), so
+// a change to the System Administrator role, whose holders may not decide it (0132), has an eligible approver, and grants proposed by
+// the System Administrator can be checked by HR. It reads the queue it decides through read_users.
+const ACCESS_APPROVER_FOR_HR: PermissionKey[] = ['access.read_users.operational', 'access.approve_role_grant.operational'];
+
+// I-84 item 8 (I-73 item 1): sending files whose malware scan could not be completed back to the scan worker. Operational (ids, dates
+// and the failure class only), so a default duty of the System Administrator, who runs the platform's integrations (storage/scan-failures.ts).
+const SCAN_REQUEUE: PermissionKey = 'attachment.requeue_scan.operational';
+
+// I-84 item 15 (I-74 item 10): HR cancels an employee's approved outdoor-duty or holiday-work request (work-request/service.ts).
+const WORK_REQUEST_CANCEL: PermissionKey = 'work_request.cancel.operational';
 
 // FR-004, DF04 (0105): the company's own reference lists; reference/maintenance.ts keeps the lists the code depends on protected.
 const REFERENCE_VALUE_ADMIN: PermissionKey[] = ['reference_value.read.operational', 'reference_value.manage.operational'];
@@ -252,8 +269,9 @@ const CORE_ROLES: readonly BaselineRole[] = [
       ...BIOMETRIC_ADMIN,
       // FR-058 / DF08: audit export and retention controls are explicit grants, never default duties.
       ...AUDIT_RETENTION_ADMIN,
+      SCAN_REQUEUE,
     ],
-    defaultDuties: [...ORG_MASTER_ALL, ...REFERENCE_VALUE_ADMIN, ...ACCESS_ADMIN, ...EMPLOYEE_OPERATIONAL_READ, 'dashboard.read.operational', 'notification.read_delivery.operational'],
+    defaultDuties: [...ORG_MASTER_ALL, ...REFERENCE_VALUE_ADMIN, ...ACCESS_ADMIN, ...EMPLOYEE_OPERATIONAL_READ, 'dashboard.read.operational', 'notification.read_delivery.operational', SCAN_REQUEUE],
   },
   {
     code: 'HR_ADMINISTRATOR',
@@ -273,6 +291,9 @@ const CORE_ROLES: readonly BaselineRole[] = [
       ...EXPENSE_HR_DEFAULT,
       ...EXPENSE_FINANCE_ADMIN,
       DELEGATE_OWN_DECISIONS,
+      REROUTE_STRANDED_TASK,
+      ...ACCESS_APPROVER_FOR_HR,
+      WORK_REQUEST_CANCEL,
       'dashboard.read.operational',
       'expense.view_receipt.receipt',
       // Section 11.2 "owner-approved scoped audience only": the upcoming celebrations report, never a default duty (0124).
@@ -297,6 +318,13 @@ const CORE_ROLES: readonly BaselineRole[] = [
       'dashboard.read.operational',
       'org_master.read.operational',
       'reference_value.read.operational',
+      // I-84 items 1, 3 and 6 (decided under owner delegation, 6 Nov 2026): operational duties, so default ones. The notification
+      // rules' business owner (C6) publishes what a System Administrator authored; never the author (0133).
+      DELEGATE_OWN_DECISIONS,
+      REROUTE_STRANDED_TASK,
+      'notification.approve_rules.operational',
+      // I-84 item 15 (0202): cancelling an employee's approved outdoor-duty or holiday-work request, within row scope.
+      WORK_REQUEST_CANCEL,
     ],
   },
   {
@@ -334,14 +362,17 @@ const CORE_ROLES: readonly BaselineRole[] = [
       DELEGATE_OWN_DECISIONS,
       'expense.view_receipt.receipt',
     ],
-    defaultDuties: [...EMPLOYEE_OPERATIONAL_READ, ...LEAVE_MANAGER, 'increment.read.operational', ...EXPENSE_MANAGER, ...TEAM_MANAGER, TEAM_HISTORY],
+    defaultDuties: [...EMPLOYEE_OPERATIONAL_READ, ...LEAVE_MANAGER, 'increment.read.operational', ...EXPENSE_MANAGER, ...TEAM_MANAGER, TEAM_HISTORY, DELEGATE_OWN_DECISIONS],
   },
   operationalReader('PAYROLL_OPERATOR', 'Payroll Operator', 'COMPANY'),
   operationalReader('PAYROLL_APPROVER', 'Payroll Approver', 'ASSIGNED'),
   operationalReader('FINANCE_REVIEWER', 'Finance Reviewer', 'COMPANY'),
-  operationalReader('EXPENSE_FINANCE_APPROVER', 'Expense Finance Approver', 'ASSIGNED'),
+  // I-83 items 1 and 2 (decided under owner delegation, 6 Nov 2026): section 5's "Assigned/Organisation". Their ordinary duties
+  // are operational counts and states of an organisation scope; a payment batch has no task and final expense decisions run
+  // only in an eligible Admin assignment, so an ASSIGNED scope would hold nothing. ASSIGNED stays allowed (C2_RECORD_SCOPES).
+  operationalReader('EXPENSE_FINANCE_APPROVER', 'Expense Finance Approver', 'COMPANY'),
   operationalReader('TREASURY_OPERATOR', 'Treasury Operator', 'COMPANY', ['payment.read.operational']),
-  operationalReader('TREASURY_APPROVER', 'Treasury Approver', 'ASSIGNED', ['payment.read.operational']),
+  operationalReader('TREASURY_APPROVER', 'Treasury Approver', 'COMPANY', ['payment.read.operational']),
   operationalReader('RECRUITER', 'Recruiter', 'COMPANY'),
   operationalReader('APPRAISAL_REVIEWER', 'Appraisal Reviewer', 'ASSIGNED'),
   operationalReader('TRAINING_COORDINATOR', 'Training Coordinator', 'COMPANY'),
@@ -359,7 +390,8 @@ const CORE_ROLES: readonly BaselineRole[] = [
  * C2 "Role and record scope" (BR-044; C7): the scope kinds an assignment of each baseline role may hold. An assignment
  * has one kind, so C2's combined entries allow either: Reporting Manager "TEAM and ASSIGNED", Payroll Approver "ASSIGNED
  * and COMPANY filters". "Plus filters" narrows and is not restricted. C2 is silent on any other role, which stays
- * unrestricted. The database holds the same matrix (migration 0098, hrms_role_record_scopes).
+ * unrestricted. The database holds the same matrix (migration 0098, hrms_role_record_scopes). 0195 (I-83 items 1 and 2) reads
+ * section 5's "Assigned/Organisation" for the Expense Finance Approver and the Treasury Approver the same way.
  */
 export const C2_RECORD_SCOPES: Readonly<Record<string, readonly ScopeKind[]>> = {
   SYSTEM_ADMINISTRATOR: ['COMPANY'],
@@ -369,9 +401,9 @@ export const C2_RECORD_SCOPES: Readonly<Record<string, readonly ScopeKind[]>> = 
   PAYROLL_OPERATOR: ['COMPANY'],
   PAYROLL_APPROVER: ['ASSIGNED', 'COMPANY'],
   FINANCE_REVIEWER: ['COMPANY'],
-  EXPENSE_FINANCE_APPROVER: ['ASSIGNED'],
+  EXPENSE_FINANCE_APPROVER: ['ASSIGNED', 'COMPANY'],
   TREASURY_OPERATOR: ['COMPANY'],
-  TREASURY_APPROVER: ['ASSIGNED'],
+  TREASURY_APPROVER: ['ASSIGNED', 'COMPANY'],
   RECRUITER: ['COMPANY'],
   APPRAISAL_REVIEWER: ['ASSIGNED'],
   TRAINING_COORDINATOR: ['COMPANY'],
@@ -732,6 +764,8 @@ export const OPERATIONAL_FIELD_GROUPS: readonly { resource: string; fieldGroup: 
   { resource: 'profile_change', fieldGroup: 'operational' },
   { resource: 'mobile_link', fieldGroup: 'operational' },
   { resource: 'workflow', fieldGroup: 'operational' },
+  // I-84 item 8: a stored file's scan state, attempts and dates, never its name, type, owner or content.
+  { resource: 'attachment', fieldGroup: 'operational' },
   { resource: 'attendance', fieldGroup: 'operational' },
   { resource: 'attendance_policy', fieldGroup: 'operational' },
   { resource: 'confirmation', fieldGroup: 'operational' },

@@ -32,7 +32,7 @@ beforeAll(async () => {
   h = await startHarness();
   A = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
-  shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
+  shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
   const m = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json();
   await h.setStatus(A, m.id, 'ACTIVE_CONFIRMED');
   managerEmp = m.id;

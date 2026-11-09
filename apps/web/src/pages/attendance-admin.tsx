@@ -7,7 +7,8 @@
 //
 // Attendance policies: revisions with their thresholds, effective period and mappings, a draft maintained by HR and
 // activated by someone else, which ends the revision it replaces. Every value comes from the person filling the form; the
-// page proposes none. The overtime setting is recorded only: nothing derives overtime until the owner decides its basis.
+// page proposes none. Overtime (decided under owner delegation, 6 Nov 2026, I-78 item 5): with the setting on, a revision
+// states its basis, minimum and rounding unit, and evaluation proposes overtime candidates only; nothing pays them.
 // The server re-checks every duty and rule; this page only offers what the role can do.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
@@ -316,6 +317,9 @@ export interface AttendancePolicy {
   presentPercent: string;
   halfDayPercent: string;
   overtimeEnabled: boolean;
+  overtimeBasis?: 'AFTER_SHIFT_END' | 'BEYOND_SCHEDULED_NET' | null;
+  overtimeMinimumMinutes?: number | null;
+  overtimeRoundingMinutes?: number | null;
   state: string;
   version: number;
   mappings: Mapping[];
@@ -334,9 +338,28 @@ interface DraftValues {
   presentPercent: string;
   halfDayPercent: string;
   overtimeEnabled: boolean;
+  overtimeBasis: string;
+  overtimeMinimumMinutes: string;
+  overtimeRoundingMinutes: string;
 }
-const BLANK: DraftValues = { effectiveFrom: '', effectiveTo: '', graceMinutes: '', presentPercent: '', halfDayPercent: '', overtimeEnabled: false };
+const BLANK: DraftValues = {
+  effectiveFrom: '',
+  effectiveTo: '',
+  graceMinutes: '',
+  presentPercent: '',
+  halfDayPercent: '',
+  overtimeEnabled: false,
+  overtimeBasis: '',
+  overtimeMinimumMinutes: '',
+  overtimeRoundingMinutes: '',
+};
 
+const OVERTIME_BASIS_TEXT: Record<string, string> = {
+  AFTER_SHIFT_END: 'minutes worked after the shift ends',
+  BEYOND_SCHEDULED_NET: 'minutes worked beyond the scheduled net minutes',
+};
+
+/** The API's body: the overtime rules go only with the setting on, and then all three are required by the form. */
 const draftBody = (v: DraftValues) => ({
   effectiveFrom: v.effectiveFrom,
   effectiveTo: v.effectiveTo || null,
@@ -344,7 +367,17 @@ const draftBody = (v: DraftValues) => ({
   presentPercent: v.presentPercent,
   halfDayPercent: v.halfDayPercent,
   overtimeEnabled: v.overtimeEnabled,
+  ...(v.overtimeEnabled
+    ? { overtimeBasis: v.overtimeBasis, overtimeMinimumMinutes: Number(v.overtimeMinimumMinutes), overtimeRoundingMinutes: Number(v.overtimeRoundingMinutes) }
+    : {}),
 });
+
+const overtimeText = (p: AttendancePolicy) =>
+  !p.overtimeEnabled
+    ? 'overtime off'
+    : p.overtimeBasis
+      ? `overtime candidates: ${OVERTIME_BASIS_TEXT[p.overtimeBasis] ?? p.overtimeBasis}, from ${p.overtimeMinimumMinutes} minutes, rounded down to ${p.overtimeRoundingMinutes}-minute units`
+      : 'overtime on, its rules not set (cannot be activated)';
 
 const mappingText = (m: Mapping) => (m.grade || m.location ? [m.grade && `grade ${m.grade}`, m.location && `location ${m.location}`].filter(Boolean).join(', ') : 'the whole company');
 const periodText = (p: AttendancePolicy) => (p.effectiveTo ? `from ${p.effectiveFrom}, until before ${p.effectiveTo}` : `from ${p.effectiveFrom}`);
@@ -362,6 +395,7 @@ function refusalText(error: unknown): string | null {
   if (error.code === 'INVALID_PERIOD') return 'The end of the period must be after its start, and a retirement cannot extend a revision.';
   if (error.code === 'BACKDATED_RETIREMENT') return 'A revision is retired from today or a later date.';
   if (error.code === 'STALE_VERSION') return 'This revision changed since you opened it. It has been reloaded; try again.';
+  if (error.code === 'OVERTIME_RULES_REQUIRED') return 'With overtime on, state its basis, its minimum and its rounding unit.';
   return null;
 }
 
@@ -377,6 +411,26 @@ function PolicyRefusal({ error }: { error: unknown }) {
 
 function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: DraftValues) => void }) {
   const field = (key: Exclude<keyof DraftValues, 'overtimeEnabled'>) => ({ value: values[key], onChange: (e: { target: { value: string } }) => onChange({ ...values, [key]: e.target.value }) });
+  const overtime = values.overtimeEnabled && (
+    <>
+      <label>
+        Overtime basis
+        <select required {...field('overtimeBasis')}>
+          <option value="">Choose a basis</option>
+          <option value="AFTER_SHIFT_END">Minutes after the shift ends</option>
+          <option value="BEYOND_SCHEDULED_NET">Minutes beyond the scheduled net minutes</option>
+        </select>
+      </label>
+      <label>
+        Overtime from (minutes)
+        <input required inputMode="numeric" pattern="\d{1,4}" {...field('overtimeMinimumMinutes')} />
+      </label>
+      <label>
+        Rounded down to units of (minutes)
+        <input required inputMode="numeric" pattern="[1-9]\d{0,3}" {...field('overtimeRoundingMinutes')} />
+      </label>
+    </>
+  );
   return (
     <>
       <label>
@@ -400,8 +454,10 @@ function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: 
         <input required inputMode="decimal" pattern="\d{1,3}(\.\d{1,2})?" {...field('halfDayPercent')} />
       </label>
       <label className="check">
-        <input type="checkbox" checked={values.overtimeEnabled} onChange={(e) => onChange({ ...values, overtimeEnabled: e.target.checked })} /> Overtime setting (recorded only; no overtime is derived yet)
+        <input type="checkbox" checked={values.overtimeEnabled} onChange={(e) => onChange({ ...values, overtimeEnabled: e.target.checked })} /> Overtime candidates (proposed for a manager's
+        decision; never paid from here)
       </label>
+      {overtime}
     </>
   );
 }
@@ -491,6 +547,9 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     presentPercent: policy.presentPercent,
     halfDayPercent: policy.halfDayPercent,
     overtimeEnabled: policy.overtimeEnabled,
+    overtimeBasis: policy.overtimeBasis ?? '',
+    overtimeMinimumMinutes: policy.overtimeMinimumMinutes == null ? '' : String(policy.overtimeMinimumMinutes),
+    overtimeRoundingMinutes: policy.overtimeRoundingMinutes == null ? '' : String(policy.overtimeRoundingMinutes),
   });
   const [retire, setRetire] = useState({ effectiveTo: '', reason: '' });
   const done = () => {
@@ -613,7 +672,7 @@ export function AttendancePoliciesPage() {
                   </td>
                   <td>{periodText(p)}</td>
                   <td>
-                    {`Grace ${p.graceMinutes} minutes; present from ${Number(p.presentPercent)}%; half day from ${Number(p.halfDayPercent)}%; overtime setting ${p.overtimeEnabled ? 'on' : 'off'}`}
+                    {`Grace ${p.graceMinutes} minutes; present from ${Number(p.presentPercent)}%; half day from ${Number(p.halfDayPercent)}%; ${overtimeText(p)}`}
                   </td>
                   <td>
                     {p.mappings.length > 0 && (
@@ -638,7 +697,8 @@ export function AttendancePoliciesPage() {
           </table>
         )}
         <p className="hint">
-          When two revisions apply, the mapping naming more of grade and location wins. Activating a revision ends the earlier revision of its code on the new revision’s first day. The present and half-day percentages count against scheduled net minutes. The overtime setting is recorded only: no overtime is derived until its basis is decided.
+          When two revisions apply, the mapping naming more of grade and location wins. Activating a revision ends the earlier revision of its code on the new revision’s first day. The present and half-day percentages count against scheduled net minutes; on a half weekly-off, against half of them. Overtime
+          candidates are minutes proposed for a manager’s decision, counted from the same punch pairs as worked time: every worked minute on a weekly off or holiday, and on a working day only a present one. Nothing pays them.
         </p>
       </Section>
       {canManage && <NewRevision onChanged={refresh} />}

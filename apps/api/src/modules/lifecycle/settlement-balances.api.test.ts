@@ -117,6 +117,8 @@ describe.runIf(isModuleActive('lifecycle') && isModuleActive('payroll-outputs'))
       ],
       // The disbursed loan only (the undecided advance owes nothing), with the loan module's balance.
       loans: [{ id: loanId, loanKind: 'LOAN', currencyCode: 'INR', principal: '6000.0000', recovered: '0.0000', awaitingRecognition: '0.0000', outstanding: '6000.0000', disbursementDate: today }],
+      // FR-052 (I-81 item 5): no payroll run covers the last working date here.
+      finalPeriodPayroll: [],
     });
     // The same ledger as the leave balance read, which counts every movement to date.
     const current = (await h.call(hr, 'GET', `/v1/employees/${employeeId}/leave-balances`)).json().items as { leaveType: string; available: string }[];

@@ -141,13 +141,15 @@ describe('F2 dashboards of the wave-2 roles', () => {
     expect(d.byCode.AWAITING_OUTCOME).toMatchObject({ status: 'OK', value: 0 });
   });
 
-  it('Appraisal Reviewer: assigned tasks and returned appraisals reconcile with the task and appraisal lists; overdue is unavailable', async () => {
+  it('Appraisal Reviewer: assigned, overdue (I-77 item 5) and returned counts reconcile with the task and appraisal lists', async () => {
     const reviewer = await h.actor(A, 'APPRAISAL_REVIEWER');
     const d = await dashboardOf(reviewer);
     expectCatalogue(d, 'APPRAISAL_REVIEWER');
     expect(d.title).toBe('Appraisal review');
     expect(d.byCode.SUBMITTED_REVIEWED).toMatchObject({ status: 'OK', kind: 'STATUS', value: '0/0' });
-    expect(d.byCode.OVERDUE_REVIEWS).toMatchObject({ status: 'NOT_AVAILABLE' });
+    const overdue = await h.call(reviewer, 'GET', '/v1/appraisal-tasks/mine?overdue=true');
+    expect(overdue.statusCode).toBe(200);
+    expect(d.byCode.OVERDUE_REVIEWS).toMatchObject({ status: 'OK', value: overdue.json().items.length });
     const tasks = await h.call(reviewer, 'GET', '/v1/appraisal-tasks/mine');
     expect(tasks.statusCode).toBe(200);
     expect(d.byCode.ASSIGNED_TASKS).toMatchObject({ status: 'OK', value: tasks.json().items.length });

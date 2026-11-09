@@ -40,7 +40,7 @@ beforeAll(async () => {
   A = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   await h.db.query(`insert into workflow_fallback_reviewer (company_id, kind, user_id, priority, active) values ($1, 'leave_request', $2, 1, true)`, [A.id, hr.user]);
-  const shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
+  const shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
   const person = async (managerId?: string) => {
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json();
     await h.setStatus(A, e.id, 'ACTIVE_CONFIRMED');

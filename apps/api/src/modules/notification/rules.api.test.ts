@@ -171,11 +171,13 @@ describe('publication needs independent approval (C6 Notification Administrator;
   const latestRevision = async (code: string) =>
     ((await rules(code)) as { revision: number; status: string }[]).filter((r) => r.status !== 'REJECTED').at(-1)!.revision;
 
-  it('the approval is its own grant, ceiling only, and manage_rules alone does not hold it', async () => {
+  it('the approval is its own grant, a default duty of the HR Administrator only (I-84 item 6), and manage_rules alone does not hold it', async () => {
     const { BASELINE_ROLES } = await import('../access/baseline.js');
     const key = 'notification.approve_rules.operational';
     expect(BASELINE_ROLES.filter((r) => r.ceiling.includes(key)).map((r) => r.code).sort()).toEqual(['HR_ADMINISTRATOR', 'SYSTEM_ADMINISTRATOR']);
-    expect(BASELINE_ROLES.filter((r) => r.defaultDuties.includes(key))).toEqual([]);
+    expect(BASELINE_ROLES.filter((r) => r.defaultDuties.includes(key)).map((r) => r.code)).toEqual(['HR_ADMINISTRATOR']);
+    // C6's business owner: a default HR Administrator sees the proposals waiting for publication.
+    expect((await h.call(hr, 'GET', '/v1/notifications/rules/proposals')).statusCode).toBe(200);
     const p = await proposed('WORK_ANNIVERSARY');
     expect((await publish(p.id, admin)).statusCode).toBe(403); // holds manage_rules only, and is the author too
     const anotherManager = await h.actor(A, 'SYSTEM_ADMINISTRATOR', { extra: ['notification.manage_rules.operational'] });
@@ -306,7 +308,7 @@ describe('publication needs independent approval (C6 Notification Administrator;
   it('the database holds it too: a revision starts proposed; the author, or someone without the duty, cannot decide it; a decision stays', async () => {
     const p = await proposed('ATTENDANCE_CORRECTION_DECIDED', { bodyTemplate: 'Your correction for {{workDate}} was {{outcome}}.' });
     const decide = (user: string, state = 'PUBLISHED') => h.db.query(`update notification_rule set publication_state = $3, decided_by = $2, decided_at = now(), decision_reason = 'Direct (synthetic)' where id = $1`, [p.id, user, state]);
-    await expectSqlError(decide(hr.user), CHECK_VIOLATION); // no approval duty
+    await expectSqlError(decide(employee.user), CHECK_VIOLATION); // no approval duty
     // The author, even holding the approval duty.
     const both = await h.actor(A, 'SYSTEM_ADMINISTRATOR', { extra: ['notification.manage_rules.operational', 'notification.approve_rules.operational'] });
     const own = await propose('ATTENDANCE_CORRECTION_SUBMITTED', { expectedRevision: 1, effectiveFrom: inFuture(60), bodyTemplate: 'A correction for {{employeeName}} waits.' }, both);

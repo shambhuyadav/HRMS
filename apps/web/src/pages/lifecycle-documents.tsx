@@ -1,36 +1,46 @@
 // Letters and full-and-final settlements (FR-017, FR-018 and FR-055 letters; FR-052 to FR-054 settlements, as built;
 // F1 "Exit and employee processes"; BR-016; DF02; DF03; DF09; DF12; C4; ZT07).
 //
-// Letters: HR keeps versioned letter templates that may use only the approved placeholders. A template is edited as its
-// DRAFT revision; publishing freezes the draft and retires the revision published before; a template is renamed,
+// Letters: HR keeps versioned letter templates that may use only the approved placeholders of their letter type, as the
+// server lists them per type (an OFFER template has the offer's own placeholders and is issued from the approved offer in
+// Hiring, never from an employee process; I-82 item 1). A template is edited as its DRAFT revision; publishing freezes the draft and retires the revision published before; a template is renamed,
 // deactivated or activated again against its version. Every placeholder a template uses is mandatory unless the template
 // marks it optional. For an employee process, an HR Administrator holding the confidential letter grant previews a
 // letter (rendered for review only: nothing is stored and nothing is sent) and then generates the final letter, which
 // the server refuses while a mandatory value is missing. The final letter is stored as a confidential file with its
-// template code and revision, its generator and time, and is downloaded for manual delivery: sending is not available
-// (FR-018; DF09/DF12). Restricted HR notes and warnings appear only when the server returned them.
-// Settlements: no calculation is configured (F1 needs actual approved policy and rate packs), so an authorised HR
-// Administrator enters or uploads the lines on pay components for a revision of an approved exit. Amounts are
+// template code and revision, its generator and time; it is downloaded, or sent, which means delivered to the employee's own
+// self-service with an in-app notice, never e-mailed (FR-018; DF09/DF12; I-81 item 9). Restricted HR notes and warnings appear
+// only when the server returned them.
+// Settlements: the preparer of a revision of an approved exit calculates it on the server (FR-052, I-88) from a versioned snapshot
+// under the settlement policy and the statutory rule packs in force on the last working date; the calculation's items become its
+// calculated lines, each item shown with the server's own basis, and lines for components it does not produce are entered with a
+// reason. A revision that is not calculated takes lines an authorised HR Administrator enters or uploads. An item that blocks
+// approval is shown as such, and the approver's refusal names every blocker; an exit's notice recovery is waived, with a reason,
+// by someone other than the employee and the preparer. Nothing is calculated in the browser. Amounts are
 // confidential: they appear only when the server returned them, exactly as returned, and the net amount is the
 // server's (never summed or worked out here). With them come the remaining balances, read-only (FR-034): outstanding
 // loans and advances (while the loans module is active) and paid leave as at the last working date; nothing here
 // changes the lines or works out an encashment or a recovery. Submission freezes the revision; an independent reviewer and then an
 // independent approver decide it in the settlement decision queues; a returned or rejected revision is corrected through
 // a new revision. Release eligibility is a further explicit step by someone independent of all of them once the exit
-// clearance is complete. It is not a payment: nothing on these screens makes, schedules or records a payment (BR-016).
-// FR-054 outputs: an approved revision downloads as CSV, Excel (XLSX) or PDF, and settlements selected from the list
-// download as one ZIP of their files; the bulk upload takes the lines of several drafts in one file (shared import
-// lifecycle). Outputs are downloaded only: nothing is stored or sent (sending awaits an owner decision).
+// clearance is complete. It is not a payment (BR-016): the payment is made outside this system and recorded here from its
+// evidence by someone independent (I-81 item 2); its date is the disbursement month. A live revision that must not be paid is
+// voided by an independent approver (I-81 items 5, 6), and the final period's payroll is shown beside the balances (FR-052).
+// FR-054 outputs: an approved revision downloads as CSV, Excel (XLSX) or PDF, and settlements selected from the list (by hand
+// or from an uploaded list of employee codes, I-81 item 7) download as one ZIP of their files; the bulk upload takes the lines
+// of several drafts in one file (shared import lifecycle). A statement is sent to the employee's own self-service, never e-mailed.
 // The server authorises every call and decides every rule; these screens hide what the selected assignment cannot use,
 // show only what the server returned and say its refusals in plain words.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ComponentType, type CSSProperties, type FormEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, download, fileToBase64, formatAmount, formatDate, idempotencyKey, pinSession } from '../api';
+import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatUnits, idempotencyKey, localDate, pinSession } from '../api';
 import type { EssPanel, ScreenRoute } from '../screens';
 import { useSession } from '../session';
+import { statutoryWorkingsNote } from '../statutory-note';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, nextSort, Pager, pageParams, Section, SortHeader, type SortState, sortParams, StateBadge } from '../ui';
 import { DelegatedBadge } from './delegations';
+import { VerifiedEvidencePicker } from './exit-finance';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from './records';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -59,6 +69,15 @@ const SETTLEMENT_PREPARE = 'settlement.prepare.amount';
 const SETTLEMENT_REVIEW = 'settlement.review.amount';
 const SETTLEMENT_APPROVE = 'settlement.approve.amount';
 const SETTLEMENT_RELEASE = 'settlement.release.amount';
+// I-81 (0185): recording a payment from evidence, and sending in-app, are rights of their own; letters are sent in-app too.
+const SETTLEMENT_RECORD_PAYMENT = 'settlement.record_payment.amount';
+const SETTLEMENT_SEND = 'settlement.send.amount';
+const LETTER_SEND = 'letter.send.letter';
+// I-88 (0235): waiving an exit's notice recovery is its own confidential right; the settlement policy and the statutory rule packs
+// are read on the settlement settings screen (settlement-settings.tsx), linked from the calculation.
+const SETTLEMENT_WAIVE_NOTICE = 'settlement.waive_notice.amount';
+const POLICY_READ = 'payroll_config.read.operational';
+const STATUTORY_READ = 'statutory_pack.read.operational';
 
 const PATHS = {
   templates: '/lifecycle/letter-templates',
@@ -73,6 +92,8 @@ const PATHS = {
   process: (id: string) => `/lifecycle/processes/${id}`,
   exit: (id: string) => `/lifecycle/exits/${id}`,
   employeeLifecycle: (id: string) => `/lifecycle/employees/${id}`,
+  // The settlement policy and statutory rule packs (settlement-settings.tsx).
+  settlementSettings: '/lifecycle/settlement-settings',
 } as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -80,6 +101,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODE = /^[A-Z][A-Z0-9_]{0,39}$/;
 /** Letter type codes (POST /v1/letter-templates `letterType`). */
 const LETTER_TYPE_CODE = /^[A-Z][A-Z0-9_]{0,59}$/;
+/** The letter type of offer letters (lifecycle/letters.ts OFFER_LETTER_TYPE): issued from the approved offer in Hiring. */
+const OFFER_LETTER_TYPE = 'OFFER';
 /** A placeholder as letters.ts reads it. */
 const TOKEN = /\{\{\s*([a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g;
 /** The amount format settlement.ts accepts; only the format is checked here, never the value. */
@@ -89,6 +112,8 @@ const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_BODY = 20000;
 const MAX_NAME = 200;
 const MAX_REASON = 1000;
+/** An entered line's reason (settlement.ts replaceLines). */
+const MAX_LINE_REASON = 500;
 const MAX_OPTIONAL = 50;
 const MAX_LINES = 500;
 const MAX_COMPONENT_CODE = 40;
@@ -125,7 +150,7 @@ const EXPORT_FORMATS: readonly (readonly [format: ExportFormat, label: string])[
 ];
 const formatLabel = (format: ExportFormat) => EXPORT_FORMATS.find(([f]) => f === format)?.[1] ?? format;
 /** The states an output is built for (settlement.ts exportable). */
-const EXPORTABLE_STATES: ReadonlySet<string> = new Set(['APPROVED', 'RELEASE_ELIGIBLE']);
+const EXPORTABLE_STATES: ReadonlySet<string> = new Set(['APPROVED', 'RELEASE_ELIGIBLE', 'PAID']);
 /** The most settlements one ZIP holds (settlement.ts MAX_ARCHIVE_SETTLEMENTS, a technical bound). */
 const MAX_ARCHIVE = 100;
 
@@ -145,7 +170,7 @@ const LETTER_TYPES: readonly (readonly [code: string, label: string])[] = [
 // ---------------------------------------------------------------------------------------------------------
 interface Placeholder {
   key: string;
-  /** EMPLOYEE, COMPANY, EXIT or LETTER. */
+  /** EMPLOYEE, COMPANY, EXIT, LETTER or (an OFFER template's) OFFER. */
   source: string;
   label: string;
 }
@@ -252,7 +277,10 @@ interface NoteItem {
   createdAt: string;
 }
 
-/** FR-052: reported by the server, never guessed. */
+/**
+ * FR-052: how a draft is calculated, reported by the server (GET /v1/settlements/calculation and the lists' `calculation`), never
+ * guessed. AVAILABLE since I-88 (a draft is calculated from a snapshot); a server before it answered NOT_CONFIGURED.
+ */
 interface Calculation {
   status: string;
   reason: string;
@@ -267,8 +295,71 @@ interface SettlementLine {
   amount: string;
   /** STANDARD or NOTICE_ADJUSTMENT. */
   lineKind: string;
-  /** ENTERED, UPLOADED or COPIED. */
+  /** ENTERED, UPLOADED, COPIED or (I-88) CALCULATED. */
   source: string;
+  /** The calculation snapshot a CALCULATED line came from (absent from answers of servers before I-88). */
+  calculationId?: string | null;
+  /** Why an entered line is entered (required on a calculated draft). */
+  reason?: string | null;
+}
+
+/** One item of a calculation snapshot (settlement-calculation.ts): what was worked out, or why it could not be. */
+export interface CalculationItem {
+  position: number;
+  /** EARNINGS_DUE, LEAVE_ENCASHMENT, NOTICE_RECOVERY, LOAN_RECOVERY, ARREARS, ADJUSTMENT, GRATUITY or STATUTORY_DEDUCTION. */
+  kind: string;
+  status: string;
+  /** A blocking item refuses the final approval. */
+  blocking: boolean;
+  componentCode: string | null;
+  componentKind: string | null;
+  /** A signed decimal string exactly as the server holds it, or null when nothing was worked out. */
+  amount: string | null;
+  /** The facts and rates the server used, by kind (see howText). */
+  basis: Record<string, unknown> | null;
+  leaveTypeCode: string | null;
+  loanId?: string | null;
+  arrearsCaseId?: string | null;
+  adjustmentId?: string | null;
+  headRevisionId?: string | null;
+}
+
+/** A versioned calculation snapshot (confidential with the amounts): the one a revision carries, or an earlier one. */
+interface SettlementCalculation {
+  id: string;
+  sequence: number;
+  calculatedAt: string;
+  calculatedBy: string;
+  lastWorkingDate: string;
+  periodStart: string;
+  periodEnd: string;
+  currencyCode: string;
+  policyId: string | null;
+  policyRevision: number | null;
+  gratuityPackId: string | null;
+  valuationPolicyId: string | null;
+  paidDayPolicyId: string | null;
+  itemCount: number;
+  blockingCount: number;
+  inputs?: Record<string, unknown>;
+  items: CalculationItem[];
+}
+
+/** F1 notice (I-88): an exit's notice recovery waived, with its reason (confidential with the amounts). */
+interface NoticeWaiver {
+  id: string;
+  reason: string;
+  waivedBy: string;
+  waivedAt: string;
+}
+
+/** One thing that refuses the final approval (settlement-gates.ts approvalBlockers; 409 CALCULATION_BLOCKED). */
+interface Blocker {
+  source: string;
+  kind: string;
+  code: string;
+  componentCode?: string | null;
+  rulePackCode?: string | null;
 }
 
 /** Decision history: step, decision and time only. */
@@ -279,6 +370,8 @@ interface SettlementDecision {
   action: string;
   decision: string;
   decidedAt: string;
+  /** The deciding user (settlement trails name them so independence can be checked). */
+  actorUserId?: string;
 }
 
 interface SettlementSummary {
@@ -316,6 +409,15 @@ interface OutstandingLoan {
   disbursementDate: string;
 }
 
+/** FR-052 (I-81 item 5): a payroll run covering the last working date, with the components it pays and which count as paid. */
+interface FinalPeriodRun {
+  runId: string;
+  periodCode: string;
+  runState: string;
+  revision: number;
+  components: { componentCode: string; headType: string; alreadyPaid: boolean }[];
+}
+
 /** FR-034 "settlement shows remaining balance": read-only, with the settlement amount group only. */
 interface SettlementBalances {
   /** The approved last working date the leave balances are taken at. */
@@ -323,17 +425,41 @@ interface SettlementBalances {
   leave: LeaveBalanceAsOf[];
   /** Absent while the loans module is not active. */
   loans?: OutstandingLoan[];
+  /** Absent from answers of servers before I-81. */
+  finalPeriodPayroll?: FinalPeriodRun[];
+}
+
+/** I-81 item 9: one in-app delivery of a letter or statement to the employee's own self-service. */
+interface Delivery {
+  id: string;
+  kind: string;
+  format: string;
+  sourceRevision: number;
+  status: string;
+  sentBy: string;
+  sentAt: string;
+  firstReadAt: string | null;
+  title?: string;
 }
 
 interface SettlementDetail extends SettlementSummary {
   supersedesSettlementId: string | null;
   preparedBy: string;
-  /** NOT_TRACKED: release eligibility is not a payment (BR-016). */
+  /** NOT_PAID or PAID: only a payment recorded from evidence is a payment (BR-016; I-81 item 2). */
   paymentStatus: string;
+  /** The recorded payment date: the disbursement month (FR-054). */
+  paymentDate?: string | null;
+  /** Confidential, like the net amount. */
+  payment?: { paidAt: string; paidBy: string; reference: string };
+  cancelReason?: string | null;
   /** Confidential, like the net amount. */
   lines?: SettlementLine[];
   /** Confidential, like the net amount; only on GET /v1/settlements/:id and the answers of its actions. */
   balances?: SettlementBalances;
+  /** I-88, confidential like the lines: the snapshot the revision carries (null while it is not calculated). */
+  calculation?: SettlementCalculation | null;
+  /** I-88, confidential like the lines: the exit's notice recovery waiver, if any. */
+  noticeWaiver?: NoticeWaiver | null;
   submittedAt: string | null;
   reviewedAt: string | null;
   approvedAt: string | null;
@@ -383,21 +509,31 @@ interface ExitCase {
 }
 
 type LineKind = 'STANDARD' | 'NOTICE_ADJUSTMENT';
+/** A line as the editor holds it; the reason is sent only when one is given. */
 interface LineInput {
   componentCode: string;
   amount: string;
   lineKind: LineKind;
+  reason: string;
+}
+/** A line as PUT /v1/settlements/:id/lines takes it. */
+interface LineBody {
+  componentCode: string;
+  amount: string;
+  lineKind: LineKind;
+  reason?: string;
 }
 
 // ---------------------------------------------------------------------------------------------------------
 // Labels
 // ---------------------------------------------------------------------------------------------------------
 const REVISION_STATE_LABEL: Record<string, string> = { DRAFT: 'Draft', PUBLISHED: 'Published', RETIRED: 'Retired' };
-const SOURCE_LABEL: Record<string, string> = { EMPLOYEE: 'Employee record', COMPANY: 'Company', EXIT: 'Approved exit', LETTER: 'The letter' };
+const SOURCE_LABEL: Record<string, string> = { EMPLOYEE: 'Employee record', COMPANY: 'Company', EXIT: 'Approved exit', LETTER: 'The letter', OFFER: 'Approved offer (Hiring)' };
 const NOTE_KIND_LABEL: Record<string, string> = { NOTE: 'Note', REMARK: 'Remark', WARNING: 'Warning' };
-const DELIVERY_LABEL: Record<string, string> = { NOT_SENT: 'Not sent' };
+const DELIVERY_LABEL: Record<string, string> = { NOT_SENT: 'Not sent', DELIVERED_IN_APP: 'Delivered to the employee’s self-service' };
+const DELIVERY_STATUS_LABEL: Record<string, string> = { DELIVERED: 'Delivered, not yet opened', READ: 'Opened by the employee' };
 
-const SETTLEMENT_STATES = ['DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE', 'RETURNED', 'REJECTED', 'CANCELLED'] as const;
+const SETTLEMENT_STATES = ['DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE', 'PAID', 'RETURNED', 'REJECTED', 'CANCELLED'] as const;
 /** BR-016: states as the server records them; release eligibility is worded so it never reads as a payment. */
 const SETTLEMENT_STATE_LABEL: Record<string, string> = {
   DRAFT: 'Draft',
@@ -405,6 +541,7 @@ const SETTLEMENT_STATE_LABEL: Record<string, string> = {
   REVIEWED: 'Reviewed, waiting for approval',
   APPROVED: 'Approved, not yet eligible for release',
   RELEASE_ELIGIBLE: 'Eligible for release (not a payment)',
+  PAID: 'Paid (recorded from evidence)',
   RETURNED: 'Returned for correction',
   REJECTED: 'Rejected',
   CANCELLED: 'Cancelled',
@@ -414,27 +551,84 @@ const SETTLEMENT_TONE: Record<string, 'good' | 'warn' | 'bad'> = {
   REVIEWED: 'warn',
   APPROVED: 'good',
   RELEASE_ELIGIBLE: 'good',
+  PAID: 'good',
   RETURNED: 'warn',
   REJECTED: 'bad',
 };
 /** A live revision blocks a new one (settlement.ts createSettlement). */
 const LIVE_STATES: ReadonlySet<string> = new Set(['DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE']);
+/** I-81 items 5, 6: a live revision past its draft that is not paid can be voided by an independent approver. */
+const VOIDABLE_STATES: ReadonlySet<string> = new Set(['SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE']);
+/** Revisions an export or an in-app statement may carry (settlement.ts EXPORTABLE_STATES). */
+const OUTPUT_STATES: ReadonlySet<string> = EXPORTABLE_STATES;
 const STATE_EXPLANATION: Record<string, string> = {
-  DRAFT: 'Being prepared: the preparer enters or uploads the lines, then submits the revision for an independent review.',
+  DRAFT: 'Being prepared: the preparer calculates it, or enters or uploads the lines, then submits the revision for an independent review.',
   SUBMITTED: 'Submitted and frozen: its lines can no longer change. It waits for an independent review.',
   REVIEWED: 'Reviewed: it waits for an independent approval by someone who neither prepared nor reviewed it.',
   APPROVED:
     'Approved. It is not yet eligible for release: that is a separate step, recorded by someone independent once the exit clearance is complete. No payment is made here.',
-  RELEASE_ELIGIBLE: 'Eligible for release. This is not a payment: no payment has been made, scheduled or recorded here.',
+  RELEASE_ELIGIBLE:
+    'Eligible for release. This is not a payment. The payment is made outside this system and then recorded here from its evidence by someone independent.',
+  PAID: 'Paid: the payment made outside this system was recorded from its evidence. It is final; nothing more is prepared for this exit.',
   RETURNED: 'Returned for correction. A corrected revision is prepared from the exit’s settlements and starts from this revision’s lines.',
   REJECTED: 'Rejected. A new revision can be prepared from the exit’s settlements.',
-  CANCELLED: 'Cancelled. A new revision can be prepared from the exit’s settlements.',
+  CANCELLED: 'Cancelled (its lines and decisions are kept). A new revision can be prepared from the exit’s settlements while the exit stands.',
 };
-const PAYMENT_STATUS_LABEL: Record<string, string> = { NOT_TRACKED: 'Not tracked here: release eligibility is not a payment' };
-const CALCULATION_LABEL: Record<string, string> = { NOT_CONFIGURED: 'Not configured' };
+const PAYMENT_STATUS_LABEL: Record<string, string> = {
+  NOT_PAID: 'Not paid: no payment has been recorded (release eligibility is not a payment)',
+  PAID: 'Paid: recorded from evidence',
+  NOT_TRACKED: 'Not tracked here: release eligibility is not a payment',
+};
+/** One revision's calculation status (settlement.calculation_status). */
+const CALCULATION_LABEL: Record<string, string> = { NOT_CONFIGURED: 'Not calculated (lines entered or uploaded)', CALCULATED: 'Calculated from a snapshot' };
+/** What GET /v1/settlements/calculation reports for every draft (not one revision's status). */
+const CALCULATION_AVAILABILITY_LABEL: Record<string, string> = { NOT_CONFIGURED: 'Not configured', AVAILABLE: 'Available' };
 const COMPONENT_KIND_LABEL: Record<string, string> = { EARNING: 'Earning', DEDUCTION: 'Deduction' };
 const LINE_KIND_LABEL: Record<string, string> = { STANDARD: 'Standard', NOTICE_ADJUSTMENT: 'Notice adjustment' };
-const LINE_SOURCE_LABEL: Record<string, string> = { ENTERED: 'Entered', UPLOADED: 'Uploaded', COPIED: 'Copied from the previous revision' };
+const LINE_SOURCE_LABEL: Record<string, string> = { ENTERED: 'Entered', UPLOADED: 'Uploaded', COPIED: 'Copied from the previous revision', CALCULATED: 'Calculated' };
+/** I-88 calculation items (settlement-calculation.ts), in plain words. */
+const ITEM_KIND_LABEL: Record<string, string> = {
+  EARNINGS_DUE: 'Earnings due',
+  LEAVE_ENCASHMENT: 'Leave encashment',
+  NOTICE_RECOVERY: 'Notice recovery',
+  LOAN_RECOVERY: 'Loan or advance recovery',
+  ARREARS: 'Arrears',
+  ADJUSTMENT: 'Timesheet adjustment',
+  GRATUITY: 'Gratuity',
+  STATUTORY_DEDUCTION: 'Tax and statutory deductions',
+};
+/** Item statuses: the first six never block; every other one blocks the final approval until it is put right. */
+const ITEM_STATUS_LABEL: Record<string, string> = {
+  CALCULATED: 'Calculated',
+  ALREADY_PAID: 'Already paid by monthly payroll',
+  NOT_APPLICABLE: 'Not applicable',
+  NOT_ELIGIBLE: 'Not eligible',
+  WAIVED: 'Waived',
+  NOT_INCLUDED: 'Not included (enter it if due)',
+  RULE_PACK_NOT_CONFIGURED: 'Rule pack not configured',
+  POLICY_NOT_CONFIGURED: 'Settlement policy not configured',
+  VALUATION_POLICY_NOT_CONFIGURED: 'Arrears valuation policy not configured',
+  RECOVERY_POLICY_NOT_CONFIGURED: 'The valuation policy names no component to pay or recover it on',
+  NOTICE_PERIOD_NOT_RECORDED: 'Notice period not recorded',
+  NO_SALARY_ARRANGEMENT: 'No salary arrangement in force',
+  ARRANGEMENT_GAP: 'The salary arrangements leave days of the period uncovered',
+  CURRENCY_MISMATCH: 'In another currency than the settlement',
+  HEAD_NOT_CONFIGURED: 'Pay head not configured',
+  COMPONENT_BASIS_NOT_MONTHLY: 'The salary component is not a monthly amount',
+  COMPONENT_HEAD_NOT_FIXED: 'The pay head is not a fixed amount',
+  RATE_BASIS_MISSING: 'The salary lacks the components of the rate basis',
+  LEAVE_DECISIONS_PENDING: 'Leave requests wait for a decision',
+  LOAN_SETTLEMENT_PENDING: 'An early settlement of the loan waits for a decision',
+};
+/** The daily-rate bases of the settlement policy (settlement-policy.ts RATE_BASES); shared with the settings screen. */
+export const RATE_BASIS_LABEL: Record<string, string> = { BASIC: 'Basic', BASIC_DA: 'Basic + DA', GROSS: 'Monthly gross (every fixed earning)' };
+/** Statutory rule pack revision states (statutory/rule-packs.ts); shared with the settings screen. */
+export const PACK_STATE_LABEL: Record<string, string> = {
+  DRAFT: 'Inactive draft',
+  VALIDATED: 'Validated, waiting for activation by another person',
+  ACTIVE: 'Active',
+  RETIRED: 'Retired',
+};
 const LOAN_KIND_LABEL: Record<string, string> = { LOAN: 'Loan', ADVANCE: 'Salary advance' };
 const DECISION_LABEL: Record<string, string> = { APPROVE: 'Approved', RETURN: 'Returned for correction', REJECT: 'Rejected' };
 const STEP_LABEL: Record<string, string> = { review: 'Review', approve: 'Approval' };
@@ -451,6 +645,7 @@ const UPLOAD_ROW_WORDS: Record<string, string> = {
   INVALID_LINE_KIND: 'The line kind must be STANDARD, NOTICE_ADJUSTMENT or blank.',
   NOTICE_PERIOD_NOT_RECORDED: 'A notice adjustment needs the contractual notice period recorded on the exit first.',
   DUPLICATE_COMPONENT: 'This pay component is already on an earlier row; each component appears once.',
+  ALREADY_PAID_IN_PAYROLL: 'The final period’s approved or processed monthly payroll already pays this component; it is not paid again in the settlement.',
   BATCH_REJECTED: 'Valid, but not applied: a file is applied all or nothing.',
 };
 
@@ -458,14 +653,14 @@ function readable(code: string): string {
   const text = code.replace(/_/g, ' ').toLowerCase();
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
-const labelOf = (map: Record<string, string>, code: string) => map[code] ?? readable(code);
+export const labelOf = (map: Record<string, string>, code: string) => map[code] ?? readable(code);
 const letterTypeLabel = (code: string) => LETTER_TYPES.find(([c]) => c === code)?.[1] ?? readable(code);
 const settlementLabel = (state: string) => labelOf(SETTLEMENT_STATE_LABEL, state);
 const enc = encodeURIComponent;
 const pad = (n: number) => String(n).padStart(2, '0');
 
 /** An instant shown as the viewer's local day (formatDate) and local time; anything else exactly as formatDate shows it. */
-function when(iso: string | null | undefined): string {
+export function when(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(iso) || Number.isNaN(d.getTime())) return formatDate(iso);
@@ -481,15 +676,15 @@ const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.l
 
 const isForbidden = (error: unknown) => error instanceof ApiError && error.status === 403;
 const isNotFound = (error: unknown) => error instanceof ApiError && error.status === 404;
-const isConflict = (error: unknown) => error instanceof ApiError && error.status === 409;
+export const isConflict = (error: unknown) => error instanceof ApiError && error.status === 409;
 const isSelf = (error: unknown) => error instanceof ApiError && error.code === 'SELF_ACTION_NOT_ALLOWED';
 /** A refusal or bad request will not change on retry; only transient failures are retried (once). */
-const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
+export const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
 
 // ---------------------------------------------------------------------------------------------------------
 // The API's refusals in plain words
 // ---------------------------------------------------------------------------------------------------------
-type Words = Record<string, string | ((error: ApiError) => string)>;
+export type Words = Record<string, string | ((error: ApiError) => string)>;
 
 /** A list in an error's details (placeholders, missing values, open clearance tasks). */
 function listOf(error: ApiError, key: string): string[] {
@@ -558,8 +753,54 @@ const PREPARE_WORDS: Words = {
   FORBIDDEN: 'The selected role cannot prepare settlements: that needs the confidential settlement preparation grant.',
 };
 
+/** The line editor's refusals: the preparation ones, and (I-88) the rules of entered lines on a calculated draft. */
+const LINES_WORDS: Words = {
+  ...PREPARE_WORDS,
+  COMPONENT_CALCULATED: (e) => atLine(e, 'the calculation already produces this pay component, so it is not entered as well.'),
+  REASON_REQUIRED: (e) => atLine(e, 'this draft is calculated, so each entered line states why it is entered.'),
+  REASON_TOO_LONG: (e) => atLine(e, `a line’s reason has at most ${MAX_LINE_REASON} characters.`),
+};
+
+/** FR-052 (I-88): calculating a draft. */
+const CALCULATE_WORDS: Words = {
+  ...PREPARE_WORDS,
+  NOT_PREPARER: 'Only the HR Administrator who prepared this revision can calculate it.',
+  INVALID_STATE: 'Only a draft is calculated, and this revision has been submitted or closed meanwhile. It has been reloaded.',
+  EXIT_NOT_APPROVED: 'The exit is no longer approved, so the settlement is not calculated.',
+  CURRENCY_UNKNOWN: 'The settlement currency is not an approved currency code, so its rounding is unknown and nothing was calculated. Prepare a revision in an approved currency.',
+  MANUAL_LINE_CONFLICT: (e) => `An entered line uses a component the calculation produces: ${listOf(e, 'components').join(', ')}. Remove it and calculate again.`,
+  FORBIDDEN: 'The selected role cannot calculate settlements: that needs the confidential settlement preparation grant.',
+};
+
+/** F1 notice (I-88): waiving an exit's notice recovery. */
+const WAIVER_WORDS: Words = {
+  NOT_INDEPENDENT: 'The preparer of this settlement cannot waive its notice recovery: someone else waives it.',
+  ALREADY_WAIVED: 'The notice recovery of this exit is already waived. The settlement has been reloaded.',
+  SETTLEMENT_PAID: 'This exit’s settlement has been paid, so nothing more is waived for it.',
+  EXIT_NOT_APPROVED: 'A notice recovery is waived only for an approved exit, and this exit is no longer approved.',
+  REASON_REQUIRED: `Record why the notice recovery is waived (at most ${MAX_REASON.toLocaleString('en-IN')} characters).`,
+  FORBIDDEN: 'The selected role cannot waive a notice recovery: that needs its own confidential grant.',
+  NOT_FOUND: 'This exit is not available in the selected role’s scope.',
+};
+
+/**
+ * I-88: what a calculation took must still stand at submission, release eligibility and payment (settlement-gates.ts
+ * assertCalculationStillHolds); otherwise a corrected revision is calculated again.
+ */
+const CALCULATION_HOLDS_WORDS: Words = {
+  ARREARS_TAKEN_BY_PAYROLL: (e) => {
+    const n = listOf(e, 'cases').length;
+    return `Monthly payroll has meanwhile paid or taken ${n === 1 ? 'an arrear or timesheet adjustment' : n > 1 ? `${n} arrears or timesheet adjustments` : 'arrears or timesheet adjustments'} this calculation includes, so it would be paid twice. Prepare a corrected revision: calculating it again leaves them out.`;
+  },
+  LOAN_BALANCE_CHANGED: (e) => {
+    const n = listOf(e, 'loans').length;
+    return `${n > 1 ? `${n} loans or advances` : 'A loan or advance'} this calculation recovers now ${n > 1 ? 'owe' : 'owes'} less than it recovers. Prepare a corrected revision: calculating it again takes the current balance.`;
+  },
+};
+
 const UPLOAD_WORDS: Words = {
   ...PREPARE_WORDS,
+  CALCULATED_REVISION: 'This draft is calculated, so its lines are not uploaded: enter the lines for components the calculation does not produce one by one, each with its reason.',
   INVALID_FILE: 'The file is not valid CSV.',
   INVALID_TEMPLATE: `The file must start with exactly the header ${UPLOAD_HEADER} (template ${UPLOAD_TEMPLATE}).`,
   EMPTY_FILE: 'The file has a header but no lines.',
@@ -570,14 +811,42 @@ const UPLOAD_WORDS: Words = {
 
 const SUBMIT_WORDS: Words = {
   ...PREPARE_WORDS,
-  NO_LINES: 'Enter or upload the settlement lines before submitting.',
+  ...CALCULATION_HOLDS_WORDS,
+  NO_LINES: 'Calculate the draft, or enter or upload its lines, before submitting.',
   EXIT_NOT_APPROVED: 'The exit is no longer approved, so the settlement cannot be submitted.',
   NO_ELIGIBLE_REVIEWER:
     'No eligible reviewer is available: the reviewer is an HR Administrator on the settlement reviewer list, holding the review grant with this employee in scope, who did not prepare it. Nothing was submitted; ask HR to update the settlement reviewer list.',
   WORKFLOW_NOT_CONFIGURED: 'No review route is configured for settlements. Nothing was submitted; ask HR to set one up.',
 };
 
+const lowerFirst = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+
+/** One blocker of a refused approval (settlement-gates.ts), in plain words with its code. */
+function blockerText(b: Blocker): string {
+  if (b.source === 'GRATUITY') {
+    return b.code === 'CALCULATION_REQUIRED'
+      ? 'Gratuity: the employee is eligible, so the settlement must be calculated (CALCULATION_REQUIRED)'
+      : `Gratuity: the gratuity rule pack is not active (${b.code})`;
+  }
+  if (b.source === 'STATUTORY') {
+    return `Statutory deduction${b.componentCode ? ` ${b.componentCode}` : ''}: ${b.rulePackCode ? `rule pack ${b.rulePackCode}` : 'its rule pack'} is not configured`;
+  }
+  const what = `${labelOf(ITEM_KIND_LABEL, b.kind)}${b.componentCode ? ` ${b.componentCode}` : ''}`;
+  if (b.kind === 'GRATUITY' && b.code === 'RULE_PACK_NOT_CONFIGURED') return `${what}: the gratuity rule pack is not active (${b.code})`;
+  return `${what}: ${lowerFirst(labelOf(ITEM_STATUS_LABEL, b.code))} (${b.code})`;
+}
+
+function blockersOf(error: ApiError): Blocker[] {
+  const value = (error.details as { blockers?: unknown } | undefined)?.blockers;
+  return Array.isArray(value) ? value.filter((b): b is Blocker => typeof b === 'object' && b !== null && typeof (b as Blocker).code === 'string') : [];
+}
+
 const DECISION_WORDS: Words = {
+  // I-88: the final approval is refused while a rule pack, policy or record the settlement needs is missing.
+  CALCULATION_BLOCKED: (e) => {
+    const blockers = blockersOf(e).map(blockerText);
+    return `This settlement cannot be approved while something it needs is missing${blockers.length > 0 ? `: ${blockers.join('; ')}` : ''}. Return the settlement for a corrected revision once that is in place.`;
+  },
   REASON_REQUIRED: 'Record why the settlement is returned or rejected.',
   TASK_CLOSED: 'This task has already been decided.',
   INVALID_STATE: 'This settlement is no longer waiting for this decision.',
@@ -591,6 +860,7 @@ const DECISION_WORDS: Words = {
 };
 
 const RELEASE_WORDS: Words = {
+  ...CALCULATION_HOLDS_WORDS,
   NOT_INDEPENDENT: 'Release eligibility is recorded by someone other than the preparer, the reviewer and the approver of this settlement.',
   CLEARANCE_NOT_STARTED: 'The exit clearance checklist has not been started. It has to be started, and its required tasks completed, first.',
   CLEARANCE_INCOMPLETE: (e) => {
@@ -604,8 +874,35 @@ const RELEASE_WORDS: Words = {
 };
 
 const EXPORT_WORDS: Words = {
-  NOT_APPROVED: 'Only an approved settlement, or one eligible for release, is exported.',
+  NOT_APPROVED: 'Only an approved settlement, one eligible for release or a paid one is exported.',
   FORBIDDEN: 'The selected role cannot export settlements: exporting needs its own settlement export grant, separate from reading a settlement.',
+};
+
+/** I-81 item 2: the payment recorded from evidence. */
+const PAYMENT_WORDS: Words = {
+  ...CALCULATION_HOLDS_WORDS,
+  NOT_INDEPENDENT: 'The payment is recorded by someone other than the preparer, the reviewer, the approver and whoever marked it eligible for release.',
+  WITHDRAWAL_PENDING: 'The employee’s request to withdraw the resignation is waiting for its decision; the payment waits for it.',
+  ALREADY_PAID_IN_PAYROLL: (e) => `Monthly payroll for the final period already pays ${listOf(e, 'components').join(', ')}; this revision has to be voided and corrected.`,
+  PAYMENT_IN_FUTURE: 'A payment is recorded once it has happened: the date cannot be in the future.',
+  PAYMENT_BEFORE_RELEASE: 'The payment date cannot be before the settlement became eligible for release.',
+  EVIDENCE_NOT_VERIFIED: 'The evidence must be released by the malware scan and verified by someone independent.',
+  EVIDENCE_KEY_REUSED: 'This payment evidence was already used for another payment.',
+  FORBIDDEN: 'The selected role cannot record settlement payments: it needs its own grant.',
+};
+
+/** I-81 items 5, 6: voiding a live revision. */
+const VOID_WORDS: Words = {
+  NOT_INDEPENDENT: 'A revision is voided by someone other than its preparer and its employee.',
+  USE_DRAFT_CANCEL: 'A draft is cancelled by its preparer.',
+};
+
+/** I-81 item 9: in-app sending. */
+const SEND_WORDS: Words = {
+  RECIPIENT_MISMATCH: 'A document is delivered only to the employee it is about.',
+  NO_SELF_SERVICE_ACCESS: 'The employee has no active self-service account to deliver to; hand the document over another way.',
+  NOT_APPROVED: 'Only an approved, release-eligible or paid settlement is sent.',
+  FORBIDDEN: 'The selected role cannot send: sending needs its own grant.',
 };
 
 /** The ZIP download's refusals: one unavailable settlement refuses the whole archive, named where the screen knows it. */
@@ -636,6 +933,8 @@ const BULK_UPLOAD_PROBLEMS: Record<string, string> = {
   NO_DRAFT_SETTLEMENT: 'This employee has no settlement revision in draft. Prepare one from the approved exit first; a submitted revision is frozen.',
   DATE_MISMATCH: 'The last working date is not the approved last working date of the exit whose settlement is in draft.',
   NOT_PREPARER: 'Only the HR Administrator who prepared the draft can upload its lines.',
+  // I-88: an upload replaces every line, so a calculated draft takes its other lines one by one, each with its reason.
+  CALCULATED_REVISION: 'This draft is calculated, so its lines are not uploaded: enter the lines for other components on the settlement, each with its reason.',
   INVALID_STATE: 'The settlement is no longer a draft.',
   COLUMN_COUNT: 'The row does not have exactly one cell for each of the five columns.',
   FORBIDDEN: 'The selected role can no longer prepare settlements, so nothing was applied.',
@@ -665,7 +964,7 @@ function refusalText(error: unknown, words: Words = {}): string | null {
  * A failed action: the API's refusal in plain words (its code beneath for reference), anything else as the API sent
  * it. `noAnswer` explains a request whose answer never came back (the connection dropped): it may have been recorded.
  */
-function Refusal({ error, words, noAnswer }: { error: unknown; words?: Words; noAnswer?: string }) {
+export function Refusal({ error, words, noAnswer }: { error: unknown; words?: Words; noAnswer?: string }) {
   if (!error) return null;
   // fetch rejects with a TypeError when the connection drops: the request may have reached the server.
   if (error instanceof TypeError) {
@@ -726,6 +1025,7 @@ function useKeys() {
       exits: (state: string) => k('exits', state),
       tasks: k('settlement-tasks'),
       calculation: k('settlement-calculation'),
+      calculations: (id: string) => k('settlement-calculations', id),
     };
   }, [context]);
 }
@@ -738,11 +1038,14 @@ function useSettlementRefresh() {
     void qc.invalidateQueries({ queryKey: keys.settlementLists });
     void qc.invalidateQueries({ queryKey: keys.tasks });
     void qc.invalidateQueries({ queryKey: keys.allExitSettlements });
-    if (s) void qc.invalidateQueries({ queryKey: keys.settlement(s.id) });
+    if (s) {
+      void qc.invalidateQueries({ queryKey: keys.settlement(s.id) });
+      void qc.invalidateQueries({ queryKey: keys.calculations(s.id) });
+    }
   };
 }
 
-function NotPermitted({ children }: { children: ReactNode }) {
+export function NotPermitted({ children }: { children: ReactNode }) {
   return (
     <p role="note">
       <Badge tone="warn">not permitted</Badge> {children}
@@ -750,7 +1053,7 @@ function NotPermitted({ children }: { children: ReactNode }) {
   );
 }
 
-function Item({ term, children }: { term: string; children: ReactNode }) {
+export function Item({ term, children }: { term: string; children: ReactNode }) {
   return (
     <div>
       <dt>{term}</dt>
@@ -760,7 +1063,7 @@ function Item({ term, children }: { term: string; children: ReactNode }) {
 }
 
 /** A list or record that did not load: a refusal of the role, one's own record, a record outside the scope, or the API's error. */
-function LoadProblem({ error, forbidden, missing }: { error: unknown; forbidden: string; missing?: string }) {
+export function LoadProblem({ error, forbidden, missing }: { error: unknown; forbidden: string; missing?: string }) {
   if (!error) return null;
   if (isSelf(error)) return <Empty>This concerns your own record, which is not available to you in this role.</Empty>;
   if (isForbidden(error)) return <NotPermitted>{forbidden}</NotPermitted>;
@@ -769,7 +1072,7 @@ function LoadProblem({ error, forbidden, missing }: { error: unknown; forbidden:
 }
 
 /** A user the API named: the signed-in user as "you", anyone else by the id the API returned. */
-function UserRef({ userId }: { userId: string }) {
+export function UserRef({ userId }: { userId: string }) {
   const { me } = useSession();
   return me?.userId === userId ? <>you</> : <code>{userId}</code>;
 }
@@ -793,14 +1096,142 @@ function SettlementState({ state }: { state: string }) {
   return <Badge tone={SETTLEMENT_TONE[state] ?? 'neutral'}>{settlementLabel(state)}</Badge>;
 }
 
-/** FR-052: the server's calculation status and its reason; nothing is ever calculated here. */
+/**
+ * FR-052: how drafts are calculated, as the server reports it, and its reason; nothing is ever calculated here. Since I-88 a draft
+ * is calculated on the server (AVAILABLE: the reason is a hint); a server that answers otherwise is flagged in words and colour.
+ */
 function CalculationNote({ calculation }: { calculation: Calculation | undefined }) {
   if (!calculation) return null;
+  if (calculation.status === 'AVAILABLE') return <p className="hint">{calculation.reason}</p>;
   return (
     <p role="note">
-      <Badge tone="warn">calculation {labelOf(CALCULATION_LABEL, calculation.status).toLowerCase()}</Badge> {calculation.reason}
+      <Badge tone="warn">calculation {labelOf(CALCULATION_AVAILABILITY_LABEL, calculation.status).toLowerCase()}</Badge> {calculation.reason}
     </p>
   );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// I-88: a calculation item's basis in a few plain words (the server's figures, only those present; nothing worked out here)
+// ---------------------------------------------------------------------------------------------------------
+type Basis = Record<string, unknown>;
+const textOf = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : null);
+/** A rate or amount of the basis with 2 decimals, as amounts show (the exact value stays in the snapshot). */
+const rateText = (v: unknown): string | null => {
+  const t = textOf(v);
+  return t === null || Number.isNaN(Number(t)) ? null : Number(t).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+/** A count of days, units or years without padding zeros ("18.5000" reads 18.5). */
+const unitText = (v: unknown): string | null => {
+  const t = textOf(v);
+  return t === null ? null : formatUnits(t);
+};
+const listIn = (v: unknown): Basis[] => (Array.isArray(v) ? v.filter((x): x is Basis => typeof x === 'object' && x !== null) : []);
+const plural = (n: string, one: string, many: string) => `${n} ${n === '1' ? one : many}`;
+
+/** The "How" of a calculation item: a short summary of the basis the server recorded for it, by kind. */
+export function howText(item: CalculationItem): string {
+  const b: Basis = item.basis ?? {};
+  const parts: string[] = [];
+  const push = (text: string | null | false | undefined) => {
+    if (text) parts.push(text);
+  };
+  const rateBasis = textOf(b.rateBasis);
+  switch (item.kind) {
+    case 'EARNINGS_DUE': {
+      const days = unitText(b.daysInMonth);
+      const segments = listIn(b.segments)
+        .map((g) => {
+          const monthly = rateText(g.monthlyAmount);
+          const paid = unitText(g.paidDays);
+          return monthly && paid ? `${monthly} x ${plural(paid, 'paid day', 'paid days')}${days ? ` / ${days}` : ''}` : null;
+        })
+        .filter((t): t is string => t !== null);
+      push(segments.join(' + '));
+      const period = textOf(b.periodCode);
+      if (period) push(`paid by the ${period} payroll${textOf(b.runState) ? ` (${readable(String(b.runState)).toLowerCase()})` : ''}`);
+      const inputs = listIn(b.inputs).map((i) => `${textOf(i.componentCode) ?? '?'}${textOf(i.periodCode) ? ` (${String(i.periodCode)})` : ''}`);
+      if (inputs.length > 0) push(`payroll inputs ${inputs.join(', ')}`);
+      const covered = unitText(b.coveredDays);
+      const eligible = unitText(b.eligibleDays);
+      if (covered && eligible) push(`${covered} of ${eligible} days covered by a salary arrangement`);
+      else if (segments.length === 0 && textOf(b.eligibleFrom) && textOf(b.lastWorkingDate)) push(`${String(b.eligibleFrom)} to ${String(b.lastWorkingDate)}`);
+      const currencies = Array.isArray(b.arrangementCurrencies) ? b.arrangementCurrencies.filter((c): c is string => typeof c === 'string') : [];
+      if (currencies.length > 0) push(`salary in ${currencies.join(', ')}${textOf(b.settlementCurrency) ? `, settlement in ${String(b.settlementCurrency)}` : ''}`);
+      if (textOf(b.rulePackCode)) push(`rule pack ${String(b.rulePackCode)}`);
+      break;
+    }
+    case 'LEAVE_ENCASHMENT': {
+      const available = unitText(b.available);
+      const cap = unitText(b.cap);
+      const units = unitText(b.units);
+      const monthly = rateText(b.monthlyRate);
+      const divisor = unitText(b.divisor);
+      if (b.encashable === false) push(`not encashable under the settlement policy${available ? ` (${available} units available)` : ''}`);
+      else if (units && available) push(`${units} of ${available} units${cap ? ` (cap ${cap})` : ''}${monthly && divisor ? ` x ${monthly} / ${divisor}` : ''}`);
+      else if (available) push(`${available} units available${unitText(b.pending) ? `, ${unitText(b.pending)} pending` : ''}`);
+      if (rateBasis) push(`rate on ${labelOf(RATE_BASIS_LABEL, rateBasis)}`);
+      break;
+    }
+    case 'NOTICE_RECOVERY': {
+      const required = unitText(b.requiredDays);
+      const served = unitText(b.servedDays);
+      const short = unitText(b.shortfallDays);
+      const monthly = rateText(b.monthlyRate);
+      const divisor = unitText(b.divisor);
+      if (required && served) {
+        const head = `${required} required, ${served} served`;
+        push(short && monthly && divisor ? `${head}: ${plural(short, 'day', 'days')} x ${monthly} / ${divisor}` : short && short !== '0' ? `${head}: ${plural(short, 'day', 'days')} short` : head);
+      }
+      if (rateBasis) push(`rate on ${labelOf(RATE_BASIS_LABEL, rateBasis)}`);
+      if (textOf(b.waiverId)) push('waived');
+      break;
+    }
+    case 'LOAN_RECOVERY': {
+      const outstanding = textOf(b.outstanding);
+      if (outstanding) push(`${textOf(b.loanKind) ? `${labelOf(LOAN_KIND_LABEL, String(b.loanKind))}: ` : ''}${formatAmount(outstanding, textOf(b.currencyCode) ?? '')} outstanding`);
+      break;
+    }
+    case 'ARREARS':
+    case 'ADJUSTMENT': {
+      const total = textOf(b.total);
+      if (total) push(`${formatAmount(total, textOf(b.currencyCode) ?? '')}${textOf(b.originPeriodCode) ? ` from period ${String(b.originPeriodCode)}` : ''}`);
+      break;
+    }
+    case 'GRATUITY': {
+      const counted = unitText(b.countedYears);
+      const wages = rateText(b.monthlyWages);
+      const wageDays = unitText(b.wageDays);
+      const divisor = unitText(b.wageDivisor);
+      const completed = unitText(b.completedYears);
+      const needed = unitText(b.minimumServiceYears);
+      if (counted && wages && wageDays && divisor) {
+        push(`${plural(counted, 'counted year', 'counted years')} x ${wages} x ${wageDays} / ${divisor}`);
+        if (b.capped === true) push(`capped at the ceiling of ${rateText(b.ceilingAmount) ?? '?'}${rateText(b.uncapped) ? ` (${rateText(b.uncapped)} before it)` : ''}`);
+      } else if (item.status === 'NOT_ELIGIBLE' && completed && needed && b.exemptSeparation !== true) {
+        push(`${plural(completed, 'completed year', 'completed years')} of the ${needed} needed`);
+      } else if (counted) {
+        push(plural(counted, 'counted year', 'counted years'));
+      }
+      if (b.exemptSeparation === true) push('no minimum service for this separation');
+      if (textOf(b.packRevision)) push(`pack revision ${String(b.packRevision)}${textOf(b.packState) ? ` (${labelOf(PACK_STATE_LABEL, String(b.packState)).toLowerCase()})` : ''}`);
+      break;
+    }
+    case 'STATUTORY_DEDUCTION': {
+      const bases = Array.isArray(b.baseComponentCodes) ? b.baseComponentCodes.filter((c): c is string => typeof c === 'string') : [];
+      if (textOf(b.rulePackCode)) push(`rule pack ${String(b.rulePackCode)}${bases.length > 0 ? ` on ${bases.join(', ')}` : ''}`);
+      // Valued from a pack (I-85, I-90, FR-039): how, from the recorded workings; the reason is said there, not again below.
+      if (textOf(b.output)) {
+        push(`${textOf(b.packCode) ?? ''}${textOf(b.packRevision) ? ` revision ${String(b.packRevision)}` : ''}`.trim());
+        push(statutoryWorkingsNote(item.status === 'CALCULATED', b, (v) => rateText(v) ?? v));
+        return parts.join('; ');
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  if (textOf(b.reason)) push(String(b.reason));
+  return parts.length > 0 ? parts.join('; ') : '—';
 }
 
 const placeholderLabelMap = (items: readonly Placeholder[] | undefined) => new Map((items ?? []).map((p) => [p.key, p.label]));
@@ -811,15 +1242,26 @@ function placeholderName(labels: ReadonlyMap<string, string>, key: string): stri
   return label ? `${label} ({{${key}}})` : `{{${key}}}`;
 }
 
-function usePlaceholders(enabled: boolean) {
+/**
+ * The approved placeholders of a letter type (GET /v1/letter-placeholders?letterType=; I-82 item 1: an OFFER template has its
+ * own). Without a well-formed type, the employee letters' list. Which type takes which list is the server's to say.
+ */
+function usePlaceholders(enabled: boolean, letterType?: string) {
   const keys = useKeys();
+  const type = letterType !== undefined && LETTER_TYPE_CODE.test(letterType) ? letterType : '';
   return useQuery({
     enabled,
-    queryKey: keys.placeholders,
-    queryFn: () => api<{ items: Placeholder[] }>('/v1/letter-placeholders'),
+    queryKey: [...keys.placeholders, type],
+    queryFn: () => api<{ items: Placeholder[] }>(type ? `/v1/letter-placeholders?letterType=${enc(type)}` : '/v1/letter-placeholders'),
     retry: retryTransient,
     staleTime: 5 * 60_000,
   });
+}
+
+/** I-82 item 1: an OFFER template is used from the approved offer in Hiring only. */
+function OfferTemplateNote({ letterType }: { letterType: string }) {
+  if (letterType !== OFFER_LETTER_TYPE) return null;
+  return <p className="hint wide">An offer letter is issued from the approved offer in Hiring, not from an employee process.</p>;
 }
 
 // =========================================================================================================
@@ -915,7 +1357,7 @@ function PlaceholderReference() {
     <Section title="Approved placeholders">
       <p className="hint">
         Write a placeholder as {'{{name}}'}. Every placeholder a template uses is mandatory unless the template marks it optional, and a missing mandatory value blocks
-        the final letter. Only these placeholders are accepted.
+        the final letter. These are the placeholders of employee letters; an offer letter template (letter type OFFER) has its own, which its editor lists.
       </p>
       {placeholders.isPending && <p className="hint">Loading the approved placeholders…</p>}
       <LoadProblem error={placeholders.error} forbidden="The selected role cannot view the approved placeholders." />
@@ -1044,10 +1486,11 @@ function CreateTemplate() {
   const keys = useKeys();
   const qc = useQueryClient();
   const id = useId();
-  const approved = usePlaceholders(can(TEMPLATE_READ));
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [letterType, setLetterType] = useState('');
+  // The placeholders of the chosen letter type (an OFFER template has the offer's own).
+  const approved = usePlaceholders(can(TEMPLATE_READ), letterType.trim());
   const [body, setBody] = useState('');
   const [optional, setOptional] = useState<string[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
@@ -1118,6 +1561,7 @@ function CreateTemplate() {
             </option>
           ))}
         </datalist>
+        <OfferTemplateNote letterType={letterType.trim()} />
         <TemplateTextFields body={body} onBody={setBody} optional={optional} onOptional={setOptional} approved={approved.data?.items} disabled={create.isPending} />
         <p className="hint wide">The template starts as draft revision 1. Publish it on the template’s page before letters can use it.</p>
         {problem && (
@@ -1200,6 +1644,7 @@ function TemplateView({ id }: { id: string }) {
             <Item term="Usable for letters">{usableText({ active: t.active, publishedRevision: published?.revision ?? null })}</Item>
           </dl>
         )}
+        {t && <OfferTemplateNote letterType={t.letterType} />}
       </Section>
       {t && <RevisionTable template={t} />}
       {t && can(TEMPLATE_MANAGE) && <TemplateSettings template={t} />}
@@ -1340,7 +1785,8 @@ function TemplateSettings({ template: t }: { template: TemplateDetail }) {
 function DraftEditor({ template: t }: { template: TemplateDetail }) {
   const { can } = useSession();
   const refresh = useTemplateRefresh(t.id);
-  const approved = usePlaceholders(can(TEMPLATE_READ));
+  // The placeholders of this template's letter type (an OFFER template has the offer's own).
+  const approved = usePlaceholders(can(TEMPLATE_READ), t.letterType);
   const draft = t.revisions.find((r) => r.state === 'DRAFT') ?? null;
   const published = t.revisions.find((r) => r.state === 'PUBLISHED') ?? null;
   const start = draft ?? published;
@@ -1631,19 +2077,45 @@ function StoredLetterList({ employeeId }: { employeeId: string }) {
   return (
     <Section title="Stored letters">
       <p className="hint">
-        Final letters exactly as generated, newest first, each with the template revision it was made from and who generated it. Each is a confidential file; it is not
-        sent to anyone, so download it for manual delivery.
+        Final letters exactly as generated, newest first, each with the template revision it was made from and who generated it. Each is a confidential file. Sending
+        delivers it to the employee’s own self-service with an in-app notice (never an e-mail attachment); it can also be downloaded for delivery by hand.
       </p>
       {outputs.isPending && <p className="hint">Loading the stored letters…</p>}
       <LoadProblem error={outputs.error} forbidden="The selected role cannot read stored letters." missing="This employee is not in the selected role’s scope." />
       {outputs.data && items.length === 0 && <Empty>No letters have been generated for this employee.</Empty>}
-      {items.length > 0 && <OutputTable items={items} />}
+      {items.length > 0 && <OutputTable items={items} employeeId={employeeId} />}
       {outputs.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(outputs.data)} onPage={setPage} label="Stored letter pages" noun="letter" />}
     </Section>
   );
 }
 
-function OutputTable({ items }: { items: readonly LetterOutput[] }) {
+/** FR-018 (I-81 item 9): in-app delivery of one stored letter to its employee, after the sender confirms the recipient. */
+function SendLetter({ output, employeeId }: { output: LetterOutput; employeeId: string }) {
+  const keys = useKeys();
+  const qc = useQueryClient();
+  const send = useMutation({
+    mutationFn: () => api<Delivery>(`/v1/letter-outputs/${enc(output.id)}/send`, { body: { recipientEmployeeId: employeeId, idempotencyKey: idempotencyKey('letter-send') } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.outputs(employeeId) }),
+  });
+  return (
+    <>
+      <button
+        type="button"
+        className="secondary"
+        disabled={send.isPending}
+        onClick={() => {
+          if (window.confirm('Deliver this letter to the employee’s own self-service? The employee it is about is the only recipient.')) send.mutate();
+        }}
+      >
+        Send to self-service
+      </button>
+      <Refusal error={send.error} words={SEND_WORDS} />
+    </>
+  );
+}
+
+function OutputTable({ items, employeeId }: { items: readonly LetterOutput[]; employeeId?: string }) {
+  const { can } = useSession();
   return (
     <div style={SCROLL}>
       <table aria-label="Stored letters">
@@ -1677,6 +2149,7 @@ function OutputTable({ items }: { items: readonly LetterOutput[] }) {
               <td>{labelOf(DELIVERY_LABEL, o.deliveryState)}</td>
               <td>
                 <OutputDownload output={o} />
+                {employeeId && can(LETTER_SEND) && <SendLetter output={o} employeeId={employeeId} />}
               </td>
             </tr>
           ))}
@@ -1917,6 +2390,7 @@ function LetterComposer({ processId, employeeId }: { processId: string; employee
       INVALID_REFERENCE: 'No letter template has this code.',
       TEMPLATE_INACTIVE: 'This letter template is inactive, so it cannot be used for letters. Choose another template, or ask HR to activate it.',
       TEMPLATE_NOT_PUBLISHED: 'This letter template has no published revision yet, so it cannot be used for letters.',
+      OFFER_TEMPLATE: 'This is an offer letter template: an offer letter is issued from the approved offer in Hiring, not from an employee process. Choose another template.',
       MISSING_PLACEHOLDER: (e) =>
         `The final letter was not generated: mandatory values are missing: ${listOf(e, 'missing')
           .map((k) => placeholderName(labels, k))
@@ -2137,6 +2611,8 @@ function SettlementRegister() {
   const [state, setState] = useState('');
   const [employeeCode, setEmployeeCode] = useState('');
   const [month, setMonth] = useState('');
+  // FR-054 disbursement month (CL-241; I-81 item 2): the month of the recorded payment date.
+  const [disbursement, setDisbursement] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [problem, setProblem] = useState<string | null>(null);
@@ -2156,13 +2632,14 @@ function SettlementRegister() {
   const apply = (event: FormEvent) => {
     event.preventDefault();
     const codeText = employeeCode.trim();
-    const missing = month !== '' && !MONTH.test(month) ? 'Enter the month as YYYY-MM.' : null;
+    const missing = (month !== '' && !MONTH.test(month)) || (disbursement !== '' && !MONTH.test(disbursement)) ? 'Enter the month as YYYY-MM.' : null;
     setProblem(missing);
     if (missing !== null) return;
     const params = new URLSearchParams();
     if (state) params.set('state', state);
     if (codeText) params.set('employeeCode', codeText);
     if (month) params.set('lastWorkingMonth', month);
+    if (disbursement) params.set('disbursementMonth', disbursement);
     setQuery(params.toString());
     setPage(1);
     setSelected([]);
@@ -2171,6 +2648,7 @@ function SettlementRegister() {
     setState('');
     setEmployeeCode('');
     setMonth('');
+    setDisbursement('');
     setProblem(null);
     setQuery('');
     setPage(1);
@@ -2211,6 +2689,10 @@ function SettlementRegister() {
         <label>
           Month of the approved last working date
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+        </label>
+        <label>
+          Disbursement month (recorded payment date)
+          <input type="month" value={disbursement} onChange={(e) => setDisbursement(e.target.value)} />
         </label>
         <div className="row">
           <button type="submit">Show settlements</button>
@@ -2289,7 +2771,93 @@ function SettlementRegister() {
       )}
       {list.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(list.data)} onPage={setPage} label="Settlement pages" noun="settlement" />}
       {selectable && <ArchiveDownload selected={selected} canSelectPage={exportable.some((s) => !isSelected(s.id))} onSelectPage={selectPage} onClear={() => setSelected([])} />}
+      {selectable && (
+        <UploadedListSelection
+          filters={{ state, lastWorkingMonth: month, disbursementMonth: disbursement }}
+          onMatched={(found) =>
+            setSelected((now) => {
+              const next = [...now];
+              for (const s of found) if (EXPORTABLE_STATES.has(s.state) && next.length < MAX_ARCHIVE && !next.some((x) => x.id === s.id)) next.push({ id: s.id, name: nameOf(s) });
+              return next;
+            })
+          }
+        />
+      )}
     </Section>
+  );
+}
+
+const SELECTION_OUTCOME_LABEL: Record<string, string> = {
+  MATCHED: 'Matched',
+  NO_SETTLEMENT: 'No settlement passes the filters',
+  NOT_FOUND: 'No employee with this code in the selected role’s scope',
+  DUPLICATE: 'Repeated: counted once',
+  INVALID_CODE: 'Not one employee code',
+};
+
+interface SelectionRow {
+  row: number;
+  employeeCode: string | null;
+  outcome: string;
+  settlements: number;
+}
+
+/**
+ * FR-054 "optional uploaded-list selection" (CL-243; I-81 item 7): a CSV with the single column employee_code selects the
+ * settlements of those employees, matched exactly (case and spaces ignored), with the list's filters; each row's outcome is shown
+ * and the exportable matches join the ZIP selection. The file is scanned and never stored.
+ */
+function UploadedListSelection({ filters, onMatched }: { filters: Record<string, string>; onMatched: (found: SettlementSummary[]) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const select = useMutation({
+    mutationFn: async (f: File) => {
+      const body: Record<string, string> = { contentBase64: await fileToBase64(f) };
+      for (const [k, v] of Object.entries(filters)) if (v) body[k] = v;
+      return api<{ rows: SelectionRow[]; total: number; matched: number; items: SettlementSummary[] }>('/v1/settlements/selection', { body });
+    },
+    onSuccess: (result) => onMatched(result.items),
+  });
+  return (
+    <div className="stack" role="group" aria-label="Select settlements from an uploaded list">
+      <p className="hint">
+        Or select from a list: a CSV file with the single column <code>employee_code</code> (template SETTLEMENT_SELECTION_V1). Codes match exactly; the settlements
+        of the matched employees that can be exported join the ZIP selection.
+      </p>
+      <TemplateDownload base="/v1/settlements/selection" code="SETTLEMENT_SELECTION_V1" />
+      <div className="row">
+        <label>
+          Employee list file
+          <input type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </label>
+        <button type="button" disabled={!file || select.isPending} onClick={() => file && select.mutate(file)}>
+          Select from the list
+        </button>
+      </div>
+      <ErrorNote error={select.error} />
+      {select.data && (
+        <>
+          <p role="status">{`${select.data.matched} of ${select.data.total} rows matched; ${select.data.items.length} settlements found.`}</p>
+          <table aria-label="Uploaded list rows">
+            <thead>
+              <tr>
+                <th scope="col">Row</th>
+                <th scope="col">Employee code</th>
+                <th scope="col">Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {select.data.rows.map((r) => (
+                <tr key={r.row}>
+                  <td>{r.row}</td>
+                  <td>{r.employeeCode ?? '—'}</td>
+                  <td>{`${labelOf(SELECTION_OUTCOME_LABEL, r.outcome)}${r.outcome === 'MATCHED' ? ` (${r.settlements})` : ''}`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -2596,7 +3164,7 @@ function PrepareRevision({ exitId, revisions }: { exitId: string; revisions: rea
       ) : (
         <form className="grid-form" aria-label="Prepare a revision" onSubmit={submit}>
           <p className="hint wide">
-            No calculation is configured, so you enter or upload the lines of the new draft yourself; an independent reviewer and approver then decide it.
+            You calculate the new draft from a snapshot on the server, or enter or upload its lines yourself; an independent reviewer and approver then decide it.
             {latest &&
               ` With the same currency as revision ${latest.revision}, its lines (active pay components only) are copied into the new draft as a starting point.`}
           </p>
@@ -2696,6 +3264,9 @@ function SettlementView({ id }: { id: string }) {
               <Item term="Currency">{s.currencyCode}</Item>
               <Item term="Calculation">{labelOf(CALCULATION_LABEL, s.calculationStatus)}</Item>
               <Item term="Payment">{labelOf(PAYMENT_STATUS_LABEL, s.paymentStatus)}</Item>
+              {s.paymentDate && <Item term="Paid on (disbursement month)">{formatDate(s.paymentDate)}</Item>}
+              {s.payment && <Item term="Payment reference">{s.payment.reference}</Item>}
+              {s.cancelReason && <Item term="Why it was cancelled">{s.cancelReason}</Item>}
               <Item term="Prepared by">
                 <UserRef userId={s.preparedBy} />
               </Item>
@@ -2713,21 +3284,175 @@ function SettlementView({ id }: { id: string }) {
               )}
             </dl>
             <p>{STATE_EXPLANATION[s.state] ?? settlementLabel(s.state)}</p>
-            {s.calculationStatus === 'NOT_CONFIGURED' && calculation.data?.status === 'NOT_CONFIGURED' && <CalculationNote calculation={calculation.data} />}
+            {/* A revision not calculated: how drafts are calculated (I-88, a hint for a draft), or the older server's "not configured". */}
+            {s.calculationStatus !== 'CALCULATED' && (calculation.data?.status === 'NOT_CONFIGURED' || (calculation.data?.status === 'AVAILABLE' && s.state === 'DRAFT')) && (
+              <CalculationNote calculation={calculation.data} />
+            )}
           </>
         )}
       </Section>
+      {s && <CalculationView s={s} />}
       {s && <SettlementLines s={s} />}
       {s && <RemainingBalances s={s} />}
       {s && <DecisionTrail s={s} />}
       {s && !own && s.state === 'DRAFT' && can(SETTLEMENT_PREPARE) && <PreparerActions s={s} exit={exit.data} onNotice={setNotice} />}
+      {s && !own && s.state === 'DRAFT' && can(SETTLEMENT_WAIVE_NOTICE) && s.noticeWaiver === null && recoversNotice(s) && <WaiveNotice s={s} onNotice={setNotice} />}
       {s && !own && s.state === 'APPROVED' && can(SETTLEMENT_RELEASE) && <ReleaseEligibility s={s} onNotice={setNotice} />}
-      {s && (s.state === 'APPROVED' || s.state === 'RELEASE_ELIGIBLE') && can(SETTLEMENT_EXPORT) && <SettlementExport s={s} />}
+      {s && !own && s.state === 'RELEASE_ELIGIBLE' && can(SETTLEMENT_RECORD_PAYMENT) && <RecordPayment s={s} onNotice={setNotice} />}
+      {s && !own && VOIDABLE_STATES.has(s.state) && can(SETTLEMENT_APPROVE) && <VoidSettlement s={s} onNotice={setNotice} />}
+      {s && OUTPUT_STATES.has(s.state) && can(SETTLEMENT_EXPORT) && <SettlementExport s={s} />}
+      {s && !own && OUTPUT_STATES.has(s.state) && can(SETTLEMENT_SEND) && <SendStatement s={s} />}
     </>
   );
 }
 
-/** Confidential lines and net amount, exactly as returned; the net is the server's, never a sum worked out here. */
+/** Whether the amount group came back (the lines, the net amount, the calculation and the waiver come with it, or none of them). */
+const withAmounts = (s: SettlementDetail) => s.lines !== undefined || s.netAmount !== undefined || s.calculation !== undefined;
+const isCalculatedLine = (l: SettlementLine) => l.source === 'CALCULATED';
+/** The calculation the revision carries recovers unserved notice, so there is something a waiver would change. */
+const recoversNotice = (s: SettlementDetail) => (s.calculation?.items ?? []).some((i) => i.kind === 'NOTICE_RECOVERY' && i.status === 'CALCULATED');
+
+/**
+ * FR-052 (I-88): the calculation snapshot the revision carries, exactly as the server recorded it: when and by whom, the period, and
+ * each item with what it is, whether it blocks the approval and the basis the server used. Confidential like the lines.
+ */
+function CalculationView({ s }: { s: SettlementDetail }) {
+  const { can } = useSession();
+  if (!withAmounts(s)) {
+    return (
+      <Section title="Calculation">
+        <p className="hint">The calculation is confidential like the settlement amounts, and the selected role does not receive it.</p>
+      </Section>
+    );
+  }
+  const k = s.calculation ?? null;
+  return (
+    <Section title="Calculation">
+      {s.noticeWaiver && (
+        <p role="note">
+          <Badge tone="warn">waived</Badge> Notice recovery waived: {s.noticeWaiver.reason}{' '}
+          <span className="hint">
+            (by <UserRef userId={s.noticeWaiver.waivedBy} />, {when(s.noticeWaiver.waivedAt)})
+          </span>
+        </p>
+      )}
+      {k === null ? (
+        <Empty>Not calculated yet.</Empty>
+      ) : (
+        <>
+          <dl className="kv">
+            <Item term="Snapshot">{k.sequence}</Item>
+            <Item term="Calculated">
+              {when(k.calculatedAt)} by <UserRef userId={k.calculatedBy} />
+            </Item>
+            <Item term="Last working date">{formatDate(k.lastWorkingDate)}</Item>
+            <Item term="Period">
+              {formatDate(k.periodStart)} to {formatDate(k.periodEnd)}
+            </Item>
+            <Item term="Settlement policy">{k.policyRevision !== null && k.policyRevision !== undefined ? `Revision ${k.policyRevision}` : 'None in force on the last working date'}</Item>
+            <Item term="Blocking items">
+              {k.blockingCount}
+              {k.blockingCount > 0 && (
+                <>
+                  {' '}
+                  <Badge tone="bad">{k.blockingCount === 1 ? 'blocks approval' : 'block approval'}</Badge>
+                </>
+              )}
+            </Item>
+          </dl>
+          {k.blockingCount > 0 && (
+            <p className="hint">
+              An item that blocks approval needs a policy, rule pack or record that is missing. Once it is in place the draft is calculated again; a submitted revision is
+              returned and corrected through a new revision.
+            </p>
+          )}
+          <CalculationItems items={k.items} currency={k.currencyCode} />
+          {k.sequence > 1 && <EarlierSnapshots s={s} current={k} />}
+        </>
+      )}
+      {(can(POLICY_READ) || can(STATUTORY_READ)) && (
+        <p>
+          <Link to={PATHS.settlementSettings}>Settlement policy and statutory packs</Link>
+        </p>
+      )}
+    </Section>
+  );
+}
+
+function CalculationItems({ items, currency }: { items: readonly CalculationItem[]; currency: string }) {
+  if (items.length === 0) return <Empty>The calculation has no items.</Empty>;
+  return (
+    <div style={SCROLL}>
+      <table aria-label="Calculation items">
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th scope="col">Status</th>
+            <th scope="col">Pay component</th>
+            <th scope="col">Leave type</th>
+            <th scope="col">Amount</th>
+            <th scope="col">How</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((i) => (
+            <tr key={i.position}>
+              <td>{labelOf(ITEM_KIND_LABEL, i.kind)}</td>
+              <td>
+                {labelOf(ITEM_STATUS_LABEL, i.status)}
+                {i.blocking && (
+                  <>
+                    {' '}
+                    <Badge tone="bad">Blocks approval</Badge>
+                  </>
+                )}
+              </td>
+              <td>{i.componentCode ?? ''}</td>
+              <td>{i.leaveTypeCode ?? ''}</td>
+              <td>{i.amount === null ? '' : <Money value={i.amount} currency={currency} />}</td>
+              <td>{howText(i)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Earlier snapshots of the revision (GET /v1/settlements/:id/calculations, newest first), read only when opened. */
+function EarlierSnapshots({ s, current }: { s: SettlementDetail; current: SettlementCalculation }) {
+  const keys = useKeys();
+  const [open, setOpen] = useState(false);
+  const list = useQuery({
+    enabled: open,
+    queryKey: keys.calculations(s.id),
+    queryFn: () => api<{ items: SettlementCalculation[] }>(`/v1/settlements/${enc(s.id)}/calculations`),
+    retry: retryTransient,
+  });
+  const earlier = (list.data?.items ?? []).filter((k) => k.id !== current.id);
+  return (
+    <details onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary>Earlier snapshots</summary>
+      {list.isFetching && !list.data && <p className="hint">Loading the earlier snapshots…</p>}
+      <LoadProblem error={list.error} forbidden="The selected role cannot read the calculation snapshots." />
+      {list.data && earlier.length === 0 && <Empty>No earlier snapshot.</Empty>}
+      {earlier.length > 0 && (
+        <ul aria-label="Earlier snapshots">
+          {earlier.map((k) => (
+            <li key={k.id}>
+              {`Snapshot ${k.sequence}, calculated ${when(k.calculatedAt)}: ${plural(String(k.itemCount), 'item', 'items')}, ${k.blockingCount} blocking approval`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+}
+
+/**
+ * Confidential lines and net amount, exactly as returned; the net is the server's, never a sum worked out here. The calculated
+ * lines (I-88) and the lines entered, uploaded or copied for other components are shown apart, the entered ones with their reason.
+ */
 function SettlementLines({ s }: { s: SettlementDetail }) {
   if (s.lines === undefined && s.netAmount === undefined) {
     return (
@@ -2736,10 +3461,26 @@ function SettlementLines({ s }: { s: SettlementDetail }) {
       </Section>
     );
   }
+  const calculated = (s.lines ?? []).filter(isCalculatedLine);
+  const entered = (s.lines ?? []).filter((l) => !isCalculatedLine(l));
   return (
     <Section title="Lines and net amount">
-      {s.lines && s.lines.length === 0 && <Empty>No lines yet.</Empty>}
-      {s.lines && s.lines.length > 0 && <LineTable lines={s.lines} currency={s.currencyCode} />}
+      {s.lines && (
+        <>
+          <h3 style={H3}>Calculated lines</h3>
+          {calculated.length > 0 ? (
+            <LineTable lines={calculated} currency={s.currencyCode} label="Calculated lines" source={false} reasons={false} />
+          ) : (
+            <Empty>{s.calculationStatus === 'CALCULATED' ? 'The calculation produced no line.' : 'None: this revision is not calculated.'}</Empty>
+          )}
+          <h3 style={H3}>Entered lines</h3>
+          {entered.length > 0 ? (
+            <LineTable lines={entered} currency={s.currencyCode} label="Entered lines" reasons />
+          ) : (
+            <Empty>{s.calculationStatus === 'CALCULATED' ? 'No line entered for other components.' : 'No lines yet.'}</Empty>
+          )}
+        </>
+      )}
       {s.netAmount !== undefined && (
         <p>
           <strong>Net amount:</strong> <Money value={s.netAmount} currency={s.currencyCode} /> <span className="hint">(as recorded by the server for these lines)</span>
@@ -2749,17 +3490,31 @@ function SettlementLines({ s }: { s: SettlementDetail }) {
   );
 }
 
-function LineTable({ lines, currency }: { lines: readonly SettlementLine[]; currency: string }) {
+/** Settlement lines; the Reason column shows where asked, or (by default) when some line has one. */
+function LineTable({
+  lines,
+  currency,
+  label = 'Settlement lines',
+  source = true,
+  reasons = lines.some((l) => !!l.reason),
+}: {
+  lines: readonly SettlementLine[];
+  currency: string;
+  label?: string;
+  source?: boolean;
+  reasons?: boolean;
+}) {
   return (
     <div style={SCROLL}>
-      <table aria-label="Settlement lines">
+      <table aria-label={label}>
         <thead>
           <tr>
             <th scope="col">Pay component</th>
             <th scope="col">Kind</th>
             <th scope="col">Line kind</th>
-            <th scope="col">Source</th>
+            {source && <th scope="col">Source</th>}
             <th scope="col">Amount</th>
+            {reasons && <th scope="col">Reason</th>}
           </tr>
         </thead>
         <tbody>
@@ -2770,15 +3525,111 @@ function LineTable({ lines, currency }: { lines: readonly SettlementLine[]; curr
               </td>
               <td>{labelOf(COMPONENT_KIND_LABEL, l.componentKind)}</td>
               <td>{labelOf(LINE_KIND_LABEL, l.lineKind)}</td>
-              <td>{labelOf(LINE_SOURCE_LABEL, l.source)}</td>
+              {source && <td>{labelOf(LINE_SOURCE_LABEL, l.source)}</td>}
               <td>
                 <Money value={l.amount} currency={currency} />
               </td>
+              {reasons && <td>{l.reason || '—'}</td>}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/**
+ * F1 notice (I-88): the exit's notice recovery waived, with a reason, by someone holding the waiver right who is neither the employee
+ * nor the preparer (the server refuses both). It applies when the preparer calculates the draft again; once per exit.
+ */
+function WaiveNotice({ s, onNotice }: { s: SettlementDetail; onNotice: (text: string) => void }) {
+  const { me } = useSession();
+  const refresh = useSettlementRefresh();
+  const [reason, setReason] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const preparer = me?.userId === s.preparedBy;
+  const blockedId = `${useId()}-preparer`;
+  const waive = useMutation({
+    mutationFn: (text: string) => api<{ id: string; exitCaseId: string; waivedBy: string }>(`/v1/exit-cases/${enc(s.exitCaseId)}/notice-waiver`, { body: { reason: text } }),
+    onSuccess: () => {
+      setReason('');
+      onNotice('Notice recovery waived. The preparer calculates the draft again to apply it.');
+      refresh(s);
+    },
+    onError: (error) => {
+      if (isConflict(error) || !(error instanceof ApiError)) refresh(s);
+    },
+  });
+  const item = s.calculation?.items.find((i) => i.kind === 'NOTICE_RECOVERY' && i.status === 'CALCULATED');
+  const short = unitText(item?.basis?.shortfallDays);
+  const send = (event: FormEvent) => {
+    event.preventDefault();
+    if (waive.isPending || preparer) return;
+    const text = reason.trim();
+    setProblem(text ? null : 'Enter why the notice recovery is waived.');
+    if (!text) {
+      waive.reset();
+      return;
+    }
+    waive.mutate(text);
+  };
+  return (
+    <Section title="Waive the notice recovery">
+      <p className="hint">
+        The calculation recovers {short ? plural(short, 'day', 'days') : 'the days'} of notice not served. Waiving it is recorded with its reason, once for this exit, by someone other
+        than the employee and the preparer; it applies when the preparer calculates the draft again.
+      </p>
+      {preparer && (
+        <p className="hint" id={blockedId}>
+          You prepared this settlement, so someone else waives its notice recovery.
+        </p>
+      )}
+      <form className="stack" aria-label="Waive the notice recovery" onSubmit={send}>
+        <label>
+          Reason for waiving (required)
+          <textarea rows={2} maxLength={MAX_REASON} value={reason} disabled={waive.isPending || preparer} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
+        </label>
+        {problem && (
+          <p role="alert" className="error">
+            {problem}
+          </p>
+        )}
+        <div className="row">
+          <button type="submit" disabled={waive.isPending || preparer} aria-describedby={preparer ? blockedId : undefined}>
+            Waive the notice recovery
+          </button>
+        </div>
+        <Refusal
+          error={waive.error}
+          words={WAIVER_WORDS}
+          noAnswer="No answer came back, so the waiver may or may not have been recorded. The settlement has been reloaded: check it before trying again."
+        />
+      </form>
+    </Section>
+  );
+}
+
+/**
+ * FR-052 (I-81 item 5): monthly payroll for the final period, components only (payroll amounts stay with the payroll grants). A
+ * component paid by an approved or processed run is not paid again in the settlement; the server refuses such a line.
+ */
+function FinalPeriodPayroll({ runs }: { runs: readonly FinalPeriodRun[] }) {
+  return (
+    <>
+      <h3 style={H3}>Monthly payroll for the final period</h3>
+      {runs.length === 0 ? (
+        <Empty>No payroll run covers the last working date yet.</Empty>
+      ) : (
+        <ul>
+          {runs.map((r) => (
+            <li key={r.runId}>
+              {`${r.periodCode}, revision ${r.revision} (${readable(r.runState)}): `}
+              {r.components.map((c) => `${c.componentCode}${c.alreadyPaid ? ' (already paid: not paid again here)' : ''}`).join(', ') || 'no component'}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
@@ -2810,6 +3661,7 @@ function RemainingBalances({ s }: { s: SettlementDetail }) {
   return (
     <Section title="Remaining balances">
       <p className="hint">Read-only. These balances do not change the settlement lines; no encashment or recovery is worked out from them.</p>
+      {b.finalPeriodPayroll !== undefined && <FinalPeriodPayroll runs={b.finalPeriodPayroll} />}
       <h3 style={H3}>Paid leave as at the last working date ({formatDate(b.asOf)})</h3>
       {b.leave.length === 0 ? (
         <Empty>No paid leave type is active.</Empty>
@@ -2936,19 +3788,91 @@ function PreparerActions({ s, exit, onNotice }: { s: SettlementDetail; exit: Exi
       </Section>
     );
   }
+  const calculated = s.calculationStatus === 'CALCULATED';
   return (
     <>
+      <CalculateDraft s={s} unsavedLines={s.lines !== undefined && unsavedLines} />
       {s.lines !== undefined ? (
-        <LinesEditor key={editorKey} s={s} onUnsaved={setUnsavedLines} />
+        // A new calculation snapshot changes which lines the editor holds: it starts again from the server's lines.
+        <LinesEditor key={`${editorKey}-${s.calculation?.id ?? 'not-calculated'}`} s={s} onUnsaved={setUnsavedLines} />
       ) : (
         <Section title="Enter the lines">
           <p className="hint">The selected role does not receive settlement amounts, so the lines cannot be edited here.</p>
         </Section>
       )}
-      <LinesUpload s={s} exit={exit} onReplaced={setReplacedAt} />
+      {calculated ? (
+        <Section title="Upload the lines">
+          <p className="hint">
+            This draft is calculated, so its lines are not uploaded: an upload would replace the calculated lines. Enter the lines for components the calculation does not
+            produce in the line editor, each with its reason.
+          </p>
+        </Section>
+      ) : (
+        <LinesUpload s={s} exit={exit} onReplaced={setReplacedAt} />
+      )}
       <SubmitDraft s={s} onNotice={onNotice} unsavedLines={s.lines !== undefined && unsavedLines} />
       <CancelDraft s={s} onNotice={onNotice} />
     </>
+  );
+}
+
+/**
+ * FR-052 (I-88): the preparer calculates the draft on the server, from a snapshot taken now, against its version; calculating again
+ * takes a new snapshot. The calculated lines replace the earlier calculated ones; lines entered for other components stay.
+ */
+function CalculateDraft({ s, unsavedLines }: { s: SettlementDetail; unsavedLines: boolean }) {
+  const qc = useQueryClient();
+  const keys = useKeys();
+  const refresh = useSettlementRefresh();
+  const blockedId = `${useId()}-unsaved`;
+  const [done, setDone] = useState<string | null>(null);
+  const again = s.calculationStatus === 'CALCULATED';
+  const calculate = useMutation({
+    mutationFn: (version: number) => api<SettlementDetail>(`/v1/settlements/${enc(s.id)}/calculate`, { body: { expectedVersion: version } }),
+    onMutate: () => setDone(null),
+    onSuccess: (saved) => {
+      // The answer is the settlement as calculated: shown at once, then every list and queue that shows it loads again.
+      qc.setQueryData(keys.settlement(saved.id), saved);
+      const k = saved.calculation;
+      setDone(
+        k
+          ? `Calculated: snapshot ${k.sequence}, ${plural(String(k.itemCount), 'item', 'items')}${k.blockingCount > 0 ? `, ${k.blockingCount} blocking approval` : ', nothing blocking approval'}.`
+          : 'Calculated.',
+      );
+      refresh(saved);
+    },
+    onError: (error) => {
+      if (isConflict(error) || !(error instanceof ApiError)) refresh(s);
+    },
+  });
+  return (
+    <Section title="Calculate">
+      <p className="hint">
+        The server calculates this draft from a snapshot taken now, under the settlement policy and the statutory rule packs in force on the last working date. Its items
+        become the calculated lines; lines entered for components it does not produce stay. An item whose policy, rule pack or record is missing is shown as such and
+        blocks approval. {again ? 'Calculating again takes a new snapshot and replaces the calculated lines.' : ''}
+      </p>
+      {unsavedLines && (
+        <p className="hint" id={blockedId}>
+          Save the lines first: the calculation keeps the saved entered lines, not changes still in the line editor.
+        </p>
+      )}
+      <div className="row">
+        <button type="button" disabled={calculate.isPending || unsavedLines} aria-describedby={unsavedLines ? blockedId : undefined} onClick={() => calculate.mutate(s.version)}>
+          {again ? 'Calculate again' : 'Calculate'}
+        </button>
+      </div>
+      {done && (
+        <p className="ok" role="status">
+          {done}
+        </p>
+      )}
+      <Refusal
+        error={calculate.error}
+        words={CALCULATE_WORDS}
+        noAnswer="No answer came back, so the draft may or may not have been calculated. The settlement has been reloaded: check its calculation before trying again."
+      />
+    </Section>
   );
 }
 
@@ -2956,29 +3880,38 @@ interface LineRow extends LineInput {
   key: number;
 }
 
+const kindOf = (l: SettlementLine): LineKind => (l.lineKind === 'NOTICE_ADJUSTMENT' ? 'NOTICE_ADJUSTMENT' : 'STANDARD');
+
 /** Whether the editor's rows are exactly the lines the server returned (compared as text, never as numbers). */
 const sameLines = (rows: readonly LineInput[], lines: readonly SettlementLine[]) =>
   rows.length === lines.length &&
   rows.every((r, i) => {
     const l = lines[i]!;
-    return r.componentCode.trim() === l.componentCode && r.amount.trim() === l.amount && r.lineKind === (l.lineKind === 'NOTICE_ADJUSTMENT' ? 'NOTICE_ADJUSTMENT' : 'STANDARD');
+    return r.componentCode.trim() === l.componentCode && r.amount.trim() === l.amount && r.lineKind === kindOf(l) && r.reason.trim() === (l.reason ?? '');
   });
 
-/** The draft's lines, replaced as a whole against the settlement's version (PUT /v1/settlements/:id/lines). */
+/**
+ * The draft's lines, replaced as a whole against the settlement's version (PUT /v1/settlements/:id/lines). On a calculated draft
+ * (I-88) the editor holds only the entered lines: the server keeps the calculated ones and replaces the entered ones, each of which
+ * states its reason.
+ */
 function LinesEditor({ s, onUnsaved }: { s: SettlementDetail; onUnsaved: (unsaved: boolean) => void }) {
   const refresh = useSettlementRefresh();
   const next = useRef(0);
+  const calculated = s.calculationStatus === 'CALCULATED';
+  /** The lines this editor replaces: every line, or on a calculated draft the entered ones only. */
+  const editable = (lines: readonly SettlementLine[] | undefined) => (lines ?? []).filter((l) => !calculated || !isCalculatedLine(l));
   const toRows = (lines: readonly SettlementLine[]): LineRow[] =>
-    lines.map((l) => ({ key: next.current++, componentCode: l.componentCode, amount: l.amount, lineKind: l.lineKind === 'NOTICE_ADJUSTMENT' ? 'NOTICE_ADJUSTMENT' : 'STANDARD' }));
-  const [rows, setRows] = useState<LineRow[]>(() => toRows(s.lines ?? []));
+    lines.map((l) => ({ key: next.current++, componentCode: l.componentCode, amount: l.amount, lineKind: kindOf(l), reason: l.reason ?? '' }));
+  const [rows, setRows] = useState<LineRow[]>(() => toRows(editable(s.lines)));
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: (body: { lines: LineInput[]; expectedVersion: number }) => api<SettlementDetail>(`/v1/settlements/${enc(s.id)}/lines`, { method: 'PUT', body }),
+    mutationFn: (body: { lines: LineBody[]; expectedVersion: number }) => api<SettlementDetail>(`/v1/settlements/${enc(s.id)}/lines`, { method: 'PUT', body }),
     onMutate: () => setNotice(null),
     // Saved: the editor shows the lines as the server holds them now. Refused: what was typed stays.
     onSuccess: (saved, body) => {
-      setRows(toRows(saved.lines ?? []));
+      setRows(toRows(editable(saved.lines)));
       setNotice(body.lines.length === 1 ? 'Saved 1 line.' : `Saved ${body.lines.length} lines.`);
       refresh(saved);
     },
@@ -2987,11 +3920,11 @@ function LinesEditor({ s, onUnsaved }: { s: SettlementDetail; onUnsaved: (unsave
     },
   });
   // Rows that differ from the server's lines are not saved yet (submitting would freeze the saved ones instead).
-  const unsaved = !sameLines(rows, s.lines ?? []);
+  const unsaved = !sameLines(rows, editable(s.lines));
   useEffect(() => onUnsaved(unsaved), [unsaved, onUnsaved]);
   useEffect(() => () => onUnsaved(false), [onUnsaved]);
   const change = (key: number, patch: Partial<LineInput>) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  const add = () => setRows((prev) => (prev.length >= MAX_LINES ? prev : [...prev, { key: next.current++, componentCode: '', amount: '', lineKind: 'STANDARD' }]));
+  const add = () => setRows((prev) => (prev.length >= MAX_LINES ? prev : [...prev, { key: next.current++, componentCode: '', amount: '', lineKind: 'STANDARD', reason: '' }]));
   const remove = (key: number) => setRows((prev) => prev.filter((r) => r.key !== key));
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -3002,22 +3935,37 @@ function LinesEditor({ s, onUnsaved }: { s: SettlementDetail; onUnsaved: (unsave
       if (missing !== null) return;
       if (!r.componentCode.trim()) missing = `Line ${i + 1}: enter the pay component code.`;
       else if (!AMOUNT.test(r.amount.trim())) missing = `Line ${i + 1}: enter the amount as a decimal number with up to 15 digits and 4 decimal places (a minus sign for a deduction).`;
+      else if (calculated && !r.reason.trim()) missing = `Line ${i + 1}: enter why this line is entered: this draft is calculated, so each entered line states its reason.`;
+      else if (r.reason.trim().length > MAX_LINE_REASON) missing = `Line ${i + 1}: a line’s reason has at most ${MAX_LINE_REASON} characters.`;
     });
     setProblem(missing);
     if (missing !== null) {
       save.reset();
       return;
     }
-    save.mutate({ lines: rows.map((r) => ({ componentCode: r.componentCode.trim(), amount: r.amount.trim(), lineKind: r.lineKind })), expectedVersion: s.version });
+    save.mutate({
+      lines: rows.map((r) => {
+        const reason = r.reason.trim();
+        return { componentCode: r.componentCode.trim(), amount: r.amount.trim(), lineKind: r.lineKind, ...(reason ? { reason } : {}) };
+      }),
+      expectedVersion: s.version,
+    });
   };
   return (
-    <Section title="Enter the lines">
-      <p className="hint">
-        One line per pay component. Earnings are zero or positive and deductions zero or negative; a notice adjustment needs the exit’s contractual notice period.
-        Saving replaces every line of this draft, and the server records the net amount.
-      </p>
+    <Section title={calculated ? 'Enter lines for other components' : 'Enter the lines'}>
+      {calculated ? (
+        <p className="hint">
+          This draft is calculated: its calculated lines stay as the calculation made them. Entered lines are for components the calculation does not produce, one line per
+          pay component, each with the reason it is entered. Saving replaces the entered lines only, and the server records the net amount.
+        </p>
+      ) : (
+        <p className="hint">
+          One line per pay component. Earnings are zero or positive and deductions zero or negative; a notice adjustment needs the exit’s contractual notice period.
+          Saving replaces every line of this draft, and the server records the net amount.
+        </p>
+      )}
       <form className="stack" aria-label="Settlement lines" onSubmit={submit}>
-        {rows.length === 0 && <Empty>No lines. Add one to start.</Empty>}
+        {rows.length === 0 && <Empty>{calculated ? 'No entered lines. Add one for a component the calculation does not produce.' : 'No lines. Add one to start.'}</Empty>}
         {rows.map((r, i) => (
           <fieldset key={r.key} style={GROUP}>
             <legend>Line {i + 1}</legend>
@@ -3036,6 +3984,10 @@ function LinesEditor({ s, onUnsaved }: { s: SettlementDetail; onUnsaved: (unsave
                   <option value="STANDARD">Standard</option>
                   <option value="NOTICE_ADJUSTMENT">Notice adjustment</option>
                 </select>
+              </label>
+              <label>
+                {calculated ? 'Reason (required)' : 'Reason (optional)'}
+                <input value={r.reason} maxLength={MAX_LINE_REASON} disabled={save.isPending} onChange={(e) => change(r.key, { reason: e.target.value })} />
               </label>
               <button type="button" className="secondary" disabled={save.isPending} aria-label={`Remove line ${i + 1}`} onClick={() => remove(r.key)}>
                 Remove
@@ -3058,7 +4010,7 @@ function LinesEditor({ s, onUnsaved }: { s: SettlementDetail; onUnsaved: (unsave
         )}
         <Refusal
           error={save.error}
-          words={PREPARE_WORDS}
+          words={LINES_WORDS}
           noAnswer="No answer came back, so the lines may or may not have been saved. The settlement has been reloaded: check it before saving again."
         />
         {notice && (
@@ -3353,6 +4305,155 @@ function SettlementExport({ s }: { s: SettlementDetail }) {
         </button>
       </div>
       <Refusal error={exp.error} words={EXPORT_WORDS} />
+    </Section>
+  );
+}
+
+/**
+ * FR-053, DF07 (I-81 item 2): the settlement is paid outside this system; its payment is recorded here from evidence (date, reference,
+ * one released and verified document) by someone independent of the preparer, reviewer, approver and release marker.
+ */
+function RecordPayment({ s, onNotice }: { s: SettlementDetail; onNotice: (text: string) => void }) {
+  const { me } = useSession();
+  const refresh = useSettlementRefresh();
+  const [date, setDate] = useState('');
+  const [reference, setReference] = useState('');
+  const [doc, setDoc] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const key = useRef<string | null>(null);
+  const involved = me?.userId === s.preparedBy || s.decisions.some((d) => d.actorUserId === me?.userId);
+  const pay = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api<SettlementDetail & { replayed: boolean }>(`/v1/settlements/${enc(s.id)}/payment`, { body }),
+    onSuccess: (saved) => {
+      key.current = null;
+      onNotice(saved.replayed ? 'This payment had already been recorded with this evidence; nothing was recorded twice.' : `The payment of revision ${saved.revision} is recorded from its evidence.`);
+      refresh(saved);
+    },
+    onError: (error) => {
+      if (isConflict(error) || !(error instanceof ApiError)) refresh(s);
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (pay.isPending || involved) return;
+    if (!date || !reference.trim() || !doc) return setProblem('Give the payment date, its bank reference and its verified evidence document.');
+    setProblem(null);
+    key.current ??= idempotencyKey('ff-pay');
+    pay.mutate({ paymentDate: date, evidenceKey: key.current, evidenceReference: reference.trim(), evidenceDocumentIds: [doc], expectedVersion: s.version });
+  };
+  return (
+    <Section title="Record the payment">
+      <p>The settlement is paid outside this system. Record the payment once it has happened, from its evidence; the full net amount is the amount paid.</p>
+      {involved && <p className="hint">You prepared, decided or marked this settlement, so someone else records its payment.</p>}
+      <form onSubmit={submit} className="grid-form" aria-label="Record the settlement payment">
+        <label>
+          Payment date
+          <input type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label>
+          Bank or receipt reference
+          <input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
+        </label>
+        <VerifiedEvidencePicker employeeId={s.employeeId} chosen={doc} onChange={setDoc} legend="Evidence of the payment (released and verified)" />
+        <div className="row">
+          <button type="submit" disabled={pay.isPending || involved}>
+            Record the payment
+          </button>
+        </div>
+      </form>
+      {problem && (
+        <p role="alert" className="error">
+          {problem}
+        </p>
+      )}
+      <Refusal error={pay.error} words={PAYMENT_WORDS} noAnswer="No answer came back, so the payment may or may not have been recorded. The settlement has been reloaded: check its state before trying again." />
+    </Section>
+  );
+}
+
+/** I-81 items 5, 6: a live revision that must not be paid is voided by an independent approver, with the reason; everything is kept. */
+function VoidSettlement({ s, onNotice }: { s: SettlementDetail; onNotice: (text: string) => void }) {
+  const refresh = useSettlementRefresh();
+  const [reason, setReason] = useState('');
+  const voiding = useMutation({
+    mutationFn: () => api<SettlementDetail>(`/v1/settlements/${enc(s.id)}/void`, { body: { reason: reason.trim(), expectedVersion: s.version } }),
+    onSuccess: (saved) => {
+      onNotice(`Revision ${saved.revision} is cancelled; its lines and decisions are kept. A corrected revision can be prepared.`);
+      refresh(saved);
+    },
+    onError: (error) => {
+      if (isConflict(error) || !(error instanceof ApiError)) refresh(s);
+    },
+  });
+  return (
+    <Section title="Void this revision">
+      <p className="hint">For a revision that must not be paid: the final period’s payroll already paid one of its components, or it is wrong. A paid revision cannot be voided.</p>
+      <label>
+        Reason
+        <input value={reason} maxLength={MAX_REASON} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      <div className="row">
+        <button type="button" disabled={voiding.isPending || !reason.trim()} onClick={() => voiding.mutate()}>
+          Void the revision
+        </button>
+      </div>
+      <Refusal error={voiding.error} words={VOID_WORDS} />
+    </Section>
+  );
+}
+
+/**
+ * FR-054 "Send PDF" / "Send Excel", FR-018, DF09 (I-81 item 9): the statement is delivered to the employee's own self-service, never
+ * e-mailed. The sender confirms the recipient (recipient review); the delivery's status shows whether the employee has opened it.
+ */
+function SendStatement({ s }: { s: SettlementDetail }) {
+  const qc = useQueryClient();
+  const [format, setFormat] = useState<'PDF' | 'XLSX'>('PDF');
+  const [confirmed, setConfirmed] = useState(false);
+  const key = useRef<string | null>(null);
+  const deliveries = useQuery({
+    queryKey: ['settlement-deliveries', s.id],
+    queryFn: () => api<{ items: Delivery[] }>(`/v1/settlements/${enc(s.id)}/deliveries`),
+    retry: retryTransient,
+  });
+  const send = useMutation({
+    mutationFn: () => {
+      key.current ??= idempotencyKey('ff-send');
+      return api<Delivery>(`/v1/settlements/${enc(s.id)}/send`, { body: { format, recipientEmployeeId: s.employeeId, idempotencyKey: key.current } });
+    },
+    onSuccess: () => {
+      key.current = null;
+      setConfirmed(false);
+      void qc.invalidateQueries({ queryKey: ['settlement-deliveries', s.id] });
+    },
+  });
+  return (
+    <Section title="Send to the employee’s self-service">
+      <p className="hint">The statement is delivered in the employee’s own self-service with an in-app notice; nothing is attached to an e-mail.</p>
+      <div className="row">
+        <label>
+          Format
+          <select value={format} disabled={send.isPending} onChange={(e) => setFormat(e.target.value as 'PDF' | 'XLSX')}>
+            <option value="PDF">PDF</option>
+            <option value="XLSX">Excel (XLSX)</option>
+          </select>
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+          {` The recipient is ${s.employeeName} (${s.employeeCode}), the employee this settlement is about`}
+        </label>
+        <button type="button" disabled={send.isPending || !confirmed} onClick={() => send.mutate()}>
+          {`Send the ${format === 'PDF' ? 'PDF' : 'Excel'} statement`}
+        </button>
+      </div>
+      <Refusal error={send.error} words={SEND_WORDS} />
+      {deliveries.data && deliveries.data.items.length > 0 && (
+        <ul>
+          {deliveries.data.items.map((d) => (
+            <li key={d.id}>{`${d.format} of revision ${d.sourceRevision}, sent ${when(d.sentAt)}: ${labelOf(DELIVERY_STATUS_LABEL, d.status)}`}</li>
+          ))}
+        </ul>
+      )}
     </Section>
   );
 }
@@ -3665,6 +4766,12 @@ function SettlementTaskItem({ task: t, kind, onFinished }: { task: SettlementTas
           </Item>
         )}
         <Item term="Calculation">{labelOf(CALCULATION_LABEL, s.calculationStatus)}</Item>
+        {/* I-88: the server refuses the final approval while an item of the calculation blocks it. */}
+        {s.calculation && s.calculation.blockingCount > 0 && (
+          <Item term="Blocking items">
+            {s.calculation.blockingCount} <Badge tone="bad">{s.calculation.blockingCount === 1 ? 'blocks approval' : 'block approval'}</Badge>
+          </Item>
+        )}
         <Item term="Prepared by">
           <UserRef userId={s.preparedBy} />
         </Item>

@@ -56,7 +56,7 @@ beforeAll(async () => {
   former = await h.actor(A, 'HR_ADMINISTRATOR', { extra: SALARY });
   // A self-link that has already ended still counts.
   await h.db.query(`insert into user_employee_link (company_id, user_id, employee_id, effective_from, effective_to) values ($1, $2, $3, '2026-01-01', '2026-01-02')`, [A.id, former.user, formerEmp]);
-  const shift = await h.call(hr, 'POST', '/v1/shifts', { code: 'OWNTEST', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
+  const shift = await h.call(hr, 'POST', '/v1/shifts', { code: 'OWNTEST', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
   expect(shift.statusCode, shift.body).toBe(201);
   shiftId = shift.json().id;
   const policy = (await h.call(hr, 'GET', '/v1/attendance/policies')).json().items[0];

@@ -302,21 +302,34 @@ describe('a link or shortcut appears only when the destination is permitted in t
     expect(byCode.MY_TASKS).not.toHaveProperty('source');
   });
 
-  it('roles with no readable list keep their figure without a link: Finance Reviewer, Expense Finance Approver, Payroll Approver’s tasks', async () => {
+  it('I-62 item 4 (I-83): the Finance Reviewer, Expense Finance Approver and Payroll Approver figures now link to a list the role reads; the overdue runs figure has none', async () => {
     const finance = await dashboardOf(await h.actor(A, 'FINANCE_REVIEWER'));
-    expect(finance.byCode.EXPENSE_REVIEW_TASKS).toMatchObject({ status: 'OK' });
-    expect(finance.byCode.EXPENSE_REVIEW_TASKS).not.toHaveProperty('source');
+    expect(finance.byCode.EXPENSE_REVIEW_TASKS).toMatchObject({ status: 'OK', source: { lists: [{ api: '/v1/expense/claim-states?states=MANAGER_PENDING%2CFINANCE_PENDING%2CHIGH_VALUE_PENDING' }] } });
     const approver = await dashboardOf(await h.actor(A, 'EXPENSE_FINANCE_APPROVER'));
-    for (const w of approver.widgets) expect(w, w.code).not.toHaveProperty('source');
+    for (const code of ['FINAL_DECISIONS', 'LATE_RECEIPT', 'RETURNED']) expect(approver.byCode[code]!.source, code).toBeTruthy();
+    expect(approver.byCode.DECISIONS_DUE).not.toHaveProperty('source');
     const payroll = await dashboardOf(await h.actor(A, 'PAYROLL_APPROVER'));
-    expect(payroll.byCode.REVIEW_TASKS).not.toHaveProperty('source');
+    expect(payroll.byCode.REVIEW_TASKS).toMatchObject({ status: 'OK', source: { lists: [{ api: '/v1/payroll/runs?states=IN_REVIEW' }] } });
+    expect(payroll.byCode.OVERDUE_REVIEWS).toMatchObject({ status: 'OK' });
+    expect(payroll.byCode.OVERDUE_REVIEWS).not.toHaveProperty('source');
     expect(payroll.byCode.UNRESOLVED_EXCEPTIONS!.source).toBeTruthy();
   });
 
   it('a widget that is not available has no link, and a role without a dashboard gets the neutral state with no shortcuts', async () => {
     const operator = await dashboardOf(await h.actor(A, 'TREASURY_OPERATOR'));
-    expect(operator.byCode.MY_TASKS).toMatchObject({ status: 'NOT_AVAILABLE' });
-    expect(operator.byCode.MY_TASKS).not.toHaveProperty('source');
+    expect(operator.byCode.RECONCILE).toMatchObject({ status: 'NOT_AVAILABLE' });
+    expect(operator.byCode.RECONCILE).not.toHaveProperty('source');
+    // I-89 item 2: the payment preparation figure links to the two lists it counts.
+    expect(operator.byCode.MY_TASKS).toMatchObject({
+      status: 'OK',
+      source: {
+        combine: 'SUM',
+        lists: [
+          { label: 'Claims awaiting preparation', api: '/v1/expense/payables?awaitingPreparation=true' },
+          { label: 'Draft payments not yet ready', api: '/v1/expense/payments?state=PREPARED&batchState=DRAFT' },
+        ],
+      },
+    });
     // A state with no figure has nothing to reconcile, though the list itself is open to this role.
     const payroll = await dashboardOf(await h.actor(await h.makeCompany(), 'PAYROLL_OPERATOR'));
     expect(payroll.byCode.PERIOD_STATE).toMatchObject({ status: 'NOT_CONFIGURED' });

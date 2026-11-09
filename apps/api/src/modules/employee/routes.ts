@@ -16,11 +16,23 @@ import {
   type ManagerChange,
   type ShiftChange,
 } from './changes.js';
+import {
+  addSectionEntry,
+  type IdentifierInput,
+  LIST_SECTION_KEYS,
+  type ListSectionKey,
+  recordSectionDictionary,
+  recordSections,
+  removeSectionEntry,
+  setPayrollIdentifiers,
+  updateSectionEntry,
+} from './record-sections.js';
 import { employeeTimeline } from './timeline.js';
 import {
   type CreateEmployeeInput,
   createEmployee,
   EMPLOYEE_SORTS,
+  EMPLOYEE_STATUS_GROUPS,
   fieldGroupsForUpdate,
   getEmployee,
   type ListQuery,
@@ -29,6 +41,7 @@ import {
   SORT_DIRECTIONS,
   type UpdateEmployeeInput,
   updateEmployee,
+  WORK_PHONE_EXTENSION_PATTERN,
 } from './service.js';
 
 const uuid = { type: 'string', format: 'uuid' } as const;
@@ -43,6 +56,8 @@ const createSchema = {
     employeeCode: code,
     displayName: { type: 'string', minLength: 1, maxLength: 200 },
     workEmail: { type: 'string', format: 'email', maxLength: 254 },
+    // DF16 work phone extension (I-89 item 5): digits only, at most 8.
+    workPhoneExtension: { type: 'string', maxLength: 20, pattern: WORK_PHONE_EXTENSION_PATTERN },
     joiningDate: date,
     employmentType: { type: 'string', enum: ['PERMANENT', 'FIXED_TERM', 'INTERN', 'CONTRACTOR'] },
     departmentId: uuid,
@@ -79,6 +94,8 @@ const updateSchema = {
     expectedVersion: { type: 'integer', minimum: 1 },
     displayName: { type: 'string', minLength: 1, maxLength: 200 },
     workEmail: { type: ['string', 'null'], format: 'email', maxLength: 254 },
+    // null clears it.
+    workPhoneExtension: { type: ['string', 'null'], maxLength: 20, pattern: WORK_PHONE_EXTENSION_PATTERN },
     dateOfBirth: { type: ['string', 'null'], format: 'date' },
     serviceAnniversaryDate: { type: ['string', 'null'], format: 'date' },
   },
@@ -90,7 +107,8 @@ const listSchema = {
   properties: {
     search: { type: 'string', maxLength: 100 },
     status: { type: 'string', pattern: '^[A-Z_]{1,60}$' },
-    statusGroup: { type: 'string', enum: ['ACTIVE'] },
+    // DF17's ACTIVE and BR-003's reference views (employee/service.ts EMPLOYEE_STATUS_GROUPS).
+    statusGroup: { type: 'string', enum: Object.keys(EMPLOYEE_STATUS_GROUPS) },
     departmentId: uuid,
     joinedFrom: date,
     joinedTo: date,
@@ -246,4 +264,75 @@ export async function employeeRoutes(app: FastifyInstance, opts: { db: Database 
     await withTransaction(db, (tx) => updateEmployee(tx, grant, id, input));
     return readFor(request, id);
   });
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // FR-008 record sections: family, qualifications, prior employment and payroll identifiers (I-82 item 2,
+  // employee/record-sections.ts). Confidential: read with employee.private (identifiers masked) or employee.payroll_id (in
+  // full); changed by an eligible Admin with employee.manage.private or employee.manage.payroll_id, never on their own record.
+  // ---------------------------------------------------------------------------------------------------------------
+  const sectionParams = { type: 'object', required: ['id', 'section'], properties: { id: uuid, section: { type: 'string', enum: LIST_SECTION_KEYS } } } as const;
+  const entryParams = { type: 'object', required: ['id', 'section', 'entryId'], properties: { id: uuid, section: { type: 'string', enum: LIST_SECTION_KEYS }, entryId: uuid } } as const;
+  // Field names and values are checked against the section's dictionary by the service (UNKNOWN_FIELD, FIELD_REQUIRED, ...).
+  // A type list, not anyOf: a value of a listed type is never coerced into another (true stays a boolean, 2015 a number).
+  const entryValue = { type: ['string', 'integer', 'boolean', 'null'], maxLength: 200 } as const;
+  const entryBody = { type: 'object', maxProperties: 10, additionalProperties: entryValue } as const;
+  const identifier = { anyOf: [{ type: 'string', maxLength: 40 }, { type: 'null' }] } as const;
+
+  app.get('/employee-record-dictionary', async (request) => {
+    await requireAccess(db, request, 'employee', 'read', ['operational']);
+    return recordSectionDictionary();
+  });
+
+  app.get(
+    '/employees/:id/record-sections',
+    { schema: { params: idParams, querystring: { type: 'object', additionalProperties: false, properties: { includeRemoved: { type: 'boolean', default: false } } } } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'employee', 'read', ['private', 'payroll_id'], { recordKey: id });
+      return recordSections(db, grant, id, request.query as { includeRemoved?: boolean });
+    },
+  );
+
+  app.post('/employees/:id/record-sections/:section', { schema: { params: sectionParams, body: entryBody } }, async (request, reply) => {
+    const { id, section } = request.params as { id: string; section: ListSectionKey };
+    const grant = await requireAccess(db, request, 'employee', 'manage', ['private'], { requireAll: true, recordKey: id });
+    const result = await withTransaction(db, (tx) => addSectionEntry(tx, grant, id, section, request.body as Record<string, unknown>));
+    reply.status(201);
+    return result;
+  });
+
+  app.put(
+    '/employees/:id/record-sections/:section/:entryId',
+    { schema: { params: entryParams, body: { ...entryBody, required: ['expectedVersion'], properties: { expectedVersion: { type: 'integer', minimum: 1 } } } } },
+    async (request) => {
+      const { id, section, entryId } = request.params as { id: string; section: ListSectionKey; entryId: string };
+      const grant = await requireAccess(db, request, 'employee', 'manage', ['private'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => updateSectionEntry(tx, grant, id, section, entryId, request.body as Record<string, unknown> & { expectedVersion: number }));
+    },
+  );
+
+  app.post(
+    '/employees/:id/record-sections/:section/:entryId/remove',
+    { schema: { params: entryParams, body: { type: 'object', additionalProperties: false, required: ['reason', 'expectedVersion'], properties: { reason: { type: 'string', minLength: 1, maxLength: 500 }, expectedVersion: { type: 'integer', minimum: 1 } } } } },
+    async (request) => {
+      const { id, section, entryId } = request.params as { id: string; section: ListSectionKey; entryId: string };
+      const grant = await requireAccess(db, request, 'employee', 'manage', ['private'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => removeSectionEntry(tx, grant, id, section, entryId, request.body as { reason: string; expectedVersion: number }));
+    },
+  );
+
+  app.put(
+    '/employees/:id/payroll-identifiers',
+    {
+      schema: {
+        params: idParams,
+        body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { pan: identifier, uan: identifier, esicIpNumber: identifier, expectedVersion: { type: 'integer', minimum: 1 } } },
+      },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'employee', 'manage', ['payroll_id'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => setPayrollIdentifiers(tx, grant, id, request.body as IdentifierInput));
+    },
+  );
 }

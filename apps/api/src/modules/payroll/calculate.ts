@@ -20,6 +20,7 @@
 // resolution instead of being guessed. Late flags and missing timesheets never reduce pay.
 import type { Queryable } from '../../db/queryable.js';
 import { lockCalendar, workingDaySql } from '../shift/calendar.js';
+import { evaluateRulePackHeads, STATUTORY_EXCEPTION_CODES } from '../statutory/evaluate.js';
 import { bankChecks } from './bank.js';
 import { advisoryLock, loanOutstandingSql } from './common.js';
 
@@ -75,9 +76,12 @@ export const EXCEPTION_CODES = {
   SALARY_STOP_OTHER_PERIOD:
     'An approved salary stop of the same service month belongs to another payroll calendar; it is never ignored (revoke it, or exclude the employee and pay them in the run of its period)',
   NO_SERVICE_IN_PERIOD: 'No service days in the period',
+  SETTLED_IN_FINAL_SETTLEMENT: 'Paid by the final settlement (release-eligible or paid), which covers the period from the last working date; monthly payroll pays nothing more',
   INPUTS_NOT_INCLUDED: 'Approved inputs exist but the employee is not calculated (an input discrepancy: a payroll approver records the resolution)',
   INPUTS_OTHER_PERIOD: 'Approved inputs of the same service month belong to another payroll calendar (an input discrepancy: a payroll approver records the resolution)',
   NO_EARNINGS: 'The calculation produced no earnings',
+  // I-85: raised by the statutory evaluator (statutory/evaluate.ts).
+  ...STATUTORY_EXCEPTION_CODES,
 } as const;
 
 /**
@@ -89,15 +93,142 @@ export const EXCEPTION_CODES = {
 const WORKING_DAY = (day: string) =>
   workingDaySql(day, 'r.employee_id', 'r.company_id', `(select ru.calendar_as_of from payroll_run ru where ru.company_id = r.company_id and ru.id = r.run_id)`);
 
-const APPROVED_LEAVE_ON = (day: string) =>
+export const APPROVED_LEAVE_ON = (day: string) =>
   `exists (select 1 from leave_request lv where lv.company_id = r.company_id and lv.employee_id = r.employee_id and lv.state = 'APPROVED'
              and ${day} between lv.start_date and lv.end_date)`;
+
+/**
+ * FR-052 (I-80, decided under owner delegation, 6 Nov 2026): the employee `employee` has a final settlement that is release-eligible
+ * or paid, and their approved last working date `lwd` falls on or before the run's service end `serviceEnd` (the period covers or
+ * follows it). The settlement is their final pay from then on, so a monthly run pays them nothing more: no component is paid twice.
+ * A voided settlement is CANCELLED and counts for nothing. `exists (...)`-ready predicate; settlement alias fs.
+ */
+export const SETTLED_FINALLY = (company: string, employee: string, lwd: string, serviceEnd: string) =>
+  `exists (select 1 from settlement fs where fs.company_id = ${company} and fs.employee_id = ${employee} and fs.state in ('RELEASE_ELIGIBLE', 'PAID')
+             and ${lwd} is not null and ${lwd} <= ${serviceEnd})`;
+
+/**
+ * FR-052 (I-88, decided under owner delegation, 6 Nov 2026): an approved arrears case or timesheet adjustment that the calculation carried by
+ * a live or paid final settlement took (a calculated item naming it) is paid by that settlement, so no payroll run takes it as well. Once the
+ * settlement is returned, rejected or cancelled the case is free again. `exists (...)`-ready predicate; item alias fsi, settlement alias fss.
+ */
+export const SETTLEMENT_TAKES = (company: string, column: 'arrears_case_id' | 'adjustment_id', id: string) =>
+  `exists (select 1 from settlement_calculation_item fsi
+             join settlement fss on fss.company_id = fsi.company_id and fss.calculation_id = fsi.calculation_id
+            where fsi.company_id = ${company} and fsi.${column} = ${id} and fsi.status = 'CALCULATED'
+              and fss.state in ('DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE', 'PAID'))`;
 
 /** Records of the chunk that are calculated (eligible and not excluded by a stop). */
 const COMPUTE = `r.company_id = $1 and r.run_id = $2 and r.employee_id = any($3::uuid[]) and r.calculation_status = 'PENDING'
   and r.eligible_from is not null and r.salary_stop_mode is distinct from 'EXCLUDE_CALCULATION'`;
 
 const EXCEPTION_INSERT = `insert into payroll_exception (company_id, run_id, record_id, employee_id, code, severity, resolvable, detail, created_by, updated_by)`;
+
+export interface ValuationPolicy {
+  id: string;
+  arrears_component_id: string;
+  adjustment_component_id: string;
+  recovery_component_id: string | null;
+  timesheet_unit: 'DAY' | 'HOUR';
+  hours_per_day: string | null;
+}
+
+/** I-79 (decided under owner delegation, 6 Nov 2026): the active valuation policy in effect on `day`, if any (0205). */
+export async function valuationPolicyOn(db: Queryable, companyId: string, day: string): Promise<ValuationPolicy | null> {
+  return (
+    (
+      await db.query<ValuationPolicy>(
+        `select id, arrears_component_id, adjustment_component_id, recovery_component_id, timesheet_unit, hours_per_day::text as hours_per_day
+           from payroll_valuation_policy where company_id = $1 and state = 'ACTIVE' and effective_from <= $2::date
+          order by effective_from desc limit 1`,
+        [companyId, day],
+      )
+    ).rows[0] ?? null
+  );
+}
+
+/**
+ * FR-035 (I-79): the approved arrears cases record `r` takes: of its employee, in the run's currency (`currency`), raised on a period
+ * earlier than the run's (`serviceStart`), with a total that is not zero, and not already held by another live run. `from ... where ...`;
+ * case alias c, its total t.total.
+ */
+export const ARREARS_FOR = (r: string, currency: string, serviceStart: string) => `
+  from payroll_arrears_case c
+  join payroll_period op on op.company_id = c.company_id and op.id = c.origin_period_id and op.service_start < ${serviceStart}
+  cross join lateral (select sum(l.amount) as total from payroll_arrears_line l where l.company_id = c.company_id and l.case_id = c.id) t
+ where c.company_id = ${r}.company_id and c.employee_id = ${r}.employee_id and c.state = 'APPROVED' and c.currency_code = ${currency} and t.total <> 0
+   and not exists (select 1 from payroll_record_input x
+                     join payroll_record xr on xr.company_id = x.company_id and xr.id = x.record_id
+                     join payroll_run xu on xu.company_id = xr.company_id and xu.id = xr.run_id
+                    where x.company_id = c.company_id and x.arrears_case_id = c.id and xu.id <> ${r}.run_id
+                      and xu.state in ('DRAFT', 'CALCULATED', 'IN_REVIEW', 'APPROVED'))
+   and not ${SETTLEMENT_TAKES('c.company_id', 'arrears_case_id', 'c.id')}`;
+
+/**
+ * FR-100 (I-79): the approved late-timesheet adjustments record `r` takes, on the same terms as ARREARS_FOR: of its employee, in the
+ * run's currency, originating in a period earlier than the run's (so never the origin run, CI25), with a difference that is not zero, and
+ * not already held by another live run. `from ... where ...`; adjustment alias a.
+ */
+export const ADJUSTMENTS_FOR = (r: string, currency: string, serviceStart: string) => `
+  from payroll_adjustment a
+  join payroll_run orun on orun.company_id = a.company_id and orun.id = a.origin_run_id and orun.service_start < ${serviceStart}
+ where a.company_id = ${r}.company_id and a.employee_id = ${r}.employee_id and a.state = 'APPROVED' and a.currency_code = ${currency} and a.delta_amount <> 0
+   and not exists (select 1 from payroll_record_input x
+                     join payroll_record xr on xr.company_id = x.company_id and xr.id = x.record_id
+                     join payroll_run xu on xu.company_id = xr.company_id and xu.id = xr.run_id
+                    where x.company_id = a.company_id and x.adjustment_id = a.id and xu.id <> ${r}.run_id
+                      and xu.state in ('DRAFT', 'CALCULATED', 'IN_REVIEW', 'APPROVED'))
+   and not ${SETTLEMENT_TAKES('a.company_id', 'adjustment_id', 'a.id')}`;
+
+/** Rows of `a` not in `b` and of `b` not in `a`: two derivations of the same snapshot disagree. */
+const differ = (a: string, b: string) => `exists ((${a} except ${b}) union all (${b} except ${a}))`;
+
+/**
+ * docs/10 A2 (I-28; decided under owner delegation, 6 Nov 2026): what the calculation read from the employee masters must still hold when
+ * processing starts, or the run returns for a new revision rather than freezing a figure the masters no longer support. Each kind is derived
+ * again exactly as steps 1, 3, 4 and 5 derive it, and compared with what the records hold: the leaving date, the arrangement segments, the
+ * approved unpaid leave days and, under reviewed attendance, the attendance loss of pay. A value, not a timestamp, so an unrelated edit
+ * blocks nothing. Counts records per kind; reads only.
+ */
+export async function mastersChanged(tx: Queryable, companyId: string, runId: string) {
+  const calculated = `r.company_id = $1 and r.run_id = $2 and r.calculation_status = 'CALCULATED'`;
+  const stored = (kind: string, ref: string) =>
+    `select lp.day, lp.${ref}, lp.units from payroll_record_lop lp where lp.company_id = r.company_id and lp.record_id = r.id and lp.source_kind = '${kind}'`;
+  return (
+    await tx.query<{ leaving_date: number; arrangements: number; unpaid_leave: number; attendance: number }>(
+      `select
+         (select count(*)::int from payroll_record r
+           where r.company_id = $1 and r.run_id = $2 and r.leaving_date is distinct from hrms_exit_last_working_date(r.company_id, r.employee_id)) as leaving_date,
+         (select count(*)::int from payroll_record r where ${calculated} and ${differ(
+           `select sa.id, greatest(sa.effective_from, r.eligible_from), least(coalesce(sa.effective_to - 1, r.eligible_to), r.eligible_to)
+              from salary_arrangement sa
+             where sa.company_id = r.company_id and sa.employee_id = r.employee_id and sa.superseded_at is null
+               and sa.effective_from <= r.eligible_to and (sa.effective_to is null or sa.effective_to > r.eligible_from)`,
+           `select s.salary_arrangement_id, s.segment_start, s.segment_end from payroll_record_segment s where s.company_id = r.company_id and s.record_id = r.id`,
+         )}) as arrangements,
+         (select count(*)::int from payroll_record r where ${calculated} and ${differ(
+           `select g.d::date, lr.id, (case when lr.half_day then 0.5 else 1 end)::numeric
+              from leave_request lr
+              join leave_type lt on lt.company_id = lr.company_id and lt.id = lr.leave_type_id and not lt.paid
+             cross join lateral generate_series(greatest(lr.start_date, r.eligible_from), least(lr.end_date, r.eligible_to), interval '1 day') g (d)
+             where lr.company_id = r.company_id and lr.employee_id = r.employee_id and lr.state = 'APPROVED'
+               and lr.start_date <= r.eligible_to and lr.end_date >= r.eligible_from and ${WORKING_DAY('g.d')}`,
+           stored('UNPAID_LEAVE', 'leave_request_id'),
+         )}) as unpaid_leave,
+         (select count(*)::int from payroll_record r join payroll_run ru on ru.company_id = r.company_id and ru.id = r.run_id
+           where ${calculated} and ru.attendance_basis = 'REVIEWED_ATTENDANCE' and ${differ(
+             `select ar.work_date, ar.id, u.units
+                from attendance_record ar
+                join reference_value st on st.company_id = ar.company_id and st.id = ar.status_id and st.code in ('ABSENT', 'HALF_DAY')
+               cross join lateral (select case st.code when 'ABSENT' then ru.absent_unpaid_units else ru.half_day_unpaid_units end as units) u
+               where ar.company_id = r.company_id and ar.employee_id = r.employee_id and ar.work_date between r.eligible_from and r.eligible_to
+                 and u.units > 0 and not ${APPROVED_LEAVE_ON('ar.work_date')}`,
+             stored('ATTENDANCE', 'attendance_record_id'),
+           )}) as attendance`,
+      [companyId, runId],
+    )
+  ).rows[0]!;
+}
 
 /**
  * Lines of records, derived from the snapshot tables only. `recordFilter` selects the records (SQL over alias r,
@@ -119,6 +250,11 @@ const linesSql = (recordFilter: string) => `
     select i.record_id, i.component_id, i.head_revision_id, i.head_type, 'INPUT'::text, i.amount, 1::numeric, r.mu
       from payroll_record_input i join recs r on r.id = i.record_id
      where i.company_id = $1 and i.calculation_basis = 'INPUT'
+    union all
+    -- I-85: a RULE_PACK head valued by its ACTIVE pack (statutory/evaluate.ts), from the record's statutory snapshot.
+    select s.record_id, s.component_id, s.head_revision_id, s.head_type, 'RULE_PACK'::text, s.amount, 1::numeric, r.mu
+      from payroll_record_statutory s join recs r on r.id = s.record_id
+     where s.company_id = $1 and s.status = 'VALUED'
   )
   select p.record_id, p.component_id, p.head_revision_id, p.head_type, p.basis,
          hrms_payroll_round_half_up(sum(p.numerator), min(p.denominator), min(p.mu)::smallint) as amount,
@@ -237,7 +373,8 @@ export async function calculateChunk(tx: Queryable, run: RunContext, policy: Pol
              and (a.effective_to is null or a.effective_to > least($9::date, coalesce(x.leaving_date, $9::date)))
        cross join lateral (
          select st.code <> 'DRAFT' and e.joining_date <= $9::date and (x.leaving_date is null or x.leaving_date >= $8::date)
-                and not (st.code in ('INACTIVE_SEPARATED', 'ARCHIVED') and x.leaving_date is null) as eligible
+                and not (st.code in ('INACTIVE_SEPARATED', 'ARCHIVED') and x.leaving_date is null)
+                and not ${SETTLED_FINALLY('$1', 'e.id', 'x.leaving_date', '$9::date')} as eligible
        ) ok
        cross join lateral (
          select case when ok.eligible then greatest(e.joining_date, $8::date) end as f,
@@ -263,9 +400,16 @@ export async function calculateChunk(tx: Queryable, run: RunContext, policy: Pol
          select 'NO_SERVICE_IN_PERIOD', 'WARNING', jsonb_build_object('joiningDate', r.joining_date, 'leavingDate', r.leaving_date)
           where r.eligible_from is null and r.salary_stop_mode is distinct from 'EXCLUDE_CALCULATION'
             and not (r.status_code in ('INACTIVE_SEPARATED', 'ARCHIVED') and r.leaving_date is null)
+            and not ${SETTLED_FINALLY('r.company_id', 'r.employee_id', 'r.leaving_date', '$5::date')}
+         union all
+         select 'SETTLED_IN_FINAL_SETTLEMENT', 'WARNING',
+                jsonb_build_object('leavingDate', r.leaving_date,
+                                   'settlementId', (select fs.id from settlement fs where fs.company_id = r.company_id and fs.employee_id = r.employee_id
+                                                       and fs.state in ('RELEASE_ELIGIBLE', 'PAID') order by fs.revision desc limit 1))
+          where r.eligible_from is null and ${SETTLED_FINALLY('r.company_id', 'r.employee_id', 'r.leaving_date', '$5::date')}
        ) x
       where r.company_id = $1 and r.run_id = $2 and r.employee_id = any($3::uuid[]) and r.calculation_status = 'PENDING'`,
-    [...base, userId],
+    [...base, userId, run.service_end],
   );
   // FR-031 "salary-stop interpretation is explicit in the result": an approved stop entered under another calendar's
   // period of the same service month is never ignored. Paying the employee here would disregard an independent
@@ -416,8 +560,6 @@ export async function calculateChunk(tx: Queryable, run: RunContext, policy: Pol
        cross join lateral (
          select 'HEAD_NOT_CONFIGURED' as code, jsonb_build_object('componentCode', pc.code) as detail where c.head_revision_id is null
          union all
-         select 'RULE_PACK_NOT_CONFIGURED', jsonb_build_object('componentCode', pc.code, 'rulePackCode', c.rule_pack_code) where c.calculation_basis = 'RULE_PACK'
-         union all
          select 'COMPONENT_BASIS_NOT_MONTHLY', jsonb_build_object('componentCode', pc.code) where c.calculation_basis = 'FIXED' and c.amount_basis <> 'MONTHLY'
          union all
          select 'COMPONENT_HEAD_NOT_FIXED', jsonb_build_object('componentCode', pc.code) where c.calculation_basis = 'INPUT'
@@ -440,6 +582,52 @@ export async function calculateChunk(tx: Queryable, run: RunContext, policy: Pol
       where ${COMPUTE}`,
     [...base, run.period_id, userId],
   );
+  // 7b. FR-035 (I-79, decided under owner delegation): approved arrears of an earlier period, not yet paid, appear once in the first
+  // later record of the employee: a positive total on the valuation policy's arrears component, a negative one as a recovery on its
+  // deduction. Serialised across runs so two calculations never take the same case. Without an active policy nothing is taken.
+  const valuation = await valuationPolicyOn(tx, run.company_id, run.service_end);
+  if (valuation) {
+    await advisoryLock(tx, `payroll_arrears_pickup:${run.company_id}`);
+    await tx.query(
+      `insert into payroll_record_input (company_id, record_id, employee_id, source_kind, arrears_case_id, component_id, amount, currency_code, head_revision_id,
+                                         head_type, calculation_basis, created_by)
+       select r.company_id, r.id, r.employee_id, 'ARREARS', c.id, k.component_id, abs(t.total), c.currency_code,
+              case when h.in_use then h.id end, case when h.in_use then h.head_type end, case when h.in_use then h.calculation_basis end, $4
+         from payroll_record r
+         cross join lateral (select c.id, c.currency_code, t.total ${ARREARS_FOR('r', '$5::text', '$6::date')}) c
+         cross join lateral (select c.total) t
+         cross join lateral (select case when t.total > 0 then $7::uuid else $8::uuid end as component_id) k
+         left join payroll_run_head rh on rh.company_id = r.company_id and rh.run_id = r.run_id and rh.component_id = k.component_id
+         left join payroll_head_revision h on h.company_id = rh.company_id and h.id = rh.head_revision_id
+        where ${COMPUTE} and k.component_id is not null`,
+      [...base, userId, run.currency_code, run.service_start, valuation.arrears_component_id, valuation.recovery_component_id],
+    );
+    // FR-100: approved late-timesheet adjustments the same way, on the policy's adjustment component (a negative one on its deduction).
+    await tx.query(
+      `insert into payroll_record_input (company_id, record_id, employee_id, source_kind, adjustment_id, component_id, amount, currency_code, head_revision_id,
+                                         head_type, calculation_basis, created_by)
+       select r.company_id, r.id, r.employee_id, 'ADJUSTMENT', a.id, k.component_id, abs(a.delta_amount), a.currency_code,
+              case when h.in_use then h.id end, case when h.in_use then h.head_type end, case when h.in_use then h.calculation_basis end, $4
+         from payroll_record r
+         cross join lateral (select a.id, a.currency_code, a.delta_amount ${ADJUSTMENTS_FOR('r', '$5::text', '$6::date')}) a
+         cross join lateral (select case when a.delta_amount > 0 then $7::uuid else $8::uuid end as component_id) k
+         left join payroll_run_head rh on rh.company_id = r.company_id and rh.run_id = r.run_id and rh.component_id = k.component_id
+         left join payroll_head_revision h on h.company_id = rh.company_id and h.id = rh.head_revision_id
+        where ${COMPUTE} and k.component_id is not null`,
+      [...base, userId, run.currency_code, run.service_start, valuation.adjustment_component_id, valuation.recovery_component_id],
+    );
+    await tx.query(
+      `${EXCEPTION_INSERT}
+       select r.company_id, r.run_id, r.id, r.employee_id, case when i.source_kind = 'ARREARS' then 'ARREARS_HEAD_INVALID' else 'ADJUSTMENT_HEAD_INVALID' end, 'BLOCKING', false,
+              jsonb_build_object('componentCode', pc.code, 'expected', case when i.component_id = $5 then 'DEDUCTION' else 'EARNING' end), $4, $4
+         from payroll_record r
+         join payroll_record_input i on i.company_id = r.company_id and i.record_id = r.id and i.source_kind in ('ARREARS', 'ADJUSTMENT')
+         join pay_component pc on pc.company_id = i.company_id and pc.id = i.component_id
+        where ${COMPUTE}
+          and (i.calculation_basis is distinct from 'INPUT' or i.head_type is distinct from case when i.component_id = $5 then 'DEDUCTION' else 'EARNING' end)`,
+      [...base, userId, valuation.recovery_component_id],
+    );
+  }
   await tx.query(
     `${EXCEPTION_INSERT}
      select r.company_id, r.run_id, r.id, r.employee_id, x.code, 'BLOCKING', false, x.detail, $5, $5
@@ -481,26 +669,11 @@ export async function calculateChunk(tx: Queryable, run: RunContext, policy: Pol
     [...base, run.period_id, userId, run.service_start],
   );
 
-  // A rule-pack head also applies where its base heads are paid (a pack calculated on BASIC applies to everyone paid
-  // BASIC), whether or not the arrangement lists the head itself: no pack is configured, so the employee is blocked
-  // with the named exception instead of being paid without it (DF05 "missing applicable mandatory inputs blocks").
-  await tx.query(
-    `${EXCEPTION_INSERT}
-     select distinct on (r.id, h.component_id) r.company_id, r.run_id, r.id, r.employee_id, 'RULE_PACK_NOT_CONFIGURED', 'BLOCKING', false,
-            jsonb_build_object('componentCode', pc.code, 'rulePackCode', h.rule_pack_code), $4, $4
-       from payroll_record r
-       join payroll_run_head rh on rh.company_id = r.company_id and rh.run_id = r.run_id
-       join payroll_head_revision h on h.company_id = rh.company_id and h.id = rh.head_revision_id and h.in_use and h.calculation_basis = 'RULE_PACK'
-       join pay_component pc on pc.company_id = h.company_id and pc.id = h.component_id
-      where ${COMPUTE}
-        and not exists (select 1 from payroll_record_component c where c.company_id = r.company_id and c.record_id = r.id and c.component_id = h.component_id)
-        and exists (select 1 from payroll_head_base b
-                     where b.company_id = h.company_id and b.head_revision_id = h.id
-                       and (exists (select 1 from payroll_record_component c where c.company_id = r.company_id and c.record_id = r.id and c.component_id = b.base_component_id)
-                            or exists (select 1 from payroll_record_input i where i.company_id = r.company_id and i.record_id = r.id and i.component_id = b.base_component_id)))
-      order by r.id, h.component_id`,
-    [...base, userId],
-  );
+  // A rule-pack head applies where the arrangement lists it or where its base heads are paid (a pack calculated on BASIC
+  // applies to everyone paid BASIC). I-85 (statutory/evaluate.ts, the one call): a head whose pack is ACTIVE for the period
+  // is valued into the record's statutory snapshot, from which step 8 derives its line; otherwise the employee is blocked
+  // with RULE_PACK_NOT_CONFIGURED instead of being paid without it (DF05 "missing applicable mandatory inputs blocks").
+  await evaluateRulePackHeads(tx, run, userId, ids, linesSql);
 
   // 8. Lines, from the snapshot alone, for records without an exception that prevents amounts.
   await tx.query(

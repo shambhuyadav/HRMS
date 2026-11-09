@@ -5,6 +5,7 @@
 import type { Queryable } from '../../db/queryable.js';
 import type { EventDescriber, ModuleOutboxEvent } from '../events-registry.js';
 import type { EventSpec } from '../notification/dispatcher.js';
+import { ruleOf } from './separation-types.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const id = (v: unknown): string | null => (typeof v === 'string' && UUID.test(v) ? v : null);
@@ -26,13 +27,23 @@ interface ExitFacts {
   employee_name: string;
   leaving_date: string;
   approved_leaving_date: string | null;
+  separation_type: string;
 }
+
+/**
+ * I-89 item 7 (0242): an HR-entered separation other than a resignation is announced in its own words (SEPARATION_*): to the reviewers
+ * of its tasks, and its decision to the employee's manager only. The employee hears of it through HR's letter, and a deceased
+ * employee's self-service is never notified (notification/dispatcher.ts refuses it for every event).
+ */
+const SEPARATION_EVENT = { EXIT_SUBMITTED: 'SEPARATION_SUBMITTED', EXIT_RECOMMENDED: 'SEPARATION_RECOMMENDED', EXIT_DECIDED: 'SEPARATION_DECIDED' } as const;
+const separationWords = (x: ExitFacts) => (x.separation_type === 'RESIGNATION' ? {} : { separationType: ruleOf(x.separation_type).label });
+const eventTypeOf = (x: ExitFacts, resignation: keyof typeof SEPARATION_EVENT) => (x.separation_type === 'RESIGNATION' ? resignation : SEPARATION_EVENT[resignation]);
 
 async function exitFacts(tx: Queryable, companyId: string, exitCaseId: string): Promise<ExitFacts | undefined> {
   return (
     await tx.query<ExitFacts>(
       `select x.employee_id, x.transaction_id, bt.revision, e.employee_code, e.display_name as employee_name, to_char(x.leaving_date, 'YYYY-MM-DD') as leaving_date,
-              to_char(x.approved_leaving_date, 'YYYY-MM-DD') as approved_leaving_date
+              to_char(x.approved_leaving_date, 'YYYY-MM-DD') as approved_leaving_date, x.separation_type
          from exit_case x
          join business_transaction bt on bt.company_id = x.company_id and bt.id = x.transaction_id
          join employee e on e.company_id = x.company_id and e.id = x.employee_id
@@ -51,12 +62,12 @@ const exitReviewer =
     const x = await exitFacts(tx, ev.companyId, exitCaseId);
     if (!x) return null;
     return spec({
-      eventType,
+      eventType: eventTypeOf(x, eventType),
       subjectEmployeeId: x.employee_id,
       transactionId: x.transaction_id,
       transactionRevision: x.revision,
       taskId,
-      data: { employeeName: x.employee_name, employeeCode: x.employee_code, lastWorkingDate: x.leaving_date },
+      data: { employeeName: x.employee_name, employeeCode: x.employee_code, lastWorkingDate: x.leaving_date, ...separationWords(x) },
     });
   };
 
@@ -75,11 +86,11 @@ const exitOutcome: EventDescriber = async (tx, ev) => {
           : null;
   if (!outcome) return null;
   return spec({
-    eventType: 'EXIT_DECIDED',
+    eventType: eventTypeOf(x, 'EXIT_DECIDED'),
     subjectEmployeeId: x.employee_id,
     transactionId: x.transaction_id,
     transactionRevision: x.revision,
-    data: { employeeName: x.employee_name, employeeCode: x.employee_code, outcome },
+    data: { employeeName: x.employee_name, employeeCode: x.employee_code, outcome, ...separationWords(x) },
   });
 };
 
@@ -193,6 +204,27 @@ const SETTLEMENT_OUTCOMES: Record<string, string> = {
   RETURNED: 'returned for correction',
   REJECTED: 'rejected',
   RELEASE_ELIGIBLE: 'marked eligible for release (this records no payment)',
+  // I-81 items 2, 5, 6: a payment recorded from evidence, and a revision voided.
+  PAID: 'recorded as paid',
+  CANCELLED: 'voided',
+};
+
+/** I-81 item 9: an in-app delivery tells the employee what kind of document is waiting, nothing more. */
+const essDelivered: EventDescriber = async (tx, ev) => {
+  const deliveryId = id(ev.payload.deliveryId);
+  if (!deliveryId) return null;
+  const d = (
+    await tx.query<{ employee_id: string; source_kind: string; recipient_user_id: string }>(
+      `select employee_id, source_kind, recipient_user_id from ess_delivery where company_id = $1 and id = $2`,
+      [ev.companyId, deliveryId],
+    )
+  ).rows[0];
+  if (!d) return null;
+  return spec({
+    eventType: 'ESS_DOCUMENT_DELIVERED',
+    subjectEmployeeId: d.employee_id,
+    data: { documentKind: d.source_kind === 'LETTER' ? 'letter' : 'full and final settlement statement' },
+  });
 };
 
 const settlementDecided: EventDescriber = async (tx, ev) => {
@@ -218,4 +250,5 @@ export const LIFECYCLE_EVENTS: Readonly<Record<string, EventDescriber>> = {
   'employee_process.task_assigned': taskAssigned,
   'settlement.assigned': settlementAssigned,
   'settlement.decided': settlementDecided,
+  'ess.delivered': essDelivered,
 };

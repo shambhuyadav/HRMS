@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import type { PermissionKey } from '../access/baseline.js';
 import { followUpSuite } from '../imports/follow-up.fixtures.js';
+import { CONFIG, head, salary } from '../payroll/payroll.fixtures.js';
 import { csvTable } from '../report/csv.fixtures.js';
 import { processReportQueue } from '../report/service.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
@@ -260,10 +261,25 @@ describe('salary master list and exports (FR-029, E08, FR-056, FR-065)', () => {
       currency: 'INR',
       annualCtc: '1200000.0000',
       monthlyGross: '100000.0000',
+      // An arrangement without components has nothing payroll would pay, so no estimate (BR-011, I-80).
+      estimatedInHand: null,
+      ctcCategory: null,
     });
     expect(mine.items.find((r) => r.employeeId === people.graded!.id)).toMatchObject({ grade: 'Grade One', displayName: 'Synthetic Salaried Two' });
-    // No estimated in-hand figure is computed (BR-011).
-    expect(Object.keys(page.items[0]!).sort()).toEqual(['annualCtc', 'currency', 'displayName', 'effectiveFrom', 'effectiveTo', 'employeeCode', 'employeeId', 'grade', 'monthlyGross', 'status']);
+    expect(Object.keys(page.items[0]!).sort()).toEqual([
+      'annualCtc',
+      'ctcCategory',
+      'currency',
+      'displayName',
+      'effectiveFrom',
+      'effectiveTo',
+      'employeeCode',
+      'employeeId',
+      'estimatedInHand',
+      'grade',
+      'monthlyGross',
+      'status',
+    ]);
     // The revision is the arrangement in force from its effective date.
     expect(ours((await list(hr1, day('2026-07-15'))).json()).items.find((r) => r.employeeId === people.revised!.id)).toMatchObject({ effectiveFrom: '2026-07-15', effectiveTo: null, monthlyGross: '110000.0000' });
     // Before any salary starts there is no row; an employee without a salary is never listed; nor another company's.
@@ -279,6 +295,41 @@ describe('salary master list and exports (FR-029, E08, FR-056, FR-065)', () => {
     const second = (await list(hr1, `${day('2026-07-01')}&page=2`)).json() as Page;
     expect(second).toMatchObject({ items: [], total: page.total, page: 2 });
     expect((await list(hr1, '?pageSize=10')).statusCode).toBe(400);
+  });
+
+  it('BR-011 (I-80): the estimated in-hand is labelled an estimate: earnings and reimbursements less fixed deductions, before tax; none payroll could not pay', async () => {
+    const configA = await h.actor(A, 'HR_ADMINISTRATOR', { extra: CONFIG });
+    const configB = await h.actor(A, 'HR_ADMINISTRATOR', { extra: CONFIG });
+    await head(h, configA, configB, { code: 'SM_BASIC', headType: 'EARNING', basis: 'FIXED', sequence: 1 });
+    await head(h, configA, configB, { code: 'SM_CONV', headType: 'REIMBURSEMENT', basis: 'FIXED', sequence: 2 });
+    await head(h, configA, configB, { code: 'SM_PF', headType: 'DEDUCTION', basis: 'FIXED', sequence: 3 });
+    await head(h, configA, configB, { code: 'SM_PF_ER', headType: 'EMPLOYER_CONTRIBUTION', basis: 'FIXED', sequence: 4 });
+    const paid = await employee();
+    await salary(h, hr1, paid.id, {
+      effectiveFrom: '2026-01-05',
+      monthlyGross: '41600',
+      annualCtc: '520800',
+      components: [
+        { code: 'SM_BASIC', amount: '40000' },
+        { code: 'SM_CONV', amount: '1600' },
+        { code: 'SM_PF', amount: '1800' },
+        { code: 'SM_PF_ER', amount: '1800' },
+      ],
+    });
+    // A FIXED head on an annual amount: payroll refuses to calculate it (COMPONENT_BASIS_NOT_MONTHLY), so no estimate is made.
+    const annual = await employee();
+    await salary(h, hr1, annual.id, { effectiveFrom: '2026-01-05', monthlyGross: '40000', components: [{ code: 'SM_BASIC', amount: '480000', basis: 'ANNUAL' }] });
+    const rowOf = async (code: string) => {
+      const page = (await list(hr1, `?date=2026-07-01&search=${encodeURIComponent(code)}`)).json() as Page & { estimate: { label: string; message: string } };
+      return { row: page.items.find((r) => r.employeeCode === code) as Listed & { estimatedInHand: string | null }, estimate: page.estimate };
+    };
+    // 40,000 + 1,600 - 1,800 = 39,800.00; the employer's PF is a cost, not pay; tax and statutory deductions are not included.
+    const shown = await rowOf(paid.code);
+    expect(shown.row.estimatedInHand).toBe('39800.00');
+    expect(shown.estimate.label).toBe('Estimated in-hand');
+    expect(shown.estimate.message).toContain('not a payslip');
+    expect(shown.estimate.message).toContain('before income tax and statutory deductions');
+    expect((await rowOf(annual.code)).row.estimatedInHand).toBeNull();
   });
 
   it('a month lists every arrangement in force in it; search and status narrow it; filters are validated', async () => {

@@ -286,7 +286,7 @@ describe.runIf(isModuleActive('payroll'))('payroll on the location calendar (FR-
       const dept = await department();
       const place = await site();
       const e = await employee(dept, place);
-      const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: uniq('S').toUpperCase(), name: 'Own', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json();
+      const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: uniq('S').toUpperCase(), name: 'Own', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json();
       await ok(await h.call(hr, 'POST', `/v1/employees/${e}/shift`, { shiftId: shift.id, effectiveFrom: '2026-01-05' }));
       const holiday = await ok<{ id: string }>(await h.call(hr, 'POST', '/v1/holidays', { locationId: place, holidayDate: '2026-03-03', name: 'Synthetic holiday' }), 201);
       await processDay('2026-03-03'); // HOLIDAY

@@ -46,6 +46,7 @@ import { assertCandidateIdentityKeyConfigured } from './modules/hiring/candidate
 import { assertFieldKeysConfigured } from './security/field-crypto.js';
 import { type FileStore, memoryFileStore } from './storage/files.js';
 import { developmentScanner, type ScanProvider, scanInWorker } from './storage/scan.js';
+import { scanFailureRoutes } from './storage/scan-failures.js';
 
 export interface AppDependencies {
   db: Database;
@@ -172,6 +173,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   app.register(essRoutes, { prefix: '/v1', db: deps.db });
   app.register(mobileLinkRoutes, { prefix: '/v1', db: deps.db });
   app.register(shiftPlanImportRoutes, { prefix: '/v1', db: deps.db, files, scanner });
+  app.register(scanFailureRoutes, { prefix: '/v1', db: deps.db });
   // Business modules added through modules/registry.ts and modules/routes-registry.ts.
   for (const m of MODULE_ROUTES) app.register(m.routes, { prefix: '/v1', db: deps.db, files, scanner });
   app.register(workflowRoutes, { prefix: '/v1', db: deps.db });

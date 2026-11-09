@@ -444,11 +444,11 @@ describe('the scan pass on the scheduler tick', () => {
 
 describe('settings', () => {
   it('have named starting values, and read a positive whole number from the environment', () => {
-    const names = ['SCAN_PER_TICK', 'SCAN_MAX_ATTEMPTS', 'SCAN_BACKOFF_BASE_MS', 'SCAN_BACKOFF_MAX_MS', 'SCAN_TIMEOUT_MS', 'SCAN_PAUSE_AFTER_ERRORS'];
+    const names = ['SCAN_PER_TICK', 'SCAN_MAX_ATTEMPTS', 'SCAN_BACKOFF_BASE_MS', 'SCAN_BACKOFF_MAX_MS', 'SCAN_TIMEOUT_MS', 'SCAN_PAUSE_AFTER_ERRORS', 'SCAN_INLINE_CONCURRENCY'];
     const saved = names.map((n) => [n, process.env[n]] as const);
     try {
       for (const n of names) delete process.env[n];
-      expect(scanSettings()).toEqual({ perPass: 200, maxAttempts: 10, backoffBaseMs: 60_000, backoffMaxMs: 3_600_000, timeoutMs: 30_000, pauseAfterErrors: 5 });
+      expect(scanSettings()).toEqual({ perPass: 200, maxAttempts: 10, backoffBaseMs: 60_000, backoffMaxMs: 3_600_000, timeoutMs: 30_000, pauseAfterErrors: 5, inlineConcurrency: 4 });
       process.env.SCAN_MAX_ATTEMPTS = '4';
       process.env.SCAN_PER_TICK = '0'; // not positive: the default stays
       expect(scanSettings()).toMatchObject({ maxAttempts: 4, perPass: 200 });

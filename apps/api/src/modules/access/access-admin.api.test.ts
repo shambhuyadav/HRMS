@@ -138,9 +138,9 @@ describe('C2 record scope per role (BR-044, C7)', () => {
     ['HR_ADMINISTRATOR', 'ASSIGNED'],
     ['PAYROLL_OPERATOR', 'ASSIGNED'],
     ['FINANCE_REVIEWER', 'OWN'],
-    ['EXPENSE_FINANCE_APPROVER', 'COMPANY'],
+    ['EXPENSE_FINANCE_APPROVER', 'TEAM'],
     ['TREASURY_OPERATOR', 'TEAM'],
-    ['TREASURY_APPROVER', 'COMPANY'],
+    ['TREASURY_APPROVER', 'OWN'],
     ['RECRUITER', 'ASSIGNED'],
     ['APPRAISAL_REVIEWER', 'COMPANY'],
     ['TRAINING_COORDINATOR', 'OWN'],
@@ -159,6 +159,11 @@ describe('C2 record scope per role (BR-044, C7)', () => {
     ['REPORTING_MANAGER', 'ASSIGNED'],
     ['PAYROLL_APPROVER', 'ASSIGNED'],
     ['PAYROLL_APPROVER', 'COMPANY'],
+    // I-83 items 1 and 2 (0195): section 5's "Assigned/Organisation" for these two roles.
+    ['EXPENSE_FINANCE_APPROVER', 'ASSIGNED'],
+    ['EXPENSE_FINANCE_APPROVER', 'COMPANY'],
+    ['TREASURY_APPROVER', 'ASSIGNED'],
+    ['TREASURY_APPROVER', 'COMPANY'],
     ['HR_ADMINISTRATOR', 'COMPANY'],
     ['EMPLOYEE', 'OWN'],
   ])('accepts %s in %s scope', async (role, scope) => {

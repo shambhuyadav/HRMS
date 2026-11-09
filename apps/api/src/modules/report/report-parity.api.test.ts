@@ -238,7 +238,7 @@ describe('ATTENDANCE_REGISTER (FR-021; BR-026; ZT17)', () => {
   const sorted = (rows: Record<string, string>[]) => [...rows].sort((x, y) => `${x['Employee code']}${x['Work date']}`.localeCompare(`${y['Employee code']}${y['Work date']}`));
 
   beforeAll(async () => {
-    const shift = async (code: string, inTime: string) => (await h.call(hr, 'POST', '/v1/shifts', { code, name: code, inTime, outTime: '18:00', breaks: [] })).json().id as string;
+    const shift = async (code: string, inTime: string) => (await h.call(hr, 'POST', '/v1/shifts', { code, name: code, inTime, outTime: '18:00', bufferMinutes: 240, breaks: [] })).json().id as string;
     dayShift = await shift('PARITY_DAY', '09:00');
     lateShift = await shift('PARITY_LATE', '10:00');
     const policy = (await h.call(hr, 'GET', '/v1/attendance/policies')).json().items[0];

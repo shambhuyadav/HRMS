@@ -4,6 +4,12 @@
 // scope predicates as the source lists, so counts reconcile with drill-down pages. A metric whose module is not
 // built yet is reported NOT_AVAILABLE rather than a misleading zero. A widget links to its source list and the page
 // offers shortcuts only where the destination is permitted in the same assignment (sources.ts).
+//
+// I-83 (decided under owner delegation, 6 Nov 2026): BR-045 "redaction must prevent inference". A people-count the viewer cannot
+// open record by record in the selected assignment (no permitted source list) is shown as "fewer than N" while it is between 1
+// and N - 1, N being the company's dated small-count threshold (reporting_setting, default 5). A count with a permitted list stays
+// exact: the list shows the same people, so hiding the number would protect nothing and break the reconciliation (FR-097).
+// Counts of the viewer's own work and of company records (runs, events, deliveries) are not people-counts (METRIC_SUBJECTS).
 import type { Queryable } from '../../db/queryable.js';
 import { type AccessGrant, employeeScopePredicate, resolveAccess, SqlParams } from '../access/authorize.js';
 import { countAccessGrants, listCompanyUsers } from '../access/admin.js';
@@ -17,17 +23,83 @@ import { EXPENSE_METRICS } from '../expense/metrics.js';
 import { HIRING_METRICS } from '../hiring/metrics.js';
 import { PAYROLL_METRICS } from '../payroll/metrics.js';
 import { isModuleActive, MODULE_REGISTRATIONS } from '../registry.js';
+import { CLAIM_STATE_METRICS } from '../reporting/claim-states.js';
+import { settingInForce } from '../reporting/settings.js';
 import { teamMemberPredicate } from '../team/service.js';
 import { TRAINING_METRICS } from '../training/metrics.js';
 import { METRIC_SOURCES, type MetricSource, type SourceCombine, type SourceList } from './sources.js';
 import { assignmentPendingTasks, countOf, monthStart, myPendingTasks, notAvailable } from './tasks.js';
 
-export type MetricResult = { status: 'OK'; value: number | string } | { status: 'NOT_CONFIGURED'; message: string } | { status: 'NOT_AVAILABLE' };
+export type MetricResult =
+  | { status: 'OK'; value: number | string }
+  | { status: 'NOT_CONFIGURED'; message: string }
+  | { status: 'NOT_AVAILABLE' }
+  // BR-045 small-count rule (I-83 item 4): a people-count between 1 and threshold - 1 with no permitted list behind it.
+  | { status: 'SUPPRESSED'; threshold: number };
 
 /** An operational record with no employee to scope cannot be counted for a filtered assignment: shown as such, never a whole-company count (FR-096). */
 const NOT_COMPANY_WIDE: MetricResult = { status: 'NOT_CONFIGURED', message: 'This count needs an unrestricted company-scope assignment' };
 
 type Metric = (db: Queryable, grant: AccessGrant) => Promise<MetricResult>;
+
+/** The assignment narrows its scope with department, location or employee filters. */
+const filtered = (g: AccessGrant) => g.filters.departments.length + g.filters.locations.length + g.filters.employees.length > 0;
+
+/**
+ * Company records with no employee to scope (payroll runs and periods, training sessions): a filtered assignment would be shown a
+ * whole-company count, so it gets the visible "needs an unrestricted scope" state instead (FR-096 "No widget defaults to
+ * whole-company scope"; I-62 item 6, I-74 item 8, I-83 item 5). The lists themselves stay the company's register.
+ */
+const unfilteredOnly = (metrics: Readonly<Record<string, Metric>>): Record<string, Metric> =>
+  Object.fromEntries(Object.entries(metrics).map(([code, metric]): [string, Metric] => [code, (db, g) => (filtered(g) ? Promise.resolve(NOT_COMPANY_WIDE) : metric(db, g))]));
+
+/**
+ * A payment has no approval task, so an ASSIGNED scope (the Treasury Approver may hold one, 0195) reaches none: said so, never a
+ * lasting zero (I-83 item 1). Organisation scopes count the instructions of claimants in scope.
+ */
+const PAYMENTS_NEED_ORGANISATION: MetricResult = { status: 'NOT_CONFIGURED', message: 'Payment counts need an organisation-scope assignment: payments are not assigned as tasks' };
+const organisationOnly = (metrics: Readonly<Record<string, Metric>>): Record<string, Metric> =>
+  Object.fromEntries(Object.entries(metrics).map(([code, metric]): [string, Metric] => [code, (db, g) => (g.scopeKind === 'ASSIGNED' ? Promise.resolve(PAYMENTS_NEED_ORGANISATION) : metric(db, g))]));
+
+const {
+  PAYMENTS_AWAITING_OUTCOME,
+  PAYMENTS_FAILED,
+  PAYMENTS_AWAITING_RELEASE,
+  PAYMENTS_RELEASE_OVERDUE,
+  PAYMENTS_CONFIRMED_REVERSED,
+  PAYMENT_PREPARATION_TASKS,
+  PAYMENT_RESERVATIONS_TO_RECONCILE,
+  ...OTHER_EXPENSE_METRICS
+} = EXPENSE_METRICS;
+const PAYMENT_METRICS = {
+  PAYMENTS_AWAITING_OUTCOME,
+  PAYMENTS_FAILED,
+  PAYMENTS_AWAITING_RELEASE,
+  PAYMENTS_RELEASE_OVERDUE,
+  PAYMENTS_CONFIRMED_REVERSED,
+  PAYMENT_PREPARATION_TASKS,
+  PAYMENT_RESERVATIONS_TO_RECONCILE,
+} as Record<string, Metric>;
+
+const { TRAINING_SESSIONS_CURRENT_FUTURE: SESSIONS, ...OTHER_TRAINING_METRICS } = TRAINING_METRICS as Record<string, Metric>;
+const TRAINING_SESSIONS_CURRENT_FUTURE = SESSIONS!;
+
+/**
+ * Payroll Approver "Assigned payroll review tasks" and "Overdue review tasks" in the ordinary role context (I-83 item 3; DF17 "no
+ * merging across role assignments"): the run review and approval decisions are the eligible Admin assignment's (payroll_run.review
+ * and approve are confidential-amount duties), so the ordinary role counts the runs waiting in review, from the run list it reads
+ * (payroll_run.read), never the same person's Admin tasks. Overdue: still in review after the period's payment date.
+ */
+const PAYROLL_REVIEW_STATE_METRICS: Record<string, Metric> = {
+  PAYROLL_RUNS_IN_REVIEW: (db, g) => {
+    const p = new SqlParams();
+    return countOf(db, `select count(*) as n from payroll_run r where r.company_id = ${p.add(g.companyId)}::uuid and r.state = 'IN_REVIEW'`, p);
+  },
+  PAYROLL_RUNS_IN_REVIEW_OVERDUE: (db, g) => {
+    const p = new SqlParams();
+    return countOf(db, `select count(*) as n from payroll_run r where r.company_id = ${p.add(g.companyId)}::uuid and r.state = 'IN_REVIEW' and r.payment_date < ${p.add(g.businessDate)}::date`, p);
+  },
+};
 
 const count = async (db: Queryable, sql: string, params: unknown[]): Promise<MetricResult> => ({
   status: 'OK',
@@ -198,25 +270,105 @@ export const METRICS: Record<string, Metric> = {
     );
   },
 
-  NOT_YET_AVAILABLE: async () => ({ status: 'NOT_AVAILABLE' }),
-  // F2 Finance Reviewer widgets whose source records the role cannot read in this build: no reconciliation workflow
-  // exists, and the role's ceiling holds no expense or payment read grant (expense.read, payment.read and the payroll
-  // bank ledger are finance-duty grants of eligible Admin assignments, DF02/DF07). A count would aggregate records
-  // outside the role's grants (FR-097), so they are visibly unavailable until a grant decision is made.
-  FINANCE_RECONCILIATION_TASKS: notAvailable,
-  FINANCE_UNRECONCILED_OUTCOMES: notAvailable,
-  FINANCE_EXPENSE_STATES: notAvailable,
-  // F2 metrics of the core expense/payment and audit records (Treasury, Finance Reviewer, Expense Finance Approver,
-  // Auditor).
-  ...EXPENSE_METRICS,
+  NOT_YET_AVAILABLE: notAvailable,
+  // F2 Finance Reviewer reconciliation figures and operational states, and the Expense Finance Approver's decision-due figure (I-92):
+  // claim states and the payment follow-up of claims in the organisation scope, from the claim-state list the roles read
+  // (reporting/claim-states.ts, below). Payment records themselves stay the treasury and finance-duty Admin grants' (DF02/DF07).
+  // F2 metrics of the core expense/payment and audit records (Treasury, Auditor).
+  ...OTHER_EXPENSE_METRICS,
+  ...organisationOnly(PAYMENT_METRICS),
   ...AUDIT_METRICS,
   // F2 metrics of business modules (Employee "Own training/tasks due", Recruiter, Training Coordinator, Payroll
   // Operator and Approver, Appraisal Reviewer).
   ...moduleMetrics('hiring', HIRING_METRICS),
-  ...moduleMetrics('training', TRAINING_METRICS),
-  ...moduleMetrics('payroll', PAYROLL_METRICS),
+  ...moduleMetrics('training', { ...OTHER_TRAINING_METRICS, ...unfilteredOnly({ TRAINING_SESSIONS_CURRENT_FUTURE }) }),
+  ...moduleMetrics('payroll', unfilteredOnly({ ...PAYROLL_METRICS, ...PAYROLL_REVIEW_STATE_METRICS })),
   ...moduleMetrics('appraisal', APPRAISAL_METRICS),
+  // Finance Reviewer and Expense Finance Approver claim states (I-83 items 2 and 3; I-92).
+  ...moduleMetrics('reporting', CLAIM_STATE_METRICS),
 };
+
+/**
+ * What each metric counts, for the BR-045 small-count rule (I-83 item 4). PEOPLE: identifiable employees, claimants, candidates or
+ * account holders, or records each about one of them; only these are suppressed. OWN: the viewer's own record or own work queue.
+ * RECORDS: company records (runs, periods, sessions, events, deliveries, requisitions), states and unavailable figures. Every
+ * metric must be classified (dashboard.api.test.ts), so a new one cannot slip past the rule unnoticed.
+ */
+export const METRIC_SUBJECTS: Readonly<Record<string, 'PEOPLE' | 'OWN' | 'RECORDS'>> = {
+  ACTIVE_ACCOUNTS: 'PEOPLE',
+  PENDING_ACCESS_GRANTS: 'PEOPLE',
+  FAILED_NOTIFICATION_DELIVERIES: 'RECORDS',
+  FAILED_INTEGRATION_RUNS: 'RECORDS',
+  ACTIVE_EMPLOYEES: 'PEOPLE',
+  DRAFT_EMPLOYEES: 'PEOPLE',
+  CONFIRMATIONS_DUE_30: 'PEOPLE',
+  MY_OPEN_TASKS: 'OWN',
+  LEAVE_EXPENSE_TASKS: 'OWN',
+  TODAY_ATTENDANCE_STATUS: 'OWN',
+  OWN_ANNUAL_LEAVE_BALANCE: 'OWN',
+  OWN_PENDING_REQUESTS: 'OWN',
+  OWN_TRAINING_DUE: 'OWN',
+  TEAM_COUNT: 'PEOPLE',
+  TEAM_ATTENDANCE_EXCEPTIONS: 'PEOPLE',
+  TEAM_REVIEWS_DUE: 'PEOPLE',
+  NOT_YET_AVAILABLE: 'RECORDS',
+  // Claims of identifiable claimants in scope (I-92): small counts are hidden where the claim-state list is not open.
+  FINANCE_RECONCILIATION_TASKS: 'PEOPLE',
+  FINANCE_UNRECONCILED_OUTCOMES: 'PEOPLE',
+  FINANCE_EXPENSE_STATES: 'PEOPLE',
+  EXPENSE_DECISION_DUE_TASKS: 'PEOPLE',
+  // Payments of identifiable claimants in scope (I-92).
+  PAYMENT_RESERVATIONS_TO_RECONCILE: 'PEOPLE',
+  PAYMENTS_AWAITING_OUTCOME: 'PEOPLE',
+  PAYMENTS_FAILED: 'PEOPLE',
+  PAYMENTS_AWAITING_RELEASE: 'PEOPLE',
+  PAYMENTS_RELEASE_OVERDUE: 'PEOPLE',
+  PAYMENTS_CONFIRMED_REVERSED: 'PEOPLE',
+  // Claims and payments of identifiable claimants in scope, not the viewer's own queue (I-89 item 2).
+  PAYMENT_PREPARATION_TASKS: 'PEOPLE',
+  EXPENSE_CLAIMS_IN_REVIEW: 'PEOPLE',
+  EXPENSE_CLAIMS_AWAITING_FINAL: 'PEOPLE',
+  EXPENSE_CLAIMS_LATE_RECEIPT: 'PEOPLE',
+  EXPENSE_CLAIMS_RETURNED_AT_FINANCE: 'PEOPLE',
+  AUDIT_EVENTS_THIS_MONTH: 'RECORDS',
+  AUDIT_ACCESS_DENIED_THIS_MONTH: 'RECORDS',
+  AUDIT_CONFIGURATION_REVISIONS_THIS_MONTH: 'RECORDS',
+  AUDIT_REVIEW_EVIDENCE_TASKS: 'RECORDS',
+  APPROVED_REQUISITIONS: 'RECORDS',
+  OPEN_PIPELINE_APPLICATIONS: 'PEOPLE',
+  // The viewer's own applications awaiting interview completion (I-92).
+  INTERVIEW_TASKS_DUE: 'OWN',
+  OFFERS_AWAITING_APPROVAL: 'PEOPLE',
+  TRAINING_SESSIONS_CURRENT_FUTURE: 'RECORDS',
+  TRAINING_CONFIRMED_PARTICIPATIONS: 'PEOPLE',
+  TRAINING_COMPLETION_NO_SHOW: 'PEOPLE',
+  TRAINING_FEEDBACK_PENDING: 'PEOPLE',
+  PAYROLL_OPEN_PERIODS: 'RECORDS',
+  PAYROLL_UNRESOLVED_EXCEPTIONS: 'RECORDS',
+  PAYROLL_RUNS_IN_PREPARATION: 'RECORDS',
+  PAYROLL_CURRENT_PERIOD_STATE: 'RECORDS',
+  PAYROLL_REVIEW_TASKS: 'OWN',
+  PAYROLL_REVIEW_TASKS_OVERDUE: 'OWN',
+  PAYROLL_APPROVED_LOCKED_RUNS: 'RECORDS',
+  PAYROLL_RUNS_IN_REVIEW: 'RECORDS',
+  PAYROLL_RUNS_IN_REVIEW_OVERDUE: 'RECORDS',
+  APPRAISAL_ASSIGNED_TASKS: 'OWN',
+  APPRAISAL_SUBMITTED_REVIEWED: 'PEOPLE',
+  APPRAISAL_REVIEW_TASKS_OVERDUE: 'OWN',
+  APPRAISAL_RETURNED: 'PEOPLE',
+};
+
+/**
+ * BR-045 small-count rule: a numeric value, or every part of an '<a>/<b>' value, is shown only when it is 0 or at least the
+ * threshold; otherwise the whole figure becomes SUPPRESSED (a part alone could be worked out from the others). No threshold in
+ * force fails closed.
+ */
+export function suppressSmallCount(result: MetricResult, threshold: number | null): MetricResult {
+  if (result.status !== 'OK') return result;
+  if (threshold === null) return { status: 'NOT_CONFIGURED', message: 'No reporting setting is in force, so this count cannot be shown' };
+  const parts = String(result.value).split('/').map(Number);
+  return parts.some((n) => n > 0 && n < threshold) ? { status: 'SUPPRESSED', threshold } : result;
+}
 
 /** A module's metrics, reported NOT_AVAILABLE while that module is not active (never a misleading zero). */
 function moduleMetrics(key: string, metrics: Readonly<Record<string, Metric>>): Record<string, Metric> {
@@ -292,6 +444,9 @@ export async function roleDashboard(db: Queryable, grant: AccessGrant) {
   const out = [];
   const shortcuts = new Map<string, string>();
   const destinationOpen = destinationCheck(db, grant);
+  // BR-045 small-count threshold in force today (reporting_setting), read once and only when a figure needs it.
+  let threshold: Promise<number | null> | undefined;
+  const thresholdInForce = () => (threshold ??= settingInForce(db, grant.companyId, grant.businessDate).then((s) => s?.smallCountThreshold ?? null));
   for (const w of widgets) {
     // Same assignment, the widget's own permission and field group; denied widgets are omitted (FR-097).
     const widgetGrant = await resolveAccess(db, {
@@ -312,6 +467,8 @@ export async function roleDashboard(db: Queryable, grant: AccessGrant) {
     }
     const source = METRIC_SOURCES[w.metric_code];
     const open = source ? await destinationOpen(source) : false;
+    // A people-count with no permitted list behind it: small values are not shown (I-83 item 4). The reporting module holds the threshold.
+    if (!open && (METRIC_SUBJECTS[w.metric_code] ?? 'PEOPLE') === 'PEOPLE' && isModuleActive('reporting')) result = suppressSmallCount(result, await thresholdInForce());
     if (source?.shortcut && open) shortcuts.set(source.shortcut.to, source.shortcut.label);
     const link: WidgetSource | null =
       source && open && result.status === 'OK'
@@ -371,43 +528,51 @@ export const BASELINE_DASHBOARDS: Record<string, { title: string; widgets: { cod
       { code: 'PERIOD_STATE', title: 'Current period calculation state', metric: 'PAYROLL_CURRENT_PERIOD_STATE', permission: 'payroll_run.read.operational', kind: 'STATUS' },
     ],
   },
+  // I-83 item 3: the ordinary role decides no run (DF17 "no merging"), so its review figures are the runs waiting in review.
   PAYROLL_APPROVER: {
     title: 'Payroll approval',
     widgets: [
-      { code: 'REVIEW_TASKS', title: 'Assigned payroll review tasks', metric: 'PAYROLL_REVIEW_TASKS', permission: 'payroll_run.read.operational', kind: 'COUNT' },
-      { code: 'OVERDUE_REVIEWS', title: 'Review tasks past the payment date', metric: 'PAYROLL_REVIEW_TASKS_OVERDUE', permission: 'payroll_run.read.operational', kind: 'COUNT' },
+      { code: 'REVIEW_TASKS', title: 'Runs awaiting review or approval', metric: 'PAYROLL_RUNS_IN_REVIEW', permission: 'payroll_run.read.operational', kind: 'COUNT' },
+      { code: 'OVERDUE_REVIEWS', title: 'Runs in review past the payment date', metric: 'PAYROLL_RUNS_IN_REVIEW_OVERDUE', permission: 'payroll_run.read.operational', kind: 'COUNT' },
       // '<approved>/<locked>' runs of the current period, shown as text.
       { code: 'APPROVED_LOCKED', title: 'Approved / locked runs this period', metric: 'PAYROLL_APPROVED_LOCKED_RUNS', permission: 'payroll_run.read.operational', kind: 'STATUS' },
       { code: 'UNRESOLVED_EXCEPTIONS', title: 'Unresolved run exceptions', metric: 'PAYROLL_UNRESOLVED_EXCEPTIONS', permission: 'payroll_run.read.operational', kind: 'COUNT' },
     ],
   },
+  // I-83 items 2 and 3: claim states of the assignment's organisation scope (reporting/claim-states.ts), never the same person's
+  // Admin tasks (DF17 "no merging"); the decisions themselves are made and counted in the eligible Admin assignment. I-92 (0245):
+  // the reconciliation figures are the claims' payment follow-up, and "decision due" uses the dated due period of a final decision.
   FINANCE_REVIEWER: {
     title: 'Financial review',
     widgets: [
-      { code: 'RECONCILIATION_TASKS', title: 'Reconciliation tasks', metric: 'FINANCE_RECONCILIATION_TASKS', permission: 'dashboard.read.operational', kind: 'COUNT' },
-      { code: 'UNRECONCILED_OUTCOMES', title: 'Unreconciled payment outcomes', metric: 'FINANCE_UNRECONCILED_OUTCOMES', permission: 'dashboard.read.operational', kind: 'COUNT' },
-      { code: 'EXPENSE_REVIEW_TASKS', title: 'Assigned expense review tasks', metric: 'EXPENSE_REVIEW_TASKS', permission: 'dashboard.read.operational', kind: 'COUNT' },
-      { code: 'EXPENSE_STATES', title: 'Operational expense states', metric: 'FINANCE_EXPENSE_STATES', permission: 'dashboard.read.operational', kind: 'STATUS' },
+      { code: 'RECONCILIATION_TASKS', title: 'Claims with a failed or reversed payment still outstanding', metric: 'FINANCE_RECONCILIATION_TASKS', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      { code: 'UNRECONCILED_OUTCOMES', title: 'Claims with a released payment whose outcome is not recorded', metric: 'FINANCE_UNRECONCILED_OUTCOMES', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      { code: 'EXPENSE_REVIEW_TASKS', title: 'Claims in expense review', metric: 'EXPENSE_CLAIMS_IN_REVIEW', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      // '<returned>/<approved, awaiting payment>' claims in scope, shown as text.
+      { code: 'EXPENSE_STATES', title: 'Returned / approved claims awaiting payment', metric: 'FINANCE_EXPENSE_STATES', permission: 'dashboard.read.operational', kind: 'STATUS' },
     ],
   },
   EXPENSE_FINANCE_APPROVER: {
     title: 'Expense final decisions',
     widgets: [
-      { code: 'FINAL_DECISIONS', title: 'Assigned final expense decisions', metric: 'EXPENSE_FINAL_DECISION_TASKS', permission: 'dashboard.read.operational', kind: 'COUNT' },
-      { code: 'LATE_RECEIPT', title: 'Late or missing-receipt claims awaiting decision', metric: 'EXPENSE_LATE_RECEIPT_EXCEPTIONS', permission: 'dashboard.read.operational', kind: 'COUNT' },
-      { code: 'RETURNED', title: 'Claims returned, awaiting the claimant', metric: 'EXPENSE_RETURNED_BY_ME', permission: 'dashboard.read.operational', kind: 'COUNT' },
-      { code: 'DECISIONS_DUE', title: 'Decision due tasks', metric: 'EXPENSE_DECISION_DUE_TASKS', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      { code: 'FINAL_DECISIONS', title: 'Claims awaiting a final decision', metric: 'EXPENSE_CLAIMS_AWAITING_FINAL', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      { code: 'LATE_RECEIPT', title: 'Late or missing-receipt claims awaiting a final decision', metric: 'EXPENSE_CLAIMS_LATE_RECEIPT', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      { code: 'RETURNED', title: 'Claims returned at a financial step, awaiting the claimant', metric: 'EXPENSE_CLAIMS_RETURNED_AT_FINANCE', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      { code: 'DECISIONS_DUE', title: 'Claims whose final decision is due', metric: 'EXPENSE_DECISION_DUE_TASKS', permission: 'dashboard.read.operational', kind: 'COUNT' },
     ],
   },
   TREASURY_OPERATOR: {
     title: 'Payment preparation',
     widgets: [
-      // F2 "Assigned payment preparation tasks": payment preparation has no approval task in this build (a payment batch
-      // runs no workflow), so there is no queue to reconcile with; counting the user's other tasks here would not be this.
-      { code: 'MY_TASKS', title: 'Assigned payment preparation tasks', metric: 'NOT_YET_AVAILABLE', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      // F2 "Assigned payment preparation tasks" (I-84 item 5, I-89 item 2; 0241): payment preparation runs no workflow, so this is a
+      // count of the scope's claims awaiting preparation and draft payments not yet ready, from the two lists the role reads,
+      // never the same person's tasks in another assignment (DF17).
+      { code: 'MY_TASKS', title: 'Claims awaiting payment preparation and draft payments not yet ready', metric: 'PAYMENT_PREPARATION_TASKS', permission: 'payment.read.operational', kind: 'COUNT' },
       { code: 'AWAITING_OUTCOME', title: 'Payments awaiting outcome', metric: 'PAYMENTS_AWAITING_OUTCOME', permission: 'payment.read.operational', kind: 'COUNT' },
       { code: 'FAILED', title: 'Failed payments', metric: 'PAYMENTS_FAILED', permission: 'payment.read.operational', kind: 'COUNT' },
-      { code: 'RECONCILE', title: 'Reservations needing reconciliation', metric: 'NOT_YET_AVAILABLE', permission: 'dashboard.read.operational', kind: 'COUNT' },
+      // F2 "Reservations needing reconciliation" (I-92; 0245): payments still holding a reservation after their payment date, not
+      // yet released or with no outcome recorded, from the payment list the role reads.
+      { code: 'RECONCILE', title: 'Payments past their date still holding a reservation', metric: 'PAYMENT_RESERVATIONS_TO_RECONCILE', permission: 'payment.read.operational', kind: 'COUNT' },
     ],
   },
   TREASURY_APPROVER: {
@@ -425,7 +590,8 @@ export const BASELINE_DASHBOARDS: Record<string, { title: string; widgets: { cod
     widgets: [
       { code: 'APPROVED_REQUISITIONS', title: 'Approved requisitions', metric: 'APPROVED_REQUISITIONS', permission: 'requisition.read.operational', kind: 'COUNT' },
       { code: 'PIPELINE', title: 'Applications in the pipeline', metric: 'OPEN_PIPELINE_APPLICATIONS', permission: 'application.read.operational', kind: 'COUNT' },
-      { code: 'INTERVIEWS_DUE', title: 'Interview tasks due', metric: 'INTERVIEW_TASKS_DUE', permission: 'application.read.operational', kind: 'COUNT' },
+      // F2 "Interview tasks due" (I-92): the viewer's own applications at the interview stage, the pending COMPLETE_INTERVIEW action.
+      { code: 'INTERVIEWS_DUE', title: 'Applications you own awaiting interview completion', metric: 'INTERVIEW_TASKS_DUE', permission: 'application.read.operational', kind: 'COUNT' },
       { code: 'OFFERS_AWAITING', title: 'Offers awaiting eligible Admin review', metric: 'OFFERS_AWAITING_APPROVAL', permission: 'offer.read.operational', kind: 'COUNT' },
     ],
   },

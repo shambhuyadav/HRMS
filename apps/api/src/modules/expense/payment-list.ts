@@ -4,10 +4,12 @@
 import { type Paging, pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
 import { type AccessGrant, SqlParams } from '../access/authorize.js';
-import { independentOf, instructionsInScope, paidEventSince } from './metrics.js';
+import { batchIn, independentOf, instructionsInScope, paidEventSince } from './metrics.js';
 
 export interface PaymentListQuery extends Paging {
   state?: string | undefined;
+  /** Only instructions whose batch is in this state (C5: DRAFT until its preparer marks it READY; I-89 item 2). */
+  batchState?: string | undefined;
   /** Only instructions the caller may release independently (C4; DF03). */
   releasableByMe?: boolean | undefined;
   /** Only instructions whose payment date is before this date. */
@@ -21,6 +23,7 @@ export async function listPaymentInstructions(db: Queryable, grant: AccessGrant,
   const p = new SqlParams();
   const where = [instructionsInScope(grant, p)];
   if (q.state) where.push(`pi.state = ${p.add(q.state)}`);
+  if (q.batchState) where.push(batchIn(p, q.batchState));
   if (q.releasableByMe) where.push(independentOf(grant, p));
   if (q.paymentDateBefore) where.push(`pi.payment_date < ${p.add(q.paymentDateBefore)}::date`);
   if (q.eventKind) where.push(paidEventSince(p, q.eventKind, q.eventFrom ?? '1900-01-01'));

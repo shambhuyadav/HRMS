@@ -16,6 +16,8 @@ export const HIRING_REFERENCE_CATEGORIES: Readonly<Record<string, StepPermission
   CANDIDATE_DOCUMENT_TYPE: { resource: 'candidate', action: 'upload', fieldGroup: 'document' },
   // FR-014 handover: the employee document type each transferred document takes.
   DOCUMENT_TYPE: { resource: 'hiring', action: 'handover', fieldGroup: 'operational' },
+  // FR-018 offer letter delivery record (I-82 item 1).
+  OFFER_LETTER_DELIVERY: { resource: 'offer', action: 'issue_letter', fieldGroup: 'compensation' },
 };
 
 export async function listReferenceValues(db: Queryable, grant: AccessGrant, category: string) {

@@ -1,32 +1,44 @@
 // Attendance daily processing and amendment (FR-020, FR-021, FR-022; DF05; DF09). Punch ingestion: punch-import.ts.
+//
+// Decided under owner delegation, 6 Nov 2026 (owner chose process rules only; I-78): punches are read from the capture
+// window of the shift revision in force, its buffer before the start and after the end (item 1, 0180); a half weekly-off
+// is evaluated against half the shift (item 4, 0182); results carry late minutes and, under a policy with overtime rules,
+// overtime candidates (items 5 and 6, 0181). Nothing here values or pays overtime.
 import { writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, assertNotOwnRecord, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { UnitFailure } from '../bulk/retry.js';
-import { holidaySql, weeklyOffSql } from '../shift/calendar.js';
-import { type AttendanceStatus, carriesShiftFlags, type DayInput, evaluateDay } from './evaluate.js';
+import { halfWeeklyOffSql, holidaySql, weeklyOffSql } from '../shift/calendar.js';
+import { type AttendanceStatus, carriesOvertime, carriesShiftFlags, type DayInput, evaluateDay, type OvertimeRule } from './evaluate.js';
 
 const ACTIVE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'];
 /** Statuses after the employment ended: such an employee is processed only up to an approved last working date. */
 const ENDED_STATUSES = ['INACTIVE_SEPARATED', 'ARCHIVED'];
-/** Punch capture window around the scheduled shift (overnight shifts belong to their start date, DF05). */
-const CAPTURE_BEFORE_MINUTES = 240;
-const CAPTURE_AFTER_MINUTES = 240;
 
 interface PolicyRow {
   id: string;
   grace_minutes: number;
   present_percent: string;
   half_day_percent: string;
+  overtime_basis: OvertimeRule['basis'] | null;
+  overtime_minimum_minutes: number | null;
+  overtime_rounding_minutes: number | null;
   specificity: number;
 }
+
+/** The overtime rules of a policy revision, when its setting is on and its rules are set (0181). */
+const overtimeRuleOf = (p: PolicyRow): OvertimeRule | null =>
+  p.overtime_basis && p.overtime_minimum_minutes !== null && p.overtime_rounding_minutes !== null
+    ? { basis: p.overtime_basis, minimumMinutes: p.overtime_minimum_minutes, roundingMinutes: p.overtime_rounding_minutes }
+    : null;
 
 async function selectAttendancePolicy(tx: Queryable, companyId: string, employeeId: string, day: string): Promise<PolicyRow | null> {
   const rows = (
     await tx.query<PolicyRow>(
       `select p.id, p.grace_minutes, p.present_percent::text, p.half_day_percent::text,
+              case when p.overtime_enabled then p.overtime_basis end as overtime_basis, p.overtime_minimum_minutes, p.overtime_rounding_minutes,
               max(num_nonnulls(m.grade_id, m.location_id))::int as specificity
          from attendance_policy p
          join attendance_policy_mapping m on m.company_id = p.company_id and m.policy_id = p.id
@@ -82,7 +94,7 @@ export async function refuseIfPayrollLocked(tx: Queryable, companyId: string, em
 
 /** The result's values at this moment, kept before a change (FR-021, DB027). The caller holds the record's lock. */
 const REVISION_COLUMNS = `company_id, attendance_record_id, prior_version, shift_id, policy_id, scheduled_net_minutes, worked_minutes, late, early_departure,
-  status_id, exception_code, amended, calculation_count, cause, bulk_job_id, amendment_id, actor_id, created_by`;
+  status_id, exception_code, amended, calculation_count, cause, bulk_job_id, amendment_id, actor_id, created_by, late_minutes, overtime_candidate_minutes`;
 
 async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: string, employeeId: string, day: string): Promise<Outcome> {
   // First: a locked day is not even evaluated, so a policy problem elsewhere in the month cannot fail the run for it.
@@ -96,12 +108,14 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
       shift_revision_id: string | null;
       start_ms: string | null;
       minutes: number | null;
+      buffer_minutes: number | null;
       weekly_off: boolean;
+      half_off: boolean;
       holiday: boolean;
       leave: 'NONE' | 'FULL' | 'HALF';
       duty_full: boolean;
     }>(
-      // The shift's times in force on this day (DF05: effective-dated), and the location calendar of this day.
+      // The shift's times and buffer in force on this day (DF05: effective-dated), and the location calendar of this day.
       `with c as (select business_timezone as tz from company where id = $1),
             sa as (select a.shift_id as id, f.* from shift_assignment a cross join lateral hrms_shift_in_force(a.company_id, a.shift_id, $3::date) f
                     where a.company_id = $1 and a.employee_id = $2 and a.effective_from <= $3::date
@@ -110,7 +124,9 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
               (select revision_id from sa) as shift_revision_id,
               (select (extract(epoch from (($3::date + sa.in_time) at time zone c.tz)) * 1000)::bigint::text from sa, c) as start_ms,
               (select minutes from sa) as minutes,
+              (select hrms_shift_buffer($1, sa.id, sa.revision_id) from sa) as buffer_minutes,
               ${weeklyOffSql('$3', '$2', '$1')} as weekly_off,
+              ${halfWeeklyOffSql('$3', '$2', '$1')} as half_off,
               ${holidaySql('$3', '$2', '$1')} as holiday,
               coalesce((select case when lr.half_day then 'HALF' else 'FULL' end from leave_request lr
                          where lr.company_id = $1 and lr.employee_id = $2 and lr.state = 'APPROVED'
@@ -123,6 +139,8 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
 
   let shift: DayInput['shift'] = null;
   let punches: DayInput['punches'] = [];
+  // I-78 item 1: the capture window is the buffer of the shift revision in force, each side of the shift.
+  const bufferMs = (ctx.buffer_minutes ?? 0) * 60_000;
   if (ctx.shift_id && ctx.start_ms && ctx.minutes) {
     const startMs = Number(ctx.start_ms);
     const breaks = (
@@ -144,15 +162,15 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
         `select (extract(epoch from occurred_at) * 1000)::bigint::text as at_ms, direction from attendance_punch
           where company_id = $1 and employee_id = $2 and occurred_at >= to_timestamp($3::bigint / 1000.0) and occurred_at < to_timestamp($4::bigint / 1000.0)
           order by occurred_at`,
-        [grant.companyId, employeeId, startMs - CAPTURE_BEFORE_MINUTES * 60_000, shift.endMs + CAPTURE_AFTER_MINUTES * 60_000],
+        [grant.companyId, employeeId, startMs - bufferMs, shift.endMs + bufferMs],
       )
     ).rows.map((r) => ({ atMs: Number(r.at_ms), direction: r.direction }));
   }
 
   // The shift's capture window, as instants (the same window the punches above were read from).
   const capture = shift && {
-    from: new Date(shift.startMs - CAPTURE_BEFORE_MINUTES * 60_000).toISOString(),
-    to: new Date(shift.endMs + CAPTURE_AFTER_MINUTES * 60_000).toISOString(),
+    from: new Date(shift.startMs - bufferMs).toISOString(),
+    to: new Date(shift.endMs + bufferMs).toISOString(),
   };
 
   // DF09: if a biometric source linked to this employee failed for the capture window and no completed run
@@ -201,13 +219,14 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
 
   const result = evaluateDay({
     offDay: ctx.holiday ? 'HOLIDAY' : ctx.weekly_off ? 'WEEKLY_OFF' : null,
+    halfOff: ctx.half_off,
     leave: ctx.leave,
     shift,
     punches,
     sourceUnavailable,
     dutyFullDay: ctx.duty_full,
     dutyIntervals,
-    policy: { graceMinutes: policy.grace_minutes, presentPercent: Number(policy.present_percent), halfDayPercent: Number(policy.half_day_percent) },
+    policy: { graceMinutes: policy.grace_minutes, presentPercent: Number(policy.present_percent), halfDayPercent: Number(policy.half_day_percent), overtime: overtimeRuleOf(policy) },
   });
 
   const newStatusId = await statusId(tx, grant.companyId, result.status);
@@ -218,10 +237,26 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
   if (!existing) {
     const created = await tx.query(
       `insert into attendance_record (company_id, employee_id, work_date, shift_id, policy_id, scheduled_net_minutes, worked_minutes,
-                                      late, early_departure, status_id, exception_code, created_by, updated_by, shift_revision_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
+                                      late, early_departure, status_id, exception_code, created_by, updated_by, shift_revision_id, late_minutes, overtime_candidate_minutes)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $15)
        on conflict (company_id, employee_id, work_date) do nothing`,
-      [grant.companyId, employeeId, day, ctx.shift_id, policy.id, result.scheduledNetMinutes, result.workedMinutes, result.late, result.earlyDeparture, newStatusId, result.exceptionCode, grant.userId, ctx.shift_revision_id],
+      [
+        grant.companyId,
+        employeeId,
+        day,
+        ctx.shift_id,
+        policy.id,
+        result.scheduledNetMinutes,
+        result.workedMinutes,
+        result.late,
+        result.earlyDeparture,
+        newStatusId,
+        result.exceptionCode,
+        grant.userId,
+        ctx.shift_revision_id,
+        result.lateMinutes,
+        result.overtimeCandidateMinutes,
+      ],
     );
     if (created.rowCount) return 'CREATED';
     existing = (await lockExisting())!; // another run created it meanwhile
@@ -231,20 +266,52 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
   const changed = await tx.query(
     `insert into attendance_record_revision (${REVISION_COLUMNS})
      select r.company_id, r.id, r.version, r.shift_id, r.policy_id, r.scheduled_net_minutes, r.worked_minutes, r.late, r.early_departure,
-            r.status_id, r.exception_code, r.amended, r.calculation_count, 'PROCESSING', $10::uuid, null, $11::uuid, $11::uuid
+            r.status_id, r.exception_code, r.amended, r.calculation_count, 'PROCESSING', $10::uuid, null, $11::uuid, $11::uuid, r.late_minutes, r.overtime_candidate_minutes
        from attendance_record r
       where r.company_id = $1 and r.id = $2
-        and (r.shift_id, r.shift_revision_id, r.policy_id, r.scheduled_net_minutes, r.worked_minutes, r.late, r.early_departure, r.status_id, r.exception_code)
-            is distinct from ($3::uuid, $13::uuid, $4::uuid, $5::int, $6::int, $7::boolean, $8::boolean, $9::uuid, $12::text)`,
-    [grant.companyId, existing.id, ctx.shift_id, policy.id, result.scheduledNetMinutes, result.workedMinutes, result.late, result.earlyDeparture, newStatusId, jobId, grant.userId, result.exceptionCode, ctx.shift_revision_id],
+        and (r.shift_id, r.shift_revision_id, r.policy_id, r.scheduled_net_minutes, r.worked_minutes, r.late, r.early_departure, r.status_id, r.exception_code,
+             r.late_minutes, r.overtime_candidate_minutes)
+            is distinct from ($3::uuid, $13::uuid, $4::uuid, $5::int, $6::int, $7::boolean, $8::boolean, $9::uuid, $12::text, $14::int, $15::int)`,
+    [
+      grant.companyId,
+      existing.id,
+      ctx.shift_id,
+      policy.id,
+      result.scheduledNetMinutes,
+      result.workedMinutes,
+      result.late,
+      result.earlyDeparture,
+      newStatusId,
+      jobId,
+      grant.userId,
+      result.exceptionCode,
+      ctx.shift_revision_id,
+      result.lateMinutes,
+      result.overtimeCandidateMinutes,
+    ],
   );
   if (!changed.rowCount) return 'UNCHANGED';
   await tx.query(
     `update attendance_record
         set shift_id = $3, shift_revision_id = $12, policy_id = $4, scheduled_net_minutes = $5, worked_minutes = $6, late = $7, early_departure = $8, status_id = $9, exception_code = $10,
-            calculation_count = calculation_count + 1, updated_by = $11
+            late_minutes = $13, overtime_candidate_minutes = $14, calculation_count = calculation_count + 1, updated_by = $11
       where company_id = $1 and id = $2`,
-    [grant.companyId, existing.id, ctx.shift_id, policy.id, result.scheduledNetMinutes, result.workedMinutes, result.late, result.earlyDeparture, newStatusId, result.exceptionCode, grant.userId, ctx.shift_revision_id],
+    [
+      grant.companyId,
+      existing.id,
+      ctx.shift_id,
+      policy.id,
+      result.scheduledNetMinutes,
+      result.workedMinutes,
+      result.late,
+      result.earlyDeparture,
+      newStatusId,
+      result.exceptionCode,
+      grant.userId,
+      ctx.shift_revision_id,
+      result.lateMinutes,
+      result.overtimeCandidateMinutes,
+    ],
   );
   return 'UPDATED';
 }
@@ -479,8 +546,16 @@ export async function processingUnprocessed(db: Queryable, grant: AccessGrant, j
 }
 
 /**
- * FR-021 / E07 attendance control filters. Every filter narrows; `minute*` compares stored minutes. The working
- * organisation and entity filters have no master yet and wait for the owner's definition.
+ * E07 "entity" (I-78 item 6, decided under owner delegation, 6 Nov 2026): the measured quantity the minute comparison applies
+ * to. Worked, scheduled net and shortfall minutes (scheduled less worked, never below zero), late minutes (from the
+ * scheduled start on a late day) and overtime candidate minutes (none under a policy without overtime rules).
+ */
+export const ATTENDANCE_MINUTE_FIELDS = ['WORKED', 'SCHEDULED', 'SHORTFALL', 'LATE', 'OVERTIME_CANDIDATE'] as const;
+
+/**
+ * FR-021 / E07 attendance control filters. Every filter narrows; `minute*` compares stored minutes. I-78 item 6: the
+ * organisation and the working organisation are the employing company, which the acting assignment fixes (a move to
+ * another company is a new employment there, DF04), so neither is a filter to choose; the entity is `minuteField`.
  */
 export interface AttendanceControlFilters {
   from: string;
@@ -493,8 +568,8 @@ export interface AttendanceControlFilters {
   employeeId?: string | undefined;
   /** Employee code or name, part of either. */
   search?: string | undefined;
-  /** Stored minutes: worked, scheduled net, or their shortfall (scheduled less worked, never below zero). */
-  minuteField?: 'WORKED' | 'SCHEDULED' | 'SHORTFALL' | undefined;
+  /** The entity whose stored minutes are compared (ATTENDANCE_MINUTE_FIELDS). */
+  minuteField?: (typeof ATTENDANCE_MINUTE_FIELDS)[number] | undefined;
   minuteOp?: 'LT' | 'LTE' | 'EQ' | 'GTE' | 'GT' | undefined;
   minuteValue?: number | undefined;
 }
@@ -503,6 +578,8 @@ const MINUTE_COLUMN: Record<NonNullable<AttendanceControlFilters['minuteField']>
   WORKED: 'r.worked_minutes',
   SCHEDULED: 'r.scheduled_net_minutes',
   SHORTFALL: 'greatest(r.scheduled_net_minutes - r.worked_minutes, 0)',
+  LATE: 'r.late_minutes',
+  OVERTIME_CANDIDATE: 'r.overtime_candidate_minutes',
 };
 const MINUTE_OP: Record<NonNullable<AttendanceControlFilters['minuteOp']>, string> = { LT: '<', LTE: '<=', EQ: '=', GTE: '>=', GT: '>' };
 
@@ -553,7 +630,8 @@ export async function attendanceControl(db: Queryable, grant: AccessGrant, f: At
   const rows = await db.query(
     `select r.id, r.employee_id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName", dep.code as "departmentCode", loc.code as "locationCode",
             r.work_date as "workDate", st.code as status, r.worked_minutes as "workedMinutes", r.scheduled_net_minutes as "scheduledNetMinutes",
-            r.late, r.early_departure as "earlyDeparture", r.exception_code as "exceptionCode", r.amended, r.calculation_count as "calculationCount", r.version,
+            r.late, r.late_minutes as "lateMinutes", r.early_departure as "earlyDeparture", r.overtime_candidate_minutes as "overtimeCandidateMinutes",
+            r.exception_code as "exceptionCode", r.amended, r.calculation_count as "calculationCount", r.version,
             s.code as "shiftCode", p.code as "policyCode", p.revision as "policyRevision", hrms_attendance_day_frozen(r.company_id, r.employee_id, r.work_date) as "payrollLocked"
        ${ATTENDANCE_CONTROL_FROM} where ${where}
       order by r.work_date desc, e.employee_code limit ${params.add(page.pageSize)}::int offset ${params.add((page.page - 1) * page.pageSize)}::int`,
@@ -564,31 +642,33 @@ export async function attendanceControl(db: Queryable, grant: AccessGrant, f: At
 
 /**
  * FR-021 "show raw/derived results": one day's untouched source punches beside its derived result: the punches of the
- * capture window evaluation read (the record's pinned shift revision -4 h .. +4 h, so a later revision changes nothing until
- * the day is reprocessed; without a shift, the business day).
+ * capture window evaluation read (the record's pinned shift revision, less and plus its buffer (I-78 item 1), so a later
+ * revision changes nothing until the day is reprocessed; without a shift, the business day).
  */
 export async function attendanceDay(db: Queryable, grant: AccessGrant, recordId: string) {
   const record = (
     await db.query<{ employee_id: string; from_at: string; to_at: string; derived: Record<string, unknown> }>(
       `select r.employee_id, w.from_at, w.to_at,
               json_build_object('workDate', r.work_date, 'status', st.code, 'workedMinutes', r.worked_minutes, 'scheduledNetMinutes', r.scheduled_net_minutes, 'late', r.late,
-                                'earlyDeparture', r.early_departure, 'exceptionCode', r.exception_code, 'amended', r.amended, 'shiftCode', sh.code, 'shiftRevision', case when sh.id is not null then coalesce(rv.revision, 1) end,
-                                'policyCode', p.code, 'policyRevision', p.revision) as derived
+                                'lateMinutes', r.late_minutes, 'earlyDeparture', r.early_departure, 'overtimeCandidateMinutes', r.overtime_candidate_minutes,
+                                'exceptionCode', r.exception_code, 'amended', r.amended, 'shiftCode', sh.code, 'shiftRevision', case when sh.id is not null then coalesce(rv.revision, 1) end,
+                                'bufferMinutes', t.buffer, 'policyCode', p.code, 'policyRevision', p.revision) as derived
          from attendance_record r
          join company c on c.id = r.company_id
          join reference_value st on st.company_id = r.company_id and st.id = r.status_id
          join attendance_policy p on p.company_id = r.company_id and p.id = r.policy_id
          left join shift sh on sh.company_id = r.company_id and sh.id = r.shift_id
          left join shift_revision rv on rv.company_id = r.company_id and rv.id = r.shift_revision_id
-         cross join lateral (select coalesce(rv.in_time, sh.in_time) as in_time, coalesce(rv.out_time, sh.out_time) as out_time, coalesce(rv.spans_midnight, sh.spans_midnight) as spans) t
+         cross join lateral (select coalesce(rv.in_time, sh.in_time) as in_time, coalesce(rv.out_time, sh.out_time) as out_time, coalesce(rv.spans_midnight, sh.spans_midnight) as spans,
+                                    coalesce(rv.buffer_minutes, sh.buffer_minutes) as buffer) t
          cross join lateral (
            select case when sh.id is null then (r.work_date::timestamp at time zone c.business_timezone)
-                       else ((r.work_date + t.in_time) at time zone c.business_timezone) - make_interval(mins => $3) end as from_at,
+                       else ((r.work_date + t.in_time) at time zone c.business_timezone) - make_interval(mins => t.buffer) end as from_at,
                   case when sh.id is null then ((r.work_date + 1)::timestamp at time zone c.business_timezone)
-                       else ((r.work_date + t.in_time) at time zone c.business_timezone) + make_interval(mins => hrms_shift_minutes(t.in_time, t.out_time, t.spans) + $4) end as to_at
+                       else ((r.work_date + t.in_time) at time zone c.business_timezone) + make_interval(mins => hrms_shift_minutes(t.in_time, t.out_time, t.spans) + t.buffer) end as to_at
          ) w
         where r.company_id = $1 and r.id = $2`,
-      [grant.companyId, recordId, CAPTURE_BEFORE_MINUTES, CAPTURE_AFTER_MINUTES],
+      [grant.companyId, recordId],
     )
   ).rows[0];
   if (!record || !(await canAccessEmployee(db, grant, record.employee_id))) throw notFound();
@@ -604,7 +684,8 @@ export async function listAttendance(db: Queryable, grant: AccessGrant, employee
   if (!(await canAccessEmployee(db, grant, employeeId))) throw notFound();
   const rows = await db.query(
     `select r.id, r.work_date as "workDate", st.code as status, r.worked_minutes as "workedMinutes",
-            r.scheduled_net_minutes as "scheduledNetMinutes", r.late, r.early_departure as "earlyDeparture",
+            r.scheduled_net_minutes as "scheduledNetMinutes", r.late, r.late_minutes as "lateMinutes", r.early_departure as "earlyDeparture",
+            r.overtime_candidate_minutes as "overtimeCandidateMinutes",
             r.exception_code as "exceptionCode", r.amended, r.calculation_count as "calculationCount", r.version,
             s.code as "shiftCode", p.code as "policyCode", p.revision as "policyRevision"
        from attendance_record r
@@ -636,8 +717,18 @@ export async function amendRecord(
   options: { decidedCorrection?: boolean } = {},
 ) {
   const record = (
-    await tx.query<{ employee_id: string; work_date: string; status_id: string; version: number; late: boolean; early_departure: boolean; exception_code: string | null }>(
-      `select employee_id, to_char(work_date, 'YYYY-MM-DD') as work_date, status_id, version, late, early_departure, exception_code
+    await tx.query<{
+      employee_id: string;
+      work_date: string;
+      status_id: string;
+      version: number;
+      late: boolean;
+      late_minutes: number | null;
+      early_departure: boolean;
+      overtime_candidate_minutes: number | null;
+      exception_code: string | null;
+    }>(
+      `select employee_id, to_char(work_date, 'YYYY-MM-DD') as work_date, status_id, version, late, late_minutes, early_departure, overtime_candidate_minutes, exception_code
          from attendance_record where company_id = $1 and id = $2 for update`,
       [grant.companyId, recordId],
     )
@@ -653,6 +744,9 @@ export async function amendRecord(
   const keepFlags = carriesShiftFlags(input.status);
   const late = keepFlags && record.late;
   const earlyDeparture = keepFlags && record.early_departure;
+  // Late minutes follow the flag; overtime candidates stay only on an outcome that can carry them (I-78 items 5, 6).
+  const lateMinutes = late ? record.late_minutes : record.late_minutes === null ? null : 0;
+  const overtime = record.overtime_candidate_minutes === null ? null : carriesOvertime(input.status) ? record.overtime_candidate_minutes : 0;
 
   const amendmentId = (
     await tx.query<{ id: string }>(
@@ -665,14 +759,14 @@ export async function amendRecord(
   await tx.query(
     `insert into attendance_record_revision (${REVISION_COLUMNS})
      select r.company_id, r.id, r.version, r.shift_id, r.policy_id, r.scheduled_net_minutes, r.worked_minutes, r.late, r.early_departure,
-            r.status_id, r.exception_code, r.amended, r.calculation_count, 'AMENDMENT', null, $3::uuid, $4::uuid, $4::uuid
+            r.status_id, r.exception_code, r.amended, r.calculation_count, 'AMENDMENT', null, $3::uuid, $4::uuid, $4::uuid, r.late_minutes, r.overtime_candidate_minutes
        from attendance_record r where r.company_id = $1 and r.id = $2`,
     [grant.companyId, recordId, amendmentId, grant.userId],
   );
   await tx.query(
-    `update attendance_record set status_id = $3, amended = true, exception_code = null, late = $5, early_departure = $6, updated_by = $4
+    `update attendance_record set status_id = $3, amended = true, exception_code = null, late = $5, early_departure = $6, late_minutes = $7, overtime_candidate_minutes = $8, updated_by = $4
       where company_id = $1 and id = $2`,
-    [grant.companyId, recordId, newStatusId, grant.userId, late, earlyDeparture],
+    [grant.companyId, recordId, newStatusId, grant.userId, late, earlyDeparture, lateMinutes, overtime],
   );
   await writeAudit(tx, {
     companyId: grant.companyId,
@@ -682,8 +776,17 @@ export async function amendRecord(
     actingAssignmentId: grant.assignmentId,
     action: 'AMEND',
     priorVersion: record.version,
-    before: { operational: { statusId: record.status_id, late: record.late, earlyDeparture: record.early_departure, exceptionCode: record.exception_code } },
-    after: { operational: { status: input.status, late, earlyDeparture } },
+    before: {
+      operational: {
+        statusId: record.status_id,
+        late: record.late,
+        lateMinutes: record.late_minutes,
+        earlyDeparture: record.early_departure,
+        overtimeCandidateMinutes: record.overtime_candidate_minutes,
+        exceptionCode: record.exception_code,
+      },
+    },
+    after: { operational: { status: input.status, late, lateMinutes, earlyDeparture, overtimeCandidateMinutes: overtime } },
     reason: input.reason,
   });
 }

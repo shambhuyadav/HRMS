@@ -28,6 +28,10 @@ const MAINTAINABLE_LISTS: Readonly<Record<string, MaintainableList>> = {
   // Naming a vendor depends on this source (hiring/candidate.ts).
   CANDIDATE_SOURCE: { module: 'hiring', protectedCodes: ['VENDOR'] },
   CANDIDATE_DOCUMENT_TYPE: { module: 'hiring' },
+  // I-82 (decided under owner delegation, 6 Nov 2026): lists a company sets for itself.
+  OFFER_LETTER_DELIVERY: { module: 'hiring' },
+  FAMILY_RELATIONSHIP: { module: 'employee-record' },
+  QUALIFICATION_LEVEL: { module: 'employee-record' },
   // An exit clearance process depends on this type (lifecycle/processes.ts).
   LIFECYCLE_PROCESS_TYPE: { module: 'lifecycle', protectedCodes: ['EXIT'] },
   LETTER_TYPE: { module: 'lifecycle' },

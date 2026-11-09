@@ -107,7 +107,7 @@ export async function listPolicies(db: Queryable, grant: AccessGrant, f: PolicyL
   const rows = await db.query<PolicyListRow>(
     `select p.id, t.code as "leaveType", t.name as "leaveTypeName", t.paid, p.revision, p.effective_from as "effectiveFrom", p.effective_to as "effectiveTo",
             p.eligibility_code as "eligibility", p.accrual_rule_code as "accrualRule", p.annual_entitlement::text as "annualEntitlement",
-            p.min_service_days as "minServiceDays", p.carry_cap::text as "carryCap", p.state, p.version,
+            p.min_service_days as "minServiceDays", p.carry_cap::text as "carryCap", p.leave_year_start_month as "leaveYearStartMonth", p.state, p.version,
             coalesce((select json_agg(json_build_object('id', m.id, 'employmentTypeId', m.employment_type_id, 'employmentType', et.code, 'gradeId', m.grade_id, 'grade', g.code,
                                                         'locationId', m.location_id, 'location', l.code, 'priority', num_nonnulls(m.employment_type_id, m.grade_id, m.location_id))
                                       order by num_nonnulls(m.employment_type_id, m.grade_id, m.location_id) desc, et.code, g.code, l.code)
@@ -141,6 +141,12 @@ export interface PolicyValues {
   minServiceDays: number;
   /** DF05: carry is zero unless explicitly configured. */
   carryCap?: string | undefined;
+  /**
+   * I-78 item 3 (decided under owner delegation, 6 Nov 2026; 0183): the month the leave year starts, 1..12; the year ends
+   * the day before. No default (companies differ and the BRD names none): without it the revision is never expired at a
+   * year end, and the year-end run counts it as not configured.
+   */
+  leaveYearStartMonth?: number | null | undefined;
 }
 
 function checkValues(v: Pick<PolicyValues, 'effectiveFrom' | 'effectiveTo' | 'accrualRule' | 'annualEntitlement'>): void {
@@ -157,10 +163,23 @@ export async function createPolicyDraft(tx: Queryable, grant: AccessGrant, input
   await reassertAccess(tx, grant, 'leave_policy', 'manage', ['operational']);
   const row = (
     await tx.query<{ id: string; revision: number; version: number }>(
-      `insert into leave_policy (company_id, leave_type_id, revision, effective_from, effective_to, eligibility_code, accrual_rule_code, annual_entitlement, min_service_days, carry_cap, state, created_by, updated_by)
-       select $1, $2, coalesce(max(revision), 0) + 1, $3, $4, $5, $6, $7::numeric, $8, $9::numeric, 'DRAFT', $10, $10 from leave_policy where company_id = $1 and leave_type_id = $2
+      `insert into leave_policy (company_id, leave_type_id, revision, effective_from, effective_to, eligibility_code, accrual_rule_code, annual_entitlement, min_service_days, carry_cap,
+                                 leave_year_start_month, state, created_by, updated_by)
+       select $1, $2, coalesce(max(revision), 0) + 1, $3, $4, $5, $6, $7::numeric, $8, $9::numeric, $11, 'DRAFT', $10, $10 from leave_policy where company_id = $1 and leave_type_id = $2
        returning id, revision, version`,
-      [grant.companyId, type.id, input.effectiveFrom, input.effectiveTo ?? null, input.eligibility, input.accrualRule, input.annualEntitlement, input.minServiceDays, input.carryCap ?? '0', grant.userId],
+      [
+        grant.companyId,
+        type.id,
+        input.effectiveFrom,
+        input.effectiveTo ?? null,
+        input.eligibility,
+        input.accrualRule,
+        input.annualEntitlement,
+        input.minServiceDays,
+        input.carryCap ?? '0',
+        grant.userId,
+        input.leaveYearStartMonth ?? null,
+      ],
     )
   ).rows[0]!;
   await writeAudit(tx, {
@@ -186,6 +205,7 @@ interface PolicyRow {
   annual_entitlement: string;
   min_service_days: number;
   carry_cap: string;
+  leave_year_start_month: number | null;
   state: string;
   version: number;
   created_by: string | null;
@@ -200,7 +220,7 @@ async function lockPolicy(tx: Queryable, grant: AccessGrant, id: string): Promis
   return (
     await tx.query<PolicyRow>(
       `select leave_type_id, revision, effective_from, effective_to, eligibility_code, accrual_rule_code, annual_entitlement::text as annual_entitlement,
-              min_service_days, carry_cap::text as carry_cap, state, version, created_by, updated_by
+              min_service_days, carry_cap::text as carry_cap, leave_year_start_month, state, version, created_by, updated_by
          from leave_policy where company_id = $1 and id = $2 for update`,
       [grant.companyId, id],
     )
@@ -226,12 +246,14 @@ export async function updatePolicyDraft(tx: Queryable, grant: AccessGrant, id: s
     annualEntitlement: input.annualEntitlement ?? p.annual_entitlement,
     minServiceDays: input.minServiceDays ?? p.min_service_days,
     carryCap: input.carryCap ?? p.carry_cap,
+    leaveYearStartMonth: input.leaveYearStartMonth === undefined ? p.leave_year_start_month : input.leaveYearStartMonth,
   };
   checkValues(next);
   await tx.query(
-    `update leave_policy set effective_from = $3, effective_to = $4, eligibility_code = $5, accrual_rule_code = $6, annual_entitlement = $7::numeric, min_service_days = $8, carry_cap = $9::numeric, updated_by = $10
+    `update leave_policy set effective_from = $3, effective_to = $4, eligibility_code = $5, accrual_rule_code = $6, annual_entitlement = $7::numeric, min_service_days = $8, carry_cap = $9::numeric, updated_by = $10,
+            leave_year_start_month = $11
       where company_id = $1 and id = $2`,
-    [grant.companyId, id, next.effectiveFrom, next.effectiveTo, next.eligibility, next.accrualRule, next.annualEntitlement, next.minServiceDays, next.carryCap, grant.userId],
+    [grant.companyId, id, next.effectiveFrom, next.effectiveTo, next.eligibility, next.accrualRule, next.annualEntitlement, next.minServiceDays, next.carryCap, grant.userId, next.leaveYearStartMonth],
   );
   await writeAudit(tx, {
     companyId: grant.companyId,
@@ -250,6 +272,7 @@ export async function updatePolicyDraft(tx: Queryable, grant: AccessGrant, id: s
         annualEntitlement: p.annual_entitlement,
         minServiceDays: p.min_service_days,
         carryCap: p.carry_cap,
+        leaveYearStartMonth: p.leave_year_start_month,
       },
     },
     after: { operational: next },

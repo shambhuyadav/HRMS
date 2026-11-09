@@ -4,8 +4,13 @@
 // Nothing here overwrites: a holiday is corrected or withdrawn and the earlier entry stays, shift times change by a dated
 // revision, and a weekly-off pattern is a dated entry per location. Days already evaluated keep their results until they are
 // processed again, so every change answers with the dates it reaches, and HR reprocesses them from here; a day a processed
-// payroll used never changes. Half weekly-offs are not offered: their meaning is an open owner question (I-48 item 6). The
-// page proposes no value. The server re-checks every duty and rule; this page only offers what the role can do.
+// payroll used never changes. The page proposes no value. The server re-checks every duty and rule; this page only offers
+// what the role can do.
+//
+// Decided under owner delegation, 6 Nov 2026 (I-78 items 1 and 4): a shift's buffer is its punch capture window before the
+// start and after the end, stated for every new shift; the 24-hour-cycle indicator is the overnight flag the times give. A
+// weekly-off pattern may add whole days off on some weeks of the month (the 2nd and 4th Saturdays) and half weekly-offs,
+// which stay working days for leave and payroll and are measured against half the shift.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -110,6 +115,11 @@ function refusalText(error: unknown): string | null {
   if (error.code === 'DUPLICATE') return 'This location already has a holiday of that type on that date, or the code is already in use.';
   if (error.code === 'OVERLAPPING_PERIOD') return 'The breaks overlap.';
   if (error.code === 'RULE_VIOLATION') return 'Check the values: the in and out times must differ, every break must lie inside the shift, and a reason cannot be blank.';
+  if (error.code === 'BUFFER_OUT_OF_RANGE') {
+    const max = (error.details as { maxBufferMinutes?: number } | undefined)?.maxBufferMinutes;
+    return `The buffer is too long for this shift: at most ${max ?? 'half of what the day leaves'} minutes, so the windows of two days do not overlap.`;
+  }
+  if (error.code === 'INVALID_PATTERN') return 'Name each weekday once, not one already off every week, and make a day either a whole or a half weekly-off.';
   return null;
 }
 
@@ -426,6 +436,7 @@ interface ShiftRevision {
   outTime: string;
   spansMidnight: boolean;
   netScheduledMinutes: number;
+  bufferMinutes?: number;
   breaks: ShiftBreak[];
   reason: string | null;
 }
@@ -437,6 +448,7 @@ export interface Shift {
   outTime: string;
   spansMidnight: boolean;
   netScheduledMinutes: number;
+  bufferMinutes?: number;
   active: boolean;
   version: number;
   revision: number;
@@ -454,8 +466,10 @@ const clockAt = (inTime: string, offset: number) => {
 const offsetFrom = (inTime: string, at: string) => (minutesOf(at) - minutesOf(inTime) + 1440) % 1440;
 const breaksText = (inTime: string, breaks: ShiftBreak[]) =>
   breaks.length === 0 ? 'no scheduled break' : breaks.map((b) => `break ${clockAt(inTime, b.startOffsetMinutes)}-${clockAt(inTime, b.endOffsetMinutes)}`).join(', ');
-const timesText = (r: { inTime: string; outTime: string; spansMidnight: boolean; netScheduledMinutes: number; breaks: ShiftBreak[] }) =>
-  `${r.inTime}-${r.outTime}${r.spansMidnight ? ' (next day)' : ''}, ${breaksText(r.inTime, r.breaks)}, ${r.netScheduledMinutes} net minutes`;
+const timesText = (r: { inTime: string; outTime: string; spansMidnight: boolean; netScheduledMinutes: number; breaks: ShiftBreak[]; bufferMinutes?: number }) =>
+  `${r.inTime}-${r.outTime}${r.spansMidnight ? ' (next day: 24-hour cycle)' : ''}, ${breaksText(r.inTime, r.breaks)}, ${r.netScheduledMinutes} net minutes${
+    r.bufferMinutes === undefined ? '' : `, punches from ${r.bufferMinutes} minutes before to ${r.bufferMinutes} after`
+  }`;
 
 interface BreakRow {
   key: number;
@@ -515,12 +529,27 @@ function TimesFields(props: {
 
 const breaksBody = (inTime: string, rows: BreakRow[]) => rows.map((b) => ({ startOffsetMinutes: offsetFrom(inTime, b.from), endOffsetMinutes: offsetFrom(inTime, b.to) }));
 
+/** I-78 item 1: the punch capture window each side of the shift. */
+function BufferField({ value, onChange, required }: { value: string; onChange: (v: string) => void; required: boolean }) {
+  return (
+    <label>
+      {required ? 'Buffer before and after (minutes)' : 'Buffer before and after (minutes; blank keeps the one in force)'}
+      <input required={required} inputMode="numeric" pattern="\d{1,3}" value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
+}
+
+const BUFFER_HINT = 'Punches from the buffer before the in time to the buffer after the out time belong to the shift’s day, the date it starts. The shift and both buffers fit in 24 hours, so two days never share a punch.';
+
 function NewShift({ onChanged }: { onChanged: () => void }) {
-  const blank = { code: '', name: '', inTime: '', outTime: '' };
+  const blank = { code: '', name: '', inTime: '', outTime: '', bufferMinutes: '' };
   const [form, setForm] = useState(blank);
   const [breaks, setBreaks] = useState<BreakRow[]>([]);
   const create = useMutation({
-    mutationFn: () => api('/v1/shifts', { body: { code: form.code.trim(), name: form.name.trim(), inTime: form.inTime, outTime: form.outTime, breaks: breaksBody(form.inTime, breaks) } }),
+    mutationFn: () =>
+      api('/v1/shifts', {
+        body: { code: form.code.trim(), name: form.name.trim(), inTime: form.inTime, outTime: form.outTime, breaks: breaksBody(form.inTime, breaks), bufferMinutes: Number(form.bufferMinutes) },
+      }),
     onSuccess: () => {
       setForm(blank);
       setBreaks([]);
@@ -546,6 +575,8 @@ function NewShift({ onChanged }: { onChanged: () => void }) {
           <input required maxLength={200} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </label>
         <TimesFields inTime={form.inTime} outTime={form.outTime} breaks={breaks} onTimes={(t) => setForm({ ...form, ...t })} onBreaks={setBreaks} />
+        <BufferField required value={form.bufferMinutes} onChange={(bufferMinutes) => setForm({ ...form, bufferMinutes })} />
+        <p className="hint wide">{BUFFER_HINT}</p>
         <button type="submit" disabled={create.isPending}>
           Create shift
         </button>
@@ -557,7 +588,7 @@ function NewShift({ onChanged }: { onChanged: () => void }) {
 
 function ShiftActions({ shift, onChanged, onSaved }: { shift: Shift; onChanged: () => void; onSaved: (r: ReprocessList) => void }) {
   const [open, setOpen] = useState<'times' | 'name' | null>(null);
-  const [times, setTimes] = useState({ effectiveFrom: '', inTime: shift.inTime, outTime: shift.outTime, reason: '' });
+  const [times, setTimes] = useState({ effectiveFrom: '', inTime: shift.inTime, outTime: shift.outTime, reason: '', bufferMinutes: '' });
   const [breaks, setBreaks] = useState<BreakRow[]>(shift.breaks.map((b, i) => ({ key: i + 1, from: clockAt(shift.inTime, b.startOffsetMinutes), to: clockAt(shift.inTime, b.endOffsetMinutes) })));
   const [name, setName] = useState(shift.name);
   const refreshOnError = (err: unknown) => {
@@ -566,7 +597,15 @@ function ShiftActions({ shift, onChanged, onSaved }: { shift: Shift; onChanged: 
   const revise = useMutation({
     mutationFn: () =>
       api<{ reprocess: ReprocessList }>(`/v1/shifts/${shift.id}/revisions`, {
-        body: { expectedVersion: shift.version, effectiveFrom: times.effectiveFrom, inTime: times.inTime, outTime: times.outTime, breaks: breaksBody(times.inTime, breaks), reason: times.reason.trim() },
+        body: {
+          expectedVersion: shift.version,
+          effectiveFrom: times.effectiveFrom,
+          inTime: times.inTime,
+          outTime: times.outTime,
+          breaks: breaksBody(times.inTime, breaks),
+          reason: times.reason.trim(),
+          ...(times.bufferMinutes !== '' ? { bufferMinutes: Number(times.bufferMinutes) } : {}),
+        },
       }),
     onSuccess: (res) => {
       setOpen(null);
@@ -609,6 +648,7 @@ function ShiftActions({ shift, onChanged, onSaved }: { shift: Shift; onChanged: 
             <input type="date" required value={times.effectiveFrom} onChange={(e) => setTimes({ ...times, effectiveFrom: e.target.value })} />
           </label>
           <TimesFields inTime={times.inTime} outTime={times.outTime} breaks={breaks} onTimes={(t) => setTimes({ ...times, ...t })} onBreaks={setBreaks} />
+          <BufferField required={false} value={times.bufferMinutes} onChange={(bufferMinutes) => setTimes({ ...times, bufferMinutes })} />
           <label className="wide">
             Reason
             <input required maxLength={500} value={times.reason} onChange={(e) => setTimes({ ...times, reason: e.target.value })} />
@@ -702,7 +742,9 @@ export function ShiftMasterPage() {
             </tbody>
           </table>
         )}
-        <p className="hint">The buffer and 24-hour-cycle settings are not offered: their meaning is an open owner question.</p>
+        <p className="hint">
+          {BUFFER_HINT} A shift whose out time is before its in time runs into the next day (the 24-hour cycle) and still belongs to the date it starts; a shift of exactly 24 hours is not accepted.
+        </p>
       </Section>
       {can(SHIFT_CREATE) && <NewShift onChanged={refresh} />}
     </>
@@ -722,26 +764,56 @@ const WEEKDAYS = [
   { day: 6, name: 'Saturday' },
   { day: 7, name: 'Sunday' },
 ];
-const offText = (offDays: number[]) => (offDays.length === 0 ? 'No weekly off' : `${offDays.map((d) => WEEKDAYS.find((w) => w.day === d)?.name ?? String(d)).join(', ')} off`);
+/** Some weeks of the month of one weekday (I-78 item 4): week 1 is days 1-7, week 5 days 29-31. */
+interface Occurrences {
+  weekday: number;
+  weeks: number[];
+}
+const ORDINAL = ['1st', '2nd', '3rd', '4th', '5th'];
+const dayName = (d: number) => WEEKDAYS.find((w) => w.day === d)?.name ?? String(d);
+const occurrencesText = (list: Occurrences[] | undefined, what: string) =>
+  (list ?? []).map((o) => `${o.weeks.length === 5 ? 'every' : o.weeks.map((n) => ORDINAL[n - 1]).join(' and ')} ${dayName(o.weekday)} ${what}`);
+const offText = (p: { offDays: number[]; offOccurrences?: Occurrences[]; halfOff?: Occurrences[] }) => {
+  const parts = [...(p.offDays.length > 0 ? [`${p.offDays.map(dayName).join(', ')} off`] : []), ...occurrencesText(p.offOccurrences, 'off'), ...occurrencesText(p.halfOff, 'half off')];
+  return parts.length === 0 ? 'No weekly off' : parts.join('; ');
+};
 
 export interface WeeklyOffCalendar {
   locationId: string;
   locationCode: string;
   locationName: string;
   active: boolean;
-  inForce: { offDays: number[]; isDefault: boolean; revision: number | null; effectiveFrom: string | null };
+  inForce: { offDays: number[]; offOccurrences?: Occurrences[]; halfOff?: Occurrences[]; isDefault: boolean; revision: number | null; effectiveFrom: string | null };
   latestRevision: number;
-  entries: { id: string; revision: number; effectiveFrom: string; offDays: number[]; reason: string }[];
+  entries: { id: string; revision: number; effectiveFrom: string; offDays: number[]; offOccurrences?: Occurrences[]; halfOff?: Occurrences[]; reason: string }[];
 }
+
+/** Week choices per weekday as `${weekday}:${week}` keys; the API's list from them, weekdays off every week left out. */
+const keysOf = (list: Occurrences[] | undefined) => (list ?? []).flatMap((o) => o.weeks.map((n) => `${o.weekday}:${n}`));
+const listOf = (keys: string[], off: number[]): Occurrences[] =>
+  WEEKDAYS.filter((w) => !off.includes(w.day))
+    .map((w) => ({ weekday: w.day, weeks: [1, 2, 3, 4, 5].filter((n) => keys.includes(`${w.day}:${n}`)) }))
+    .filter((o) => o.weeks.length > 0);
 
 function PatternActions({ calendar, onChanged, onSaved }: { calendar: WeeklyOffCalendar; onChanged: () => void; onSaved: (r: ReprocessList) => void }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ effectiveFrom: '', reason: '' });
   const [off, setOff] = useState<number[]>(calendar.inForce.offDays);
+  const [weeksOff, setWeeksOff] = useState<string[]>(keysOf(calendar.inForce.offOccurrences));
+  const [weeksHalf, setWeeksHalf] = useState<string[]>(keysOf(calendar.inForce.halfOff));
+  const toggle = (list: string[], set: (v: string[]) => void, key: string, on: boolean) => set(on ? [...list, key] : list.filter((k) => k !== key));
   const save = useMutation({
     mutationFn: () =>
       api<{ reprocess: ReprocessList }>('/v1/weekly-off-patterns', {
-        body: { locationId: calendar.locationId, effectiveFrom: form.effectiveFrom, offDays: [...off].sort((a, b) => a - b), reason: form.reason.trim(), expectedRevision: calendar.latestRevision },
+        body: {
+          locationId: calendar.locationId,
+          effectiveFrom: form.effectiveFrom,
+          offDays: [...off].sort((a, b) => a - b),
+          offOccurrences: listOf(weeksOff, off),
+          halfOff: listOf(weeksHalf, off),
+          reason: form.reason.trim(),
+          expectedRevision: calendar.latestRevision,
+        },
       }),
     onSuccess: (res) => {
       setOpen(false);
@@ -779,6 +851,27 @@ function PatternActions({ calendar, onChanged, onSaved }: { calendar: WeeklyOffC
               </label>
             ))}
           </fieldset>
+          {[
+            { legend: 'Off on some weeks of the month', list: weeksOff, set: setWeeksOff, other: weeksHalf, what: 'off' },
+            { legend: 'Half weekly-off on some weeks of the month', list: weeksHalf, set: setWeeksHalf, other: weeksOff, what: 'half off' },
+          ].map((group) => (
+            <fieldset key={group.legend} className="wide">
+              <legend>{group.legend}</legend>
+              {WEEKDAYS.filter((w) => !off.includes(w.day)).map((w) => (
+                <span key={w.day} className="row">
+                  {[1, 2, 3, 4, 5].map((n) => {
+                    const key = `${w.day}:${n}`;
+                    return (
+                      <label key={key} className="check">
+                        <input type="checkbox" checked={group.list.includes(key)} disabled={group.other.includes(key)} onChange={(e) => toggle(group.list, group.set, key, e.target.checked)} />{' '}
+                        {`${ORDINAL[n - 1]} ${w.name} ${group.what}`}
+                      </label>
+                    );
+                  })}
+                </span>
+              ))}
+            </fieldset>
+          ))}
           <label className="wide">
             Reason
             <input required maxLength={500} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
@@ -786,7 +879,10 @@ function PatternActions({ calendar, onChanged, onSaved }: { calendar: WeeklyOffC
           <button type="submit" disabled={save.isPending}>
             Save pattern
           </button>
-          <p className="hint wide">Whole days only. The earlier pattern stays in force before this date; a later entry on the same date corrects this one.</p>
+          <p className="hint wide">
+            Weeks count from the 1st of the month: days 1 to 7 are the 1st week. A half weekly-off is still a working day for leave and payroll; attendance measures it against the first half of the shift. The earlier
+            pattern stays in force before this date; a later entry on the same date corrects this one.
+          </p>
           <Refusal error={save.error} />
         </form>
       )}
@@ -825,7 +921,7 @@ export function WeeklyOffPage() {
                   {c.active ? '' : ' (inactive)'}
                 </td>
                 <td>
-                  {offText(c.inForce.offDays)}
+                  {offText(c.inForce)}
                   <div className="hint">{c.inForce.isDefault ? 'The Monday to Friday default: no pattern is in force' : `Entry ${c.inForce.revision}, from ${c.inForce.effectiveFrom}`}</div>
                 </td>
                 <td>
@@ -835,7 +931,7 @@ export function WeeklyOffPage() {
                     <ul>
                       {c.entries.map((e) => (
                         <li key={e.id}>
-                          Entry {e.revision}, from {e.effectiveFrom}: {offText(e.offDays)}. {e.reason}
+                          Entry {e.revision}, from {e.effectiveFrom}: {offText(e)}. {e.reason}
                         </li>
                       ))}
                     </ul>
@@ -848,7 +944,8 @@ export function WeeklyOffPage() {
         </table>
       )}
       <p className="hint">
-        Attendance, leave, outdoor duty, holiday work, payroll loss of pay and timesheet utilisation all count on this calendar. Half weekly-offs are not offered: their meaning is an open owner question. Reminders and hold escalations count business days on Monday to Friday.
+        Attendance, leave, outdoor duty, holiday work, payroll loss of pay and timesheet utilisation all count on this calendar; a half weekly-off counts as a working day for all of them but attendance. Reminders and
+        hold escalations count business days on Monday to Friday.
       </p>
     </Section>
   );

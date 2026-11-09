@@ -6,7 +6,7 @@ import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import { type AccessGrant, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { type AccessGrant, assertNotOwnRecord, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { assertUsableEvidence, EVIDENCE_JSON, linkEvidence, revisionEvidence } from '../employee/evidence.js';
 import { lastWorkingDateOf, lockEmployeeDays, MANAGER_BACKDATE_LIMIT_DAYS, refuseAfterLastWorkingDate, workingDays } from '../leave/service.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, startApproval } from '../workflow/engine.js';
@@ -223,6 +223,77 @@ export async function withdrawWorkRequest(tx: Queryable, grant: AccessGrant, kin
     after: { operational: { state: 'WITHDRAWN' } },
   });
   return { requestId: r.id, state: 'WITHDRAWN' };
+}
+
+/**
+ * I-84 item 15 (I-74 item 10; decided under owner delegation, 6 Nov 2026; DF03 "approved changes need a controlled reversal/
+ * cancellation action"): an APPROVED outdoor-duty or holiday-work request is cancelled, with a reason, instead of standing for good.
+ *   OWN  its employee (work_request.withdraw), before its first day: it only gives back what they asked for, and no day of it has
+ *        been evaluated, so there is nothing to undo and no second approval; its approver is told.
+ *   HR   work_request.cancel within row scope, never one's own record, before its first day or when every day of it falls after the
+ *        approved last working date (I-81 item 3: HR cancels those in their own module); the employee is told.
+ * From its first day on (inside employment) a day is corrected through an attendance amendment (FR-022), which is reviewed and
+ * respects the payroll lock. CANCELLED is terminal; the request, its approval and its history are kept (0202).
+ */
+export async function cancelWorkRequest(
+  tx: Queryable,
+  grant: AccessGrant,
+  kind: WorkRequestKind,
+  requestId: string,
+  input: { reason: string; expectedVersion: number },
+  by: 'OWN' | 'HR',
+): Promise<{ requestId: string; state: 'CANCELLED'; version: number }> {
+  const reason = input.reason.trim();
+  if (!reason) throw new HttpError(422, 'REASON_REQUIRED', 'Say why the approved request is cancelled');
+  const r =
+    by === 'OWN'
+      ? await lockRow(tx, kind, grant.companyId, 'r.id = $2 and r.employee_id = $3', [requestId, grant.linkedEmployeeId])
+      : await lockRow(tx, kind, grant.companyId, 'r.id = $2', [requestId]);
+  if (!r) throw notFound();
+  if (by === 'HR') {
+    if (!(await canAccessEmployee(tx, grant, r.employee_id))) throw notFound();
+    await assertNotOwnRecord(tx, grant, r.employee_id);
+  }
+  await reassertAccess(tx, grant, 'work_request', by === 'OWN' ? 'withdraw' : 'cancel', ['operational']);
+  if (r.version !== input.expectedVersion) throw new HttpError(409, 'STALE_VERSION', 'The request changed; reload and retry');
+  if (r.state !== 'APPROVED') throw new HttpError(409, 'INVALID_STATE', 'Only an approved request can be cancelled; a pending one is withdrawn');
+  const businessDate = (await tx.query<{ d: string }>(`select to_char(hrms_business_date($1, now()), 'YYYY-MM-DD') as d`, [grant.companyId])).rows[0]!.d;
+  const lastWorkingDate = by === 'HR' ? await lastWorkingDateOf(tx, grant.companyId, r.employee_id) : null;
+  const notStarted = r.start_date > businessDate;
+  const afterEmployment = lastWorkingDate !== null && r.start_date > lastWorkingDate;
+  if (!notStarted && !afterEmployment) {
+    throw new HttpError(409, 'REQUEST_STARTED', 'The request has started; correct its days through an attendance amendment');
+  }
+  const lastTask = (
+    await tx.query<{ id: string }>(
+      `select t.id from approval_task t join approval_instance i on i.company_id = t.company_id and i.id = t.instance_id
+        where i.company_id = $1 and i.transaction_id = $2 order by t.created_at desc limit 1`,
+      [grant.companyId, r.transaction_id],
+    )
+  ).rows[0];
+  await setState(tx, kind, grant.companyId, r, 'CANCELLED', grant.userId);
+  // DF12 "withdrawn/cancelled": the approver when the employee cancels, the employee when HR does. Kind and dates only.
+  const raised = { kind, requestId: r.id, revision: r.revision, startDate: r.start_date, endDate: r.end_date };
+  await enqueueEvent(
+    tx,
+    by === 'OWN'
+      ? { companyId: grant.companyId, topic: 'work_request.withdrawn', aggregateId: r.id, dedupeKey: `work_request.cancelled:${r.id}`, payload: { ...raised, taskId: lastTask?.id ?? null } }
+      : { companyId: grant.companyId, topic: 'work_request.decided', aggregateId: r.id, dedupeKey: `work_request.cancelled:${r.id}`, payload: { ...raised, outcome: 'CANCELLED' } },
+  );
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: WORK_REQUEST_KINDS[kind].table,
+    recordKey: r.id,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'CANCEL',
+    priorVersion: r.version,
+    newVersion: r.version + 1,
+    before: { operational: { state: 'APPROVED' } },
+    after: { operational: { state: 'CANCELLED', by, ...(afterEmployment && !notStarted ? { afterLastWorkingDate: lastWorkingDate } : {}) } },
+    reason,
+  });
+  return { requestId: r.id, state: 'CANCELLED', version: r.version + 1 };
 }
 
 async function setState(tx: Queryable, kind: WorkRequestKind, companyId: string, r: Row, state: string, actor: string) {

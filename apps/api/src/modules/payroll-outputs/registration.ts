@@ -40,6 +40,8 @@ export const payrollOutputsRegistration: ModuleRegistration = {
         'payroll_loan.decide.loan',
         'payroll_loan.disburse.loan',
         'payroll_loan.recover.loan',
+        // FR-034 early settlement (I-81 item 1, 0186): waiving or writing off a balance; ceiling only, held by no one by default.
+        'payroll_loan.waive.loan',
       ],
     },
     TREASURY_OPERATOR: {

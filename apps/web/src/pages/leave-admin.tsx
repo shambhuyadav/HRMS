@@ -3,8 +3,12 @@
 // employees listed before accrual and the employee leave ledger. A warning is always in words as well as colour
 // (FR-024 "with text as well as colour"). Every value comes from the person filling the form: the page proposes none but
 // the zero carry DF05 states. The server re-checks every duty and rule; this page only offers what the role can do.
+//
+// Decided under owner delegation, 6 Nov 2026 (I-78 item 3): a revision names the month its leave year starts (no default:
+// without it nothing expires), and the year-end run expires what is held above the carry cap on the year's last day.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, ApiError, download, formatDate } from '../api';
 import { isReportRefusal, reportProblem } from '../report-failures';
 import type { ScreenRoute } from '../screens';
@@ -39,6 +43,8 @@ export interface PolicyRevision {
   annualEntitlement: string;
   minServiceDays: number;
   carryCap: string;
+  /** I-78 item 3: 1 (January) .. 12, or null when not set. */
+  leaveYearStartMonth?: number | null;
   state: string;
   version: number;
   mappings: Mapping[];
@@ -191,10 +197,15 @@ interface DraftValues {
   annualEntitlement: string;
   minServiceDays: string;
   carryCap: string;
+  /** '' when not set. */
+  leaveYearStartMonth: string;
 }
-const blankDraft: DraftValues = { effectiveFrom: '', effectiveTo: '', eligibility: '', accrualRule: 'NONE', annualEntitlement: '', minServiceDays: '', carryCap: '0' };
+const blankDraft: DraftValues = { effectiveFrom: '', effectiveTo: '', eligibility: '', accrualRule: 'NONE', annualEntitlement: '', minServiceDays: '', carryCap: '0', leaveYearStartMonth: '' };
 
-/** The API's body of a draft: every value as entered; an empty end means no end. */
+export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const leaveYearText = (month: number | null | undefined) => (month ? `leave year from ${MONTHS[month - 1]}` : 'no leave year set, so nothing expires');
+
+/** The API's body of a draft: every value as entered; an empty end means no end, an empty leave year none. */
 const draftBody = (v: DraftValues) => ({
   effectiveFrom: v.effectiveFrom,
   effectiveTo: v.effectiveTo || null,
@@ -203,6 +214,7 @@ const draftBody = (v: DraftValues) => ({
   annualEntitlement: v.annualEntitlement,
   minServiceDays: Number(v.minServiceDays),
   carryCap: v.carryCap,
+  leaveYearStartMonth: v.leaveYearStartMonth ? Number(v.leaveYearStartMonth) : null,
 });
 
 function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: DraftValues) => void }) {
@@ -239,6 +251,17 @@ function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: 
       <label>
         Carry cap (days)
         <input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,4})?" {...field('carryCap')} />
+      </label>
+      <label>
+        Leave year starts in
+        <select {...field('leaveYearStartMonth')}>
+          <option value="">Not set (nothing expires)</option>
+          {MONTHS.map((m, i) => (
+            <option key={m} value={String(i + 1)}>
+              {m}
+            </option>
+          ))}
+        </select>
       </label>
     </>
   );
@@ -355,6 +378,7 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     annualEntitlement: policy.annualEntitlement,
     minServiceDays: String(policy.minServiceDays),
     carryCap: policy.carryCap,
+    leaveYearStartMonth: policy.leaveYearStartMonth ? String(policy.leaveYearStartMonth) : '',
   });
   const [closePredecessors, setClosePredecessors] = useState(false);
   const [retire, setRetire] = useState({ effectiveTo: '', reason: '' });
@@ -534,7 +558,8 @@ function LeavePoliciesPage() {
                   </td>
                   <td>{periodText(p)}</td>
                   <td>
-                    {`${p.accrualRule === 'NONE' ? 'No accrual' : 'Monthly accrual'}, ${Number(p.annualEntitlement)} days a year, ${p.minServiceDays} days of service, carry cap ${Number(p.carryCap)}`} <span className="hint">({p.eligibility})</span>
+                    {`${p.accrualRule === 'NONE' ? 'No accrual' : 'Monthly accrual'}, ${Number(p.annualEntitlement)} days a year, ${p.minServiceDays} days of service, carry cap ${Number(p.carryCap)}, ${leaveYearText(p.leaveYearStartMonth)}`}{' '}
+                    <span className="hint">({p.eligibility})</span>
                   </td>
                   <td>
                     {p.mappings.length > 0 && <ul>{p.mappings.map((m) => <li key={m.id}>{mappingText(m)}</li>)}</ul>}
@@ -585,7 +610,110 @@ const UNRESOLVED_TEXT: Record<string, string> = {
   POLICY_AMBIGUOUS: 'two policies tie, so the run stops on this employee',
 };
 
+interface PendingAtYearEnd {
+  requestId: string;
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  leaveType: string;
+  startDate: string;
+  endDate: string;
+}
+
+/**
+ * FR-024 / FR-025 year-end expiry (I-78 item 3): units held above a policy's carry cap on the last day of its leave year
+ * expire, once; leave already promised to later dates stays covered. A request still pending in the closing year holds its
+ * employee back until it is decided, and running the same date again takes them.
+ */
+function YearEnd() {
+  const [yearEnd, setYearEnd] = useState('');
+  const [page, setPage] = useState(1);
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(yearEnd);
+  const run = useMutation({ mutationFn: () => api('/v1/leave/year-end-runs', { body: { yearEnd } }) });
+  const pending = useQuery({
+    queryKey: ['leave-year-end-pending', yearEnd, page],
+    enabled: valid,
+    queryFn: () => api<{ items: PendingAtYearEnd[]; total: number; page: number }>(`/v1/leave/year-end-runs/pending-requests?yearEnd=${yearEnd}&${pageParams(page)}`),
+  });
+  return (
+    <Section title="Leave year end">
+      <form
+        className="grid-form"
+        aria-label="Leave year end"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          run.mutate();
+        }}
+      >
+        <label>
+          Last day of the leave year
+          <input
+            type="date"
+            required
+            value={yearEnd}
+            onChange={(e) => {
+              setYearEnd(e.target.value);
+              setPage(1);
+              run.reset();
+            }}
+          />
+        </label>
+        <button type="submit" disabled={run.isPending || !valid}>
+          Expire balances above the carry cap
+        </button>
+      </form>
+      <p className="hint">
+        Only leave types whose policy starts its leave year the next day are expired, each employee and type once. Units promised to leave after that day are kept, so no balance goes below zero.
+      </p>
+      {run.isSuccess && (
+        <p role="status">
+          Queued. Follow it in <Link to="/bulk-jobs">My background jobs</Link>.
+        </p>
+      )}
+      <ErrorNote error={run.error ?? pending.error} />
+      {pending.isSuccess && pending.data.total === 0 && <Empty>No request in your scope is waiting for a decision in this leave year.</Empty>}
+      {pending.isSuccess && pending.data.items.length > 0 && (
+        <>
+          <p role="note">
+            <Badge tone="warn">waiting</Badge> {`${pending.data.total} pending ${pending.data.total === 1 ? 'request holds its employee' : 'requests hold their employees'} back until decided; run this date again afterwards.`}
+          </p>
+          <table aria-label="Pending requests at the leave year end">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Employee</th>
+                <th>Leave type</th>
+                <th>Dates</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pending.data.items.map((r) => (
+                <tr key={r.requestId}>
+                  <td>{r.employeeCode}</td>
+                  <td>{r.employeeName}</td>
+                  <td>{r.leaveType}</td>
+                  <td>{`${formatDate(r.startDate)} – ${formatDate(r.endDate)}`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Pager page={pending.data.page} pageSize={LIST_PAGE_SIZE} total={pending.data.total} onPage={setPage} label="Pending request pages" noun="request" />
+        </>
+      )}
+    </Section>
+  );
+}
+
 function BeforeAccrualPage() {
+  return (
+    <>
+      <WithoutPolicyList />
+      <YearEnd />
+    </>
+  );
+}
+
+function WithoutPolicyList() {
   const [month, setMonth] = useState('');
   const [page, setPage] = useState(1);
   const list = useQuery({

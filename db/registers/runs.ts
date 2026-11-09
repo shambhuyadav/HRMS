@@ -10,6 +10,11 @@ export interface TestOutcome {
   /** Describe blocks and title joined by " > ", which is how the access trace names a test too. */
   name: string;
   status: TestStatus;
+  /**
+   * Declared with `it.fails` / `test.fails` in its file: vitest reports it passed only while its assertion fails, so a pass is a
+   * known wrong behaviour recorded as a test, never evidence that the behaviour holds (I-84). Absent in runs read before I-84.
+   */
+  expectedFailure?: boolean;
 }
 
 export interface RunEvidence {
@@ -64,3 +69,35 @@ export function parseRun(label: string, text: string, root: string): RunEvidence
 }
 
 export const loadRun = (label: string, path: string, root: string): RunEvidence => parseRun(label, readFileSync(path, 'utf8'), root);
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The titles a test file declares with `it.fails` or `test.fails`, as patterns over a test's own title. A template literal's `${...}`
+ * parts match anything. A declaration whose title cannot be read from the source (`it.fails.each`, a title held in a variable) is
+ * returned as a pattern matching every title, so the whole file's tests count as declared to fail rather than as evidence.
+ */
+export function declaredToFail(source: string): RegExp[] {
+  const patterns: RegExp[] = [];
+  for (const m of source.matchAll(/\b(?:it|test)\.fails\b(\.each)?\s*\(\s*(?:(['"])((?:\\.|(?!\2)[^\\\r\n])*)\2|`((?:\\.|[^`\\])*)`)?/g)) {
+    const [, each, , quoted, template] = m;
+    if (each || (quoted === undefined && template === undefined)) {
+      patterns.push(/^/);
+      continue;
+    }
+    const title = (quoted ?? template ?? '').replace(/\\(.)/g, '$1');
+    const body = template === undefined ? escapeRegExp(title) : title.split(/\$\{[^}]*\}/).map(escapeRegExp).join('.*');
+    patterns.push(new RegExp(`(?:^| > )${body}$`));
+  }
+  return patterns;
+}
+
+/** Marks each test its file declares with `.fails` (sources by repository path; a file not given is left as it is). */
+export function markExpectedFailures(runs: readonly RunEvidence[], sources: ReadonlyMap<string, string>): RunEvidence[] {
+  const patternsOf = new Map<string, RegExp[]>();
+  for (const [file, source] of sources) patternsOf.set(file, declaredToFail(source));
+  return runs.map((run) => ({
+    ...run,
+    tests: run.tests.map((t) => ((patternsOf.get(t.file) ?? []).some((p) => p.test(t.name)) ? { ...t, expectedFailure: true } : t)),
+  }));
+}

@@ -1789,6 +1789,29 @@ describe('confirmation policies (FR-080, BR-029, DF11)', () => {
     expect((within(form).getByLabelText('Duration') as HTMLInputElement).value).toBe('');
   });
 
+  it('sends a count from the joining day as day one only when asked, and lists it (I-84 item 12)', async () => {
+    let list = LIST();
+    serve({
+      [`GET ${POLICIES}`]: () => [200, list],
+      [`POST ${POLICIES}`]: () => {
+        const created = { ...policy(P_NEW, 'CONTRACT_SIX', 1, { duration: 6 }), startDayInclusive: true };
+        list = { ...list, items: [...list.items, created] };
+        return [201, created];
+      },
+    });
+    renderPolicies();
+    const form = await screen.findByRole('form', { name: 'New policy' });
+    fireEvent.change(within(form).getByLabelText('Code'), { target: { value: 'CONTRACT_SIX' } });
+    fillTerms(form, { duration: '6', unit: 'CALENDAR_MONTHS', from: '2026-02-01' });
+    fireEvent.click(within(form).getByLabelText(/Count the joining day as day one/));
+    fireEvent.click(within(form).getByRole('button', { name: 'Create policy' }));
+    await waitFor(() => expect(callsTo('POST', POLICIES)).toHaveLength(1));
+    expect(callsTo('POST', POLICIES)[0]!.body).toEqual({ code: 'CONTRACT_SIX', duration: 6, durationUnit: 'CALENDAR_MONTHS', startBasis: 'JOINING_DATE', effectiveFrom: '2026-02-01', startDayInclusive: true });
+    await waitFor(() => expect(row(screen.getByRole('table', { name: 'Confirmation policies' }), 'CONTRACT_SIX', 1)).toBeTruthy());
+    expect(cells(row(screen.getByRole('table', { name: 'Confirmation policies' }), 'CONTRACT_SIX', 1))[3]).toBe('Joining date, counted as day one');
+    expect((within(form).getByLabelText(/Count the joining day as day one/) as HTMLInputElement).checked).toBe(false);
+  });
+
   it('leaves the rules to the server: its refusals are shown in its own plain words and what was typed stays', async () => {
     const refusals: [number, { error: string; message: string }][] = [
       [422, { error: 'INVALID_DURATION', message: 'The duration must be a whole number of calendar days or months greater than zero' }],

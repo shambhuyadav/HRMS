@@ -2,13 +2,14 @@
 // company, where a widget hard-coded to 0 would pass; widget-sources.api.test.ts walks most metrics under one synthetic assignment. Here
 // each role's own GET /v1/dashboard is read over records made through the real routes: every number is written out as the count those
 // records must give, compared with the widget's source list under the same actor, and read again under an assignment filtered to one
-// department, which must count less and must not move when a record outside its scope appears. Where a baseline role cannot reach a
-// number at all, the test says so as an open defect. Synthetic data only: amounts below are markers searched for in the answers.
+// department, which must count less and must not move when a record outside its scope appears. The Treasury Approver and the finance
+// roles follow I-83 (decided under owner delegation, 6 Nov 2026): organisation scope, claim states rather than the same person's Admin
+// tasks, and the BR-045 small-count rule. Synthetic data only: amounts below are markers searched for in the answers.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { resolveAccess } from '../access/authorize.js';
-import type { PermissionKey } from '../access/baseline.js';
+import { BASELINE_ROLES, type PermissionKey } from '../access/baseline.js';
 import { prepareReady, releaseNaming } from '../expense/payment.fixtures.js';
 import { addDays as addHiringDays, approvedRequisition, hiringWorld, type HiringWorld } from '../hiring/test-fixtures.js';
 import { advance, addDays, businessDate, newPlan, nominated, person } from '../training/training.fixtures.js';
@@ -67,6 +68,7 @@ async function expenseWorld(c: Company, reviewers: TestActor[]) {
   const claimant = async (departmentId: string) => h.actor(c, 'EMPLOYEE', { employeeId: await person(h, c, hr, { departmentId, managerId: boss }) });
   const eng = await claimant(c.dept);
   const fin = await claimant(c.financeDept);
+  const finEmployee = (await h.one<{ id: string }>(`select employee_id as id from user_employee_link where company_id = $1 and user_id = $2`, [c.id, fin.user])).id;
   const policy = (await h.call(hr, 'GET', '/v1/expense/policies')).json().items[0];
   expect((await h.call(activator, 'POST', `/v1/expense/policies/${policy.id}/activate`, { expectedVersion: policy.version })).statusCode).toBe(200);
 
@@ -81,8 +83,8 @@ async function expenseWorld(c: Company, reviewers: TestActor[]) {
     return ((await h.call(a, 'GET', '/v1/expense/tasks')).json().items as { taskId: string; transactionId: string }[]).find((t) => t.transactionId === tx)!.taskId;
   };
   const decide = (a: TestActor, taskId: string, body: object) => h.call(a, 'POST', `/v1/expense/tasks/${taskId}/decision`, { idempotencyKey: uniq('widget-key-'), ...body });
-  /** A claim submitted and past its manager: waiting at the finance step of the first reviewer. */
-  const atFinance = async (who: TestActor, amount: string, extra?: Record<string, unknown>, expenseDate = daysAgo(0)) => {
+  /** A claim submitted: waiting at its manager's step. */
+  const submitted = async (who: TestActor, amount: string, extra?: Record<string, unknown>, expenseDate = daysAgo(0)) => {
     const lineExtra = extra ?? { receipt: await receipt(who) };
     const created = await h.call(who, 'POST', '/v1/expense/claims', {
       purpose: 'Widget marker purpose (synthetic)',
@@ -91,12 +93,17 @@ async function expenseWorld(c: Company, reviewers: TestActor[]) {
     });
     expect(created.statusCode, created.body).toBe(201);
     const id = created.json().claimId as string;
-    const submitted = await h.call(who, 'POST', `/v1/expense/claims/${id}/submit`, { expectedVersion: (await view(who, id)).version });
-    expect(submitted.statusCode, submitted.body).toBe(200);
+    const sent = await h.call(who, 'POST', `/v1/expense/claims/${id}/submit`, { expectedVersion: (await view(who, id)).version });
+    expect(sent.statusCode, sent.body).toBe(200);
+    return id;
+  };
+  /** A claim submitted and past its manager: waiting at the finance step of the first reviewer. */
+  const atFinance = async (who: TestActor, amount: string, extra?: Record<string, unknown>, expenseDate = daysAgo(0)) => {
+    const id = await submitted(who, amount, extra, expenseDate);
     expect((await decide(manager, await taskOf(manager, id), { decision: 'APPROVE' })).json().state).toBe('FINANCE_PENDING');
     return id;
   };
-  return { manager, eng, fin, view, receipt, taskOf, decide, atFinance };
+  return { manager, eng, fin, finEmployee, view, receipt, taskOf, decide, submitted, atFinance };
 }
 
 beforeAll(async () => {
@@ -188,12 +195,14 @@ describe('Recruiter (F2; FR-096; BR-045)', () => {
 });
 
 describe('Training Coordinator (F2; FR-096; BR-045)', () => {
+  let c: Company;
+  let hr: TestActor;
   let coordinator: TestActor;
   let financeCoordinator: TestActor;
 
   beforeAll(async () => {
-    const c = await h.makeCompany();
-    const hr = await h.actor(c, 'HR_ADMINISTRATOR');
+    c = await h.makeCompany();
+    hr = await h.actor(c, 'HR_ADMINISTRATOR');
     coordinator = await h.actor(c, 'TRAINING_COORDINATOR');
     financeCoordinator = await h.actor(c, 'TRAINING_COORDINATOR', { departmentFilter: c.financeDept });
     const day = await businessDate(h, c);
@@ -225,8 +234,35 @@ describe('Training Coordinator (F2; FR-096; BR-045)', () => {
     await expectWidgets(coordinator, { SESSIONS: 2, CONFIRMED: 2, COMPLETION_NO_SHOW: '2/1', FEEDBACK_PENDING: 1 });
   });
 
-  it('a department filter narrows participation counts to its people; the plan register is company-wide by design', async () => {
-    await expectWidgets(financeCoordinator, { SESSIONS: 2, CONFIRMED: 1, COMPLETION_NO_SHOW: '1/0', FEEDBACK_PENDING: 1 });
+  it('a department filter narrows participation counts to its people; sessions, company records, are not counted for it (FR-096 "No widget defaults to whole-company scope"; I-83 item 5)', async () => {
+    await expectWidgets(financeCoordinator, { CONFIRMED: 1, COMPLETION_NO_SHOW: '1/0', FEEDBACK_PENDING: 1 });
+    const sessions = (await dashboardOf(financeCoordinator)).byCode.SESSIONS;
+    expect(sessions).toMatchObject({ status: 'NOT_CONFIGURED', message: 'This count needs an unrestricted company-scope assignment' });
+    expect(sessions).not.toHaveProperty('value');
+  });
+
+  // Last in this block: it changes the company's threshold.
+  it('BR-045 small counts (I-83 item 4): without the plan register behind them, people-counts below the dated threshold show as fewer than N; exact again once HR lowers it', async () => {
+    const duties = (BASELINE_ROLES.find((r) => r.code === 'TRAINING_COORDINATOR')!.defaultDuties as PermissionKey[]).filter((k) => k !== 'training_plan.read.operational');
+    const noRegister = await h.actor(c, 'TRAINING_COORDINATOR', { duties });
+    let { byCode } = await dashboardOf(noRegister);
+    expect(byCode.SESSIONS, 'needs the plan register grant itself').toBeUndefined();
+    for (const code of ['CONFIRMED', 'COMPLETION_NO_SHOW', 'FEEDBACK_PENDING']) {
+      expect(byCode[code], code).toEqual({ code, title: expect.any(String), kind: expect.any(String), status: 'SUPPRESSED', threshold: 5 });
+    }
+    // With the list behind it the same people are shown one by one, so the figure stays exact.
+    await expectWidgets(coordinator, { CONFIRMED: 2, COMPLETION_NO_SHOW: '2/1', FEEDBACK_PENDING: 1 });
+
+    const today = await businessDate(h, c);
+    const changed = await h.call(hr, 'POST', '/v1/reporting-settings', { effectiveFrom: today, smallCountThreshold: 2, recentActivityDays: 14, salaryProgressionYears: 5, reason: 'Synthetic: smaller teams' });
+    expect(changed.statusCode, changed.body).toBe(201);
+    ({ byCode } = await dashboardOf(noRegister));
+    expect(byCode.CONFIRMED).toMatchObject({ status: 'OK', value: 2 });
+    expect(byCode.CONFIRMED).not.toHaveProperty('source');
+    // '2/1': the 1 alone is below 2, and a part could be worked out from the others, so the whole figure stays hidden.
+    expect(byCode.COMPLETION_NO_SHOW).toMatchObject({ status: 'SUPPRESSED', threshold: 2 });
+    expect(byCode.FEEDBACK_PENDING).toMatchObject({ status: 'SUPPRESSED', threshold: 2 });
+    expect(JSON.stringify(byCode.FEEDBACK_PENDING)).not.toContain('"value"');
   });
 });
 
@@ -284,18 +320,21 @@ describe('payment widgets (F2 Treasury Operator, Treasury Approver; DF07; BR-045
     expect(draft.statusCode, draft.body).toBe(201);
   });
 
-  it('Treasury Operator: awaiting outcome and failed are the instructions made, and equal the payment list', async () => {
-    await expectWidgets(operator, { AWAITING_OUTCOME: 2, FAILED: 3 });
+  // I-84 item 5, I-89 item 2 (0241): MY_TASKS is the claims awaiting preparation (the three failed ones and the one reopened by a
+  // reversal: an outstanding amount and no live reservation) plus the one draft not yet marked ready. Released, ready and paid
+  // claims hold a reservation or nothing outstanding, so they are not counted.
+  it('Treasury Operator: awaiting outcome, failed and payment preparation are the records made, and equal their source lists', async () => {
+    await expectWidgets(operator, { AWAITING_OUTCOME: 2, FAILED: 3, MY_TASKS: 5 });
     const { byCode } = await dashboardOf(operator);
-    for (const code of ['MY_TASKS', 'RECONCILE']) expect(byCode[code], code).toMatchObject({ status: 'NOT_AVAILABLE' });
+    expect(byCode.RECONCILE).toMatchObject({ status: 'NOT_AVAILABLE' });
   });
 
   it('Treasury Operator: a department filter counts its own people only', async () => {
-    await expectWidgets(financeOperator, { AWAITING_OUTCOME: 1, FAILED: 1 });
+    await expectWidgets(financeOperator, { AWAITING_OUTCOME: 1, FAILED: 1, MY_TASKS: 1 });
   });
 
   it('the release and outcome counts follow the instructions, and independence: under company scope, the source lists agree, and the preparer has nothing to release', async () => {
-    // The role itself is ASSIGNED only, so its logic is read under a company-scope reader holding the same grants (see the open defect below).
+    // A company-scope reader holding only the role's grants: the metrics themselves, apart from the role's catalogue.
     const reader = await h.customActor(c, { scope: 'COMPANY', permissions: ['dashboard.read.operational', 'payment.read.operational'] });
     const expected: Record<string, number | string> = { PAYMENTS_AWAITING_RELEASE: 3, PAYMENTS_RELEASE_OVERDUE: 2, PAYMENTS_CONFIRMED_REVERSED: '2/1', PAYMENTS_AWAITING_OUTCOME: 2 };
     const grant = await resolveAccess(h.db, { userId: reader.user, companyId: c.id, assignmentId: reader.assignment, resource: 'dashboard', action: 'read', fieldGroups: ['operational'] });
@@ -311,10 +350,25 @@ describe('payment widgets (F2 Treasury Operator, Treasury Approver; DF07; BR-045
     expect((await h.call(preparer, 'GET', '/v1/expense/payments?state=PREPARED&releasableByMe=true')).json().total).toBe(0);
   });
 
-  // DEFECT left open, needs a decision: C2 allows this role ASSIGNED scope only and a payment batch has no approval task, so nothing is ever in its scope: every number is 0 whatever exists.
-  it.fails('Treasury Approver: its own dashboard shows the instructions awaiting it', async () => {
+  // I-74 item 1, decided in I-83 item 1 (0195): section 5's "Assigned/Organisation"; a new assignment defaults to organisation scope.
+  it('Treasury Approver (I-83 item 1; ZT28; FR-096; FR-097): its own organisation-scope dashboard shows the instructions awaiting it, equal to the payment list', async () => {
     const approver = await h.actor(c, 'TREASURY_APPROVER');
+    expect(await h.one<{ scope_kind: string }>(`select scope_kind from role_assignment where id = $1`, [approver.assignment])).toEqual({ scope_kind: 'COMPANY' });
     await expectWidgets(approver, { RELEASE_TASKS: 3, OVERDUE_RELEASES: 2, CONFIRMED_REVERSED: '2/1', AWAITING_OUTCOME: 2 });
+  });
+
+  it('Treasury Approver with a department filter counts its own people only, and a record outside it does not move them (BR-045)', async () => {
+    const financeApprover = await h.actor(c, 'TREASURY_APPROVER', { departmentFilter: c.financeDept });
+    await expectWidgets(financeApprover, { RELEASE_TASKS: 1, OVERDUE_RELEASES: 1, CONFIRMED_REVERSED: '0/0', AWAITING_OUTCOME: 1 });
+  });
+
+  it('Treasury Approver in an ASSIGNED scope: payments are never assigned as tasks, so each figure says so instead of a lasting 0', async () => {
+    const assigned = await h.actor(c, 'TREASURY_APPROVER', { scope: 'ASSIGNED' });
+    const { byCode } = await dashboardOf(assigned);
+    for (const code of ['RELEASE_TASKS', 'OVERDUE_RELEASES', 'CONFIRMED_REVERSED', 'AWAITING_OUTCOME']) {
+      expect(byCode[code], code).toMatchObject({ status: 'NOT_CONFIGURED', message: 'Payment counts need an organisation-scope assignment: payments are not assigned as tasks' });
+      expect(byCode[code], code).not.toHaveProperty('source');
+    }
   });
 
   it('counts and states only: no amount or claim fact reaches either treasury dashboard, with real payments behind them', async () => {
@@ -339,48 +393,61 @@ describe('Finance Reviewer and Expense Finance Approver (F2; DF02; DF17; BR-045)
     return w;
   }
 
-  it('as built: the Finance Reviewer’s assigned expense tasks count what the same person may decide in their Admin assignment (owner question: DF17 "no merging")', async () => {
+  // I-74 item 3, decided in I-83 item 3: DF17 "no merging across role assignments". The figure is the claims in review in the
+  // assignment's scope, whoever holds their tasks; the same person's Admin tasks are counted on the Admin dashboard only.
+  it('Finance Reviewer (I-83 item 3; DF17; FR-097): claims in expense review are counted in scope whoever holds the tasks, and equal the claim-state list', async () => {
     const c = await h.makeCompany();
     // The final decision belongs to an Admin assignment carrying the duty (DF02, F3 row 2); the same person also holds the ordinary role.
     const decider = await h.actor(c, 'HR_ADMINISTRATOR', { extra: DECIDE });
-    const review = await h.actor(c, 'FINANCE_REVIEWER', { user: decider.user });
-    await queued(c, decider);
-    const { byCode, body } = await dashboardOf(review);
-    expect((await h.call(decider, 'GET', '/v1/expense/tasks')).json().items).toHaveLength(4);
-    expect(byCode.EXPENSE_REVIEW_TASKS).toMatchObject({ status: 'OK', value: 4 });
-    expect(byCode.EXPENSE_REVIEW_TASKS).not.toHaveProperty('source');
-    expect((await h.call(review, 'GET', '/v1/expense/tasks')).statusCode).toBe(403);
+    const sameUser = await h.actor(c, 'FINANCE_REVIEWER', { user: decider.user });
+    const otherUser = await h.actor(c, 'FINANCE_REVIEWER');
+    const w = await queued(c, decider);
+    await w.submitted(w.eng, AMOUNT); // still at its manager's step: in review, and not the decider's task
+    for (const review of [sameUser, otherUser]) await expectWidgets(review, { EXPENSE_REVIEW_TASKS: 5 });
+    // The Admin assignment's own dashboard counts its own four tasks (DF17 "Admin context"), not the manager's.
+    expect((await dashboardOf(decider)).byCode.MY_TASKS).toMatchObject({ status: 'OK', value: 4 });
+
+    const { byCode, body } = await dashboardOf(sameUser);
+    expect((await h.call(sameUser, 'GET', '/v1/expense/tasks')).statusCode).toBe(403);
     for (const code of ['RECONCILIATION_TASKS', 'UNRECONCILED_OUTCOMES', 'EXPENSE_STATES']) expect(byCode[code], code).toMatchObject({ status: 'NOT_AVAILABLE' });
     for (const marker of [AMOUNT, 'Widget Marker']) expect(body, marker).not.toContain(marker);
   });
 
-  it('a department filter on the Finance Reviewer’s assignment counts only tasks about its people', async () => {
+  it('a department filter on the Finance Reviewer’s assignment counts only claims of its people, and one outside it does not move the figure', async () => {
     const c = await h.makeCompany();
     const decider = await h.actor(c, 'HR_ADMINISTRATOR', { extra: DECIDE });
     const filtered = await h.actor(c, 'FINANCE_REVIEWER', { user: decider.user, departmentFilter: c.financeDept });
-    await queued(c, decider);
-    expect((await dashboardOf(filtered)).byCode.EXPENSE_REVIEW_TASKS).toMatchObject({ status: 'OK', value: 1 });
+    const w = await queued(c, decider);
+    await expectWidgets(filtered, { EXPENSE_REVIEW_TASKS: 1 });
+    await w.submitted(w.eng, AMOUNT);
+    await expectWidgets(filtered, { EXPENSE_REVIEW_TASKS: 1 });
   });
 
-  it('the metrics behind the final-decision widgets count real tasks and flags, under an assignment that may decide them', async () => {
+  it('the claim-state list (I-62 item 4): identity, state and an exception mark only, for the two finance roles; refused to a role without the grant', async () => {
     const c = await h.makeCompany();
-    // A company-specific ASSIGNED role holding the duties: what these metrics do once someone can reach them.
-    const holder = await h.customActor(c, { scope: 'ASSIGNED', permissions: ['dashboard.read.operational', ...DECIDE] });
-    const w = await queued(c, holder);
-    expect(await metricOf(holder, c, 'EXPENSE_FINAL_DECISION_TASKS')).toEqual({ status: 'OK', value: 4 });
-    expect(await metricOf(holder, c, 'EXPENSE_LATE_RECEIPT_EXCEPTIONS')).toEqual({ status: 'OK', value: 2 });
-    expect(await metricOf(holder, c, 'EXPENSE_RETURNED_BY_ME')).toEqual({ status: 'OK', value: 0 });
-    expect((await h.call(holder, 'GET', '/v1/expense/tasks')).json().items).toHaveLength(4);
-
-    // One goes back to its claimant: a task fewer, a return more.
-    const back = await w.atFinance(w.fin, AMOUNT);
-    expect(await metricOf(holder, c, 'EXPENSE_FINAL_DECISION_TASKS')).toEqual({ status: 'OK', value: 5 });
-    expect((await w.decide(holder, await w.taskOf(holder, back), { decision: 'RETURN', reason: 'Please correct (synthetic)' })).json().state).toBe('RETURNED');
-    expect(await metricOf(holder, c, 'EXPENSE_FINAL_DECISION_TASKS')).toEqual({ status: 'OK', value: 4 });
-    expect(await metricOf(holder, c, 'EXPENSE_RETURNED_BY_ME')).toEqual({ status: 'OK', value: 1 });
+    const decider = await h.actor(c, 'HR_ADMINISTRATOR', { extra: DECIDE });
+    const w = await queued(c, decider);
+    const review = await h.actor(c, 'FINANCE_REVIEWER');
+    const approverRole = await h.actor(c, 'EXPENSE_FINANCE_APPROVER');
+    for (const a of [review, approverRole]) {
+      const res = await h.call(a, 'GET', '/v1/expense/claim-states?states=FINANCE_PENDING,HIGH_VALUE_PENDING');
+      expect(res.statusCode, res.body).toBe(200);
+      const items = res.json().items as Record<string, unknown>[];
+      expect(items).toHaveLength(4);
+      for (const item of items) expect(Object.keys(item).sort()).toEqual(['claimId', 'claimantEmployeeCode', 'claimantName', 'lateOrReceiptException', 'revision', 'state', 'updatedAt']);
+      expect(items.filter((i) => i.lateOrReceiptException)).toHaveLength(2);
+      // Purpose, merchant, the clearance reasons and the receipt file never travel (the claimant's own name does).
+      for (const marker of [AMOUNT, 'Widget Marker', 'Late, synthetic', 'No receipt, synthetic', 'r.pdf', 'INR']) expect(res.body.toLowerCase(), marker).not.toContain(marker.toLowerCase());
+    }
+    const late = await h.call(approverRole, 'GET', '/v1/expense/claim-states?states=FINANCE_PENDING,HIGH_VALUE_PENDING&exception=LATE_RECEIPT');
+    expect(late.json().total).toBe(2);
+    // The claimant, the Treasury Operator (payments, not claims) and the HR Administrator do not hold expense_state.read.
+    for (const a of [w.eng, await h.actor(c, 'TREASURY_OPERATOR'), await h.actor(c, 'HR_ADMINISTRATOR')]) {
+      expect((await h.call(a, 'GET', '/v1/expense/claim-states')).statusCode).toBe(403);
+    }
   });
 
-  it('claims returned follow the assignment’s row scope: one outside its department filter does not move the count (BRD line 92; BR-045)', async () => {
+  it('claims returned at a financial step follow the assignment’s row scope: one outside its department filter does not move the count (BRD line 92; BR-045)', async () => {
     const c = await h.makeCompany();
     const decider = await h.actor(c, 'HR_ADMINISTRATOR', { extra: DECIDE });
     const whole = await h.actor(c, 'EXPENSE_FINANCE_APPROVER', { user: decider.user });
@@ -402,15 +469,44 @@ describe('Finance Reviewer and Expense Finance Approver (F2; DF02; DF17; BR-045)
     expect(await returned(financeOnly)).toMatchObject({ status: 'OK', value: 1 });
   });
 
-  // DEFECT left open, needs a decision: the role's ceiling holds no expense duty and its ASSIGNED scope reaches only tasks it may decide, so these two can only ever be 0 (DF17 keeps the same person's Admin tasks out).
-  it.fails('Expense Finance Approver: its own dashboard shows the final decisions and late or missing-receipt claims waiting', async () => {
+  // I-74 item 2, decided in I-83 item 2: the ordinary role never holds the final-decision duty (BRD lines 306 and 4656 "never this
+  // ordinary role context"); in its organisation scope it shows the claims waiting for that decision, whoever decides them.
+  it('Expense Finance Approver (I-83 item 2; ZT28; FR-096; FR-097): its own dashboard shows the claims awaiting a final decision and the late or missing-receipt ones, equal to the claim-state list', async () => {
     const c = await h.makeCompany();
     const decider = await h.actor(c, 'HR_ADMINISTRATOR', { extra: DECIDE });
-    const approverRole = await h.actor(c, 'EXPENSE_FINANCE_APPROVER', { user: decider.user });
+    const sameUser = await h.actor(c, 'EXPENSE_FINANCE_APPROVER', { user: decider.user });
+    const otherUser = await h.actor(c, 'EXPENSE_FINANCE_APPROVER');
+    expect(await h.one<{ scope_kind: string }>(`select scope_kind from role_assignment where id = $1`, [otherUser.assignment])).toEqual({ scope_kind: 'COMPANY' });
+    const w = await queued(c, decider);
+    for (const a of [sameUser, otherUser]) await expectWidgets(a, { FINAL_DECISIONS: 4, LATE_RECEIPT: 2, RETURNED: 0 });
+    expect((await dashboardOf(otherUser)).byCode.DECISIONS_DUE).toMatchObject({ status: 'NOT_AVAILABLE' });
+
+    // The finance step returns one: a claim fewer waiting, a return more. A return by the manager is not a financial-step return.
+    const fin = ((await h.call(decider, 'GET', '/v1/expense/tasks')).json().items as { taskId: string; ownerEmployeeId: string }[]).find((t) => t.ownerEmployeeId === w.finEmployee)!;
+    expect((await w.decide(decider, fin.taskId, { decision: 'RETURN', reason: 'Please correct (synthetic)' })).json().state).toBe('RETURNED');
+    const atManager = await w.submitted(w.eng, AMOUNT);
+    expect((await w.decide(w.manager, await w.taskOf(w.manager, atManager), { decision: 'RETURN', reason: 'Please correct (synthetic)' })).json().state).toBe('RETURNED');
+    for (const a of [sameUser, otherUser]) await expectWidgets(a, { FINAL_DECISIONS: 3, LATE_RECEIPT: 2, RETURNED: 1 });
+  });
+
+  it('Expense Finance Approver in an ASSIGNED scope: claims are not routed to the role, so the claim figures say so instead of a lasting 0', async () => {
+    const c = await h.makeCompany();
+    const decider = await h.actor(c, 'HR_ADMINISTRATOR', { extra: DECIDE });
     await queued(c, decider);
-    const { byCode } = await dashboardOf(approverRole);
-    expect(byCode.FINAL_DECISIONS).toMatchObject({ status: 'OK', value: 4 });
-    expect(byCode.LATE_RECEIPT).toMatchObject({ status: 'OK', value: 2 });
+    const { byCode } = await dashboardOf(await h.actor(c, 'EXPENSE_FINANCE_APPROVER', { scope: 'ASSIGNED' }));
+    for (const code of ['FINAL_DECISIONS', 'LATE_RECEIPT', 'RETURNED']) {
+      expect(byCode[code], code).toMatchObject({ status: 'NOT_CONFIGURED', message: 'Claim counts need an organisation-scope assignment: claims are not assigned to this role' });
+    }
+  });
+
+  it('BR-045 small counts (I-83 item 4): an assignment without the claim-state list (approved before 0196) sees fewer than 5, never the number; zero stays zero', async () => {
+    const c = await h.makeCompany();
+    const decider = await h.actor(c, 'HR_ADMINISTRATOR', { extra: DECIDE });
+    await queued(c, decider);
+    const duties = (BASELINE_ROLES.find((r) => r.code === 'EXPENSE_FINANCE_APPROVER')!.defaultDuties as PermissionKey[]).filter((k) => k !== 'expense_state.read.operational');
+    const { byCode } = await dashboardOf(await h.actor(c, 'EXPENSE_FINANCE_APPROVER', { duties }));
+    for (const code of ['FINAL_DECISIONS', 'LATE_RECEIPT']) expect(byCode[code], code).toEqual({ code, title: expect.any(String), kind: 'COUNT', status: 'SUPPRESSED', threshold: 5 });
+    expect(byCode.RETURNED).toEqual({ code: 'RETURNED', title: expect.any(String), kind: 'COUNT', status: 'OK', value: 0 });
   });
 });
 

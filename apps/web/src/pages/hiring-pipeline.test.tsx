@@ -730,6 +730,85 @@ describe('one candidate (FR-013, F1, DF02)', () => {
     expect(callsTo('GET', documents)).toHaveLength(0);
   });
 
+  it('FR-013 approves typed searchable text only with the upload grant and says CONSENT_REQUIRED in plain words', async () => {
+    const searchable = `/v1/hiring/candidate-documents/${D_CLEAN}/searchable-text`;
+    const X1 = '92000000-0000-4000-8000-000000000001';
+    const X2 = '92000000-0000-4000-8000-000000000002';
+    const nila = person(OTHER_USER, 'Nila Synthetic', 'SYN-7');
+    const approvedText = {
+      candidateDocumentId: D_CLEAN,
+      candidateId: C1,
+      consentStatus: 'GIVEN',
+      searchable: true,
+      approved: { id: X1, source: 'TRANSCRIBED', content: 'Synthetic CV: Kotlin, SQL', approvedAt: '2026-11-02T06:00:00.000Z', approvedBy: OTHER_USER, approvedByPerson: nila },
+      history: [{ id: X1, state: 'APPROVED', source: 'TRANSCRIBED', approvedAt: '2026-11-02T06:00:00.000Z', approvedBy: OTHER_USER, approvedByPerson: nila, revokedAt: null, revocationReason: null }],
+    };
+    let attempt = 0;
+    serve({
+      [detail]: [200, candidateView()],
+      [`GET ${documents}`]: [200, { items: [doc(D_CLEAN, 'asha-cv.pdf', 'CLEAN'), { ...doc(D_PENDING, 'asha-cover.pdf', 'CLEAN'), documentType: 'OTHER' }] }],
+      [`GET ${searchable}`]: [200, approvedText],
+      [`POST ${searchable}`]: () => {
+        attempt += 1;
+        if (attempt === 1) return [422, { error: 'EXTRACTION_NOT_CONFIGURED', message: 'No text-extraction component is configured', details: { mediaType: 'application/pdf' } }];
+        if (attempt === 2) return [409, { error: 'CONSENT_REQUIRED', message: 'Consent must be given', details: { consentStatus: 'WITHDRAWN' } }];
+        return [201, { id: X2, candidateDocumentId: D_CLEAN, candidateId: C1, source: 'TRANSCRIBED', state: 'APPROVED', length: 34, replacedCvTextId: X1 }];
+      },
+    });
+
+    // The read grant alone: the status and the text on request, and no way to approve or revoke.
+    const view = renderAt(path, [...RECRUITER, 'candidate.read.document']);
+    const region = await screen.findByRole('region', { name: 'Searchable text of asha-cv.pdf' });
+    // Only a CV has searchable text.
+    expect(screen.queryByRole('region', { name: 'Searchable text of asha-cover.pdf' })).toBeNull();
+    expect(within(region).queryByRole('form', { name: 'Approve searchable text of asha-cv.pdf' })).toBeNull();
+    expect(within(region).queryByRole('form', { name: 'Revoke searchable text of asha-cv.pdf' })).toBeNull();
+    await settle();
+    // Each read of an approved text is audited: nothing is read until asked.
+    expect(callsTo('GET', searchable)).toHaveLength(0);
+    click(within(region).getByRole('button', { name: 'Show searchable text' }));
+    expect(await within(region).findByText('Synthetic CV: Kotlin, SQL')).toBeTruthy();
+    const status = within(region).getByLabelText('Status of the searchable text of asha-cv.pdf');
+    expect(valueOf(status, 'Searchable now')).toBe('Yes: the CV search matches this approved text');
+    expect(valueOf(status, 'Candidate consent')).toBe('Given');
+    expect(valueOf(status, 'Approved')).toBe(`${formatDate('2026-11-02T06:00:00.000Z')} by Nila Synthetic, SYN-7`);
+    expect(valueOf(status, 'Source')).toBe('Typed or pasted by an Admin from the released CV');
+    click(within(region).getByRole('button', { name: 'Hide searchable text' }));
+    expect(within(region).queryByText('Synthetic CV: Kotlin, SQL')).toBeNull();
+    expect(callsTo('GET', searchable)).toHaveLength(1);
+    view.unmount();
+
+    // With the upload grant: an empty submit asks the server to extract, which is not configured; then typed text.
+    renderAt(path, [...RECRUITER, ...DOCUMENTS]);
+    const form = await screen.findByRole('form', { name: 'Approve searchable text of asha-cv.pdf' });
+    click(within(form).getByRole('button', { name: 'Approve as searchable text' }));
+    expect((await within(form).findByRole('alert')).textContent).toBe(
+      'No text extraction is configured for this kind of file, so nothing was approved. Type or paste the CV’s text and approve that.',
+    );
+    expect(bodyOf('POST', searchable, 0)).toStrictEqual({});
+    const text = within(form).getByLabelText('Text of the CV, typed or pasted from the released file');
+    type(text, 'Synthetic CV: Kotlin, SQL, Postgres');
+    await waitFor(() => expect(disabled(within(form).getByRole('button', { name: 'Approve as searchable text' }))).toBe(false));
+    click(within(form).getByRole('button', { name: 'Approve as searchable text' }));
+    await waitFor(() =>
+      expect(within(form).getByRole('alert').textContent).toBe(
+        'The candidate’s consent is withdrawn. Nothing of a candidate becomes searchable until the candidate’s consent is recorded as given.',
+      ),
+    );
+    expect(valueIn(text)).toBe('Synthetic CV: Kotlin, SQL, Postgres');
+    await waitFor(() => expect(disabled(within(form).getByRole('button', { name: 'Approve as searchable text' }))).toBe(false));
+    click(within(form).getByRole('button', { name: 'Approve as searchable text' }));
+    const upload = await screen.findByRole('region', { name: 'Searchable text of asha-cv.pdf' });
+    expect(
+      (await within(upload).findByText('Approved as the searchable text of asha-cv.pdf (34 characters); the text approved before it is revoked. The CV search matches it and never shows it.'))
+        .textContent,
+    ).toBeTruthy();
+    expect(callsTo('POST', searchable).map((c) => c.body)).toStrictEqual([{}, { content: 'Synthetic CV: Kotlin, SQL, Postgres' }, { content: 'Synthetic CV: Kotlin, SQL, Postgres' }]);
+    expect(valueIn(text)).toBe('');
+    // Approving reads nothing back: the next look is a new, recorded read.
+    expect(callsTo('GET', searchable)).toHaveLength(1);
+  });
+
   it('saves only the changed fields with the record version', async () => {
     let current = candidateView({ version: 3 });
     serve({
@@ -879,16 +958,45 @@ describe('CV search (FR-013)', () => {
     });
     renderAt('/hiring/cv-search', ['candidate.read.operational', 'candidate.read.document']);
     click(await screen.findByRole('button', { name: 'Search' }));
-    expect(screen.getByRole('alert').textContent).toBe('Enter a file name, document type or candidate code.');
-    type(screen.getByLabelText('File name, document type or candidate code'), ' cv ');
+    expect(screen.getByRole('alert').textContent).toBe('Enter a file name, document type, candidate code or words from a CV.');
+    type(screen.getByLabelText('File name, document type, candidate code or CV text'), ' cv ');
     click(screen.getByRole('button', { name: 'Search' }));
     const table = await screen.findByRole('table', { name: 'Matching documents' });
     expect(callsTo('GET', '/v1/hiring/candidate-documents')[0]!.params.get('search')).toBe('cv');
-    expect(headers(table)).toEqual(['Candidate', 'Type', 'File', 'Uploaded', 'Malware scan', 'Download']);
+    expect(headers(table)).toEqual(['Candidate', 'Type', 'File', 'Uploaded', 'Malware scan', 'Approved CV text', 'Download']);
     expect(within(rowWith(table, 'ravi-cv.pdf')).queryByRole('button')).toBeNull();
     expect(within(table).getByRole('link', { name: 'CAN-000002' }).getAttribute('href')).toBe(`/hiring/candidates/${C2}`);
     click(within(table).getByRole('button', { name: 'Download asha-cv.pdf' }));
     expect((await screen.findByRole('alert')).textContent).toBe('This file was quarantined by the malware scan and can never be opened.');
+  });
+
+  it('FR-013 shows a content match without showing any text', async () => {
+    serve({
+      'GET /v1/hiring/candidate-documents': [
+        200,
+        {
+          items: [
+            // A field the API never sends, to show that nothing of a CV's text would be put on the page.
+            { ...doc(D_CLEAN, 'asha-cv.pdf', 'CLEAN'), contentMatch: true, content: 'Synthetic CV text: Kotlin and SQL' },
+            { ...doc(D_PENDING, 'kotlin-cv.pdf', 'PENDING_SCAN', C2), contentMatch: false },
+          ],
+        },
+      ],
+    });
+    renderAt('/hiring/cv-search', ['candidate.read.operational', 'candidate.read.document']);
+    const search = await sectionOf('Search CVs');
+    expect(search.textContent).toContain('The search covers the file name, the document type, the candidate code and the approved searchable text of CVs.');
+    expect(search.textContent).toContain('a match in it is marked, and the text itself is never shown here.');
+    type(screen.getByLabelText('File name, document type, candidate code or CV text'), 'kotlin');
+    click(screen.getByRole('button', { name: 'Search' }));
+    const table = await screen.findByRole('table', { name: 'Matching documents' });
+    expect(callsTo('GET', '/v1/hiring/candidate-documents')[0]!.params.get('search')).toBe('kotlin');
+    expect(cells(rowWith(table, 'asha-cv.pdf'))[5]).toBe('matched in approved CV text');
+    expect(cells(rowWith(table, 'kotlin-cv.pdf'))[5]).toBe('—');
+    expect(document.body.textContent).not.toContain('Kotlin and SQL');
+    // The search reads no approved text: that is read only on a candidate's record, when asked for.
+    await settle();
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual(['GET /v1/hiring/candidate-documents']);
   });
 });
 
@@ -1379,6 +1487,327 @@ describe('offers (F1: approved requisition, confidential compensation, independe
     expect(screen.queryByRole('heading', { name: 'Compensation (confidential)' })).toBeNull();
     expect(document.body.textContent).not.toMatch(/1234567|98765/);
     expect(callsTo('GET', `/v1/hiring/offers/${O1}`)).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------
+
+describe('offer letters (FR-014, FR-017, FR-018; DF09: never sent by the system; I-82 item 1)', () => {
+  const path = `/hiring/offers/${O1}`;
+  const detail = `GET /v1/hiring/offers/${O1}`;
+  const letters = `/v1/hiring/offers/${O1}/letters`;
+  const preview = `/v1/hiring/offers/${O1}/letter-preview`;
+  const L1 = '93000000-0000-4000-8000-000000000001';
+  const L2 = '93000000-0000-4000-8000-000000000002';
+  /** Reads the offer compensation and so the stored letters, and may list letter templates; issues nothing. */
+  const READ_LETTERS = [...RECRUITER, 'offer.read.compensation', 'letter_template.read.operational'];
+  /** An eligible HR Administrator assignment holding the offer letter grant (registration ceiling). */
+  const ISSUER = [...READ_LETTERS, 'offer.issue_letter.compensation'];
+  const KEY = /^[A-Za-z0-9._:-]{8,100}$/;
+  const TEMPLATE_LIST = {
+    items: [
+      { id: '94000000-0000-4000-8000-000000000001', code: 'OFFER_STD', name: 'Standard offer letter (synthetic)', letterType: 'OFFER', active: true, version: 2, publishedRevision: 3, draftRevision: null },
+      { id: '94000000-0000-4000-8000-000000000002', code: 'OFFER_OLD', name: 'Old offer letter (synthetic)', letterType: 'OFFER', active: false, version: 3, publishedRevision: 1, draftRevision: null },
+      { id: '94000000-0000-4000-8000-000000000003', code: 'OFFER_NEXT', name: 'Next offer letter (synthetic)', letterType: 'OFFER', active: true, version: 1, publishedRevision: null, draftRevision: 1 },
+      { id: '94000000-0000-4000-8000-000000000004', code: 'RELIEVING', name: 'Relieving letter (synthetic)', letterType: 'RELIEVING', active: true, version: 4, publishedRevision: 2, draftRevision: null },
+    ],
+  };
+  const OFFER_PLACEHOLDERS = {
+    items: [
+      { key: 'candidateName', source: 'OFFER', label: 'Candidate name' },
+      { key: 'annualCtc', source: 'OFFER', label: 'Annual CTC (approved offer)' },
+      { key: 'monthlyGross', source: 'OFFER', label: 'Monthly gross (approved offer)' },
+    ],
+  };
+  const METHODS = {
+    category: 'OFFER_LETTER_DELIVERY',
+    items: [
+      { code: 'IN_PERSON', label: 'Handed to the candidate in person' },
+      { code: 'POST', label: 'Sent by post or courier' },
+    ],
+  };
+  const LETTER_TEXT = 'Dear Ravi Synthetic,\nWe offer you the post of Synthetic backend engineer from 2026-12-01.';
+  const ready = (patch: Json = {}): Json => ({ offerId: O1, offerRevision: 2, templateCode: 'OFFER_STD', templateRevision: 3, text: LETTER_TEXT, missing: [], ready: true, sent: false, ...patch });
+  const stored = (patch: Json = {}): Json => ({
+    id: L1,
+    offerId: O1,
+    offerRevision: 2,
+    templateCode: 'OFFER_STD',
+    templateRevision: 3,
+    outputNumber: 1,
+    checksum: 'synthetic-checksum',
+    byteSize: 96,
+    generatedAt: '2026-11-05T06:00:00.000Z',
+    generatedBy: ME,
+    deliveryState: 'NOT_DELIVERED',
+    ...patch,
+  });
+  const listed = (patch: Json = {}): Json => ({ ...stored(), current: true, delivery: null, ...patch });
+  const letterList = (items: Json[], offerState = 'APPROVED') => ({ offerId: O1, offerState, currentRevision: 2, items });
+  const approved = offerView({ state: 'APPROVED', currentRevision: 2, version: 5 });
+
+  it('FR-017 previews and generates an offer letter from an OFFER template only with the issue grant', async () => {
+    let items: Json[] = [];
+    serve({
+      [detail]: [200, approved],
+      [`GET ${letters}`]: () => [200, letterList(items)],
+      'GET /v1/letter-templates': [200, TEMPLATE_LIST],
+      'GET /v1/letter-placeholders': [200, OFFER_PLACEHOLDERS],
+      'GET /v1/hiring/reference-values': [200, METHODS],
+      [`POST ${preview}`]: [200, ready()],
+      [`POST ${letters}`]: () => {
+        const n = items.length + 1;
+        const letter = stored({ id: n === 1 ? L1 : L2, outputNumber: n });
+        items = [{ ...letter, current: true, delivery: null }, ...items];
+        return [201, { ...letter, replayed: false }];
+      },
+    });
+
+    // Reading the letters without the issue grant: the list, and no way to preview or generate one.
+    const view = renderAt(path, READ_LETTERS);
+    const readOnly = await sectionOf('Offer letters (confidential)');
+    expect(await within(readOnly).findByText('No offer letter has been generated for this offer.')).toBeTruthy();
+    expect(readOnly.textContent).toContain('The system never e-mails or sends an offer letter.');
+    expect(within(readOnly).queryByRole('button', { name: 'Preview' })).toBeNull();
+    expect(within(readOnly).queryByRole('button', { name: 'Generate final letter' })).toBeNull();
+    await settle();
+    expect(callsTo('GET', '/v1/letter-templates')).toHaveLength(0);
+    expect(callsTo('POST', preview)).toHaveLength(0);
+    view.unmount();
+
+    renderAt(path, ISSUER);
+    const section = await sectionOf('Offer letters (confidential)');
+    const select = (await within(section).findByLabelText('Offer letter template')) as HTMLSelectElement;
+    // Only an active OFFER template with a published revision is offered.
+    await waitFor(() => expect([...select.options].map((o) => o.textContent)).toEqual(['Choose…', 'Standard offer letter (synthetic) (OFFER_STD, revision 3)']));
+    const generateButton = () => within(section).getByRole('button', { name: 'Generate final letter' });
+    expect(disabled(generateButton())).toBe(true);
+    click(within(section).getByRole('button', { name: 'Preview' }));
+    expect(within(section).getByRole('alert').textContent).toBe('Choose an offer letter template.');
+    await settle();
+    expect(callsTo('POST', preview)).toHaveLength(0);
+
+    fireEvent.change(select, { target: { value: 'OFFER_STD' } });
+    click(within(section).getByRole('button', { name: 'Preview' }));
+    const shown = await within(section).findByRole('region', { name: 'Offer letter preview' });
+    expect(bodyOf('POST', preview)).toStrictEqual({ templateCode: 'OFFER_STD' });
+    expect(shown.textContent).toContain('Preview of OFFER_STD, revision 3, for offer revision 2');
+    expect(shown.textContent).toContain('Nothing was stored or sent.');
+    expect(shown.textContent).toContain('Every mandatory value is present.');
+    expect(shown.querySelector('pre')?.textContent).toBe(LETTER_TEXT);
+    // A preview stores nothing.
+    expect(callsTo('POST', letters)).toHaveLength(0);
+    expect(disabled(generateButton())).toBe(false);
+    click(generateButton());
+    expect((await within(section).findByRole('status')).textContent).toBe(
+      'Final letter stored: letter number 1 (OFFER_STD, revision 3; offer revision 2). It was not sent: download it, hand it to the candidate and record the delivery.',
+    );
+    const first = bodyOf('POST', letters)!;
+    expect(Object.keys(first).sort()).toEqual(['idempotencyKey', 'templateCode']);
+    expect(first.templateCode).toBe('OFFER_STD');
+    expect(String(first.idempotencyKey)).toMatch(KEY);
+    // The stored letter is listed as the server returns it.
+    const table = await within(section).findByRole('table', { name: 'Offer letters' });
+    await waitFor(() => expect(cells(rows(table)[0]!)).toEqual(['1', 'OFFER_STD, revision 3', '2', formatDate('2026-11-05T06:00:00.000Z'), 'Not delivered yet', 'Download']));
+
+    // Another letter is another action: a new preview first, then a new idempotency key.
+    expect(disabled(generateButton())).toBe(true);
+    fireEvent.change(select, { target: { value: 'OFFER_STD' } });
+    click(within(section).getByRole('button', { name: 'Preview' }));
+    await waitFor(() => expect(disabled(generateButton())).toBe(false));
+    click(generateButton());
+    await waitFor(() => expect(callsTo('POST', letters)).toHaveLength(2));
+    const second = bodyOf('POST', letters, 1)!;
+    expect(String(second.idempotencyKey)).toMatch(KEY);
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+    await waitFor(() => expect(rows(within(section).getByRole('table', { name: 'Offer letters' }))).toHaveLength(2));
+  });
+
+  it('FR-018 records a delivery with method, date and confirmed recipient; the page never offers to send', async () => {
+    const downloads = stubDownloads();
+    try {
+      let items: Json[] = [listed({ id: L2, outputNumber: 2 }), listed({ id: L1, outputNumber: 1, offerRevision: 1, generatedAt: '2026-11-01T06:00:00.000Z', current: false })];
+      let attempt = 0;
+      serve({
+        [detail]: [200, approved],
+        [`GET ${letters}`]: () => [200, letterList(items)],
+        'GET /v1/letter-templates': [200, TEMPLATE_LIST],
+        'GET /v1/letter-placeholders': [200, OFFER_PLACEHOLDERS],
+        'GET /v1/hiring/reference-values': [200, METHODS],
+        [`GET /v1/hiring/offer-letters/${L2}/content`]: [200, { synthetic: true }],
+        [`POST /v1/hiring/offer-letters/${L2}/delivery`]: (c) => {
+          attempt += 1;
+          if (attempt === 1) return [422, { error: 'INVALID_DATE', message: 'The delivery date cannot be before the letter was generated', details: { field: 'deliveredOn', generatedOn: '2026-11-05' } }];
+          const b = c.body as Json;
+          items = items.map((l) =>
+            l.id === L2
+              ? {
+                  ...l,
+                  deliveryState: 'DELIVERED',
+                  delivery: { method: b.deliveryMethod, methodLabel: 'Handed to the candidate in person', deliveredOn: b.deliveredOn, recordedBy: ME, recordedByPerson: person(ME, 'Synthetic Recruiter', 'SYN-9'), recordedAt: '2026-11-06T06:00:00.000Z' },
+                }
+              : l,
+          );
+          return [200, { id: L2, offerId: O1, deliveryState: 'DELIVERED', deliveryMethod: b.deliveryMethod, deliveredOn: b.deliveredOn }];
+        },
+      });
+      renderAt(path, ISSUER);
+      const section = await sectionOf('Offer letters (confidential)');
+      const table = await within(section).findByRole('table', { name: 'Offer letters' });
+      expect(headers(table)).toEqual(['Letter number', 'Template', 'Offer revision', 'Generated', 'Delivery', 'Download']);
+      expect(cells(rows(table)[0]!)).toEqual(['2', 'OFFER_STD, revision 3', '2', formatDate('2026-11-05T06:00:00.000Z'), 'Not delivered yet', 'Download']);
+      expect(cells(rows(table)[1]!)[4]).toBe('Not delivered, and no longer deliverable: it carries an earlier revision of the offer, or the offer is no longer approved or accepted');
+      // DF09: the letter is handed over outside the system; nothing on the page sends or e-mails it.
+      expect(section.textContent).toContain(
+        'The system never e-mails or sends an offer letter. Download the letter here and hand it to the candidate yourself, outside the system; then record how and when it was delivered.',
+      );
+      expect(screen.queryByRole('button', { name: /send|e-?mail/i })).toBeNull();
+      click(within(table).getByRole('button', { name: 'Download offer letter 2' }));
+      await waitFor(() => expect(downloads.saved).toHaveBeenCalledOnce());
+      expect(callsTo('GET', `/v1/hiring/offer-letters/${L2}/content`)).toHaveLength(1);
+
+      // Only the letter of the current approved revision can be recorded as delivered.
+      const form = await within(section).findByRole('form', { name: 'Record the delivery of offer letter 2' });
+      expect(within(section).queryByRole('form', { name: 'Record the delivery of offer letter 1' })).toBeNull();
+      expect(callsTo('GET', '/v1/hiring/reference-values')[0]!.params.get('category')).toBe('OFFER_LETTER_DELIVERY');
+      const method = within(form).getByLabelText('Delivery method (required)') as HTMLSelectElement;
+      expect([...method.options].map((o) => o.textContent)).toEqual(['Choose…', 'Handed to the candidate in person', 'Sent by post or courier']);
+      click(within(form).getByRole('button', { name: 'Record delivery' }));
+      expect(within(form).getByRole('alert').textContent).toBe('Choose how the letter was delivered.');
+      fireEvent.change(method, { target: { value: 'IN_PERSON' } });
+      type(within(form).getByLabelText('Delivered on (required)'), '2026-11-04');
+      click(within(form).getByRole('button', { name: 'Record delivery' }));
+      expect(within(form).getByRole('alert').textContent).toBe('Confirm that the letter went to the offer’s candidate, Ravi Synthetic (CAN-000002).');
+      await settle();
+      expect(callsTo('POST', `/v1/hiring/offer-letters/${L2}/delivery`)).toHaveLength(0);
+
+      click(within(form).getByLabelText('The letter went to the offer’s candidate, Ravi Synthetic (CAN-000002)'));
+      click(within(form).getByRole('button', { name: 'Record delivery' }));
+      expect((await within(form).findByRole('alert')).textContent).toBe('The delivery date cannot be before the letter was generated (2026-11-05).');
+      type(within(form).getByLabelText('Delivered on (required)'), '2026-11-06');
+      await waitFor(() => expect(disabled(within(form).getByRole('button', { name: 'Record delivery' }))).toBe(false));
+      click(within(form).getByRole('button', { name: 'Record delivery' }));
+      expect((await within(section).findByRole('status')).textContent).toBe(
+        'Recorded the delivery of offer letter 2 to Ravi Synthetic (CAN-000002): Handed to the candidate in person on 2026-11-06.',
+      );
+      expect(callsTo('POST', `/v1/hiring/offer-letters/${L2}/delivery`).map((c) => c.body)).toStrictEqual([
+        { deliveryMethod: 'IN_PERSON', deliveredOn: '2026-11-04', recipientConfirmed: true },
+        { deliveryMethod: 'IN_PERSON', deliveredOn: '2026-11-06', recipientConfirmed: true },
+      ]);
+      await waitFor(() => expect(cells(rows(within(section).getByRole('table', { name: 'Offer letters' }))[0]!)[4]).toBe('Delivered: Handed to the candidate in person on 2026-11-06'));
+      // A recorded delivery is final: nothing more to record for it.
+      expect(within(section).queryByRole('form', { name: 'Record the delivery of offer letter 2' })).toBeNull();
+    } finally {
+      downloads.restore();
+    }
+  });
+
+  it('FR-018 says a delivery recorded meanwhile in plain words and reads the letters again', async () => {
+    let items: Json[] = [listed({ id: L2, outputNumber: 2 })];
+    serve({
+      [detail]: [200, approved],
+      [`GET ${letters}`]: () => [200, letterList(items)],
+      'GET /v1/letter-templates': [200, TEMPLATE_LIST],
+      'GET /v1/letter-placeholders': [200, OFFER_PLACEHOLDERS],
+      'GET /v1/hiring/reference-values': [200, METHODS],
+      [`POST /v1/hiring/offer-letters/${L2}/delivery`]: () => {
+        items = [listed({ id: L2, outputNumber: 2, deliveryState: 'DELIVERED', delivery: { method: 'POST', methodLabel: 'Sent by post or courier', deliveredOn: '2026-11-05', recordedBy: OTHER_USER, recordedByPerson: null, recordedAt: '2026-11-05T09:00:00.000Z' } })];
+        return [409, { error: 'ALREADY_DELIVERED', message: 'This letter’s delivery is already recorded' }];
+      },
+    });
+    renderAt(path, ISSUER);
+    const section = await sectionOf('Offer letters (confidential)');
+    const form = await within(section).findByRole('form', { name: 'Record the delivery of offer letter 2' });
+    fireEvent.change(within(form).getByLabelText('Delivery method (required)'), { target: { value: 'IN_PERSON' } });
+    type(within(form).getByLabelText('Delivered on (required)'), '2026-11-06');
+    click(within(form).getByLabelText('The letter went to the offer’s candidate, Ravi Synthetic (CAN-000002)'));
+    click(within(form).getByRole('button', { name: 'Record delivery' }));
+    expect((await within(section).findByRole('alert')).textContent).toBe(
+      'Offer letter 2: This letter’s delivery is already recorded, and a recorded delivery is final. The letters have been reloaded.',
+    );
+    await waitFor(() => expect(cells(rows(within(section).getByRole('table', { name: 'Offer letters' }))[0]!)[4]).toBe('Delivered: Sent by post or courier on 2026-11-05'));
+    expect(within(section).queryByRole('form', { name: 'Record the delivery of offer letter 2' })).toBeNull();
+  });
+
+  it('FR-017 says a missing mandatory value in plain words', async () => {
+    let previews = 0;
+    serve({
+      [detail]: [200, approved],
+      [`GET ${letters}`]: [200, letterList([])],
+      'GET /v1/letter-templates': [200, TEMPLATE_LIST],
+      'GET /v1/letter-placeholders': [200, OFFER_PLACEHOLDERS],
+      [`POST ${preview}`]: () => (previews++ === 0 ? [200, ready({ text: 'Monthly gross: ', missing: ['monthlyGross'], ready: false })] : [200, ready()]),
+      [`POST ${letters}`]: [422, { error: 'MISSING_PLACEHOLDER', message: 'Mandatory letter values are missing', details: { missing: ['annualCtc'] } }],
+    });
+    renderAt(path, ISSUER);
+    const section = await sectionOf('Offer letters (confidential)');
+    const select = (await within(section).findByLabelText('Offer letter template')) as HTMLSelectElement;
+    await waitFor(() => expect(select.options).toHaveLength(2));
+    fireEvent.change(select, { target: { value: 'OFFER_STD' } });
+    click(within(section).getByRole('button', { name: 'Preview' }));
+    const shown = await within(section).findByRole('region', { name: 'Offer letter preview' });
+    await waitFor(() =>
+      expect(within(shown).getByRole('alert').textContent).toBe(
+        'The final letter cannot be generated while the approved offer lacks these mandatory values: Monthly gross (approved offer) ({{monthlyGross}}).',
+      ),
+    );
+    // The names come from the offer letter type's own placeholders.
+    expect(callsTo('GET', '/v1/letter-placeholders')[0]!.params.get('letterType')).toBe('OFFER');
+    expect(shown.textContent).toContain('Nothing was stored or sent.');
+    expect(disabled(within(section).getByRole('button', { name: 'Generate final letter' }))).toBe(true);
+
+    // The server checks again when the final letter is generated: a value gone meanwhile is named in words.
+    click(within(section).getByRole('button', { name: 'Preview' }));
+    expect(await within(section).findByText('Every mandatory value is present.')).toBeTruthy();
+    await waitFor(() => expect(disabled(within(section).getByRole('button', { name: 'Generate final letter' }))).toBe(false));
+    click(within(section).getByRole('button', { name: 'Generate final letter' }));
+    expect((await within(section).findByRole('alert')).textContent).toBe(
+      'The final letter was not generated: mandatory values are missing from the approved offer: Annual CTC (approved offer) ({{annualCtc}}).',
+    );
+    expect(within(section).queryByRole('status')).toBeNull();
+  });
+
+  it('FR-017 takes a template code where the role cannot list templates, says the refusals in plain words, and issues only from an approved or accepted offer', async () => {
+    const refusals: Record<string, Reply> = {
+      RELIEVING: [422, { error: 'NOT_AN_OFFER_TEMPLATE', message: 'An offer letter uses a template of the offer letter type' }],
+      OFFER_OLD: [422, { error: 'TEMPLATE_INACTIVE', message: 'The letter template is inactive' }],
+      OFFER_NEXT: [422, { error: 'TEMPLATE_NOT_PUBLISHED', message: 'The letter template has no published revision' }],
+      OFFER_STD: [409, { error: 'OFFER_NOT_APPROVED', message: 'An offer letter is issued only for an approved or accepted offer', details: { state: 'WITHDRAWN' } }],
+    };
+    serve({
+      [detail]: [200, approved],
+      [`GET ${letters}`]: [200, letterList([])],
+      [`POST ${preview}`]: (c) => refusals[String((c.body as Json).templateCode)]!,
+    });
+    const issuer = [...RECRUITER, 'offer.read.compensation', 'offer.issue_letter.compensation'];
+    const view = renderAt(path, issuer);
+    const section = await sectionOf('Offer letters (confidential)');
+    const code = within(section).getByLabelText('Offer letter template code') as HTMLInputElement;
+    for (const [typed, words] of [
+      ['relieving', 'This template is not an offer letter template: an offer letter uses a template of the offer letter type.'],
+      ['OFFER_OLD', 'This letter template is inactive, so it cannot be used. Choose another template, or ask HR to activate it.'],
+      ['OFFER_NEXT', 'This letter template has no published revision yet, so it cannot be used.'],
+      ['OFFER_STD', 'Only an approved or accepted offer issues an offer letter, and this offer is not approved or accepted (any more). It has been reloaded.'],
+    ] as const) {
+      type(code, typed);
+      await waitFor(() => expect(disabled(within(section).getByRole('button', { name: 'Preview' }))).toBe(false));
+      click(within(section).getByRole('button', { name: 'Preview' }));
+      await waitFor(() => expect(within(section).getByRole('alert').textContent).toBe(words));
+    }
+    expect(callsTo('POST', preview).map((c) => (c.body as Json).templateCode)).toEqual(['RELIEVING', 'OFFER_OLD', 'OFFER_NEXT', 'OFFER_STD']);
+    // The offer is read again after the conflict; the templates were never listed for this role.
+    await waitFor(() => expect(callsTo('GET', `/v1/hiring/offers/${O1}`).length).toBeGreaterThan(1));
+    expect(callsTo('GET', '/v1/letter-templates')).toEqual([]);
+    view.unmount();
+
+    serve({ [detail]: [200, offerView({ state: 'SUBMITTED', currentRevision: 1 })], [`GET ${letters}`]: [200, letterList([], 'SUBMITTED')] });
+    renderAt(path, ISSUER);
+    const pending = await sectionOf('Offer letters (confidential)');
+    expect(await within(pending).findByText('Only an approved or accepted offer issues a letter. This offer’s state: Waiting for approval.')).toBeTruthy();
+    expect(within(pending).queryByRole('button', { name: 'Preview' })).toBeNull();
+    await settle();
+    expect(callsTo('GET', '/v1/letter-templates')).toEqual([]);
+    expect(callsTo('GET', '/v1/hiring/reference-values')).toEqual([]);
   });
 });
 

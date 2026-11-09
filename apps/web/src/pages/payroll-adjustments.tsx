@@ -1,6 +1,7 @@
-// Later-period payroll cases (FR-035 arrears; FR-100 late or amended timesheets; DB111; H2; H3 TN13; H7). Cases are recorded and
-// reviewed here; nothing is valued or computed, approval of a timesheet adjustment waits for an adjustment valuation policy, and an
-// approved arrears case pays nothing. Figures are shown exactly as the server returns them.
+// Later-period payroll cases (FR-035 arrears; FR-100 late or amended timesheets; DB111; H2; H3 TN13; H7) and the valuation policy they
+// are paid under (I-79, decided under owner delegation, 6 Nov 2026). The server calculates every amount: a case shows its figures as
+// returned and is never typed in. An independent reviewer approves; the first later payroll pays an approved case once and the case then
+// names that payroll. Without an active valuation policy, approval of a timesheet adjustment is not offered and the reason is said.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { api, formatAmount, formatDate, idempotencyKey } from '../api';
@@ -14,6 +15,9 @@ const ADJ_DECIDE = 'payroll_adjustment.decide.amount';
 const ARR_READ = 'payroll_arrears.read.amount';
 const ARR_PROPOSE = 'payroll_arrears.propose.amount';
 const ARR_DECIDE = 'payroll_arrears.decide.amount';
+const CONFIG_READ = 'payroll_config.read.operational';
+const CONFIG_MANAGE = 'payroll_config.manage.operational';
+const CONFIG_ACTIVATE = 'payroll_config.activate.operational';
 
 interface AdjustmentCandidate {
   timesheetId: string;
@@ -45,6 +49,9 @@ interface Adjustment {
   explanation: string | null;
   state: string;
   version: number;
+  targetPeriodCode?: string | null;
+  /** I-88 follow-up: the final settlement that paid it. */
+  appliedSettlementId?: string | null;
 }
 interface Note {
   status: string;
@@ -91,20 +98,17 @@ function DecisionButtons({ url, canApprove, name, onDone, approveNote }: { url: 
 const facts = (a: Adjustment) => [
   `${KIND[a.adjustmentKind] ?? a.adjustmentKind}, revision ${a.sourceRevision}: ${formatDate(a.serviceStart)} to ${formatDate(a.serviceEnd)}, ${a.sourceMinutes / 60} hours approved`,
   `Processed payroll ${a.originPeriodCode}, run revision ${a.originRunRevision}, paid units ${a.originPaidUnits ?? '—'}`,
-  `Entered figures: previously recognised ${a.previousRecognizedUnits ?? 'pending'}, corrected ${a.correctedUnits ?? 'pending'}, difference ${a.deltaAmount === null ? 'pending' : formatAmount(a.deltaAmount, a.currencyCode)}`,
+  a.deltaAmount === null
+    ? 'Not valued: no valuation policy was in effect'
+    : `Calculated: previously recognised ${a.previousRecognizedUnits}, corrected ${a.correctedUnits}, difference ${formatAmount(a.deltaAmount, a.currencyCode)}`,
+  ...(a.targetPeriodCode ? [`Paid in payroll ${a.targetPeriodCode}`] : []),
+  ...(a.appliedSettlementId ? ['Paid in the final settlement'] : []),
 ];
 
 function DraftActions({ a, onDone }: { a: Adjustment; onDone: () => void }) {
-  const [previous, setPrevious] = useState(a.previousRecognizedUnits ?? '');
-  const [corrected, setCorrected] = useState(a.correctedUnits ?? '');
-  const [delta, setDelta] = useState(a.deltaAmount ?? '');
   const [explanation, setExplanation] = useState(a.explanation ?? '');
   const save = useMutation({
-    mutationFn: () =>
-      api<Adjustment>(`/v1/payroll/adjustments/${encodeURIComponent(a.id)}`, {
-        method: 'PUT',
-        body: { expectedVersion: a.version, previousRecognizedUnits: previous.trim() || null, correctedUnits: corrected.trim() || null, deltaAmount: delta.trim() || null, explanation: explanation.trim() || null },
-      }),
+    mutationFn: () => api<Adjustment>(`/v1/payroll/adjustments/${encodeURIComponent(a.id)}`, { method: 'PUT', body: { expectedVersion: a.version, explanation: explanation.trim() || null } }),
     onSuccess: () => onDone(),
   });
   const send = useMutation({ mutationFn: () => api(`/v1/payroll/adjustments/${encodeURIComponent(a.id)}/submit`, { body: { expectedVersion: a.version } }), onSuccess: () => onDone() });
@@ -114,19 +118,7 @@ function DraftActions({ a, onDone }: { a: Adjustment; onDone: () => void }) {
   };
   return (
     <form className="stack" aria-label={`Draft case of ${a.employeeCode}`} onSubmit={submit}>
-      <p className="hint">The figures are optional: they are your entry, and nothing here computes them.</p>
-      <label>
-        Previously recognised units
-        <input inputMode="decimal" value={previous} onChange={(e) => setPrevious(e.target.value)} />
-      </label>
-      <label>
-        Corrected units
-        <input inputMode="decimal" value={corrected} onChange={(e) => setCorrected(e.target.value)} />
-      </label>
-      <label>
-        Signed difference
-        <input inputMode="decimal" value={delta} onChange={(e) => setDelta(e.target.value)} />
-      </label>
+      <p className="hint">The figures are calculated from the processed payroll under the valuation policy in effect; saving or submitting values the case again.</p>
       <label>
         Explanation
         <textarea rows={2} maxLength={2000} value={explanation} onChange={(e) => setExplanation(e.target.value)} />
@@ -163,8 +155,14 @@ function AdjustmentQueue() {
             ))}
           </ul>
           <p>{a.explanation}</p>
-          {/* H2: an unresolved policy blocks approval, so the action is not offered; the server refuses it as well. */}
-          <DecisionButtons url={`/v1/payroll/adjustment-tasks/${encodeURIComponent(taskId)}/decision`} canApprove={false} name={`the case of ${a.employeeCode}`} onDone={() => void qc.invalidateQueries({ queryKey: ['adjustment-tasks'] })} />
+          {/* H2: an unresolved policy, or a case never valued, blocks approval, so the action is not offered; the server refuses it as well. */}
+          <DecisionButtons
+            url={`/v1/payroll/adjustment-tasks/${encodeURIComponent(taskId)}/decision`}
+            canApprove={tasks.data.valuation.status === 'CONFIGURED' && a.deltaAmount !== null}
+            approveNote={tasks.data.valuation.status === 'CONFIGURED' && a.deltaAmount === null ? 'This case was submitted before a valuation policy was in effect: return it so it is opened again and valued.' : undefined}
+            name={`the case of ${a.employeeCode}`}
+            onDone={() => void qc.invalidateQueries({ queryKey: ['adjustment-tasks'] })}
+          />
         </div>
       ))}
     </Section>
@@ -283,24 +281,16 @@ interface ArrearsCase {
   state: string;
   lines: { componentCode: string; amount: string }[];
   totalEntered: string;
+  appliedPeriodCode?: string | null;
+  /** I-88 follow-up: the final settlement that paid it. */
+  appliedSettlementId?: string | null;
 }
-
-const parseLines = (text: string) =>
-  text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => {
-      const [componentCode, amount] = l.split(/\s+/);
-      return { componentCode: componentCode ?? '', amount: amount ?? '' };
-    });
 
 function ArrearsForm({ candidate, onDone }: { candidate: ArrearsCandidate; onDone: () => void }) {
   const [reason, setReason] = useState('');
-  const [lines, setLines] = useState('');
   const [key] = useState(() => idempotencyKey('arrears'));
   const propose = useMutation({
-    mutationFn: () => api<ArrearsCase>('/v1/payroll/arrears-cases', { body: { sourceRevisionId: candidate.sourceRevisionId, originRecordId: candidate.originRecordId, reason: reason.trim(), lines: parseLines(lines), idempotencyKey: key } }),
+    mutationFn: () => api<ArrearsCase>('/v1/payroll/arrears-cases', { body: { sourceRevisionId: candidate.sourceRevisionId, originRecordId: candidate.originRecordId, reason: reason.trim(), idempotencyKey: key } }),
     onSuccess: () => onDone(),
   });
   return (
@@ -313,16 +303,13 @@ function ArrearsForm({ candidate, onDone }: { candidate: ArrearsCandidate; onDon
       }}
     >
       <p>{`${candidate.employeeName} (${candidate.employeeCode}): salary revision from ${formatDate(candidate.sourceEffectiveFrom)}, processed payroll ${candidate.periodCode}`}</p>
-      <label>
-        {`Amounts in ${candidate.currencyCode}, one component per line: CODE amount`}
-        <textarea rows={2} value={lines} onChange={(e) => setLines(e.target.value)} />
-      </label>
+      <p className="hint">{`The amounts are calculated in ${candidate.currencyCode} from the processed record and the revision, per component, as the month was paid.`}</p>
       <label>
         Reason
         <textarea rows={2} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
       <ErrorNote error={propose.error} />
-      <button type="submit" disabled={propose.isPending || !reason.trim() || !lines.trim()}>
+      <button type="submit" disabled={propose.isPending || !reason.trim()}>
         Raise the case
       </button>
     </form>
@@ -336,7 +323,7 @@ function ArrearsQueue() {
   if (!can(ARR_DECIDE)) return <p className="hint">The selected role does not decide arrears cases.</p>;
   return (
     <Section title="Arrears cases to decide">
-      <p className="hint">Approving records your decision on the amounts entered. Nothing is paid and no payroll changes.</p>
+      <p className="hint">Approving lets the first later payroll of the employee pay the calculated amount once, or recover a negative one. A processed payroll never changes.</p>
       <ErrorNote error={tasks.error} />
       {tasks.data?.items.length === 0 && <Empty>Nothing is waiting for you.</Empty>}
       {tasks.data?.items.map(({ taskId, case: c }) => (
@@ -405,8 +392,9 @@ function ArrearsScreen() {
                     <th>Source revision from</th>
                     <th>Period</th>
                     <th>Component detail</th>
-                    <th>Total entered</th>
+                    <th>Total</th>
                     <th>State</th>
+                    <th>Paid in</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -420,6 +408,7 @@ function ArrearsScreen() {
                       <td>
                         <StateBadge state={c.state} />
                       </td>
+                      <td>{c.appliedPeriodCode ?? (c.appliedSettlementId ? 'Final settlement' : '—')}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -433,10 +422,166 @@ function ArrearsScreen() {
 }
 
 // =========================================================================================================
+// I-79 valuation policy: the components arrears and adjustments are paid through, and the timesheet unit
+// =========================================================================================================
+
+interface ValuationPolicy {
+  id: string;
+  revision: number;
+  effectiveFrom: string;
+  arrearsComponentCode: string;
+  adjustmentComponentCode: string;
+  recoveryComponentCode: string | null;
+  timesheetUnit: 'DAY' | 'HOUR';
+  hoursPerDay: string | null;
+  state: string;
+  createdBy: string;
+  version: number;
+}
+
+function ValuationPolicyForm({ onDone }: { onDone: () => void }) {
+  const [effectiveFrom, setEffectiveFrom] = useState('');
+  const [arrears, setArrears] = useState('');
+  const [adjustment, setAdjustment] = useState('');
+  const [recovery, setRecovery] = useState('');
+  const [unit, setUnit] = useState<'DAY' | 'HOUR'>('DAY');
+  const [hours, setHours] = useState('');
+  const create = useMutation({
+    mutationFn: () =>
+      api<ValuationPolicy>('/v1/payroll/valuation-policies', {
+        body: {
+          effectiveFrom,
+          arrearsComponentCode: arrears.trim(),
+          adjustmentComponentCode: adjustment.trim(),
+          ...(recovery.trim() ? { recoveryComponentCode: recovery.trim() } : {}),
+          timesheetUnit: unit,
+          ...(unit === 'HOUR' ? { hoursPerDay: hours.trim() } : {}),
+        },
+      }),
+    onSuccess: () => onDone(),
+  });
+  const ready = effectiveFrom && arrears.trim() && adjustment.trim() && (unit === 'DAY' || hours.trim());
+  return (
+    <form
+      className="stack"
+      aria-label="New valuation policy"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!create.isPending && ready) create.mutate();
+      }}
+    >
+      <p className="hint">Each component is a pay head on the input basis: arrears and adjustments are earnings, the recovery is a deduction. Without a recovery deduction, a negative arrear or adjustment cannot be approved.</p>
+      <label>
+        Effective from
+        <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </label>
+      <label>
+        Arrears component code
+        <input value={arrears} onChange={(e) => setArrears(e.target.value)} />
+      </label>
+      <label>
+        Timesheet adjustment component code
+        <input value={adjustment} onChange={(e) => setAdjustment(e.target.value)} />
+      </label>
+      <label>
+        Recovery deduction code (optional)
+        <input value={recovery} onChange={(e) => setRecovery(e.target.value)} />
+      </label>
+      <label>
+        Timesheet unit
+        <select value={unit} onChange={(e) => setUnit(e.target.value as 'DAY' | 'HOUR')}>
+          <option value="DAY">Day</option>
+          <option value="HOUR">Hour</option>
+        </select>
+      </label>
+      {unit === 'HOUR' && (
+        <label>
+          Hours a day
+          <input inputMode="decimal" value={hours} onChange={(e) => setHours(e.target.value)} />
+        </label>
+      )}
+      <ErrorNote error={create.error} />
+      <button type="submit" disabled={create.isPending || !ready}>
+        Save as draft
+      </button>
+    </form>
+  );
+}
+
+function ValuationPoliciesScreen() {
+  const { can, me } = useSession();
+  const qc = useQueryClient();
+  const policies = useQuery({ queryKey: ['valuation-policies'], queryFn: () => api<{ items: ValuationPolicy[] }>('/v1/payroll/valuation-policies') });
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['valuation-policies'] });
+  const activate = useMutation({
+    mutationFn: (p: ValuationPolicy) => api<ValuationPolicy>(`/v1/payroll/valuation-policies/${encodeURIComponent(p.id)}/activate`, { body: { expectedVersion: p.version } }),
+    onSuccess: () => refresh(),
+  });
+  return (
+    <div className="stack">
+      <Section title="Valuation policies">
+        <p className="hint">
+          The active policy in effect pays approved arrears and late-timesheet adjustments through the first later payroll, and values a late timesheet by the day or by the hour. A policy is activated by
+          someone other than the person who drafted it; one with a later start date takes over from that date.
+        </p>
+        <ErrorNote error={policies.error ?? activate.error} />
+        {policies.data?.items.length === 0 && <Empty>No valuation policy yet: arrears and timesheet adjustments cannot be approved.</Empty>}
+        {policies.data && policies.data.items.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table aria-label="Valuation policies">
+              <thead>
+                <tr>
+                  <th>Revision</th>
+                  <th>From</th>
+                  <th>Arrears</th>
+                  <th>Adjustment</th>
+                  <th>Recovery</th>
+                  <th>Unit</th>
+                  <th>State</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {policies.data.items.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.revision}</td>
+                    <td>{formatDate(p.effectiveFrom)}</td>
+                    <td>{p.arrearsComponentCode}</td>
+                    <td>{p.adjustmentComponentCode}</td>
+                    <td>{p.recoveryComponentCode ?? 'None'}</td>
+                    <td>{p.timesheetUnit === 'HOUR' ? `Hour (${p.hoursPerDay} a day)` : 'Day'}</td>
+                    <td>
+                      <StateBadge state={p.state} />
+                    </td>
+                    <td>
+                      {p.state === 'DRAFT' && can(CONFIG_ACTIVATE) && p.createdBy !== me?.userId && (
+                        <button type="button" className="secondary" onClick={() => activate.mutate(p)} disabled={activate.isPending}>
+                          Activate
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Section>
+      {can(CONFIG_MANAGE) && (
+        <Section title="Draft a valuation policy">
+          <ValuationPolicyForm onDone={refresh} />
+        </Section>
+      )}
+    </div>
+  );
+}
+
+// =========================================================================================================
 
 export const PAYROLL_ADJUSTMENT_SCREENS: ScreenRoute[] = [
   { path: '/payroll/adjustments', title: 'Late-timesheet adjustments', permission: ADJ_READ, nav: true, component: AdjustmentsScreen },
   { path: '/payroll/arrears', title: 'Arrear register', permission: ARR_READ, nav: true, component: ArrearsScreen },
+  { path: '/payroll/valuation-policies', title: 'Arrears and adjustment valuation', permission: CONFIG_READ, nav: true, component: ValuationPoliciesScreen },
 ];
 
 export const PAYROLL_ADJUSTMENT_TASK_QUEUES = [

@@ -6,7 +6,9 @@
 // them and the server's net amount (never a sum worked out in the browser), the preparer's lines and upload, submission,
 // release eligibility worded as no payment, the review and approval queues with idempotency keys and reasons, refusal
 // codes in plain words, in-flight disabling, form resets, gating by permission, the role context in the query keys and
-// the exports for the navigation step. Synthetic data only.
+// the exports for the navigation step. I-88: the server's calculation of a draft (its items, what blocks approval and the
+// basis of each), calculated and entered lines apart, entered lines with their reason, the notice recovery waiver and the
+// approver's refusal naming every blocker. Synthetic data only.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -605,6 +607,46 @@ describe('letter templates (FR-017)', () => {
     expect(text.value).toBe('Dear {{employeeName}}');
     expect(within(form).getByLabelText('Employee name ({{employeeName}}) optional')).toBeTruthy();
   });
+
+  it('FR-017 lists the placeholders of the chosen letter type (OFFER has the offer placeholders)', async () => {
+    const OFFER_PLACEHOLDERS = [
+      { key: 'candidateName', source: 'OFFER', label: 'Candidate name' },
+      { key: 'annualCtc', source: 'OFFER', label: 'Annual CTC (approved offer)' },
+      { key: 'companyName', source: 'COMPANY', label: 'Company name' },
+    ];
+    const OFFER_NOTE = 'An offer letter is issued from the approved offer in Hiring, not from an employee process.';
+    const byType = (c: Call): Reply => [200, { items: c.params.get('letterType') === 'OFFER' ? OFFER_PLACEHOLDERS : PLACEHOLDERS }];
+    serve(listRoutes({ 'GET /v1/letter-placeholders': byType, [`GET /v1/letter-templates/${T_OFFER}`]: [200, offerDetail()] }));
+    const view = renderAt('/lifecycle/letter-templates', [TEMPLATE_READ, TEMPLATE_MANAGE]);
+    const form = await screen.findByRole('form', { name: 'New letter template' });
+    fireEvent.change(within(form).getByLabelText('Letter text (required)'), { target: { value: 'Dear {{candidateName}}, {{employeeName}}' } });
+    // No letter type chosen yet: the employee letters' placeholders.
+    expect(await within(form).findByText('{{candidateName}} is not an approved placeholder')).toBeTruthy();
+    expect(form.textContent).not.toContain(OFFER_NOTE);
+
+    fireEvent.change(within(form).getByLabelText('Letter type (required)'), { target: { value: 'offer' } });
+    expect(await within(form).findByText('{{employeeName}} is not an approved placeholder')).toBeTruthy();
+    expect(within(form).getByLabelText('Candidate name ({{candidateName}}) optional')).toBeTruthy();
+    const insert = within(form).getByLabelText('Placeholder to insert') as HTMLSelectElement;
+    expect([...insert.options].map((o) => o.value)).toEqual(['', 'candidateName', 'annualCtc', 'companyName']);
+    expect(form.textContent).toContain(OFFER_NOTE);
+    expect(callsTo('GET', '/v1/letter-placeholders').map((c) => c.params.get('letterType'))).toContain('OFFER');
+    // The reference list stays the employee letters' one.
+    expect(cells(rows(await screen.findByRole('table', { name: 'Approved placeholders' }))[0]!)[0]).toBe('{{employeeCode}}');
+
+    // Another type: the employee letters' placeholders again, and no offer note.
+    fireEvent.change(within(form).getByLabelText('Letter type (required)'), { target: { value: 'RELIEVING' } });
+    expect(await within(form).findByText('{{candidateName}} is not an approved placeholder')).toBeTruthy();
+    expect(form.textContent).not.toContain(OFFER_NOTE);
+    view.unmount();
+
+    // An opened OFFER template: its editor asks for the offer placeholders, and says where an offer letter is issued.
+    renderAt(`/lifecycle/letter-templates/${T_OFFER}`, [TEMPLATE_READ, TEMPLATE_MANAGE]);
+    const draft = await screen.findByRole('form', { name: 'Draft revision 1' });
+    expect(await within(draft).findByText('{{designation}} is not an approved placeholder')).toBeTruthy();
+    expect((await findSection('Template')).textContent).toContain(OFFER_NOTE);
+    expect(callsTo('GET', '/v1/letter-placeholders').at(-1)!.params.get('letterType')).toBe('OFFER');
+  });
 });
 
 describe('one letter template (FR-017)', () => {
@@ -1005,7 +1047,8 @@ describe('settlements (FR-052 to FR-054, BR-016)', () => {
     const note = screen.getByText(CALCULATION.reason, { exact: false }).closest('p') as HTMLElement;
     expect(note.textContent).toContain('calculation not configured');
     expect(document.body.textContent).not.toMatch(/INR [-\d]/);
-    expect(document.body.textContent).not.toMatch(/\bpaid\b/i);
+    // BR-016: no listed revision reads as paid; only a payment recorded from evidence is (the PAID state, I-81 item 2).
+    expect(table.textContent).not.toMatch(/\bpaid\b/i);
     // The outputs carry amounts: without the amount grant nothing is selectable and there is no ZIP download.
     expect(within(table).queryByRole('checkbox')).toBeNull();
     expect(screen.queryByRole('group', { name: 'ZIP download of the selected settlements' })).toBeNull();
@@ -1343,19 +1386,23 @@ describe('one settlement revision (FR-052 to FR-054, BR-016)', () => {
     // The net amount differs from the lines on purpose: the page must show the server's figure, not its own sum.
     serve(base({ [`GET ${detailPath(S_APPROVED)}`]: [200, { ...APPROVED, netAmount: '52345.1700' }] }));
     renderAt(`/lifecycle/settlements/${S_APPROVED}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT]);
-    const lines = await screen.findByRole('table', { name: 'Settlement lines' });
+    // I-88: a revision that is not calculated has only entered lines (entered, uploaded or copied), each with its reason if any.
+    const lines = await screen.findByRole('table', { name: 'Entered lines' });
+    expect(headers(lines)).toEqual(['Pay component', 'Kind', 'Line kind', 'Source', 'Amount', 'Reason']);
     expect(rows(lines).map(cells)).toEqual([
-      ['Basic pay (synthetic) BASIC', 'Earning', 'Standard', 'Entered', 'INR 50,000.00'],
-      ['Leave encashment (synthetic) LEAVE_ENC', 'Earning', 'Standard', 'Uploaded', 'INR 12,345.68 (exactly 12345.6789)'],
-      ['Loan recovery (synthetic) LOAN', 'Deduction', 'Standard', 'Copied from the previous revision', 'INR -10,000.50'],
+      ['Basic pay (synthetic) BASIC', 'Earning', 'Standard', 'Entered', 'INR 50,000.00', '—'],
+      ['Leave encashment (synthetic) LEAVE_ENC', 'Earning', 'Standard', 'Uploaded', 'INR 12,345.68 (exactly 12345.6789)', '—'],
+      ['Loan recovery (synthetic) LOAN', 'Deduction', 'Standard', 'Copied from the previous revision', 'INR -10,000.50', '—'],
     ]);
+    expect(screen.queryByRole('table', { name: 'Calculated lines' })).toBeNull();
+    expect(screen.getByText('None: this revision is not calculated.')).toBeTruthy();
     const net = screen.getByText('Net amount:').closest('p') as HTMLElement;
     expect(net.textContent).toContain('INR 52,345.17');
     expect(net.textContent).not.toContain('52,345.18');
     const facts = await findSection('Settlement');
     expect(term(facts, 'State')).toBe('Approved, not yet eligible for release');
     expect(term(facts, 'Payment')).toBe('Not tracked here: release eligibility is not a payment');
-    expect(term(facts, 'Calculation')).toBe('Not configured');
+    expect(term(facts, 'Calculation')).toBe('Not calculated (lines entered or uploaded)');
     expect(term(facts, 'Prepared by')).toBe(U_OTHER);
     expect(facts.textContent).toContain('It is not yet eligible for release');
     expect(await within(facts).findByText(CALCULATION.reason, { exact: false })).toBeTruthy();
@@ -1416,7 +1463,11 @@ describe('one settlement revision (FR-052 to FR-054, BR-016)', () => {
     serve(base({ [`GET ${detailPath(S_DRAFT)}`]: [200, settlement(S_DRAFT, {}, null)] }));
     renderAt(`/lifecycle/settlements/${S_DRAFT}`, [SETTLEMENT_READ, SETTLEMENT_PREPARE]);
     expect(await screen.findByText('Settlement amounts are confidential, and the selected role does not receive them.')).toBeTruthy();
-    expect(screen.queryByRole('table', { name: 'Settlement lines' })).toBeNull();
+    expect(screen.queryByRole('table', { name: 'Entered lines' })).toBeNull();
+    expect(screen.queryByRole('table', { name: 'Calculated lines' })).toBeNull();
+    // The calculation comes with the amounts only (I-88).
+    expect(screen.getByText('The calculation is confidential like the settlement amounts, and the selected role does not receive it.')).toBeTruthy();
+    expect(screen.queryByRole('table', { name: 'Calculation items' })).toBeNull();
     expect(screen.queryByText('Net amount:')).toBeNull();
     // The remaining balances come with the amounts only.
     expect(screen.getByText('Remaining loan and leave balances are shown with the settlement amounts, and the selected role does not receive them.')).toBeTruthy();
@@ -1752,7 +1803,7 @@ describe('one settlement revision (FR-052 to FR-054, BR-016)', () => {
     fireEvent.click(button(section, 'Record release eligibility'));
     expect(await screen.findByText('Revision 2 is now eligible for release. No payment has been made, scheduled or recorded.')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('Eligible for release (not a payment)')).toBeTruthy());
-    expect(screen.getByText('Eligible for release. This is not a payment: no payment has been made, scheduled or recorded here.')).toBeTruthy();
+    expect(screen.getByText('Eligible for release. This is not a payment. The payment is made outside this system and then recorded here from its evidence by someone independent.')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Release eligibility' })).toBeNull();
   });
 
@@ -2079,5 +2130,515 @@ describe('settlement decision queues (FR-053; C4; ZT07)', () => {
     expect(await screen.findByRole('list', { name: 'Settlements waiting for your review' })).toBeTruthy();
     expect(await screen.findByRole('list', { name: 'Settlements waiting for your approval' })).toBeTruthy();
     expect(callsTo('GET', '/v1/settlements/tasks/mine')).toHaveLength(1);
+  });
+});
+
+describe('settlement payment, void, in-app sending and list selection (I-81)', () => {
+  const RECORD_PAYMENT = 'settlement.record_payment.amount';
+  const SEND = 'settlement.send.amount';
+  const DOCUMENT_READ = 'document.read.document';
+  const ELIGIBLE = { ...APPROVED, id: S_ELIGIBLE, state: 'RELEASE_ELIGIBLE', paymentStatus: 'NOT_PAID', releaseEligibleAt: '2026-10-26T09:00:00.000Z', version: 8 };
+  const DOC = { id: 'd0000000-0000-4000-8000-000000000001', documentType: 'GENERAL', fileName: 'neft.pdf', uploadedAt: '2026-10-27T05:00:00.000Z', scanState: 'CLEAN', verificationState: 'VERIFIED' };
+  const base = (overrides: Record<string, Route> = {}): Record<string, Route> => ({
+    'GET /v1/settlements/calculation': [200, CALCULATION],
+    [`GET /v1/exit-cases/${X_ASHA}`]: [200, EXIT],
+    [`GET /v1/employees/${E_ASHA}/documents`]: [200, { items: [DOC] }],
+    [`GET /v1/settlements/${S_ELIGIBLE}/deliveries`]: [200, { items: [] }],
+    ...overrides,
+  });
+
+  it('FR-053 records the payment made outside the system from its evidence, by someone independent; the date is the disbursement month', async () => {
+    let current: Json = ELIGIBLE;
+    serve(
+      base({
+        [`GET /v1/settlements/${S_ELIGIBLE}`]: () => [200, current],
+        [`POST /v1/settlements/${S_ELIGIBLE}/payment`]: () => {
+          current = { ...ELIGIBLE, state: 'PAID', paymentStatus: 'PAID', paymentDate: '2026-10-28', payment: { paidAt: '2026-10-28T09:00:00.000Z', paidBy: U_ME, reference: 'NEFT-1' }, version: 9 };
+          return [200, { ...current, replayed: false }];
+        },
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_ELIGIBLE}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT, RECORD_PAYMENT, DOCUMENT_READ]);
+    const section = await findSection('Record the payment');
+    fireEvent.change(within(section).getByLabelText('Payment date'), { target: { value: '2026-10-28' } });
+    fireEvent.change(within(section).getByLabelText('Bank or receipt reference'), { target: { value: 'NEFT-1' } });
+    fireEvent.click(await within(section).findByRole('radio'));
+    fireEvent.click(button(section, 'Record the payment'));
+    expect(await screen.findByText('The payment of revision 2 is recorded from its evidence.')).toBeTruthy();
+    const body = bodyOf('POST', `/v1/settlements/${S_ELIGIBLE}/payment`) as Record<string, unknown>;
+    expect(body).toMatchObject({ paymentDate: '2026-10-28', evidenceReference: 'NEFT-1', evidenceDocumentIds: [DOC.id], expectedVersion: 8 });
+    expect(typeof body.evidenceKey).toBe('string');
+    await waitFor(() => expect(screen.getByText('Paid: recorded from evidence')).toBeTruthy());
+    expect(screen.queryByRole('heading', { name: 'Record the payment' })).toBeNull();
+  });
+
+  it('FR-052 FR-053 voids a live revision with the reason, and says a refusal in words', async () => {
+    serve(
+      base({
+        [`GET /v1/settlements/${S_ELIGIBLE}`]: [200, ELIGIBLE],
+        [`POST /v1/settlements/${S_ELIGIBLE}/void`]: [409, { error: 'NOT_INDEPENDENT', message: 'x' }],
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_ELIGIBLE}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT, SETTLEMENT_APPROVE]);
+    const section = await findSection('Void this revision');
+    expect(button(section, 'Void the revision').disabled).toBe(true);
+    fireEvent.change(within(section).getByLabelText('Reason'), { target: { value: 'Final-period payroll paid BASIC' } });
+    fireEvent.click(button(section, 'Void the revision'));
+    expect((await within(section).findByRole('alert')).textContent).toContain('A revision is voided by someone other than its preparer and its employee.');
+    expect(bodyOf('POST', `/v1/settlements/${S_ELIGIBLE}/void`)).toEqual({ reason: 'Final-period payroll paid BASIC', expectedVersion: 8 });
+  });
+
+  it('FR-054 FR-018 sends the statement to the employee’s own self-service only after the recipient is confirmed', async () => {
+    serve(
+      base({
+        [`GET /v1/settlements/${S_ELIGIBLE}`]: [200, ELIGIBLE],
+        [`POST /v1/settlements/${S_ELIGIBLE}/send`]: [201, { id: 'dl-1', kind: 'SETTLEMENT_STATEMENT', format: 'XLSX', sourceRevision: 2, status: 'DELIVERED', sentBy: U_ME, sentAt: '2026-10-28T09:00:00.000Z', firstReadAt: null }],
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_ELIGIBLE}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT, SEND]);
+    const section = await findSection('Send to the employee’s self-service');
+    expect(section.textContent).toContain('nothing is attached to an e-mail');
+    expect(button(section, /Send the PDF statement/).disabled).toBe(true);
+    fireEvent.change(within(section).getByLabelText('Format'), { target: { value: 'XLSX' } });
+    fireEvent.click(within(section).getByRole('checkbox'));
+    fireEvent.click(button(section, /Send the Excel statement/));
+    await waitFor(() => expect(callsTo('POST', `/v1/settlements/${S_ELIGIBLE}/send`)).toHaveLength(1));
+    expect(bodyOf('POST', `/v1/settlements/${S_ELIGIBLE}/send`)).toMatchObject({ format: 'XLSX', recipientEmployeeId: E_ASHA });
+  });
+
+  it('FR-054 filters by disbursement month and selects from an uploaded list of employee codes', async () => {
+    serve({
+      'GET /v1/settlements': [200, { calculation: CALCULATION, total: 0, items: [] }],
+      'POST /v1/settlements/selection': [
+        200,
+        {
+          template: 'SETTLEMENT_SELECTION_V1',
+          total: 2,
+          matched: 1,
+          rows: [
+            { row: 2, employeeCode: 'SYN-301', outcome: 'MATCHED', settlements: 1 },
+            { row: 3, employeeCode: 'NOPE', outcome: 'NOT_FOUND', settlements: 0 },
+          ],
+          items: [summary(S_ELIGIBLE, { revision: 2, state: 'PAID' }, true)],
+        },
+      ],
+    });
+    renderAt('/lifecycle/settlements', [SETTLEMENT_READ, SETTLEMENT_AMOUNT, SETTLEMENT_EXPORT]);
+    fireEvent.change(await screen.findByLabelText('Disbursement month (recorded payment date)'), { target: { value: '2026-10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Show settlements' }));
+    await waitFor(() => expect(calls.some((c) => c.path === '/v1/settlements' && c.params.get('disbursementMonth') === '2026-10')).toBe(true));
+    const file = new File(['employee_code\r\nSYN-301\r\nNOPE\r\n'], 'list.csv', { type: 'text/csv' });
+    fireEvent.change(screen.getByLabelText('Employee list file'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Select from the list' }));
+    const outcomes = await screen.findByRole('table', { name: 'Uploaded list rows' });
+    expect(rows(outcomes).map(cells)).toEqual([
+      ['2', 'SYN-301', 'Matched (1)'],
+      ['3', 'NOPE', 'No employee with this code in the selected role’s scope'],
+    ]);
+    expect(await screen.findByText('1 of at most 100 selected.')).toBeTruthy();
+    expect(calls.find((c) => c.path === '/v1/settlements/selection')!.body).toMatchObject({ disbursementMonth: '2026-10' });
+  });
+});
+
+describe('the settlement calculation (FR-052; I-88)', () => {
+  const WAIVE = 'settlement.waive_notice.amount';
+  const C_FIRST = 'c1000000-0000-4000-8000-000000000001';
+  const C_EARLIER = 'c1000000-0000-4000-8000-000000000002';
+  const AVAILABLE = { status: 'AVAILABLE', reason: 'A draft is calculated from a versioned snapshot (synthetic reason).' };
+  const detailPath = `/v1/settlements/${S_DRAFT}`;
+  const ITEMS = [
+    {
+      position: 1,
+      kind: 'EARNINGS_DUE',
+      status: 'CALCULATED',
+      blocking: false,
+      componentCode: 'BASIC',
+      componentKind: 'EARNING',
+      amount: '9032.2600',
+      basis: { daysInMonth: 31, segments: [{ arrangementId: 'f2000000-0000-4000-8000-000000000001', start: '2026-10-01', end: '2026-10-31', monthlyAmount: '20000.0000', paidDays: '14.0000' }] },
+      leaveTypeCode: null,
+    },
+    {
+      position: 2,
+      kind: 'LEAVE_ENCASHMENT',
+      status: 'CALCULATED',
+      blocking: false,
+      componentCode: 'LEAVE_ENC',
+      componentKind: 'EARNING',
+      amount: '13500.0000',
+      basis: { leaveType: 'EL', asOf: '2026-10-31', available: '18.5000', pending: '0.0000', cap: '15', units: '15', rateBasis: 'BASIC_DA', monthlyRate: '27000.0000', divisor: 30 },
+      leaveTypeCode: 'EL',
+    },
+    {
+      position: 3,
+      kind: 'NOTICE_RECOVERY',
+      status: 'CALCULATED',
+      blocking: false,
+      componentCode: 'NOTICE_REC',
+      componentKind: 'DEDUCTION',
+      amount: '-5833.3300',
+      basis: { requestDate: '2026-10-01', lastWorkingDate: '2026-10-25', requiredDays: 30, servedDays: 25, shortfallDays: 5, rateBasis: 'GROSS', monthlyRate: '35000.0000', divisor: 30 },
+      leaveTypeCode: null,
+    },
+    {
+      position: 4,
+      kind: 'GRATUITY',
+      status: 'RULE_PACK_NOT_CONFIGURED',
+      blocking: true,
+      componentCode: null,
+      componentKind: null,
+      amount: null,
+      basis: { rulePackCode: 'GRATUITY', packRevision: 1, packState: 'DRAFT', completedYears: 7, partYearCounts: false, countedYears: 7, minimumServiceYears: 5, exemptSeparation: false },
+      leaveTypeCode: null,
+    },
+    {
+      position: 5,
+      kind: 'STATUTORY_DEDUCTION',
+      status: 'NOT_APPLICABLE',
+      blocking: false,
+      componentCode: null,
+      componentKind: null,
+      amount: null,
+      basis: { tax: 'NOT_CONFIGURED', reason: 'No statutory head applies (synthetic).' },
+      leaveTypeCode: null,
+    },
+  ];
+  const SNAPSHOT = {
+    id: C_FIRST,
+    sequence: 2,
+    calculatedAt: '2026-11-05T06:00:00.000Z',
+    calculatedBy: U_ME,
+    lastWorkingDate: '2026-10-31',
+    periodStart: '2026-10-01',
+    periodEnd: '2026-10-31',
+    currencyCode: 'INR',
+    policyId: 'f3000000-0000-4000-8000-000000000001',
+    policyRevision: 2,
+    gratuityPackId: 'f4000000-0000-4000-8000-000000000001',
+    valuationPolicyId: null,
+    paidDayPolicyId: null,
+    itemCount: 5,
+    blockingCount: 1,
+    inputs: {},
+    items: ITEMS,
+  };
+  const calculatedLine = (componentCode: string, componentName: string, componentKind: string, amount: string, lineKind = 'STANDARD') => ({
+    componentCode,
+    componentName,
+    componentKind,
+    amount,
+    lineKind,
+    source: 'CALCULATED',
+    calculationId: C_FIRST,
+    reason: null,
+  });
+  const BONUS = {
+    componentCode: 'BONUS',
+    componentName: 'Bonus (synthetic)',
+    componentKind: 'EARNING',
+    amount: '1000.0000',
+    lineKind: 'STANDARD',
+    source: 'ENTERED',
+    calculationId: null,
+    reason: 'Synthetic: festival bonus agreed in writing',
+  };
+  const CALCULATED_LINES = [
+    calculatedLine('BASIC', 'Basic pay (synthetic)', 'EARNING', '9032.2600'),
+    calculatedLine('LEAVE_ENC', 'Leave encashment (synthetic)', 'EARNING', '13500.0000'),
+    calculatedLine('NOTICE_REC', 'Notice recovery (synthetic)', 'DEDUCTION', '-5833.3300', 'NOTICE_ADJUSTMENT'),
+  ];
+  const notCalculated = (patch: Json = {}) => settlement(S_DRAFT, { calculation: null, noticeWaiver: null, ...patch }, { netAmount: '1000.0000', lines: [BONUS] });
+  const calculated = (patch: Json = {}) =>
+    settlement(S_DRAFT, { calculationStatus: 'CALCULATED', calculation: SNAPSHOT, noticeWaiver: null, version: 6, ...patch }, { netAmount: '17698.9300', lines: [...CALCULATED_LINES, BONUS] });
+  const base = (overrides: Record<string, Route> = {}): Record<string, Route> => ({
+    'GET /v1/settlements/calculation': [200, AVAILABLE],
+    [`GET /v1/exit-cases/${X_ASHA}`]: [200, EXIT],
+    ...overrides,
+  });
+
+  it('calculates the draft against its version and shows each item with its basis, a blocking item marked "Blocks approval"', async () => {
+    let current = notCalculated();
+    let attempt = 0;
+    serve(
+      base({
+        [`GET ${detailPath}`]: () => [200, current],
+        [`POST ${detailPath}/calculate`]: () => {
+          attempt += 1;
+          if (attempt === 1) return [409, { error: 'MANUAL_LINE_CONFLICT', message: 'An entered line uses a component the calculation produces', details: { components: ['BASIC'] } }];
+          current = calculated();
+          return [200, current];
+        },
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, PREPARER);
+    const calculation = await findSection('Calculation');
+    expect(await within(calculation).findByText('Not calculated yet.')).toBeTruthy();
+    expect(within(calculation).queryByRole('table', { name: 'Calculation items' })).toBeNull();
+    // How a draft is calculated is the server's to say: a hint for a draft that is not calculated.
+    const facts = await findSection('Settlement');
+    expect(await within(facts).findByText(AVAILABLE.reason)).toBeTruthy();
+    expect(term(facts, 'Calculation')).toBe('Not calculated (lines entered or uploaded)');
+
+    const section = await findSection('Calculate');
+    fireEvent.click(button(section, 'Calculate'));
+    const alert = await within(section).findByRole('alert');
+    expect(alert.textContent).toContain('An entered line uses a component the calculation produces: BASIC. Remove it and calculate again.');
+    expect(alert.textContent).toContain('MANUAL_LINE_CONFLICT');
+    expect(bodyOf('POST', `${detailPath}/calculate`)).toEqual({ expectedVersion: 5 });
+
+    fireEvent.click(button(section, 'Calculate'));
+    await waitFor(() => expect(callsTo('POST', `${detailPath}/calculate`)).toHaveLength(2));
+    expect(bodyOf('POST', `${detailPath}/calculate`, 1)).toEqual({ expectedVersion: 5 });
+    expect((await within(section).findByRole('status')).textContent).toBe('Calculated: snapshot 2, 5 items, 1 blocking approval.');
+    expect(button(section, 'Calculate again')).toBeTruthy();
+
+    const items = await screen.findByRole('table', { name: 'Calculation items' });
+    expect(headers(items)).toEqual(['Item', 'Status', 'Pay component', 'Leave type', 'Amount', 'How']);
+    expect(rows(items).map(cells)).toEqual([
+      ['Earnings due', 'Calculated', 'BASIC', '', 'INR 9,032.26', '20,000.00 x 14 paid days / 31'],
+      ['Leave encashment', 'Calculated', 'LEAVE_ENC', 'EL', 'INR 13,500.00', '15 of 18.5 units (cap 15) x 27,000.00 / 30; rate on Basic + DA'],
+      ['Notice recovery', 'Calculated', 'NOTICE_REC', '', 'INR -5,833.33', '30 required, 25 served: 5 days x 35,000.00 / 30; rate on Monthly gross (every fixed earning)'],
+      ['Gratuity', 'Rule pack not configured Blocks approval', '', '', '', '7 counted years; pack revision 1 (inactive draft)'],
+      ['Tax and statutory deductions', 'Not applicable', '', '', '', 'No statutory head applies (synthetic).'],
+    ]);
+    // "Blocks approval" is words, not colour alone, and only on the blocking item.
+    expect(within(items).getAllByText('Blocks approval')).toHaveLength(1);
+    const view = items.closest('section') as HTMLElement;
+    expect(term(view, 'Snapshot')).toBe('2');
+    expect(term(view, 'Calculated')).toBe(`${localTime('2026-11-05T06:00:00.000Z')} by you`);
+    expect(term(view, 'Last working date')).toBe('2026-10-31');
+    expect(term(view, 'Period')).toBe('2026-10-01 to 2026-10-31');
+    expect(term(view, 'Blocking items')).toBe('1 blocks approval');
+    await waitFor(() => expect(term(screen.getByRole('heading', { name: 'Settlement' }).closest('section') as HTMLElement, 'Calculation')).toBe('Calculated from a snapshot'));
+    // Calculated: the hint about how drafts are calculated goes, and the upload is not offered.
+    expect(screen.queryByText(AVAILABLE.reason)).toBeNull();
+    expect(screen.queryByLabelText('Settlement lines file (CSV)')).toBeNull();
+  });
+
+  it('lists earlier snapshots only when asked, newest first, without the one the revision carries', async () => {
+    serve(
+      base({
+        [`GET ${detailPath}`]: [200, calculated()],
+        [`GET ${detailPath}/calculations`]: [
+          200,
+          { items: [SNAPSHOT, { ...SNAPSHOT, id: C_EARLIER, sequence: 1, calculatedAt: '2026-11-04T06:00:00.000Z', itemCount: 4, blockingCount: 2 }] },
+        ],
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT]);
+    await screen.findByRole('table', { name: 'Calculation items' });
+    await settle();
+    expect(callsTo('GET', `${detailPath}/calculations`)).toEqual([]);
+    const details = screen.getByText('Earlier snapshots', { selector: 'summary' }).closest('details') as HTMLDetailsElement;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    const list = await screen.findByRole('list', { name: 'Earlier snapshots' });
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`Snapshot 1, calculated ${localTime('2026-11-04T06:00:00.000Z')}: 4 items, 2 blocking approval`]);
+  });
+
+  it('shows calculated and entered lines apart, the entered ones with their reason; the editor changes the entered lines only, each with a reason', async () => {
+    let current = calculated();
+    let attempt = 0;
+    serve(
+      base({
+        [`GET ${detailPath}`]: () => [200, current],
+        [`PUT ${detailPath}/lines`]: () => {
+          attempt += 1;
+          if (attempt === 1) return [422, { error: 'COMPONENT_CALCULATED', message: 'The calculation already produces this component', details: { line: 2 } }];
+          current = calculated({
+            lines: [...CALCULATED_LINES, BONUS, { ...BONUS, componentCode: 'ADV_REC', componentName: 'Advance recovery (synthetic)', componentKind: 'DEDUCTION', amount: '-500.0000', reason: 'Synthetic: advance agreed' }],
+            version: 7,
+          });
+          return [200, current];
+        },
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, PREPARER);
+    const calculatedTable = await screen.findByRole('table', { name: 'Calculated lines' });
+    expect(headers(calculatedTable)).toEqual(['Pay component', 'Kind', 'Line kind', 'Amount']);
+    expect(rows(calculatedTable).map(cells)).toEqual([
+      ['Basic pay (synthetic) BASIC', 'Earning', 'Standard', 'INR 9,032.26'],
+      ['Leave encashment (synthetic) LEAVE_ENC', 'Earning', 'Standard', 'INR 13,500.00'],
+      ['Notice recovery (synthetic) NOTICE_REC', 'Deduction', 'Notice adjustment', 'INR -5,833.33'],
+    ]);
+    const entered = screen.getByRole('table', { name: 'Entered lines' });
+    expect(rows(entered).map(cells)).toEqual([['Bonus (synthetic) BONUS', 'Earning', 'Standard', 'Entered', 'INR 1,000.00', 'Synthetic: festival bonus agreed in writing']]);
+    expect((screen.getByText('Net amount:').closest('p') as HTMLElement).textContent).toContain('INR 17,698.93');
+
+    // The upload would replace the calculated lines: it is not offered, and the screen says why.
+    const upload = await findSection('Upload the lines');
+    expect(upload.textContent).toContain('This draft is calculated, so its lines are not uploaded');
+    expect(within(upload).queryByLabelText('Settlement lines file (CSV)')).toBeNull();
+
+    const form = await screen.findByRole('form', { name: 'Settlement lines' });
+    const editor = form.closest('section') as HTMLElement;
+    expect(editor.textContent).toContain('Entered lines are for components the calculation does not produce');
+    expect((within(form).getAllByLabelText('Pay component code') as HTMLInputElement[]).map((i) => i.value)).toEqual(['BONUS']);
+    expect((within(form).getByLabelText('Reason (required)') as HTMLInputElement).value).toBe('Synthetic: festival bonus agreed in writing');
+    fireEvent.click(button(form, 'Add a line'));
+    const codes = within(form).getAllByLabelText('Pay component code') as HTMLInputElement[];
+    const amounts = within(form).getAllByLabelText('Amount') as HTMLInputElement[];
+    const reasons = within(form).getAllByLabelText('Reason (required)') as HTMLInputElement[];
+    fireEvent.change(codes[1]!, { target: { value: 'adv_rec' } });
+    fireEvent.change(amounts[1]!, { target: { value: '-500' } });
+    fireEvent.click(button(form, 'Save lines'));
+    expect((await within(form).findByRole('alert')).textContent).toBe('Line 2: enter why this line is entered: this draft is calculated, so each entered line states its reason.');
+    await settle();
+    expect(callsTo('PUT', `${detailPath}/lines`)).toEqual([]);
+
+    fireEvent.change(reasons[1]!, { target: { value: 'Synthetic: advance agreed' } });
+    fireEvent.click(button(form, 'Save lines'));
+    await waitFor(() => expect(callsTo('PUT', `${detailPath}/lines`)).toHaveLength(1));
+    // Only the entered lines are sent: the server keeps the calculated ones.
+    expect(bodyOf('PUT', `${detailPath}/lines`)).toEqual({
+      lines: [
+        { componentCode: 'BONUS', amount: '1000.0000', lineKind: 'STANDARD', reason: 'Synthetic: festival bonus agreed in writing' },
+        { componentCode: 'ADV_REC', amount: '-500', lineKind: 'STANDARD', reason: 'Synthetic: advance agreed' },
+      ],
+      expectedVersion: 6,
+    });
+    const alert = await within(form).findByRole('alert');
+    expect(alert.textContent).toContain('Line 2: the calculation already produces this pay component, so it is not entered as well.');
+    expect(alert.textContent).toContain('COMPONENT_CALCULATED');
+
+    fireEvent.click(button(form, 'Save lines'));
+    expect((await within(form).findByRole('status')).textContent).toBe('Saved 2 lines.');
+    await waitFor(() => expect(rows(screen.getByRole('table', { name: 'Entered lines' }))).toHaveLength(2));
+    expect((within(form).getAllByLabelText('Pay component code') as HTMLInputElement[]).map((i) => i.value)).toEqual(['BONUS', 'ADV_REC']);
+  });
+
+  it('sends an optional reason with an entered line of a draft that is not calculated', async () => {
+    serve(
+      base({
+        [`GET ${detailPath}`]: [200, notCalculated()],
+        [`PUT ${detailPath}/lines`]: [200, notCalculated({ version: 6 })],
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, PREPARER);
+    const form = await screen.findByRole('form', { name: 'Settlement lines' });
+    fireEvent.change(within(form).getByLabelText('Reason (optional)'), { target: { value: 'Synthetic: confirmed by the manager' } });
+    fireEvent.click(button(form, 'Save lines'));
+    await waitFor(() => expect(callsTo('PUT', `${detailPath}/lines`)).toHaveLength(1));
+    expect(bodyOf('PUT', `${detailPath}/lines`)).toEqual({
+      lines: [{ componentCode: 'BONUS', amount: '1000.0000', lineKind: 'STANDARD', reason: 'Synthetic: confirmed by the manager' }],
+      expectedVersion: 5,
+    });
+    // Not calculated: the upload is offered as before.
+    expect(within(await findSection('Upload the lines')).getByLabelText('Settlement lines file (CSV)')).toBeTruthy();
+  });
+
+  it('offers the notice recovery waiver only with its own right, to someone other than the preparer, and posts the reason', async () => {
+    let current = calculated({ preparedBy: U_OTHER });
+    serve(
+      base({
+        [`GET ${detailPath}`]: () => [200, current],
+        [`POST /v1/exit-cases/${X_ASHA}/notice-waiver`]: () => {
+          current = calculated({
+            preparedBy: U_OTHER,
+            noticeWaiver: { id: 'f5000000-0000-4000-8000-000000000001', reason: 'Synthetic: relieved early at our request', waivedBy: U_ME, waivedAt: '2026-11-05T07:00:00.000Z' },
+          });
+          return [201, { id: 'f5000000-0000-4000-8000-000000000001', exitCaseId: X_ASHA, waivedBy: U_ME }];
+        },
+      }),
+    );
+    const without = renderAt(`/lifecycle/settlements/${S_DRAFT}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT]);
+    await screen.findByRole('table', { name: 'Calculation items' });
+    expect(screen.queryByRole('heading', { name: 'Waive the notice recovery' })).toBeNull();
+    without.unmount();
+
+    // The preparer holding the right is told someone else waives it.
+    current = calculated();
+    const preparer = renderAt(`/lifecycle/settlements/${S_DRAFT}`, [...PREPARER, WAIVE]);
+    const own = await findSection('Waive the notice recovery');
+    expect(within(own).getByText('You prepared this settlement, so someone else waives its notice recovery.')).toBeTruthy();
+    expect(button(own, 'Waive the notice recovery').disabled).toBe(true);
+    preparer.unmount();
+
+    current = calculated({ preparedBy: U_OTHER });
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT, WAIVE]);
+    const section = await findSection('Waive the notice recovery');
+    expect(section.textContent).toContain('The calculation recovers 5 days of notice not served.');
+    const form = within(section).getByRole('form', { name: 'Waive the notice recovery' });
+    fireEvent.click(button(form, 'Waive the notice recovery'));
+    expect((await within(form).findByRole('alert')).textContent).toBe('Enter why the notice recovery is waived.');
+    await settle();
+    expect(callsTo('POST', `/v1/exit-cases/${X_ASHA}/notice-waiver`)).toEqual([]);
+    fireEvent.change(within(form).getByLabelText('Reason for waiving (required)'), { target: { value: '  Synthetic: relieved early at our request ' } });
+    fireEvent.click(button(form, 'Waive the notice recovery'));
+    await waitFor(() => expect(callsTo('POST', `/v1/exit-cases/${X_ASHA}/notice-waiver`)).toHaveLength(1));
+    expect(bodyOf('POST', `/v1/exit-cases/${X_ASHA}/notice-waiver`)).toEqual({ reason: 'Synthetic: relieved early at our request' });
+    expect(await screen.findByText('Notice recovery waived. The preparer calculates the draft again to apply it.')).toBeTruthy();
+    // Loaded again: the waiver is shown with its reason, and nothing more is offered to waive.
+    const note = await screen.findByText(/Notice recovery waived: Synthetic: relieved early at our request/);
+    expect(note.closest('p')?.textContent).toContain('waived');
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Waive the notice recovery' })).toBeNull());
+  });
+
+  it('says a refused waiver in plain words', async () => {
+    serve(
+      base({
+        [`GET ${detailPath}`]: [200, calculated({ preparedBy: U_OTHER })],
+        [`POST /v1/exit-cases/${X_ASHA}/notice-waiver`]: [409, { error: 'NOT_INDEPENDENT', message: 'The notice recovery is waived by someone other than the settlement’s preparer' }],
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT, WAIVE]);
+    const section = await findSection('Waive the notice recovery');
+    fireEvent.change(within(section).getByLabelText('Reason for waiving (required)'), { target: { value: 'Synthetic: early release' } });
+    fireEvent.click(button(section, 'Waive the notice recovery'));
+    const alert = await within(section).findByRole('alert');
+    expect(alert.textContent).toContain('The preparer of this settlement cannot waive its notice recovery: someone else waives it.');
+    expect(alert.textContent).toContain('NOT_INDEPENDENT');
+  });
+
+  it('says a submission refused because payroll took an arrear the calculation includes', async () => {
+    serve(
+      base({
+        [`GET ${detailPath}`]: [200, calculated()],
+        [`POST ${detailPath}/submit`]: [409, { error: 'ARREARS_TAKEN_BY_PAYROLL', message: 'Payroll has paid or holds an arrear', details: { cases: ['f6000000-0000-4000-8000-000000000001'] } }],
+      }),
+    );
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, PREPARER);
+    const section = await findSection('Submit for review');
+    fireEvent.click(button(section, 'Submit revision 1 for review'));
+    const alert = await within(section).findByRole('alert');
+    expect(alert.textContent).toContain('Monthly payroll has meanwhile paid or taken an arrear or timesheet adjustment this calculation includes');
+    expect(alert.textContent).toContain('Prepare a corrected revision');
+  });
+
+  it('the approval refused with CALCULATION_BLOCKED names every blocker in plain words, and the task stays', async () => {
+    const APPROVE = `/v1/settlements/tasks/${K_APPROVAL}/approve`;
+    const blockers = [
+      { source: 'CALCULATION', kind: 'GRATUITY', code: 'RULE_PACK_NOT_CONFIGURED', componentCode: null },
+      { source: 'CALCULATION', kind: 'NOTICE_RECOVERY', code: 'POLICY_NOT_CONFIGURED', componentCode: null },
+      { source: 'STATUTORY', kind: 'STATUTORY_DEDUCTION', code: 'RULE_PACK_NOT_CONFIGURED', componentCode: 'TX_TDS', rulePackCode: 'TDS' },
+      { source: 'GRATUITY', kind: 'GRATUITY', code: 'CALCULATION_REQUIRED', rulePackCode: 'GRATUITY' },
+    ];
+    const task = { ...APPROVAL_TASK, settlement: { ...APPROVAL_TASK.settlement, calculationStatus: 'CALCULATED', calculation: { ...SNAPSHOT, blockingCount: 2 } } };
+    serve({
+      'GET /v1/settlements/tasks/mine': [200, { items: [task] }],
+      [`POST ${APPROVE}`]: [409, { error: 'CALCULATION_BLOCKED', message: 'This settlement cannot be approved', details: { blockers } }],
+    });
+    renderQueue(1, [SETTLEMENT_READ, SETTLEMENT_AMOUNT, SETTLEMENT_APPROVE]);
+    const list = await screen.findByRole('list', { name: 'Settlements waiting for your approval' });
+    const item = within(list).getAllByRole('listitem')[0]!;
+    expect(term(item, 'Calculation')).toBe('Calculated from a snapshot');
+    expect(term(item, 'Blocking items')).toBe('2 block approval');
+    fireEvent.click(button(item, 'Approve'));
+    const alert = await within(item).findByRole('alert');
+    expect(alert.textContent).toContain(
+      'This settlement cannot be approved while something it needs is missing: Gratuity: the gratuity rule pack is not active (RULE_PACK_NOT_CONFIGURED); Notice recovery: settlement policy not configured (POLICY_NOT_CONFIGURED); Statutory deduction TX_TDS: rule pack TDS is not configured; Gratuity: the employee is eligible, so the settlement must be calculated (CALCULATION_REQUIRED). Return the settlement for a corrected revision once that is in place.',
+    );
+    expect(alert.textContent).toContain('CALCULATION_BLOCKED');
+    // Nothing was decided: the task stays, so the approver can return it instead.
+    await settle();
+    expect(within(screen.getByRole('list', { name: 'Settlements waiting for your approval' })).getAllByRole('listitem')).toHaveLength(1);
+    expect(button(item, 'Return for correction').disabled).toBe(false);
+  });
+
+  it('links the calculation to the settlement policy and statutory packs for a role that reads them', async () => {
+    serve(base({ [`GET ${detailPath}`]: [200, calculated()] }));
+    renderAt(`/lifecycle/settlements/${S_DRAFT}`, [SETTLEMENT_READ, SETTLEMENT_AMOUNT, 'statutory_pack.read.operational']);
+    const link = await screen.findByRole('link', { name: 'Settlement policy and statutory packs' });
+    expect(link.getAttribute('href')).toBe('/lifecycle/settlement-settings');
   });
 });

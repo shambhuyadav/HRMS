@@ -29,6 +29,12 @@ export const AUDIT_METRICS: Readonly<Record<string, (db: Queryable, grant: Acces
   AUDIT_ACCESS_DENIED_THIS_MONTH: (db, g) => monthCount(db, g, { action: 'ACCESS_DENIED' }),
   /** Audited configuration revision events of the month. */
   AUDIT_CONFIGURATION_REVISIONS_THIS_MONTH: (db, g) => monthCount(db, g, { resourceGroup: 'CONFIGURATION' }),
-  /** No evidence-review workflow exists (auditors have no task kinds): unavailable, never zero. */
+  /**
+   * F2 "Review evidence tasks" stays unavailable, never zero (decided under owner delegation, 6 Nov 2026, docs/03 I-92). No
+   * evidence-review process exists: no record says which evidence an auditor asked for, from whom, by when or whether it was given,
+   * and the Auditor holds no task kind. Evidence itself (documents, receipts, payment outcome references) is confidential, and the
+   * Auditor is an OTHER-class role that can never hold a confidential field grant (CI24), so the role could not open such a task.
+   * Counting something else under this title (refusals, configuration revisions) would repeat the role's other three figures.
+   */
   AUDIT_REVIEW_EVIDENCE_TASKS: notAvailable,
 };

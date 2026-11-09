@@ -31,10 +31,12 @@ import {
   updateCandidate,
   updateVendor,
 } from './candidate.js';
+import { approveCvText, cvTextOf, MAX_CV_TEXT, revokeCvText } from './cv-text.js';
 import { employeeOrigin, type HandoverInput, handOver } from './handover.js';
 import { type CompensationInput, createOffer, decideOffer, getOffer, listOffers, type OfferDecisionInput, offerTasks, recordResponse, setCompensation, submitOffer, updateOffer, withdrawOffer } from './offer.js';
+import { type DeliveryInput, generateOfferLetter, listOfferLetters, offerLetterContent, previewOfferLetter, recordOfferLetterDelivery } from './offer-letter.js';
 import { canAccessCandidate } from './scope.js';
-import { date, decisionBody, expectedVersion, idParams, optionalPaging, paging, reasonBody, skills, uuid, versionBody } from './schemas.js';
+import { date, decisionBody, expectedVersion, idempotencyKey, idParams, optionalPaging, paging, reasonBody, skills, uuid, versionBody } from './schemas.js';
 
 const consent = { type: 'string', enum: ['NOT_RECORDED', 'GIVEN', 'WITHDRAWN'] } as const;
 const nullableDate = { anyOf: [date, { type: 'null' }] } as const;
@@ -257,6 +259,31 @@ export async function pipelineRoutes(app: FastifyInstance, opts: { db: Database;
     }
     reply.headers(downloadHeaders({ mediaType: content.mediaType, fileName: content.fileName }, 'candidate-document'));
     return content.bytes;
+  });
+
+  // FR-013 approved searchable CV content (I-82 item 4): approved and revoked under the document upload grant, read under the
+  // document read grant; the search above matches approved text only.
+  app.get('/hiring/candidate-documents/:id/searchable-text', { schema: { params: idParams } }, async (request) => {
+    const { id } = request.params as { id: string };
+    return cvTextOf(db, await requireAccess(db, request, 'candidate', 'read', ['document'], { requireAll: true, recordKey: id }), id);
+  });
+
+  app.post(
+    '/hiring/candidate-documents/:id/searchable-text',
+    { schema: { params: idParams, body: { type: 'object', additionalProperties: false, properties: { content: { type: 'string', minLength: 1, maxLength: MAX_CV_TEXT } } } } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'candidate', 'upload', ['document'], { requireAll: true, recordKey: id });
+      const result = await withTransaction(db, (tx) => approveCvText(tx, grant, files, id, request.body as { content?: string }));
+      reply.status(201);
+      return result;
+    },
+  );
+
+  app.post('/hiring/candidate-documents/:id/searchable-text/revoke', { schema: { params: idParams, body: reasonBody } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'candidate', 'upload', ['document'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => revokeCvText(tx, grant, id, request.body as { reason: string }));
   });
 
   // FR-013 duplicate review (no automatic merge).
@@ -513,6 +540,68 @@ export async function pipelineRoutes(app: FastifyInstance, opts: { db: Database;
       const result = await withTransaction(db, (tx) => handOver(tx, { hiring, employee, documents }, id, body));
       reply.status(201);
       return result;
+    },
+  );
+
+  // -------------------------------------------------------------------------------------------------------
+  // Offer letters before employment (FR-014, FR-017, FR-018; DF09; I-82 item 1): issued by an eligible Admin from the approved
+  // offer; read with the grant that reads the approved compensation; delivered outside the system and recorded here.
+  // -------------------------------------------------------------------------------------------------------
+  const templateBody = { type: 'object', additionalProperties: false, required: ['templateCode'], properties: { templateCode: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,39}$' } } } as const;
+
+  app.get('/hiring/offers/:id/letters', { schema: { params: idParams } }, async (request) => {
+    const { id } = request.params as { id: string };
+    return listOfferLetters(db, await requireAccess(db, request, 'offer', 'read', ['compensation'], { requireAll: true, recordKey: id }), id);
+  });
+
+  app.post('/hiring/offers/:id/letter-preview', { schema: { params: idParams, body: templateBody } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'offer', 'issue_letter', ['compensation'], { requireAll: true, recordKey: id });
+    return previewOfferLetter(db, grant, id, request.body as { templateCode: string });
+  });
+
+  app.post(
+    '/hiring/offers/:id/letters',
+    { schema: { params: idParams, body: { ...templateBody, properties: { ...templateBody.properties, idempotencyKey } } } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'offer', 'issue_letter', ['compensation'], { requireAll: true, recordKey: id });
+      const result = await withTransaction(db, (tx) => generateOfferLetter(tx, grant, files, id, request.body as { templateCode: string; idempotencyKey?: string }));
+      reply.status(result.replayed ? 200 : 201);
+      return result;
+    },
+  );
+
+  app.get('/hiring/offer-letters/:id/content', { schema: { params: idParams } }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'offer', 'read', ['compensation'], { requireAll: true, recordKey: id });
+    const content = await offerLetterContent(db, grant, files, id);
+    if (!content) {
+      const existing = await db.query(`select 1 from hiring_offer_letter where company_id = $1 and id = $2`, [grant.companyId, id]);
+      if (existing.rowCount) await auditDenial(db, request, { resource: 'hiring_offer_letter', action: 'read', reason: 'OUT_OF_SCOPE', recordKey: id });
+      throw notFound();
+    }
+    reply.headers(downloadHeaders({ mediaType: content.mediaType, fileName: content.fileName }, 'offer-letter'));
+    return content.bytes;
+  });
+
+  app.post(
+    '/hiring/offer-letters/:id/delivery',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['deliveryMethod', 'deliveredOn', 'recipientConfirmed'],
+          properties: { deliveryMethod: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,59}$' }, deliveredOn: date, recipientConfirmed: { type: 'boolean' } },
+        },
+      },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'offer', 'issue_letter', ['compensation'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => recordOfferLetterDelivery(tx, grant, id, request.body as DeliveryInput));
     },
   );
 

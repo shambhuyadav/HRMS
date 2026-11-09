@@ -43,7 +43,7 @@ describe('a database just migrated', () => {
     const { scanned } = await preGoLiveCheck(db);
     expect(scanned.foreignKeys).toBeGreaterThan(1000);
     expect(scanned.transactionKinds).toBe((await db.query('select 1 from transaction_kind')).rowCount);
-    expect(scanned.guards).toBe(7);
+    expect(scanned.guards).toBe(8);
     expect(scanned.creatorTables).toBeGreaterThan(200);
   });
 
@@ -218,7 +218,7 @@ describe('a database upgraded with one bad row of each kind', () => {
     expect(proved.length).toBeGreaterThan(0);
   });
 
-  it('finds what a guard on new rows never read (0140, 0143, 0151, 0172)', () => {
+  it('finds what a guard on new rows never read (0140, 0143, 0151, 0172, 0173)', () => {
     reported('GUARD_BROKEN', 'payroll_run', 'payroll_run_lineage_guard', [planted.bad.lineage]);
     reported('GUARD_BROKEN', 'confirmation_action', 'confirmation_action_provenance', [planted.bad.confirmationAction]);
     reported('GUARD_BROKEN', 'increment_history', 'increment_history_provenance', [planted.bad.historyDecision, planted.bad.historyBasis]);
@@ -226,6 +226,7 @@ describe('a database upgraded with one bad row of each kind', () => {
     reported('GUARD_BROKEN', 'notification_event', 'notification_event_subject', [planted.bad.subject]);
     reported('GUARD_BROKEN', 'biometric_ingest_event', 'biometric_event_link_covers', [planted.bad.event]);
     reported('GUARD_BROKEN', 'payroll_record', 'payroll_record_segment_currency', [planted.bad.segmentCurrency]);
+    reported('GUARD_BROKEN', 'payroll_record', 'payroll_record_valuation_date', [planted.bad.valuationDate]);
   });
 
   it('an upgrade to 0172 leaves a stored segment in another currency where it is, and refuses the next one', async () => {

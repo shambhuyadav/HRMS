@@ -18,7 +18,7 @@ afterAll(async () => {
   await h?.stop();
 });
 
-const createShift = (body: object) => h.call(hr, 'POST', '/v1/shifts', body);
+const createShift = (body: object) => h.call(hr, 'POST', '/v1/shifts', { bufferMinutes: 240, ...body });
 
 describe('shift definitions (FR-005, BR-008)', () => {
   it('DF05 default day shift: 09:00-18:00 with a 60-minute unpaid break gives 480 net minutes', async () => {

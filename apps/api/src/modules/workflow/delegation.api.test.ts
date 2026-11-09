@@ -25,6 +25,8 @@ const DELEGATE: PermissionKey = 'access.delegate.operational';
 const LEAVE: PermissionKey = 'leave.approve.operational';
 const REROUTE: PermissionKey = 'workflow.reroute_task.operational';
 
+/** A Reporting Manager's default duties without the request duty, which is a default one since I-84 item 3. */
+const managerWithoutDelegate = () => BASELINE_ROLES.find((r) => r.code === 'REPORTING_MANAGER')!.defaultDuties.filter((k) => k !== DELEGATE);
 const iso = (ms: number) => new Date(Date.now() + ms).toISOString();
 const DAY = 86_400_000;
 const now = () => iso(-60_000);
@@ -109,13 +111,7 @@ beforeAll(async () => {
   A = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   admin = await h.actor(A, 'SYSTEM_ADMINISTRATOR');
-  // The fixtures' reviewers on the leave fallback list, and a role widened to exercise the reroute (no baseline ceiling holds it).
-  await h.db.query(
-    `insert into role_permission (company_id, role_id, permission_id, effect)
-     select $1, r.id, p.id, 'ALLOW' from role r, permission p
-      where r.company_id = $1 and r.code = 'HR_ADMINISTRATOR' and p.resource = 'workflow' and p.action = 'reroute_task' and p.field_group = 'operational'`,
-    [A.id],
-  );
+  // The fixtures' reviewers on the leave fallback list. Rerouting is an HR Administrator duty (I-84 item 1).
   world = leaveTasks(h, A, hr);
   await world.activatePolicies();
   await setFallback(hr);
@@ -199,7 +195,7 @@ describe('request and independent approval (DF03, DB018, C4)', () => {
     expect((await ask(m, d, { permission: 'no_such.thing.operational' })).json().error).toBe('NOT_DELEGABLE');
     expect((await ask(m, d, { permission: 'expense.finance_decide.operational' })).json().error).toBe('OUTSIDE_OWN_AUTHORITY');
     // The duty itself is needed, and the delegator's other assignment lends nothing.
-    const noDuty = await h.actor(A, 'REPORTING_MANAGER', { employeeId: await world.employee() });
+    const noDuty = await h.actor(A, 'REPORTING_MANAGER', { employeeId: await world.employee(), duties: managerWithoutDelegate() });
     expect((await ask(noDuty, d)).statusCode).toBe(403);
     const sameUserOtherRole = await h.actor(A, 'SYSTEM_ADMINISTRATOR', { user: m.user, extra: [] });
     expect((await ask(sameUserOtherRole, d)).statusCode).toBe(403);
@@ -367,13 +363,15 @@ describe('request and independent approval (DF03, DB018, C4)', () => {
     expect((await h.one<{ state: string }>(`select state from delegation where id = $1`, [asked])).state).toBe('ACTIVE');
   });
 
-  it('access.delegate is in the ceiling of the two reviewers DF03 names, and no role’s default duty (C2 and C3 do not list it)', async () => {
+  it('I-84 item 3: access.delegate is a default duty of the two reviewers DF03 names and of no other role; without it nobody can ask', async () => {
     const holders = BASELINE_ROLES.filter((r) => r.ceiling.includes(DELEGATE)).map((r) => r.code).sort();
     expect(holders).toEqual(['HR_ADMINISTRATOR', 'REPORTING_MANAGER']);
-    expect(BASELINE_ROLES.filter((r) => r.defaultDuties.includes(DELEGATE))).toEqual([]);
-    // It reaches an assignment only through an independently approved grant, and the default manager cannot ask.
+    expect(BASELINE_ROLES.filter((r) => r.defaultDuties.includes(DELEGATE)).map((r) => r.code).sort()).toEqual(['HR_ADMINISTRATOR', 'REPORTING_MANAGER']);
+    // A default manager may ask (an independent approver still decides every delegation); one whose grant left it out cannot.
     const plain = await h.actor(A, 'REPORTING_MANAGER', { employeeId: await world.employee() });
-    expect((await h.call(plain, 'GET', '/v1/access/delegations/options')).statusCode).toBe(403);
+    expect((await h.call(plain, 'GET', '/v1/access/delegations/options')).statusCode).toBe(200);
+    const without = await h.actor(A, 'REPORTING_MANAGER', { employeeId: await world.employee(), duties: BASELINE_ROLES.find((r) => r.code === 'REPORTING_MANAGER')!.defaultDuties.filter((k) => k !== DELEGATE) });
+    expect((await h.call(without, 'GET', '/v1/access/delegations/options')).statusCode).toBe(403);
     const propose = (roleCode: string, scopeKind: string) =>
       h.call(admin, 'POST', '/v1/access/assignments', { userId: plain.user, roleCode, scopeKind, effectiveFrom: '2026-01-01T00:00:00Z', permissions: [DELEGATE, 'employee.read.operational'] });
     expect((await propose('AUDITOR', 'COMPANY')).json().error).toBe('OUTSIDE_ROLE_CEILING');
@@ -391,8 +389,9 @@ describe('request and independent approval (DF03, DB018, C4)', () => {
     expect(candidates).toContain(d.user);
     expect(candidates).not.toContain(m.user);
     expect(candidates).not.toContain(teamOnly.user);
-    expect((await h.call(d, 'GET', '/v1/access/delegations/options')).statusCode).toBe(403);
-    expect((await h.call(d, 'GET', `/v1/access/delegations/candidates?permission=${LEAVE}`)).statusCode).toBe(403);
+    const noDuty = await h.actor(A, 'REPORTING_MANAGER', { scope: 'ASSIGNED', duties: managerWithoutDelegate() });
+    expect((await h.call(noDuty, 'GET', '/v1/access/delegations/options')).statusCode).toBe(403);
+    expect((await h.call(noDuty, 'GET', `/v1/access/delegations/candidates?permission=${LEAVE}`)).statusCode).toBe(403);
   });
 });
 
@@ -945,7 +944,9 @@ describe('ZT05 delegation expiry and revocation while signed in', () => {
   it('only the delegator or the revocation duty can end it; someone else’s reads as missing', async () => {
     const { m, d } = await people();
     const id = await live(m, d);
-    expect((await end(d, id)).statusCode).toBe(403);
+    // The delegate holds the request duty by default (I-84 item 3) but is not the delegator; without the duty the route refuses.
+    expect((await end(d, id)).statusCode).toBe(404);
+    expect((await end(await h.actor(A, 'REPORTING_MANAGER', { scope: 'ASSIGNED', duties: managerWithoutDelegate() }), id)).statusCode).toBe(403);
     const otherDelegator = await h.actor(A, 'REPORTING_MANAGER', { scope: 'ASSIGNED', extra: [DELEGATE] });
     expect((await end(otherDelegator, id)).statusCode).toBe(404);
     expect((await end(m, id, 7)).json().error).toBe('STALE_VERSION');

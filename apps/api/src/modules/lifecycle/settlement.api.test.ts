@@ -1,5 +1,6 @@
 // Full-and-final settlement records over HTTP (FR-052, FR-053, FR-054; DB079; DB080; F1; BR-016; DF02; DF03; DF09).
-// No calculation (NOT_CONFIGURED); lines entered or uploaded by an authorised HR Administrator; net = sum of lines;
+// Revisions without a calculation (NOT_CONFIGURED; the calculation itself is settlement-calculation.api.test.ts, I-88); lines entered or
+// uploaded by an authorised HR Administrator; net = sum of lines;
 // independent review and approval; release eligibility that never creates or implies a payment. Synthetic data and
 // synthetic pay components (test fixtures) only.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -97,8 +98,8 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
 
   let settlementId: string;
 
-  it('reports calculation as NOT_CONFIGURED and lets only an authorised HR Administrator prepare', async () => {
-    expect((await h.call(hrPlain, 'GET', '/v1/settlements/calculation')).json()).toMatchObject({ status: 'NOT_CONFIGURED' });
+  it('reports how a draft is calculated (I-88) and lets only an authorised HR Administrator prepare', async () => {
+    expect((await h.call(hrPlain, 'GET', '/v1/settlements/calculation')).json()).toMatchObject({ status: 'AVAILABLE' });
     expect((await h.call(hrPlain, 'POST', `/v1/exit-cases/${exitId}/settlements`, { currencyCode: 'INR' })).statusCode).toBe(403);
     expect((await h.call(payroll, 'POST', `/v1/exit-cases/${exitId}/settlements`, { currencyCode: 'INR' })).statusCode).toBe(403);
     expect((await h.call(employee, 'POST', `/v1/exit-cases/${exitId}/settlements`, { currencyCode: 'INR' })).statusCode).toBe(403);
@@ -132,7 +133,7 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
       calculationStatus: 'NOT_CONFIGURED',
       netAmount: '0.0000',
       lines: [],
-      paymentStatus: 'NOT_TRACKED',
+      paymentStatus: 'NOT_PAID',
       lastWorkingDate: today,
     });
     settlementId = created.json().id;
@@ -307,7 +308,9 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
     expect(r2.json()).toMatchObject({ revision: 2, state: 'DRAFT', supersedesSettlementId: settlementId, currencyCode: 'INR', netAmount: '39750.0000' });
     expect(r2.json().lines.map((l: { source: string }) => l.source)).toEqual(['COPIED', 'COPIED', 'COPIED']);
     const listed = (await h.call(prep, 'GET', `/v1/exit-cases/${exitId}/settlements`)).json();
-    expect(listed.calculation.status).toBe('NOT_CONFIGURED');
+    // I-88: the calculation is available; these revisions carry none, so their own status stays NOT_CONFIGURED.
+    expect(listed.calculation.status).toBe('AVAILABLE');
+    expect(listed.items.map((i: { calculationStatus: string }) => i.calculationStatus)).toEqual(['NOT_CONFIGURED', 'NOT_CONFIGURED']);
     expect(listed.items.map((i: { revision: number; state: string }) => [i.revision, i.state])).toEqual([
       [1, 'RETURNED'],
       [2, 'DRAFT'],
@@ -334,7 +337,7 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
     expect((await decide(appr, 'review', at.taskId, { decision: 'APPROVE' })).statusCode).toBe(404);
     expect((await decide(appr, 'approve', at.taskId, { decision: 'APPROVE' })).json().state).toBe('APPROVED');
     const approved = await get(appr, settlementId);
-    expect(approved).toMatchObject({ state: 'APPROVED', netAmount: '39750.0000', paymentStatus: 'NOT_TRACKED' });
+    expect(approved).toMatchObject({ state: 'APPROVED', netAmount: '39750.0000', paymentStatus: 'NOT_PAID' });
     expect(approved.decisions.map((d: { action: string; decision: string }) => [d.action, d.decision])).toEqual([
       ['review', 'APPROVE'],
       ['approve', 'APPROVE'],
@@ -371,7 +374,7 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
     await expect(withTransaction(h.pool, (tx) => markReleaseEligible(tx, narrowed, settlementId, { expectedVersion: s.version }))).rejects.toMatchObject({ statusCode: 403 });
     expect((await get(rel, settlementId)).state).toBe('APPROVED');
     const marked = await mark(rel);
-    expect(marked.json()).toMatchObject({ state: 'RELEASE_ELIGIBLE', paymentStatus: 'NOT_TRACKED' });
+    expect(marked.json()).toMatchObject({ state: 'RELEASE_ELIGIBLE', paymentStatus: 'NOT_PAID' });
     expect(await payments()).toEqual(before);
     expect((await mark(rel)).json().error).toBe('INVALID_STATE');
     // FR-054 list: state, employee search and month filters within scope; amounts only with the amount group.
@@ -496,12 +499,13 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
     ).rejects.toThrow(/exit_case_one_open/);
   });
 
-  it('blocks withdrawing the exit while a settlement is live', async () => {
-    // The exit's last working date is today, so a withdrawal request is still possible; its approval is refused.
+  it('FR-051 FR-053 refuses approving a withdrawal while the settlement is eligible for release (I-81 item 6)', async () => {
+    // The exit's last working date is today, so a withdrawal request is still possible; its approval waits for the release-eligible
+    // revision to be paid or voided (money may already be moving); a revision not yet eligible would be voided by it instead.
     const w = await h.call(employee, 'POST', `/v1/me/exit-cases/${exitId}/withdrawal-request`, { reason: 'Synthetic second thoughts' });
     expect(w.statusCode, w.body).toBe(201);
     const t = (await h.call(exitHr, 'GET', '/v1/exit-cases/tasks/mine')).json().items.find((i: { kind: string }) => i.kind === 'exit_withdrawal');
-    expect((await h.call(exitHr, 'POST', `/v1/exit-withdrawals/tasks/${t.taskId}/decision`, { decision: 'APPROVE', reason: 'Synthetic', idempotencyKey: key() })).json().error).toBe('SETTLEMENT_IN_PROGRESS');
+    expect((await h.call(exitHr, 'POST', `/v1/exit-withdrawals/tasks/${t.taskId}/decision`, { decision: 'APPROVE', reason: 'Synthetic', idempotencyKey: key() })).json().error).toBe('SETTLEMENT_RELEASE_ELIGIBLE');
     expect((await h.call(exitHr, 'GET', `/v1/exit-cases/${exitId}`)).json().state).toBe('APPROVED');
   });
 
@@ -517,7 +521,7 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
     expect(all.items).toHaveLength(all.total);
     expect(all).not.toHaveProperty('page');
     const first = await list(prep, '/v1/settlements?page=1&pageSize=25');
-    expect(first).toMatchObject({ total: all.total, page: 1, pageSize: 25, calculation: { status: 'NOT_CONFIGURED' } });
+    expect(first).toMatchObject({ total: all.total, page: 1, pageSize: 25, calculation: { status: 'AVAILABLE' } });
     expect(first.items.map((x) => x.id)).toEqual(all.items.slice(0, 25).map((x) => x.id));
     const past = Math.ceil(all.total / 25) + 1;
     expect(await list(prep, `/v1/settlements?page=${past}&pageSize=25`)).toMatchObject({ items: [], total: all.total, page: past, pageSize: 25 });

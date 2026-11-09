@@ -47,7 +47,7 @@ beforeAll(async () => {
   A = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   // 22:00-06:00 with a 30-minute break at 02:00: 450 net minutes.
-  nightShift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'NIGHT', name: 'Night', inTime: '22:00', outTime: '06:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 270 }] })).json().id;
+  nightShift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'NIGHT', name: 'Night', inTime: '22:00', outTime: '06:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 270 }] })).json().id;
   const policy = (await h.call(hr, 'GET', '/v1/attendance/policies')).json().items[0];
   expect((await h.call(hr, 'POST', `/v1/attendance/policies/${policy.id}/activate`, { expectedVersion: policy.version })).statusCode).toBe(200);
 });

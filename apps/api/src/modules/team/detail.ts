@@ -22,7 +22,7 @@ export const NO_SKILLS_SOURCE = 'This system does not keep a skills record, so n
 export const PROTECTED_VALUE = 'Protected';
 
 /** DF02 operational employee-record fields whose earlier and later values the History tab may show (BR-043: anything else is protected). */
-const HISTORY_OPERATIONAL_FIELDS: ReadonlySet<string> = new Set(['employeeCode', 'displayName', 'workEmail', 'joiningDate', 'confirmationDate', 'employmentType']);
+const HISTORY_OPERATIONAL_FIELDS: ReadonlySet<string> = new Set(['employeeCode', 'displayName', 'workEmail', 'workPhoneExtension', 'joiningDate', 'confirmationDate', 'employmentType']);
 
 interface AuditValues {
   action: string;
@@ -94,18 +94,31 @@ async function trainingItems(db: Queryable, grant: AccessGrant, employeeId: stri
   return { available: true, items: rows.rows };
 }
 
-/** DF02 "goal names and completion flags": each appraisal's cycle, task status and goals; targets, scores and comments stay out. */
+/**
+ * DF02 "goal names and completion flags": each appraisal's cycle, task status and goals; targets, scores and comments stay out.
+ * I-89 item 4 (I-62, I-86 item 6: competency names, weights and completion flags are operational, like goal names): the
+ * competencies copied into the appraisal at enrolment, in their order, with their weights and whether the self-entry and the
+ * manager's rating of each are complete. Their descriptions and indicators are left out (this tab names, it does not assess),
+ * and so are every self and manager score and comment. An appraisal of a cycle that does not assess competencies has none.
+ */
 async function goalItems(db: Queryable, grant: AccessGrant, employeeId: string): Promise<TabSection> {
   const rows = (
-    await db.query<{ id: string; state: AppraisalRow['state']; cycleCode: string; cycleName: string; goals: { weight: number }[] }>(
-      `select a.id, a.state, c.code as "cycleCode", c.name as "cycleName",
+    await db.query<{ id: string; state: AppraisalRow['state']; cycleCode: string; cycleName: string; goals: { weight: number }[]; goalReviewPending: boolean }>(
+      `select a.id, a.state, c.code as "cycleCode", c.name as "cycleName", (c.goal_review_required and a.goals_reviewed_at is null) as "goalReviewPending",
               coalesce((select json_agg(json_build_object('sequence', i.sequence, 'name', i.description, 'weight', i.weight,
                                                           'selfEntryComplete', coalesce(en.self_score is not null, false),
                                                           'managerRatingComplete', coalesce(en.manager_score is not null, false)) order by i.sequence)
                           from appraisal_item i
                           left join appraisal_revision r on r.company_id = a.company_id and r.appraisal_id = a.id and r.revision = a.revision
                           left join appraisal_entry en on en.company_id = i.company_id and en.revision_id = r.id and en.item_id = i.id
-                         where i.company_id = a.company_id and i.appraisal_id = a.id and i.active), '[]'::json) as goals
+                         where i.company_id = a.company_id and i.appraisal_id = a.id and i.active), '[]'::json) as goals,
+              coalesce((select json_agg(json_build_object('sequence', ci.sequence, 'name', ci.name, 'weight', ci.weight,
+                                                          'selfEntryComplete', coalesce(ce.self_score is not null, false),
+                                                          'managerRatingComplete', coalesce(ce.manager_score is not null, false)) order by ci.sequence)
+                          from appraisal_competency_item ci
+                          left join appraisal_revision cr on cr.company_id = a.company_id and cr.appraisal_id = a.id and cr.revision = a.revision
+                          left join appraisal_competency_entry ce on ce.company_id = ci.company_id and ce.revision_id = cr.id and ce.item_id = ci.id
+                         where ci.company_id = a.company_id and ci.appraisal_id = a.id), '[]'::json) as competencies
          from appraisal a join appraisal_cycle c on c.company_id = a.company_id and c.id = a.cycle_id
         where a.company_id = $1 and a.employee_id = $2 and a.state <> 'CANCELLED'
         order by c.start_date desc, a.created_at desc limit 50`,
@@ -114,7 +127,7 @@ async function goalItems(db: Queryable, grant: AccessGrant, employeeId: string):
   ).rows;
   return {
     available: true,
-    items: rows.map(({ id: _id, ...r }) => ({ ...r, taskStatus: taskStatusOf(r.state, r.goals.length > 0 && r.goals.reduce((s, g) => s + g.weight, 0) === 100) })),
+    items: rows.map(({ id: _id, goalReviewPending, ...r }) => ({ ...r, taskStatus: taskStatusOf(r.state, r.goals.length > 0 && r.goals.reduce((s, g) => s + g.weight, 0) === 100, goalReviewPending) })),
   };
 }
 
@@ -169,7 +182,7 @@ export async function teamMemberDetail(db: Queryable, grant: AccessGrant, employ
 
   const profile = (
     await db.query(
-      `select e.employee_code as "employeeCode", e.display_name as "displayName", e.work_email as "workEmail", e.joining_date as "joiningDate",
+      `select e.employee_code as "employeeCode", e.display_name as "displayName", e.work_email as "workEmail", e.work_phone_extension as "workPhoneExtension", e.joining_date as "joiningDate",
               e.confirmation_date as "confirmationDate", st.code as status, et.code as "employmentType"
          from employee e join reference_value st on st.company_id = e.company_id and st.id = e.status_id
          join reference_value et on et.company_id = e.company_id and et.id = e.employment_type_id

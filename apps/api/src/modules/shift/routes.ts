@@ -5,6 +5,12 @@
 // appends its successor, a withdrawal closes it; a weekly-off pattern is a dated entry, and a mistaken one is corrected by
 // a later entry on the same date. Every such change answers with the evaluated days it touches: those days keep their
 // results until HR processes the dates again, and a day a processed payroll used never changes (I-04, I-54).
+//
+// Decided under owner delegation, 6 Nov 2026 (I-78 items 1 and 4; 0180, 0182): a shift's buffer is its punch capture
+// window, minutes before the start and after the end, stated for every new shift (the BRD gives no value) and dated with its
+// times; its range keeps the windows of consecutive days apart (scheduled minutes + 2 x buffer <= 1440). The 24-hour-cycle
+// indicator is the overnight flag (spansMidnight), derived from the times. A weekly-off pattern may add whole days off on
+// some occurrences of a weekday in the month (the 2nd and 4th Saturdays) and half weekly-offs.
 import type { FastifyInstance } from 'fastify';
 import { writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
@@ -12,9 +18,11 @@ import { type Database, withTransaction } from '../../db/transaction.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess, requireAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
-import { DEFAULT_OFF_DAYS, evaluatedDays, evaluatedDaysSummary, lockCalendar, mergeEvaluatedDays, type ReprocessList } from './calendar.js';
+import { DEFAULT_OFF_DAYS, evaluatedDays, evaluatedDaysSummary, lockCalendar, mergeEvaluatedDays, occurrenceCodes, occurrencesOf, type ReprocessList, type WeekdayOccurrences } from './calendar.js';
 
 const time = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' } as const;
+/** I-78 item 1: the punch capture window each side of the shift, in minutes; its upper bound depends on the shift's length. */
+const bufferMinutes = { type: 'integer', minimum: 0, maximum: 720 } as const;
 const uuid = { type: 'string', format: 'uuid' } as const;
 const date = { type: 'string', format: 'date' } as const;
 const reason = { type: 'string', minLength: 1, maxLength: 500 } as const;
@@ -36,13 +44,14 @@ const breaksField = {
 const shiftBody = {
   type: 'object',
   additionalProperties: false,
-  required: ['code', 'name', 'inTime', 'outTime', 'breaks'],
+  required: ['code', 'name', 'inTime', 'outTime', 'breaks', 'bufferMinutes'],
   properties: {
     code: { type: 'string', pattern: '^\\s*[A-Za-z0-9][A-Za-z0-9_-]{0,39}\\s*$' },
     name: { type: 'string', minLength: 1, maxLength: 200 },
     inTime: time,
     outTime: time,
     breaks: breaksField,
+    bufferMinutes,
   },
 } as const;
 
@@ -58,7 +67,8 @@ const shiftRevisionBody = {
   type: 'object',
   additionalProperties: false,
   required: ['expectedVersion', 'effectiveFrom', 'inTime', 'outTime', 'breaks', 'reason'],
-  properties: { expectedVersion, effectiveFrom: date, inTime: time, outTime: time, breaks: breaksField, reason },
+  // Without a buffer, the revision keeps the one in force on its first day.
+  properties: { expectedVersion, effectiveFrom: date, inTime: time, outTime: time, breaks: breaksField, reason, bufferMinutes },
 } as const;
 
 const holidayBody = {
@@ -107,6 +117,18 @@ const holidayQuery = {
   },
 } as const;
 
+/** Some occurrences of weekdays in the month: each weekday once, its weeks 1 (days 1-7) .. 5 (days 29-31). */
+const occurrencesField = {
+  type: 'array',
+  maxItems: 7,
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['weekday', 'weeks'],
+    properties: { weekday: { type: 'integer', minimum: 1, maximum: 7 }, weeks: { type: 'array', minItems: 1, maxItems: 5, uniqueItems: true, items: { type: 'integer', minimum: 1, maximum: 5 } } },
+  },
+} as const;
+
 const weeklyOffBody = {
   type: 'object',
   additionalProperties: false,
@@ -114,13 +136,43 @@ const weeklyOffBody = {
   properties: {
     locationId: uuid,
     effectiveFrom: date,
-    // Whole ISO weekdays only: a half weekly-off has no agreed meaning yet (I-48 item 6).
+    // Whole ISO weekdays off every week.
     offDays: { type: 'array', uniqueItems: true, maxItems: 7, items: { type: 'integer', minimum: 1, maximum: 7 } },
+    // I-78 item 4: whole days off on some occurrences of a weekday (e.g. the 2nd and 4th Saturdays), and half weekly-offs.
+    offOccurrences: occurrencesField,
+    halfOff: occurrencesField,
     reason,
     // The location's latest entry the person saw (0: none), so an entry nobody has read is not silently overtaken.
     expectedRevision: { type: 'integer', minimum: 0 },
   },
 } as const;
+
+/** Every weekday named once in a list, never one already off every week; a half weekly-off never on a whole one. */
+function checkOccurrences(offDays: number[], offOccurrences: WeekdayOccurrences[], halfOff: WeekdayOccurrences[]): void {
+  for (const list of [offOccurrences, halfOff]) {
+    const days = list.map((o) => o.weekday);
+    if (new Set(days).size !== days.length) throw new HttpError(422, 'INVALID_PATTERN', 'Name each weekday once in a list of occurrences');
+    if (days.some((d) => offDays.includes(d))) throw new HttpError(422, 'INVALID_PATTERN', 'A weekday off every week has no occurrences to add');
+  }
+  const whole = new Set(occurrenceCodes(offOccurrences));
+  if (occurrenceCodes(halfOff).some((c) => whole.has(c))) throw new HttpError(422, 'INVALID_PATTERN', 'A day is either a whole or a half weekly-off');
+}
+
+/** The (current) length of a shift in minutes; equal times are refused by the database. */
+const shiftMinutes = (inTime: string, outTime: string) => {
+  const m = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  return (m(outTime) - m(inTime) + 1440) % 1440;
+};
+
+/** I-78 item 1: the windows of one shift on consecutive days stay apart, so a punch belongs to at most one of its days. */
+function checkBuffer(inTime: string, outTime: string, buffer: number): void {
+  const minutes = shiftMinutes(inTime, outTime);
+  if (minutes > 0 && minutes + 2 * buffer > 1440) {
+    throw new HttpError(422, 'BUFFER_OUT_OF_RANGE', `With a shift of ${minutes} minutes the buffer is at most ${Math.floor((1440 - minutes) / 2)} minutes, so the windows of consecutive days do not overlap`, {
+      maxBufferMinutes: Math.floor((1440 - minutes) / 2),
+    });
+  }
+}
 
 interface BreakInput {
   startOffsetMinutes: number;
@@ -133,6 +185,7 @@ interface ShiftInput {
   inTime: string;
   outTime: string;
   breaks: BreakInput[];
+  bufferMinutes: number;
 }
 
 function assertCompanyWide(grant: AccessGrant): void {
@@ -172,6 +225,7 @@ async function loadShift(db: Queryable, companyId: string, id: string) {
       outTime: string;
       spansMidnight: boolean;
       scheduledMinutes: number;
+      bufferMinutes: number;
       active: boolean;
       version: number;
       revisionId: string | null;
@@ -179,7 +233,7 @@ async function loadShift(db: Queryable, companyId: string, id: string) {
       effectiveFrom: string | null;
     }>(
       `select s.id, s.code, s.name, to_char(f.in_time, 'HH24:MI') as "inTime", to_char(f.out_time, 'HH24:MI') as "outTime",
-              f.spans_midnight as "spansMidnight", f.minutes as "scheduledMinutes", s.active, s.version,
+              f.spans_midnight as "spansMidnight", f.minutes as "scheduledMinutes", hrms_shift_buffer(s.company_id, s.id, f.revision_id) as "bufferMinutes", s.active, s.version,
               f.revision_id as "revisionId", f.revision, to_char(f.effective_from, 'YYYY-MM-DD') as "effectiveFrom"
          from shift s cross join lateral hrms_shift_in_force(s.company_id, s.id, hrms_business_date(s.company_id, now())) f
         where s.company_id = $1 and s.id = $2`,
@@ -190,17 +244,30 @@ async function loadShift(db: Queryable, companyId: string, id: string) {
   const { revisionId, ...inForce } = shift;
   const breaks = await breaksOf(db, companyId, id, revisionId);
   const dated = (
-    await db.query<{ id: string; revision: number; effectiveFrom: string; inTime: string; outTime: string; spansMidnight: boolean; scheduledMinutes: number; reason: string; createdAt: string; createdBy: string | null }>(
+    await db.query<{
+      id: string;
+      revision: number;
+      effectiveFrom: string;
+      inTime: string;
+      outTime: string;
+      spansMidnight: boolean;
+      scheduledMinutes: number;
+      bufferMinutes: number;
+      reason: string;
+      createdAt: string;
+      createdBy: string | null;
+    }>(
       `select id, revision, to_char(effective_from, 'YYYY-MM-DD') as "effectiveFrom", to_char(in_time, 'HH24:MI') as "inTime", to_char(out_time, 'HH24:MI') as "outTime",
-              spans_midnight as "spansMidnight", hrms_shift_minutes(in_time, out_time, spans_midnight) as "scheduledMinutes", reason, created_at as "createdAt", created_by as "createdBy"
+              spans_midnight as "spansMidnight", hrms_shift_minutes(in_time, out_time, spans_midnight) as "scheduledMinutes", buffer_minutes as "bufferMinutes",
+              reason, created_at as "createdAt", created_by as "createdBy"
          from shift_revision where company_id = $1 and shift_id = $2 order by revision`,
       [companyId, id],
     )
   ).rows;
   const first = (
-    await db.query<{ inTime: string; outTime: string; spansMidnight: boolean; scheduledMinutes: number; createdAt: string; createdBy: string | null }>(
+    await db.query<{ inTime: string; outTime: string; spansMidnight: boolean; scheduledMinutes: number; bufferMinutes: number; createdAt: string; createdBy: string | null }>(
       `select to_char(in_time, 'HH24:MI') as "inTime", to_char(out_time, 'HH24:MI') as "outTime", spans_midnight as "spansMidnight",
-              hrms_shift_minutes(in_time, out_time, spans_midnight) as "scheduledMinutes", created_at as "createdAt", created_by as "createdBy"
+              hrms_shift_minutes(in_time, out_time, spans_midnight) as "scheduledMinutes", buffer_minutes as "bufferMinutes", created_at as "createdAt", created_by as "createdBy"
          from shift where company_id = $1 and id = $2`,
       [companyId, id],
     )
@@ -288,14 +355,15 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
     const input = request.body as ShiftInput;
     const grant = await requireAccess(db, request, 'shift', 'create', ['operational'], { requireAll: true });
     assertCompanyWide(grant);
+    checkBuffer(input.inTime, input.outTime, input.bufferMinutes);
     const id = await withTransaction(db, async (tx) => {
       await reassertAccess(tx, grant, 'shift', 'create', ['operational']);
       const spans = input.outTime < input.inTime; // equal times are rejected by the database
       const created = (
         await tx.query<{ id: string }>(
-          `insert into shift (company_id, code, name, in_time, out_time, spans_midnight, active, created_by, updated_by)
-           values ($1, $2, $3, $4, $5, $6, true, $7, $7) returning id`,
-          [grant.companyId, input.code.trim().toUpperCase(), input.name.trim(), input.inTime, input.outTime, spans, grant.userId],
+          `insert into shift (company_id, code, name, in_time, out_time, spans_midnight, buffer_minutes, active, created_by, updated_by)
+           values ($1, $2, $3, $4, $5, $6, $7, true, $8, $8) returning id`,
+          [grant.companyId, input.code.trim().toUpperCase(), input.name.trim(), input.inTime, input.outTime, spans, input.bufferMinutes, grant.userId],
         )
       ).rows[0]!.id;
       let sequence = 0;
@@ -364,7 +432,7 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
   // (attendance_record.shift_revision_id) until HR reprocesses them; the answer lists them.
   app.post('/shifts/:id/revisions', { schema: { params: idParams, body: shiftRevisionBody } }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const input = request.body as { expectedVersion: number; effectiveFrom: string; inTime: string; outTime: string; breaks: BreakInput[]; reason: string };
+    const input = request.body as { expectedVersion: number; effectiveFrom: string; inTime: string; outTime: string; breaks: BreakInput[]; reason: string; bufferMinutes?: number };
     const grant = await requireAccess(db, request, 'shift', 'update', ['operational'], { requireAll: true, recordKey: id });
     assertCompanyWide(grant);
     const reprocess = await withTransaction(db, async (tx) => {
@@ -373,12 +441,17 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
       await reassertAccess(tx, grant, 'shift', 'update', ['operational']);
       if (current.version !== input.expectedVersion) throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
       const spans = input.outTime < input.inTime; // equal times are rejected by the database
+      // I-78 item 1: a revision naming no buffer keeps the one in force on its first day.
+      const buffer =
+        input.bufferMinutes ??
+        (await tx.query<{ b: number }>(`select hrms_shift_buffer($1, $2, f.revision_id) as b from hrms_shift_in_force($1, $2, $3::date) f`, [grant.companyId, id, input.effectiveFrom])).rows[0]!.b;
+      checkBuffer(input.inTime, input.outTime, buffer);
       const created = (
         await tx.query<{ id: string; revision: number }>(
-          `insert into shift_revision (company_id, shift_id, revision, effective_from, in_time, out_time, spans_midnight, reason, created_by)
-           select $1, $2, coalesce(max(r.revision), 1) + 1, $3::date, $4::time, $5::time, $6::boolean, $7::text, $8::uuid from shift_revision r where r.company_id = $1 and r.shift_id = $2
+          `insert into shift_revision (company_id, shift_id, revision, effective_from, in_time, out_time, spans_midnight, buffer_minutes, reason, created_by)
+           select $1, $2, coalesce(max(r.revision), 1) + 1, $3::date, $4::time, $5::time, $6::boolean, $9::int, $7::text, $8::uuid from shift_revision r where r.company_id = $1 and r.shift_id = $2
            returning id, revision`,
-          [grant.companyId, id, input.effectiveFrom, input.inTime, input.outTime, spans, input.reason.trim(), grant.userId],
+          [grant.companyId, id, input.effectiveFrom, input.inTime, input.outTime, spans, input.reason.trim(), grant.userId, buffer],
         )
       ).rows[0]!;
       let sequence = 0;
@@ -412,6 +485,7 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
             inTime: input.inTime,
             outTime: input.outTime,
             spansMidnight: spans,
+            bufferMinutes: buffer,
             breaks: input.breaks,
             evaluatedDays: evaluatedDaysSummary(days),
           },
@@ -559,12 +633,24 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
     const today = (await db.query<{ d: string }>(`select to_char(hrms_business_date($1, now()), 'YYYY-MM-DD') as d`, [grant.companyId])).rows[0]!.d;
     const locations = (await db.query<{ id: string; code: string; name: string; active: boolean }>(`select id, code, name, active from location where company_id = $1 order by code`, [grant.companyId])).rows;
     const entries = (
-      await db.query<{ id: string; locationId: string; revision: number; effectiveFrom: string; offDays: number[]; reason: string; createdAt: string; createdBy: string | null }>(
-        `select id, location_id as "locationId", revision, to_char(effective_from, 'YYYY-MM-DD') as "effectiveFrom", off_days as "offDays", reason, created_at as "createdAt", created_by as "createdBy"
+      await db.query<{
+        id: string;
+        locationId: string;
+        revision: number;
+        effectiveFrom: string;
+        offDays: number[];
+        offCodes: number[];
+        halfCodes: number[];
+        reason: string;
+        createdAt: string;
+        createdBy: string | null;
+      }>(
+        `select id, location_id as "locationId", revision, to_char(effective_from, 'YYYY-MM-DD') as "effectiveFrom", off_days as "offDays",
+                off_occurrences as "offCodes", half_off as "halfCodes", reason, created_at as "createdAt", created_by as "createdBy"
            from weekly_off_pattern where company_id = $1 order by revision`,
         [grant.companyId],
       )
-    ).rows;
+    ).rows.map(({ offCodes, halfCodes, ...e }) => ({ ...e, offOccurrences: occurrencesOf(offCodes), halfOff: occurrencesOf(halfCodes) }));
     return {
       defaultOffDays: DEFAULT_OFF_DAYS,
       items: locations.map((l) => {
@@ -576,8 +662,8 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
           locationName: l.name,
           active: l.active,
           inForce: inForce
-            ? { offDays: inForce.offDays, isDefault: false, revision: inForce.revision, effectiveFrom: inForce.effectiveFrom }
-            : { offDays: DEFAULT_OFF_DAYS, isDefault: true, revision: null, effectiveFrom: null },
+            ? { offDays: inForce.offDays, offOccurrences: inForce.offOccurrences, halfOff: inForce.halfOff, isDefault: false, revision: inForce.revision, effectiveFrom: inForce.effectiveFrom }
+            : { offDays: DEFAULT_OFF_DAYS, offOccurrences: [], halfOff: [], isDefault: true, revision: null, effectiveFrom: null },
           latestRevision: own.at(-1)?.revision ?? 0,
           entries: own,
         };
@@ -586,29 +672,41 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
   });
 
   app.post('/weekly-off-patterns', { schema: { body: weeklyOffBody } }, async (request, reply) => {
-    const input = request.body as { locationId: string; effectiveFrom: string; offDays: number[]; reason: string; expectedRevision: number };
+    const input = request.body as {
+      locationId: string;
+      effectiveFrom: string;
+      offDays: number[];
+      offOccurrences?: WeekdayOccurrences[];
+      halfOff?: WeekdayOccurrences[];
+      reason: string;
+      expectedRevision: number;
+    };
     const grant = await requireAccess(db, request, 'shift', 'update', ['operational'], { requireAll: true });
     assertLocationWritable(grant, input.locationId);
     const offDays = [...input.offDays].sort((a, b) => a - b);
     if (offDays.length === 7) throw new HttpError(422, 'NO_WORKING_DAY', 'A pattern must leave at least one working day in the week');
+    checkOccurrences(offDays, input.offOccurrences ?? [], input.halfOff ?? []);
+    const offCodes = occurrenceCodes(input.offOccurrences ?? []);
+    const halfCodes = occurrenceCodes(input.halfOff ?? []);
     const result = await withTransaction(db, async (tx) => {
       await lockCalendar(tx, grant.companyId);
       await reassertAccess(tx, grant, 'shift', 'update', ['operational']);
       const latest = (await tx.query<{ revision: number }>(`select coalesce(max(revision), 0)::int as revision from weekly_off_pattern where company_id = $1 and location_id = $2`, [grant.companyId, input.locationId])).rows[0]!.revision;
       if (latest !== input.expectedRevision) throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
       // What this entry replaces on its first day: from then until the next later entry, only the weekdays whose status
-      // changes can change a result.
-      const before = (
-        await tx.query<{ off_days: number[] }>(
-          `select off_days from weekly_off_pattern where company_id = $1 and location_id = $2 and effective_from <= $3::date order by effective_from desc, revision desc limit 1`,
+      // changes can change a result (a weekday with a changed occurrence counts as changed).
+      const prior = (
+        await tx.query<{ off_days: number[]; off_occurrences: number[]; half_off: number[] }>(
+          `select off_days, off_occurrences, half_off from weekly_off_pattern where company_id = $1 and location_id = $2 and effective_from <= $3::date order by effective_from desc, revision desc limit 1`,
           [grant.companyId, input.locationId, input.effectiveFrom],
         )
-      ).rows[0]?.off_days ?? [...DEFAULT_OFF_DAYS];
+      ).rows[0];
+      const before = prior?.off_days ?? [...DEFAULT_OFF_DAYS];
       const created = (
         await tx.query<{ id: string; revision: number }>(
-          `insert into weekly_off_pattern (company_id, location_id, revision, effective_from, off_days, reason, created_at, created_by)
-           values ($1, $2, $3, $4, $5::smallint[], $6, clock_timestamp(), $7) returning id, revision`,
-          [grant.companyId, input.locationId, latest + 1, input.effectiveFrom, offDays, input.reason.trim(), grant.userId],
+          `insert into weekly_off_pattern (company_id, location_id, revision, effective_from, off_days, off_occurrences, half_off, reason, created_at, created_by)
+           values ($1, $2, $3, $4, $5::smallint[], $8::smallint[], $9::smallint[], $6, clock_timestamp(), $7) returning id, revision`,
+          [grant.companyId, input.locationId, latest + 1, input.effectiveFrom, offDays, input.reason.trim(), grant.userId, offCodes, halfCodes],
         )
       ).rows[0]!;
       const until = (
@@ -617,8 +715,16 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
           [grant.companyId, input.locationId, input.effectiveFrom],
         )
       ).rows[0]!.last_day;
-      const weekdays = [1, 2, 3, 4, 5, 6, 7].filter((d) => before.includes(d) !== offDays.includes(d));
+      const codesOf = (codes: number[], day: number) => codes.filter((c) => Math.floor(c / 10) === day).join(',');
+      const weekdays = [1, 2, 3, 4, 5, 6, 7].filter(
+        (d) =>
+          before.includes(d) !== offDays.includes(d) ||
+          codesOf(prior?.off_occurrences ?? [], d) !== codesOf(offCodes, d) ||
+          codesOf(prior?.half_off ?? [], d) !== codesOf(halfCodes, d),
+      );
       const days = await evaluatedDays(tx, grant.companyId, { locationId: input.locationId, from: input.effectiveFrom, to: until, weekdays });
+      const offOccurrences = occurrencesOf(offCodes);
+      const halfOff = occurrencesOf(halfCodes);
       await writeAudit(tx, {
         companyId: grant.companyId,
         resource: 'weekly_off_pattern',
@@ -627,11 +733,11 @@ export async function shiftRoutes(app: FastifyInstance, opts: { db: Database }):
         actingAssignmentId: grant.assignmentId,
         action: 'CREATE',
         newVersion: 1,
-        before: { operational: { offDays: before } },
-        after: { operational: { locationId: input.locationId, revision: created.revision, effectiveFrom: input.effectiveFrom, offDays, evaluatedDays: evaluatedDaysSummary(days) } },
+        before: { operational: { offDays: before, offOccurrences: occurrencesOf(prior?.off_occurrences ?? []), halfOff: occurrencesOf(prior?.half_off ?? []) } },
+        after: { operational: { locationId: input.locationId, revision: created.revision, effectiveFrom: input.effectiveFrom, offDays, offOccurrences, halfOff, evaluatedDays: evaluatedDaysSummary(days) } },
         reason: input.reason.trim(),
       });
-      return { id: created.id, locationId: input.locationId, revision: created.revision, effectiveFrom: input.effectiveFrom, offDays, reprocess: days };
+      return { id: created.id, locationId: input.locationId, revision: created.revision, effectiveFrom: input.effectiveFrom, offDays, offOccurrences, halfOff, reprocess: days };
     });
     reply.status(201);
     return result;

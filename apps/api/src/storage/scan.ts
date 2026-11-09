@@ -8,7 +8,8 @@
 // so a route stores the file and answers PENDING_SCAN, and the scan worker reaches the verdict. Only a test harness can ask for the
 // verdict in the request, and production refuses that (app.ts). The worker retries a file it could not scan with exponential backoff
 // and jitter, up to an attempt limit (docs/09 §8.3). A file whose attempts run out stays PENDING_SCAN and is marked scan_failed_at,
-// so it stays unusable and says why: nothing ever marks a file CLEAN except a scanner's CLEAN verdict.
+// so it stays unusable and says why: nothing ever marks a file CLEAN except a scanner's CLEAN verdict. Its uploader is told, and a
+// System Administrator may send it back to the worker (I-84 item 8; storage/scan-failures.ts).
 import { SYSTEM_ACTOR_ID } from '../audit/actors.js';
 import { writeAudit } from '../audit/audit.js';
 import { positiveIntFromEnv } from '../db/budget.js';
@@ -56,6 +57,11 @@ export interface ScanSettings {
   timeoutMs: number;
   /** A pass stops after this many failures in a row, so a scanner that is down is not asked about every waiting file (SCAN_PAUSE_AFTER_ERRORS). */
   pauseAfterErrors: number;
+  /**
+   * In-memory uploads one API process asks about at once (SCAN_INLINE_CONCURRENCY; I-84 item 9). One more is refused at once as "no
+   * verdict" (503 SCAN_UNAVAILABLE, nothing read or saved), so scans never take more of the foreground capacity than this (NFR-S09).
+   */
+  inlineConcurrency: number;
 }
 
 export const scanSettings = (): ScanSettings => ({
@@ -65,6 +71,7 @@ export const scanSettings = (): ScanSettings => ({
   backoffMaxMs: positiveIntFromEnv('SCAN_BACKOFF_MAX_MS') ?? 3_600_000,
   timeoutMs: positiveIntFromEnv('SCAN_TIMEOUT_MS') ?? 30_000,
   pauseAfterErrors: positiveIntFromEnv('SCAN_PAUSE_AFTER_ERRORS') ?? 5,
+  inlineConcurrency: positiveIntFromEnv('SCAN_INLINE_CONCURRENCY') ?? 4,
 });
 
 /**
@@ -142,15 +149,27 @@ export async function scanAttachment(
   return (await recordVerdict(db, attachment, result, options)).state;
 }
 
+/** In-memory scans running in this process now (scanInMemory). */
+let inlineScans = 0;
+
 /**
  * An upload that is read and answered in the request and never stored, so there is no file for the worker to scan (payroll inputs,
- * settlement lines; I-21). The wait is bounded by SCAN_TIMEOUT_MS, a timeout reads as no verdict, and the caller holds no transaction
- * while it asks. Moving these to the worker needs an owner decision (docs/09 §7.2): the file would have to be stored and the route's
- * answer would change.
+ * settlement lines and the settlement selection list; I-21). I-84 item 9 (I-73 item 2; decided under owner delegation, 6 Nov 2026):
+ * they stay in the request, never stored, because their answer is the preparer's preview of one small file (up to 1 MB) against
+ * the period or settlement as it stands; storing them would keep confidential amounts as files and change every route's answer. They
+ * meet NFR-S09 by bounds instead: the wait is bounded by SCAN_TIMEOUT_MS (a timeout reads as no verdict), at most SCAN_INLINE_CONCURRENCY
+ * run at once in a process (one more is refused at once, without asking the scanner), and the caller holds no transaction while it
+ * asks. No verdict means 503 SCAN_UNAVAILABLE with nothing read or saved. The bulk settlement import is stored and held for the worker.
  */
-export async function scanInMemory(scanner: ScanProvider, bytes: Buffer): Promise<ScanVerdict> {
-  const result = await ask(scanner, bytes, scanSettings().timeoutMs);
-  return result.verdict === 'TIMEOUT' ? { verdict: 'ERROR' } : result;
+export async function scanInMemory(scanner: ScanProvider, bytes: Buffer, settings: Pick<ScanSettings, 'timeoutMs' | 'inlineConcurrency'> = scanSettings()): Promise<ScanVerdict> {
+  if (inlineScans >= settings.inlineConcurrency) return { verdict: 'ERROR' };
+  inlineScans++;
+  try {
+    const result = await ask(scanner, bytes, settings.timeoutMs);
+    return result.verdict === 'TIMEOUT' ? { verdict: 'ERROR' } : result;
+  } finally {
+    inlineScans--;
+  }
 }
 
 export interface ScanPassOutcome {
@@ -166,10 +185,22 @@ export interface ScanPassOutcome {
   paused: boolean;
 }
 
-/** Marks a file whose attempts ran out. It stays PENDING_SCAN, never served; the audit names the failure class, never the file's content. */
+/**
+ * Marks a file whose attempts ran out (I-84 item 8, decided under owner delegation, 6 Nov 2026): it stays PENDING_SCAN, never served
+ * and never called a finding, until a holder of attachment.requeue_scan sends it back to the worker (scan-failures.ts) or its uploader
+ * replaces it. The uploader is told once per failure (H7 "scan"), in the same statement. The audit names the failure class, never
+ * the file's content.
+ */
 async function markScanFailed(tx: Queryable, companyId: string, id: string, attempts: number, code: string): Promise<void> {
   await tx.query(
-    `update attachment set scan_failed_at = now(), scan_next_attempt_at = null, scan_last_error = $3, updated_by = $4 where company_id = $1 and id = $2 and scan_state = 'PENDING_SCAN'`,
+    `with failed as (
+       update attachment set scan_failed_at = now(), scan_next_attempt_at = null, scan_last_error = $3, updated_by = $4
+        where company_id = $1 and id = $2 and scan_state = 'PENDING_SCAN' returning id, scan_failed_at
+     )
+     insert into outbox_event (company_id, topic, aggregate_id, dedupe_key, payload)
+     select $1, 'storage.scan_failed', f.id, 'storage.scan_failed:' || f.id::text || ':' || to_char(f.scan_failed_at at time zone 'UTC', 'YYYYMMDDHH24MISSUS'), jsonb_build_object('attachmentId', f.id)
+       from failed f
+     on conflict (company_id, dedupe_key) do nothing`,
     [companyId, id, code, SYSTEM_ACTOR_ID],
   );
   await writeAudit(tx, {

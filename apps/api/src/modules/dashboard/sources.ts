@@ -3,11 +3,12 @@
 // lists/tasks"). A source names the list routes that hold the metric's records, with exactly the metric's filters, and the
 // permissions those routes need. roleDashboard shows it only when every one of them is allowed in the selected assignment.
 //
-// A metric without a source here has no list its role may read: the role's ceiling holds no grant for the records (the
-// Finance Reviewer's and Expense Finance Approver's expense counts, the Payroll Approver's review tasks), or the metric is
-// not available at all. Such a widget shows its value with no link rather than a link that would be refused.
+// A metric without a source here has no list its role may read, or the metric is not available at all. Such a widget shows its
+// value with no link rather than a link that would be refused; a people-count without a permitted list is then subject to the
+// small-count rule (service.ts, I-83 item 4).
 import type { AccessGrant } from '../access/authorize.js';
 import type { PermissionKey } from '../access/baseline.js';
+import { CLAIM_STATE_FILTERS, EXPENSE_STATE_PARTS } from '../reporting/claim-states.js';
 import { monthStart } from './tasks.js';
 
 export interface SourceList {
@@ -91,6 +92,12 @@ const auditWith = (query: Record<string, string>): MetricSource => ({
 
 const participants = (query: Record<string, string>): SourceList => ({ api: withQuery('/v1/training-participants', query) });
 
+/** I-83 items 2, 3 and 5 (I-62 item 4): the claim-state list behind the Finance Reviewer's and Expense Finance Approver's figures. */
+const claimStates = (query: Record<string, string>): MetricSource => ({
+  permissions: ['expense_state.read.operational'],
+  lists: () => [{ api: withQuery('/v1/expense/claim-states', query) }],
+});
+
 /** Runs not yet processed whose unresolved exceptions a widget adds up (PAYROLL_UNRESOLVED_EXCEPTIONS). */
 const UNPROCESSED_RUN_STATES = 'DRAFT,CALCULATED,IN_REVIEW,APPROVED';
 
@@ -162,6 +169,24 @@ export const METRIC_SOURCES: Readonly<Record<string, MetricSource>> = {
     shortcut: RUNS,
   },
 
+  // I-83 item 3: the ordinary Payroll Approver's review figure is the runs waiting in review, from the run list it reads. Its
+  // overdue figure has no list filter for the payment date, so it is shown without a link.
+  PAYROLL_RUNS_IN_REVIEW: runsOf(() => ({ states: 'IN_REVIEW' })),
+
+  EXPENSE_CLAIMS_IN_REVIEW: claimStates(CLAIM_STATE_FILTERS.EXPENSE_CLAIMS_IN_REVIEW),
+  EXPENSE_CLAIMS_AWAITING_FINAL: claimStates(CLAIM_STATE_FILTERS.EXPENSE_CLAIMS_AWAITING_FINAL),
+  EXPENSE_CLAIMS_LATE_RECEIPT: claimStates(CLAIM_STATE_FILTERS.EXPENSE_CLAIMS_LATE_RECEIPT),
+  EXPENSE_CLAIMS_RETURNED_AT_FINANCE: claimStates(CLAIM_STATE_FILTERS.EXPENSE_CLAIMS_RETURNED_AT_FINANCE),
+  // I-92: the claims' payment follow-up, the decision due date and the Finance Reviewer's two operational states.
+  EXPENSE_DECISION_DUE_TASKS: claimStates(CLAIM_STATE_FILTERS.EXPENSE_DECISION_DUE_TASKS),
+  FINANCE_RECONCILIATION_TASKS: claimStates(CLAIM_STATE_FILTERS.FINANCE_RECONCILIATION_TASKS),
+  FINANCE_UNRECONCILED_OUTCOMES: claimStates(CLAIM_STATE_FILTERS.FINANCE_UNRECONCILED_OUTCOMES),
+  FINANCE_EXPENSE_STATES: {
+    permissions: ['expense_state.read.operational'],
+    lists: () => EXPENSE_STATE_PARTS.map((part) => ({ label: part.label, api: withQuery('/v1/expense/claim-states', part.query) })),
+    combine: 'PARTS',
+  },
+
   PAYMENTS_AWAITING_OUTCOME: paymentsWith({ state: 'RELEASED' }),
   PAYMENTS_FAILED: paymentsWith({ state: 'FAILED' }),
   PAYMENTS_AWAITING_RELEASE: paymentsWith({ state: 'PREPARED', releasableByMe: 'true' }),
@@ -169,6 +194,24 @@ export const METRIC_SOURCES: Readonly<Record<string, MetricSource>> = {
   PAYMENTS_RELEASE_OVERDUE: {
     permissions: ['payment.read.operational'],
     lists: (g) => [{ api: withQuery('/v1/expense/payments', { state: 'PREPARED', releasableByMe: 'true', paymentDateBefore: g.businessDate }) }],
+    shortcut: PAYMENTS,
+  },
+  // I-84 item 5, I-89 item 2: claims awaiting preparation plus draft payments not yet marked ready, the metric's own conditions.
+  PAYMENT_PREPARATION_TASKS: {
+    permissions: ['payment.read.operational'],
+    lists: () => [
+      { label: 'Claims awaiting preparation', api: '/v1/expense/payables?awaitingPreparation=true' },
+      { label: 'Draft payments not yet ready', api: withQuery('/v1/expense/payments', { state: 'PREPARED', batchState: 'DRAFT' }) },
+    ],
+    shortcut: PAYMENTS,
+  },
+  // I-92: reservations still held after their payment date, not yet released or released with no outcome recorded.
+  PAYMENT_RESERVATIONS_TO_RECONCILE: {
+    permissions: ['payment.read.operational'],
+    lists: (g) => [
+      { label: 'Prepared, not released by their payment date', api: withQuery('/v1/expense/payments', { state: 'PREPARED', paymentDateBefore: g.businessDate }) },
+      { label: 'Released, no outcome recorded by their payment date', api: withQuery('/v1/expense/payments', { state: 'RELEASED', paymentDateBefore: g.businessDate }) },
+    ],
     shortcut: PAYMENTS,
   },
   PAYMENTS_CONFIRMED_REVERSED: {
@@ -184,6 +227,13 @@ export const METRIC_SOURCES: Readonly<Record<string, MetricSource>> = {
   APPROVED_REQUISITIONS: { permissions: ['requisition.read.operational'], lists: () => [{ api: '/v1/hiring/requisitions?state=APPROVED' }], shortcut: { to: '/hiring/requisitions', label: 'Requisitions' } },
   OPEN_PIPELINE_APPLICATIONS: { permissions: ['application.read.operational'], lists: () => [{ api: '/v1/hiring/applications?open=true' }], shortcut: { to: '/hiring/tracker', label: 'Hiring tracker' } },
   OFFERS_AWAITING_APPROVAL: { permissions: ['offer.read.operational'], lists: () => [{ api: '/v1/hiring/offers?state=SUBMITTED' }], shortcut: { to: '/hiring/offers', label: 'Offers' } },
+  // I-92: the viewer's own applications at the interview stage. The figure counts only where this assignment holds the duty that
+  // makes one an owner (hiring/metrics.ts), so the link needs it too.
+  INTERVIEW_TASKS_DUE: {
+    permissions: ['application.read.operational', 'application.manage.operational'],
+    lists: (g) => [{ api: withQuery('/v1/hiring/applications', { stage: 'INTERVIEW', ownerUserId: g.userId }) }],
+    shortcut: { to: '/hiring/tracker', label: 'Hiring tracker' },
+  },
 
   APPRAISAL_ASSIGNED_TASKS: { permissions: ['appraisal.read.operational'], lists: () => [{ api: '/v1/appraisal-tasks/mine' }], shortcut: APPRAISALS },
   APPRAISAL_SUBMITTED_REVIEWED: {
@@ -196,6 +246,8 @@ export const METRIC_SOURCES: Readonly<Record<string, MetricSource>> = {
     shortcut: APPRAISALS,
   },
   APPRAISAL_RETURNED: { permissions: ['appraisal.read.operational'], lists: () => [{ api: '/v1/appraisals?state=RETURNED' }], shortcut: APPRAISALS },
+  // Overdue is relative to today, which the list applies itself (appraisal/review.ts reviewTasks).
+  APPRAISAL_REVIEW_TASKS_OVERDUE: { permissions: ['appraisal.read.operational'], lists: () => [{ api: '/v1/appraisal-tasks/mine?overdue=true' }], shortcut: APPRAISALS },
 
   TRAINING_SESSIONS_CURRENT_FUTURE: {
     permissions: ['training_plan.read.operational'],

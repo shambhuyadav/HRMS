@@ -186,9 +186,11 @@ describe.runIf(isModuleActive('payroll'))('payroll identity and dates', () => {
     expect(r.lines).toEqual([]);
   });
 
-  // Direct writes the calculation would never make. The outer describe and these names deliberately do not state the identifier: the row
-  // stays Blocked on the owner's valuation rule (docs/03 I-75 item 4), so nothing here may add to its evidence.
-  const completeByHand = async (o: { laterArrangementFrom?: string; segmentCurrency?: string }) => {
+  // Direct writes the calculation would never make, against 0172 (currency) and 0173 (the valuation date rule decided under owner
+  // delegation, 6 Nov 2026: each day is valued with the arrangement in force on it, and the record names its last segment's arrangement).
+  // `laterArrangementFrom` gives the record an arrangement starting after the period; `segmentWith: 'current'` keeps the segment on the
+  // arrangement in force, so the record and its segment disagree.
+  const completeByHand = async (o: { laterArrangementFrom?: string; segmentCurrency?: string; segmentWith?: 'named' | 'current' }) => {
     const waiting = await h.one<{ employee_id: string; employee_code: string; joining_date: string; arrangement: string }>(
       `select m.employee_id, e.employee_code, to_char(e.joining_date, 'YYYY-MM-DD') as joining_date, a.id as arrangement
          from payroll_run_member m join employee e on e.company_id = m.company_id and e.id = m.employee_id
@@ -208,7 +210,7 @@ describe.runIf(isModuleActive('payroll'))('payroll identity and dates', () => {
         await h.db.query(
           `insert into payroll_record_segment (company_id, record_id, employee_id, salary_arrangement_id, segment_start, segment_end, calendar_days, leave_lop_units, attendance_lop_units, paid_days, currency_code)
            values ($1, $2, $3, $4, '2026-04-01', '2026-04-30', 30, 0, 0, 30, $5)`,
-          [A.id, rec.id, waiting.employee_id, arrangement, o.segmentCurrency],
+          [A.id, rec.id, waiting.employee_id, o.segmentWith === 'current' ? waiting.arrangement : arrangement, o.segmentCurrency],
         );
         // As if committed while the record was pending: what the segment's own write checks is over, so only the completion can answer.
         await h.db.query('set constraints all immediate');
@@ -224,13 +226,13 @@ describe.runIf(isModuleActive('payroll'))('payroll identity and dates', () => {
   };
 
   // 0172. A segment may differ from its record while the record has failed (the test above), so the guard is on a calculated record.
-  it('a record cannot be completed by hand with a segment in another currency; in its own currency the same write goes through', async () => {
+  it('CI07: a record cannot be completed by hand with a segment in another currency; in its own currency the same write goes through', async () => {
     await expect(completeByHand({ segmentCurrency: 'INR' })).resolves.toBeUndefined();
     await expect(completeByHand({ segmentCurrency: 'USD' })).rejects.toMatchObject({ code: CHECK_VIOLATION });
   });
 
   // Possible only while the run is a draft: after that the snapshot guard refuses every segment, in any currency.
-  it('a segment in another currency cannot be added to a record already calculated; in its own currency it can', async () => {
+  it('CI07: a segment in another currency cannot be added to a record already calculated; in its own currency it can', async () => {
     const done = await h.one<{ calculation_status: string; employee_id: string; salary_arrangement_id: string }>(`select calculation_status, employee_id, salary_arrangement_id from payroll_record where id = $1`, [open.recordId]);
     expect(done.calculation_status).toBe('CALCULATED');
     const add = (currency: string) =>
@@ -246,9 +248,27 @@ describe.runIf(isModuleActive('payroll'))('payroll identity and dates', () => {
     await expect(add('USD')).rejects.toMatchObject({ code: CHECK_VIOLATION });
   });
 
-  // A known gap: the calculation applies the valuation date, and nothing holds a direct write to it, because the BRD leaves that rule to the
-  // owner. This it.fails passes only while the write is accepted. A passing it.fails counts as passed in the register, hence the name.
-  it.fails('a record cannot be completed by hand with an arrangement not in force in its period (no guard: only the calculation applies the valuation date, and the BRD leaves that rule to the owner)', async () => {
-    await expect(completeByHand({ laterArrangementFrom: '2026-11-01' })).rejects.toMatchObject({ code: CHECK_VIOLATION });
+  // 0173, at completion.
+  it('CI07: a record cannot be completed by hand on an arrangement not in force for its days, nor name one other than its last segment’s', async () => {
+    await expect(completeByHand({ segmentCurrency: 'INR' })).resolves.toBeUndefined();
+    await expect(completeByHand({ laterArrangementFrom: '2026-11-01', segmentCurrency: 'INR' })).rejects.toMatchObject({ code: CHECK_VIOLATION });
+    await expect(completeByHand({ laterArrangementFrom: '2026-11-01', segmentCurrency: 'INR', segmentWith: 'current' })).rejects.toMatchObject({ code: CHECK_VIOLATION });
+  });
+
+  // 0173, for a segment added while the run is still a draft.
+  it('CI07: a segment on an arrangement not in force for its days cannot be added to a record already calculated; on the one in force it can', async () => {
+    const done = await h.one<{ employee_id: string; salary_arrangement_id: string }>(`select employee_id, salary_arrangement_id from payroll_record where id = $1`, [open.recordId]);
+    const add = (later: boolean) =>
+      undone(async () => {
+        const arrangement = later ? await laterArrangement(h, A, done.employee_id, '2099-06-01', '1', []) : done.salary_arrangement_id;
+        await h.db.query(
+          `insert into payroll_record_segment (company_id, record_id, employee_id, salary_arrangement_id, segment_start, segment_end, calendar_days, leave_lop_units, attendance_lop_units, paid_days, currency_code)
+           values ($1, $2, $3, $4, '2099-01-01', '2099-01-01', 1, 0, 0, 1, 'INR')`,
+          [A.id, open.recordId, done.employee_id, arrangement],
+        );
+        return h.db.query('set constraints all immediate');
+      });
+    await expect(add(false)).resolves.toBeDefined();
+    await expect(add(true)).rejects.toMatchObject({ code: CHECK_VIOLATION });
   });
 });

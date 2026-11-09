@@ -1,7 +1,10 @@
 // Full-and-final settlement records (FR-052, FR-053, FR-054; DB079; DB080; F1; BR-016; DF02; DF03; DF05; DF07; DF09).
 // FR-054 outputs (CSV, XLSX, PDF, ZIP of a selection) and the bulk upload's row checks are at the end of this file.
-// No calculation exists: F1 requires actual approved policy/rate packs and none is configured, so the calculation
-// status is NOT_CONFIGURED and lines are entered or uploaded by the authorised preparer (an eligible, granted HR
+// FR-052 calculation (I-88, decided under owner delegation, 6 Nov 2026): the preparer calculates a draft from a versioned snapshot
+// (settlement-calculation.ts); its values are CALCULATED lines carrying the snapshot, and lines for other components are entered with a
+// reason (a revision without a calculation keeps the entered or uploaded lines it always had, status NOT_CONFIGURED). The approval is
+// refused while a blocking item, an applicable statutory rule pack, or an eligible employee's missing gratuity calculation stands
+// (settlement-gates.ts). Lines are entered or uploaded by the authorised preparer (an eligible, granted HR
 // Administrator assignment; amounts are a confidential group). Lines reference pay components; amounts are signed
 // (earnings >= 0, deductions <= 0) and the net amount equals their sum. Submission freezes the revision; an
 // independent reviewer and then an independent approver decide (neither the preparer, nor each other, nor the
@@ -17,13 +20,16 @@ import type { ScanVerdict } from '../../storage/scan.js';
 import { type AccessGrant, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { CsvError, parseCsv } from '../employee/csv.js';
 import { ledgerBalances } from '../leave/service.js';
+import { requireVerifiedEvidence } from '../payroll/common.js';
 import { outstandingLoans } from '../payroll-outputs/loans.js';
 import { isModuleActive } from '../registry.js';
 import { fileContext, type ReportContext } from '../report/context.js';
 import { PDF_MEDIA_TYPE, type PdfColumn, pdfDocument } from '../report/pdf.js';
 import { PLAIN_DECIMAL, type SheetCell, XLSX_MEDIA_TYPE, xlsxWorkbook, zipStored } from '../report/xlsx.js';
-import { decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
+import { applyCasesPaidBySettlement } from '../payroll-adjustments/settled.js';
+import { cancelActiveApproval, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
 import {
+  type Actor,
   actorOf,
   advisoryLock,
   assertNotSelf,
@@ -31,6 +37,7 @@ import {
   decidersOf,
   decisionTrail,
   holds,
+  isIsoDate,
   isSelf,
   priorDecision,
   setRootState,
@@ -39,6 +46,7 @@ import {
   userIsEmployee,
 } from './common.js';
 import { clearanceStatus, lockClearance } from './processes.js';
+import { assertApprovable, assertCalculationStillHolds, calculationView, encashOnPayment, noticeWaiverOf } from './settlement-gates.js';
 
 export const SETTLEMENT_KIND = 'settlement';
 export const SETTLEMENT_APPROVAL_KIND = 'settlement_approval';
@@ -51,11 +59,11 @@ const ZERO = /^-?0+(\.0+)?$/;
 /** Revisions that keep an exit's settlement live (the settlement_one_live index). */
 const LIVE_STATES = ['DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE'];
 
-/** FR-052: reported, never guessed. */
+/** FR-052 (I-88): what the calculation does; anything it needs and lacks is reported on its item and blocks approval, never guessed. */
 export const CALCULATION_STATUS = {
-  status: 'NOT_CONFIGURED',
+  status: 'AVAILABLE',
   reason:
-    'Full-and-final calculation needs actual approved policy and rate packs (F1, DF05: no gratuity, encashment, notice or tax rule is assumed). None is configured, so settlement lines are entered or uploaded and independently reviewed.',
+    'A draft is calculated from a versioned snapshot under the settlement policy and the statutory rule packs in force on the last working date (F1, DF05: no gratuity, encashment, notice or tax rule is assumed). An item whose policy, rule pack or record is missing is shown as such and blocks approval. Lines for other components are entered with a reason; review and approval stay independent.',
 } as const;
 
 export interface SettlementRow {
@@ -69,15 +77,18 @@ export interface SettlementRow {
   net_amount: string;
   prepared_by: string;
   supersedes_settlement_id: string | null;
+  calculation_id: string | null;
   version: number;
 }
 
-const COLUMNS = `s.id, s.exit_case_id, s.employee_id, s.transaction_id, s.revision, s.state, s.currency_code, s.net_amount, s.prepared_by, s.supersedes_settlement_id, s.version`;
+const COLUMNS = `s.id, s.exit_case_id, s.employee_id, s.transaction_id, s.revision, s.state, s.currency_code, s.net_amount, s.prepared_by, s.supersedes_settlement_id, s.calculation_id, s.version`;
 
 export interface LineInput {
   componentCode: string;
   amount: string;
   lineKind?: 'STANDARD' | 'NOTICE_ADJUSTMENT' | undefined;
+  /** Why the line is entered; required on a calculated revision (I-88), where entered lines are for components the calculation does not produce. */
+  reason?: string | undefined;
 }
 
 async function lockSettlement(tx: Queryable, grant: AccessGrant, id: string): Promise<SettlementRow> {
@@ -135,6 +146,7 @@ export async function createSettlement(tx: Queryable, grant: AccessGrant, exitCa
   if (revisions.some((r) => LIVE_STATES.includes(r.state))) {
     throw new HttpError(409, 'SETTLEMENT_EXISTS', 'This exit already has a live settlement revision');
   }
+  if (revisions.some((r) => r.state === 'PAID')) throw new HttpError(409, 'SETTLEMENT_PAID', 'This exit’s settlement has been paid; nothing more is prepared for it');
   const predecessor = revisions[0];
   const currency = input.currencyCode ?? predecessor?.currency_code;
   if (!currency || !/^[A-Z]{3}$/.test(currency)) throw new HttpError(422, 'CURRENCY_REQUIRED', 'Give the settlement currency (ISO 4217 code)');
@@ -154,14 +166,15 @@ export async function createSettlement(tx: Queryable, grant: AccessGrant, exitCa
   ).rows[0]!.id;
   let copied = 0;
   if (predecessor && predecessor.currency_code === currency) {
-    // DF03: the correction starts from the returned or rejected revision's lines (active components only).
+    // DF03: the correction starts from the returned or rejected revision's entered lines (active components only), with their reasons.
+    // Calculated lines are not copied: the new revision is calculated again from a new snapshot (I-88).
     copied =
       (
         await tx.query(
-          `insert into settlement_line (company_id, settlement_id, component_id, amount, line_kind, source, created_by, updated_by)
-           select l.company_id, $3, l.component_id, l.amount, l.line_kind, 'COPIED', $4, $4
+          `insert into settlement_line (company_id, settlement_id, component_id, amount, line_kind, source, reason, created_by, updated_by)
+           select l.company_id, $3, l.component_id, l.amount, l.line_kind, 'COPIED', l.reason, $4, $4
              from settlement_line l join pay_component c on c.company_id = l.company_id and c.id = l.component_id and c.active
-            where l.company_id = $1 and l.settlement_id = $2`,
+            where l.company_id = $1 and l.settlement_id = $2 and l.source <> 'CALCULATED'`,
           [grant.companyId, predecessor.id, id, grant.userId],
         )
       ).rowCount ?? 0;
@@ -173,7 +186,7 @@ export async function createSettlement(tx: Queryable, grant: AccessGrant, exitCa
   return settlementDetail(tx, grant, id);
 }
 
-async function refreshNet(tx: Queryable, grant: AccessGrant, id: string): Promise<void> {
+export async function refreshNet(tx: Queryable, grant: AccessGrant, id: string): Promise<void> {
   await tx.query(
     `update settlement s set net_amount = coalesce((select sum(l.amount) from settlement_line l where l.company_id = s.company_id and l.settlement_id = s.id), 0), updated_by = $3
       where s.company_id = $1 and s.id = $2`,
@@ -186,15 +199,90 @@ export interface CheckedLine {
   componentCode: string;
   amount: string;
   lineKind: 'STANDARD' | 'NOTICE_ADJUSTMENT';
+  reason?: string | null;
 }
 
-/** Validates one line; returns an error code or the checked line. */
+/**
+ * FR-052 "no component already paid in monthly payroll is paid again in settlement" (docs/03 I-81 item 5; decided under owner
+ * delegation, 6 Nov 2026). Already paid means: an earning or reimbursement line above zero of the employee's payroll record that
+ * covers the approved last working date (its eligible days run through that date), in a run that is approved for payment or
+ * processed (APPROVED, PROCESSED_LOCKED). It blocks, never warns: a settlement line above zero on such a component is refused when
+ * entered or uploaded, and every later step (submission, release eligibility, the recorded payment) checks again, so a final-period
+ * run approved after the lines were entered stops the settlement until a corrected revision is prepared. Deductions are not
+ * "paid" and are left to their own rules (a loan recovery is bounded by the outstanding balance, I-51). A run still being
+ * calculated or reviewed pays nothing yet and is only shown (finalPeriodPayroll). Component ids, mapped to their codes.
+ */
+export async function componentsPaidInFinalPayroll(db: Queryable, companyId: string, employeeId: string, lastWorkingDate: string | null): Promise<Map<string, string>> {
+  if (!lastWorkingDate || !isModuleActive('payroll')) return new Map();
+  const rows = (
+    await db.query<{ component_id: string; code: string }>(
+      `select distinct pl.component_id, pc.code
+         from payroll_record r
+         join payroll_run ru on ru.company_id = r.company_id and ru.id = r.run_id and ru.state in ('APPROVED', 'PROCESSED_LOCKED')
+         join payroll_line pl on pl.company_id = r.company_id and pl.record_id = r.id and pl.amount > 0 and pl.head_type in ('EARNING', 'REIMBURSEMENT')
+         join pay_component pc on pc.company_id = pl.company_id and pc.id = pl.component_id
+        where r.company_id = $1 and r.employee_id = $2 and r.calculation_status = 'CALCULATED'
+          and r.eligible_from <= $3::date and r.eligible_to >= $3::date`,
+      [companyId, employeeId, lastWorkingDate],
+    )
+  ).rows;
+  return new Map(rows.map((r) => [r.component_id, r.code]));
+}
+
+/** The settlement's own lines that FR-052 refuses now (see componentsPaidInFinalPayroll); 409 naming the components. */
+async function assertNotPaidInPayroll(tx: Queryable, companyId: string, s: { id: string; employee_id: string; exit_case_id: string }) {
+  const exit = await exitFor(tx, companyId, s.exit_case_id);
+  const paid = await componentsPaidInFinalPayroll(tx, companyId, s.employee_id, exit?.approved_leaving_date ?? null);
+  if (paid.size === 0) return;
+  const lines = (await tx.query<{ component_id: string }>(`select component_id from settlement_line where company_id = $1 and settlement_id = $2 and amount > 0`, [companyId, s.id])).rows;
+  const repeated = lines.filter((l) => paid.has(l.component_id)).map((l) => paid.get(l.component_id)!).sort();
+  if (repeated.length > 0) {
+    throw new HttpError(409, 'ALREADY_PAID_IN_PAYROLL', 'Monthly payroll for the final period already pays these components; prepare a corrected revision', { components: repeated });
+  }
+}
+
+/**
+ * The employee's payroll for the final period, read-only beside the settlement (FR-052 "reconcile to salary"): each run whose record
+ * covers the last working date, with its state and the components it pays or deducts, and whether they count as already paid.
+ * Payroll amounts stay with the payroll grants (DF02), so none is shown here.
+ */
+async function finalPeriodPayroll(db: Queryable, companyId: string, employeeId: string, lastWorkingDate: string | null) {
+  if (!lastWorkingDate || !isModuleActive('payroll')) return [];
+  const rows = (
+    await db.query<{ run_id: string; period_code: string; run_state: string; revision: number; component_code: string; head_type: string }>(
+      `select ru.id as run_id, p.period_code, ru.state as run_state, ru.revision, pc.code as component_code, pl.head_type
+         from payroll_record r
+         join payroll_run ru on ru.company_id = r.company_id and ru.id = r.run_id and ru.state not in ('CANCELLED', 'RETURNED')
+         join payroll_period p on p.company_id = ru.company_id and p.id = ru.period_id
+         join payroll_line pl on pl.company_id = r.company_id and pl.record_id = r.id and pl.amount > 0
+         join pay_component pc on pc.company_id = pl.company_id and pc.id = pl.component_id
+        where r.company_id = $1 and r.employee_id = $2 and r.calculation_status = 'CALCULATED'
+          and r.eligible_from <= $3::date and r.eligible_to >= $3::date
+        order by p.period_code, ru.revision, pc.code`,
+      [companyId, employeeId, lastWorkingDate],
+    )
+  ).rows;
+  const runs = new Map<string, { runId: string; periodCode: string; runState: string; revision: number; components: { componentCode: string; headType: string; alreadyPaid: boolean }[] }>();
+  for (const r of rows) {
+    const run = runs.get(r.run_id) ?? { runId: r.run_id, periodCode: r.period_code, runState: r.run_state, revision: r.revision, components: [] };
+    run.components.push({
+      componentCode: r.component_code,
+      headType: r.head_type,
+      alreadyPaid: (r.run_state === 'APPROVED' || r.run_state === 'PROCESSED_LOCKED') && (r.head_type === 'EARNING' || r.head_type === 'REIMBURSEMENT'),
+    });
+    runs.set(r.run_id, run);
+  }
+  return [...runs.values()];
+}
+
+/** Validates one line; returns an error code or the checked line. `paidInPayroll`: FR-052, see componentsPaidInFinalPayroll. */
 async function checkLine(
   tx: Queryable,
   companyId: string,
   components: Map<string, { id: string; kind: string } | null>,
   noticeRecorded: boolean,
   line: { componentCode: string; amount: string; lineKind: string },
+  paidInPayroll: ReadonlyMap<string, string> = new Map(),
 ): Promise<CheckedLine | { error: string }> {
   const code = line.componentCode.trim().toUpperCase();
   if (!components.has(code)) {
@@ -209,6 +297,7 @@ async function checkLine(
   const positive = !amount.startsWith('-') && !ZERO.test(amount);
   // Sign convention (owner approval pending): earnings are zero or positive, deductions zero or negative.
   if ((component.kind === 'EARNING' && negative) || (component.kind === 'DEDUCTION' && positive)) return { error: 'SIGN_MISMATCH' };
+  if (positive && paidInPayroll.has(component.id)) return { error: 'ALREADY_PAID_IN_PAYROLL' };
   const kind = line.lineKind === '' ? 'STANDARD' : line.lineKind;
   if (kind !== 'STANDARD' && kind !== 'NOTICE_ADJUSTMENT') return { error: 'INVALID_LINE_KIND' };
   // F1: a monetary notice adjustment needs the recorded contractual notice period.
@@ -216,18 +305,29 @@ async function checkLine(
   return { componentId: component.id, componentCode: code, amount, lineKind: kind };
 }
 
+/** Replaces the draft's entered (or uploaded, or copied) lines; its calculated lines stay (I-88). */
 async function writeLines(tx: Queryable, grant: AccessGrant, s: SettlementRow, lines: readonly CheckedLine[], source: 'ENTERED' | 'UPLOADED') {
-  await tx.query(`delete from settlement_line where company_id = $1 and settlement_id = $2`, [grant.companyId, s.id]);
+  await tx.query(`delete from settlement_line where company_id = $1 and settlement_id = $2 and source <> 'CALCULATED'`, [grant.companyId, s.id]);
   for (const l of lines) {
     await tx.query(
-      `insert into settlement_line (company_id, settlement_id, component_id, amount, line_kind, source, created_by, updated_by) values ($1, $2, $3, $4::numeric, $5, $6, $7, $7)`,
-      [grant.companyId, s.id, l.componentId, l.amount, l.lineKind, source, grant.userId],
+      `insert into settlement_line (company_id, settlement_id, component_id, amount, line_kind, source, reason, created_by, updated_by) values ($1, $2, $3, $4::numeric, $5, $6, $7, $8, $8)`,
+      [grant.companyId, s.id, l.componentId, l.amount, l.lineKind, source, l.reason ?? null, grant.userId],
     );
   }
   await refreshNet(tx, grant, s.id);
 }
 
-async function draftForChange(tx: Queryable, grant: AccessGrant, id: string, expectedVersion: number) {
+/** FR-054 uploads replace a draft's lines wholesale, so a calculated draft takes entered lines (each with its reason) instead (I-88). */
+function assertNotCalculated(s: SettlementRow): void {
+  if (s.calculation_id) throw new HttpError(409, 'CALCULATED_REVISION', 'This draft is calculated: enter the lines of other components one by one, each with its reason');
+}
+
+/** The components the draft's calculated lines use (entered lines may not repeat them). */
+async function calculatedComponents(tx: Queryable, companyId: string, settlementId: string): Promise<Set<string>> {
+  return new Set((await tx.query<{ component_id: string }>(`select component_id from settlement_line where company_id = $1 and settlement_id = $2 and source = 'CALCULATED'`, [companyId, settlementId])).rows.map((r) => r.component_id));
+}
+
+export async function draftForChange(tx: Queryable, grant: AccessGrant, id: string, expectedVersion: number) {
   const s = await lockSettlement(tx, grant, id);
   assertNotSelf(grant, s.employee_id);
   assertPreparer(grant, s);
@@ -239,19 +339,28 @@ async function draftForChange(tx: Queryable, grant: AccessGrant, id: string, exp
   return { s, exit };
 }
 
-/** Replaces the draft's lines with the entered set (one line per component). */
+/**
+ * Replaces the draft's entered lines with the entered set (one line per component). On a calculated draft (I-88) its calculated lines stay,
+ * an entered line may not use a component the calculation produced (COMPONENT_CALCULATED), and each entered line states its reason.
+ */
 export async function replaceLines(tx: Queryable, grant: AccessGrant, id: string, input: { lines: LineInput[]; expectedVersion: number }) {
   const { s, exit } = await draftForChange(tx, grant, id, input.expectedVersion);
   const components = new Map<string, { id: string; kind: string } | null>();
+  const paid = await componentsPaidInFinalPayroll(tx, grant.companyId, s.employee_id, exit.approved_leaving_date);
+  const calculated = await calculatedComponents(tx, grant.companyId, s.id);
   const checked: CheckedLine[] = [];
   for (const [i, line] of input.lines.entries()) {
-    const r = await checkLine(tx, grant.companyId, components, exit.contractual_notice_days !== null, { componentCode: line.componentCode, amount: line.amount, lineKind: line.lineKind ?? 'STANDARD' });
+    const r = await checkLine(tx, grant.companyId, components, exit.contractual_notice_days !== null, { componentCode: line.componentCode, amount: line.amount, lineKind: line.lineKind ?? 'STANDARD' }, paid);
     if ('error' in r) throw new HttpError(422, r.error, 'A settlement line is not valid', { line: i + 1 });
     if (checked.some((c) => c.componentId === r.componentId)) throw new HttpError(422, 'DUPLICATE_COMPONENT', 'Each component appears once', { line: i + 1 });
-    checked.push(r);
+    if (calculated.has(r.componentId)) throw new HttpError(422, 'COMPONENT_CALCULATED', 'The calculation already produces this component; it is not entered as well', { line: i + 1 });
+    const reason = line.reason?.trim() ?? '';
+    if (reason.length > 500) throw new HttpError(422, 'REASON_TOO_LONG', 'A line reason is at most 500 characters', { line: i + 1 });
+    if (s.calculation_id && reason === '') throw new HttpError(422, 'REASON_REQUIRED', 'On a calculated settlement each entered line states why it is entered', { line: i + 1 });
+    checked.push({ ...r, reason: reason === '' ? null : reason });
   }
   await writeLines(tx, grant, s, checked, 'ENTERED');
-  await audit(tx, actorOf(grant), 'settlement', s.id, 'SET_LINES', null, { operational: { revision: s.revision, lineCount: checked.length, source: 'ENTERED' } });
+  await audit(tx, actorOf(grant), 'settlement', s.id, 'SET_LINES', null, { operational: { revision: s.revision, lineCount: checked.length, source: 'ENTERED', calculated: s.calculation_id !== null } });
   return settlementDetail(tx, grant, s.id);
 }
 
@@ -269,6 +378,7 @@ export async function uploadLines(
   input: { contentBase64: string; dryRun?: boolean | undefined; expectedVersion: number },
 ) {
   const { s, exit } = await draftForChange(tx, grant, id, input.expectedVersion);
+  assertNotCalculated(s);
   const bytes = Buffer.from(input.contentBase64, 'base64');
   // FR-106: an upload is never read before the scanner has released it (as payroll inputs); the file is not stored. The route
   // asked the scanner (scanInMemory) before this transaction opened.
@@ -290,6 +400,7 @@ export async function uploadLines(
   if (data.length === 0) throw new HttpError(422, 'EMPTY_FILE', 'The file has no lines');
   if (data.length > MAX_UPLOAD_ROWS) throw new HttpError(422, 'TOO_MANY_ROWS', `At most ${MAX_UPLOAD_ROWS} rows per upload`);
   const components = new Map<string, { id: string; kind: string } | null>();
+  const paid = await componentsPaidInFinalPayroll(tx, grant.companyId, s.employee_id, exit.approved_leaving_date);
   const results: ({ row: number; line: CheckedLine } | { row: number; error: string })[] = [];
   for (const [i, cells] of data.entries()) {
     const row = i + 2;
@@ -306,7 +417,7 @@ export async function uploadLines(
       results.push({ row, error: 'DATE_MISMATCH' });
       continue;
     }
-    const r = await checkLine(tx, grant.companyId, components, exit.contractual_notice_days !== null, { componentCode, amount, lineKind: lineKind.toUpperCase() });
+    const r = await checkLine(tx, grant.companyId, components, exit.contractual_notice_days !== null, { componentCode, amount, lineKind: lineKind.toUpperCase() }, paid);
     if ('error' in r) {
       results.push({ row, error: r.error });
       continue;
@@ -340,9 +451,131 @@ export async function uploadLines(
 
 export async function cancelDraft(tx: Queryable, grant: AccessGrant, id: string, input: { expectedVersion: number; reason: string }) {
   const { s } = await draftForChange(tx, grant, id, input.expectedVersion);
-  await setRootState(tx, 'settlement', grant.companyId, s, 'CANCELLED', grant.userId, ', closed_at = now()');
+  await setRootState(tx, 'settlement', grant.companyId, s, 'CANCELLED', grant.userId, ', closed_at = now(), cancel_reason = $5', [input.reason.trim()]);
   await audit(tx, actorOf(grant), 'settlement', s.id, 'CANCEL', { operational: { state: 'DRAFT' } }, { operational: { state: 'CANCELLED', revision: s.revision } }, input.reason);
   return settlementDetail(tx, grant, s.id);
+}
+
+/**
+ * Ends a revision that is live and not paid (docs/03 I-81 items 5 and 6): CANCELLED with its reason, its lines, decisions and
+ * history kept (DF08); the open review or approval task ends with it, and so does an approval stage still waiting. Used by an
+ * approved exit withdrawal (FR-051/FR-053) and by an independent approver's void (voidSettlement). Lock order as everywhere:
+ * the settlement's transaction, then its approval stage's. Returns the state it left, or null when the revision was not live.
+ */
+export async function cancelLiveSettlement(tx: Queryable, actor: Actor, settlementId: string, reason: string): Promise<{ settlementId: string; from: string; revision: number } | null> {
+  const t = (await tx.query<{ transaction_id: string }>(`select transaction_id from settlement where company_id = $1 and id = $2`, [actor.companyId, settlementId])).rows[0];
+  if (!t) return null;
+  await lockTransaction(tx, t.transaction_id);
+  const s = (await tx.query<SettlementRow>(`select ${COLUMNS} from settlement s where s.company_id = $1 and s.id = $2 for update`, [actor.companyId, settlementId])).rows[0]!;
+  if (!LIVE_STATES.includes(s.state)) return null;
+  await cancelActiveApproval(tx, actor.companyId, s.transaction_id, actor.userId);
+  const stages = (
+    await tx.query<{ id: string; transaction_id: string }>(`select id, transaction_id from settlement_approval where company_id = $1 and settlement_id = $2 and state = 'SUBMITTED'`, [actor.companyId, s.id])
+  ).rows;
+  for (const stage of stages) {
+    await lockTransaction(tx, stage.transaction_id);
+    await cancelActiveApproval(tx, actor.companyId, stage.transaction_id, actor.userId);
+    await setRootState(tx, 'settlement_approval', actor.companyId, stage, 'CANCELLED', actor.userId, ', decided_at = now()');
+  }
+  await setRootState(tx, 'settlement', actor.companyId, s, 'CANCELLED', actor.userId, ', closed_at = now(), cancel_reason = $5', [reason]);
+  await audit(tx, actor, 'settlement', s.id, 'VOID', { operational: { state: s.state } }, { operational: { state: 'CANCELLED', revision: s.revision } }, reason);
+  await decidedEvent(tx, actor.companyId, s.id, 'CANCELLED');
+  return { settlementId: s.id, from: s.state, revision: s.revision };
+}
+
+/**
+ * FR-052, FR-053 (docs/03 I-81 items 5, 6): a submitted, reviewed, approved or release-eligible revision that must not be paid (a
+ * final-period payroll paid one of its components, or it is wrong) is voided by someone holding the settlement approval duty who
+ * did not prepare it and is not its employee, with the reason. A draft is cancelled by its preparer; a paid revision is final.
+ */
+export async function voidSettlement(tx: Queryable, grant: AccessGrant, id: string, input: { reason: string; expectedVersion: number }) {
+  const s = await lockSettlement(tx, grant, id);
+  assertNotSelf(grant, s.employee_id);
+  await reassertAccess(tx, grant, 'settlement', 'approve', ['amount']);
+  if (s.state === 'DRAFT') throw new HttpError(409, 'USE_DRAFT_CANCEL', 'A draft is cancelled by its preparer');
+  if (!LIVE_STATES.includes(s.state)) throw new HttpError(409, 'INVALID_STATE', 'Only a live revision that is not paid can be voided');
+  if (s.version !== input.expectedVersion) throw new HttpError(409, 'STALE_VERSION', 'The settlement changed; reload and retry');
+  if (grant.userId === s.prepared_by || (await userIsEmployee(tx, grant.companyId, grant.userId, s.employee_id))) {
+    throw new HttpError(409, 'NOT_INDEPENDENT', 'A revision is voided by someone other than its preparer and its employee');
+  }
+  await cancelLiveSettlement(tx, actorOf(grant), s.id, input.reason.trim());
+  return settlementDetail(tx, grant, s.id);
+}
+
+/** An exit withdrawal request still waiting for its decision (release eligibility and payment wait for it, as final release does). */
+async function withdrawalPending(tx: Queryable, companyId: string, exitCaseId: string): Promise<boolean> {
+  const r = await tx.query(`select 1 from exit_withdrawal_request where company_id = $1 and exit_case_id = $2 and state = 'SUBMITTED'`, [companyId, exitCaseId]);
+  return (r.rowCount ?? 0) > 0;
+}
+
+export interface PaymentInput {
+  paymentDate: string;
+  evidenceKey: string;
+  evidenceReference: string;
+  evidenceDocumentIds: string[];
+  expectedVersion: number;
+}
+
+/**
+ * FR-053, FR-054, DF07 (docs/03 I-40 item 2, I-81 item 2; decided under owner delegation, 6 Nov 2026): a settlement is paid outside
+ * the system, never by a final-settlement payroll run (that would need a calculation the payroll owner has not approved), and the
+ * payment is recorded here from evidence: the payment date, the bank or receipt reference, an idempotent evidence key and one
+ * released, verified document of the employee. Only a release-eligible revision is paid (FR-053 "keep release and actual payment
+ * tracking separate"), in full: the net amount is the paid amount. Whoever records it prepared, reviewed, approved or marked none of
+ * it and is not the employee (C4); a withdrawal waiting for its decision, and a component the final-period payroll already pays
+ * (FR-052), stop it. The payment date is the disbursement month of the FR-054 list. The same key again is the same payment.
+ */
+export async function recordSettlementPayment(tx: Queryable, grant: AccessGrant, id: string, input: PaymentInput) {
+  const s = await lockSettlement(tx, grant, id);
+  assertNotSelf(grant, s.employee_id);
+  await reassertAccess(tx, grant, 'settlement', 'record_payment', ['amount']);
+  const key = input.evidenceKey.trim();
+  if (!/^[A-Za-z0-9._:-]{8,100}$/.test(key)) throw new HttpError(422, 'EVIDENCE_KEY_REQUIRED', 'A payment carries its evidence key (8 to 100 letters, digits or ._:-)');
+  const prior = (await tx.query<{ id: string }>(`select id from settlement where company_id = $1 and payment_evidence_key = $2`, [grant.companyId, key])).rows[0];
+  if (prior) {
+    if (prior.id !== s.id) throw new HttpError(409, 'EVIDENCE_KEY_REUSED', 'This evidence key already recorded another payment');
+    return { ...(await settlementDetail(tx, grant, s.id)), replayed: true };
+  }
+  if (s.state !== 'RELEASE_ELIGIBLE') throw new HttpError(409, 'INVALID_STATE', 'Only a settlement eligible for release is recorded as paid');
+  if (s.version !== input.expectedVersion) throw new HttpError(409, 'STALE_VERSION', 'The settlement changed; reload and retry');
+  const marker = (await tx.query<{ by: string; day: string }>(`select release_eligible_by as by, to_char(hrms_business_date(company_id, release_eligible_at), 'YYYY-MM-DD') as day from settlement where company_id = $1 and id = $2`, [grant.companyId, s.id])).rows[0]!;
+  const stages = (await tx.query<{ transaction_id: string }>(`select transaction_id from settlement_approval where company_id = $1 and settlement_id = $2`, [grant.companyId, s.id])).rows.map((r) => r.transaction_id);
+  const deciders = await decidersOf(tx, grant.companyId, [s.transaction_id, ...stages]);
+  if (grant.userId === s.prepared_by || grant.userId === marker.by || deciders.includes(grant.userId) || (await userIsEmployee(tx, grant.companyId, grant.userId, s.employee_id))) {
+    throw new HttpError(409, 'NOT_INDEPENDENT', 'The payment is recorded by someone other than the preparer, reviewer, approver and release marker');
+  }
+  if (await withdrawalPending(tx, grant.companyId, s.exit_case_id)) throw new HttpError(409, 'WITHDRAWAL_PENDING', 'A withdrawal request is waiting for a decision');
+  await assertNotPaidInPayroll(tx, grant.companyId, s);
+  // Serialised with the payroll calculation's pickup of arrears and adjustments, so neither can take a case the other is paying.
+  await advisoryLock(tx, `payroll_arrears_pickup:${grant.companyId}`);
+  await assertCalculationStillHolds(tx, grant.companyId, s.id);
+  const date = input.paymentDate;
+  if (!isIsoDate(date)) throw new HttpError(422, 'INVALID_DATE', 'The payment date is not a valid date', { field: 'paymentDate' });
+  if (date > grant.businessDate) throw new HttpError(422, 'PAYMENT_IN_FUTURE', 'A payment is recorded once it has happened');
+  if (date < marker.day) throw new HttpError(422, 'PAYMENT_BEFORE_RELEASE', 'The payment date cannot be before the settlement became eligible for release');
+  const reference = input.evidenceReference.trim();
+  if (reference === '' || reference.length > 500) throw new HttpError(422, 'EVIDENCE_REQUIRED', 'Give the payment reference (at most 500 characters)');
+  const docs = await requireVerifiedEvidence(tx, grant.companyId, s.employee_id, input.evidenceDocumentIds, { required: true });
+  if (docs.length !== 1) throw new HttpError(422, 'ONE_EVIDENCE_DOCUMENT', 'A payment is evidenced by one released, verified document');
+  await setRootState(
+    tx,
+    'settlement',
+    grant.companyId,
+    s,
+    'PAID',
+    grant.userId,
+    ', paid_at = now(), paid_by = $4, paid_assignment_id = $5, payment_date = $6, payment_reference = $7, payment_evidence_key = $8, payment_document_id = $9',
+    [grant.assignmentId, date, reference, key, docs[0]],
+  );
+  // BRD line 4939 (I-88): the paid settlement consumes the leave it encashed, once.
+  const encashed = await encashOnPayment(tx, actorOf(grant), s.id);
+  // I-88 follow-up (0214): the arrears and timesheet adjustments its calculation took are paid by it, once.
+  const applied = await applyCasesPaidBySettlement(tx, grant.companyId, s.id, grant.userId);
+  await audit(tx, actorOf(grant), 'settlement', s.id, 'RECORD_PAYMENT', { operational: { state: 'RELEASE_ELIGIBLE' } }, {
+    operational: { state: 'PAID', revision: s.revision, paymentDate: date, evidenceDocuments: 1, leaveTypesEncashed: encashed, arrearsApplied: applied.arrears, adjustmentsApplied: applied.adjustments },
+  });
+  await decidedEvent(tx, grant.companyId, s.id, 'PAID');
+  return { ...(await settlementDetail(tx, grant, s.id)), replayed: false };
 }
 
 export async function submitSettlement(tx: Queryable, grant: AccessGrant, id: string, input: { expectedVersion: number }) {
@@ -350,6 +583,8 @@ export async function submitSettlement(tx: Queryable, grant: AccessGrant, id: st
   if (!approvedExit(exit.state)) throw new HttpError(409, 'EXIT_NOT_APPROVED', 'The exit is no longer approved');
   const lines = (await tx.query<{ n: number }>(`select count(*)::int as n from settlement_line where company_id = $1 and settlement_id = $2`, [grant.companyId, s.id])).rows[0]!.n;
   if (lines === 0) throw new HttpError(422, 'NO_LINES', 'Enter or upload the settlement lines first');
+  await assertNotPaidInPayroll(tx, grant.companyId, s);
+  await assertCalculationStillHolds(tx, grant.companyId, s.id);
   await setRootState(tx, 'settlement', grant.companyId, s, 'SUBMITTED', grant.userId, ', submitted_at = now(), submitted_by = $4');
   // C4/DF02: the preparer never reviews or approves the settlement; the employee never decides it either.
   const { taskId } = await startApproval(tx, {
@@ -448,6 +683,8 @@ export async function approveSettlement(tx: Queryable, grant: AccessGrant, taskI
   if (await priorDecision(tx, grant.companyId, input.idempotencyKey, taskId)) return { settlementId: s.id, state: s.state, replayed: true };
   if (!(await taskIsPending(tx, grant, taskId))) throw new HttpError(409, 'TASK_CLOSED', 'This task has already been decided');
   if (s.state !== 'REVIEWED' || stage.state !== 'SUBMITTED') throw new HttpError(409, 'INVALID_STATE', 'This settlement is not waiting for approval');
+  // FR-052 (I-88; BRD line 5120): a missing rule pack, policy or record refuses the approval; returning or rejecting stays open.
+  if (input.decision === 'APPROVE') await assertApprovable(tx, grant.companyId, s);
   const result = await decideTask(tx, { grant, taskId, decision: input.decision, reason: input.reason, idempotencyKey: input.idempotencyKey, permission: { resource: 'settlement', action: 'approve' } });
   if (result.replayed) return { settlementId: s.id, state: s.state, replayed: true };
   if (result.outcome === 'NEXT_STEP') return { settlementId: s.id, state: s.state, replayed: false };
@@ -478,6 +715,10 @@ export async function markReleaseEligible(tx: Queryable, grant: AccessGrant, id:
   }
   const exit = (await exitFor(tx, grant.companyId, s.exit_case_id))!;
   if (!approvedExit(exit.state)) throw new HttpError(409, 'EXIT_NOT_APPROVED', 'The exit is no longer approved');
+  // FR-051/FR-053 (I-81 item 6): a withdrawal waiting for its decision may still end the exit, as final release waits for it.
+  if (await withdrawalPending(tx, grant.companyId, s.exit_case_id)) throw new HttpError(409, 'WITHDRAWAL_PENDING', 'A withdrawal request is waiting for a decision');
+  await assertNotPaidInPayroll(tx, grant.companyId, s);
+  await assertCalculationStillHolds(tx, grant.companyId, s.id);
   await lockClearance(tx, grant.companyId, s.exit_case_id);
   const clearance = await clearanceStatus(tx, grant.companyId, s.exit_case_id);
   if (!clearance.started) throw new HttpError(409, 'CLEARANCE_NOT_STARTED', 'Start the exit clearance checklist first');
@@ -502,10 +743,16 @@ interface DetailRow extends SettlementRow {
   release_eligible_at: Date | null;
   created_at: Date;
   last_working_date: string | null;
+  cancel_reason: string | null;
+  paid_at: Date | null;
+  paid_by: string | null;
+  payment_date: string | null;
+  payment_reference: string | null;
 }
 
 const DETAIL_SQL = `select ${COLUMNS}, e.employee_code, e.display_name as employee_name, s.calculation_status, s.submitted_at, s.reviewed_at, s.approved_at,
-    s.release_eligible_at, s.created_at, to_char(sx.approved_leaving_date, 'YYYY-MM-DD') as last_working_date
+    s.release_eligible_at, s.created_at, to_char(sx.approved_leaving_date, 'YYYY-MM-DD') as last_working_date,
+    s.cancel_reason, s.paid_at, s.paid_by, to_char(s.payment_date, 'YYYY-MM-DD') as payment_date, s.payment_reference
   from settlement s join employee e on e.company_id = s.company_id and e.id = s.employee_id
   join exit_case sx on sx.company_id = s.company_id and sx.id = s.exit_case_id`;
 
@@ -515,7 +762,8 @@ async function present(db: Queryable, grant: AccessGrant, s: DetailRow) {
   const lines = showAmounts
     ? (
         await db.query(
-          `select c.code as "componentCode", c.name as "componentName", c.component_kind as "componentKind", l.amount, l.line_kind as "lineKind", l.source
+          `select c.code as "componentCode", c.name as "componentName", c.component_kind as "componentKind", l.amount, l.line_kind as "lineKind", l.source,
+                  l.calculation_id as "calculationId", l.reason
              from settlement_line l join pay_component c on c.company_id = l.company_id and c.id = l.component_id
             where l.company_id = $1 and l.settlement_id = $2 order by c.code`,
           [grant.companyId, s.id],
@@ -536,9 +784,15 @@ async function present(db: Queryable, grant: AccessGrant, s: DetailRow) {
     // The exit's approved (inclusive) last working date, which every upload row must carry (FR-054).
     lastWorkingDate: s.last_working_date,
     preparedBy: s.prepared_by,
-    // BR-016: release eligibility is not a payment; no payment is tracked here.
-    paymentStatus: 'NOT_TRACKED',
+    // BR-016: release eligibility is not a payment; only a payment recorded from evidence is (I-81 item 2). Its date is the
+    // disbursement month; its reference and recorder are confidential like the amounts.
+    paymentStatus: s.state === 'PAID' ? 'PAID' : 'NOT_PAID',
+    paymentDate: s.payment_date,
+    ...(showAmounts && s.paid_at ? { payment: { paidAt: s.paid_at, paidBy: s.paid_by, reference: s.payment_reference } } : {}),
+    cancelReason: s.cancel_reason,
     ...(showAmounts ? { netAmount: s.net_amount, lines } : {}),
+    // FR-052 (I-88): the snapshot the revision carries, its items and the exit's notice waiver, confidential like the lines.
+    ...(showAmounts ? { calculation: await calculationView(db, grant.companyId, s.calculation_id), noticeWaiver: await noticeWaiverOf(db, grant.companyId, s.exit_case_id) } : {}),
     submittedAt: s.submitted_at,
     reviewedAt: s.reviewed_at,
     approvedAt: s.approved_at,
@@ -567,6 +821,8 @@ async function remainingBalances(db: Queryable, grant: AccessGrant, s: DetailRow
       taken,
     })),
     ...(isModuleActive('payroll-outputs') ? { loans: await outstandingLoans(db, grant.companyId, s.employee_id) } : {}),
+    // FR-052 (I-81 item 5): the final period's payroll, components only, and which of them count as already paid.
+    finalPeriodPayroll: await finalPeriodPayroll(db, grant.companyId, s.employee_id, s.last_working_date),
   };
 }
 
@@ -609,10 +865,14 @@ export const AWAITING_EXIT_LIST_CAP = 200;
 export async function listSettlements(
   db: Queryable,
   grant: AccessGrant,
-  filter: { state?: string | undefined; employeeCode?: string | undefined; lastWorkingMonth?: string | undefined } & Paging & Sorting,
+  filter: { state?: string | undefined; employeeCode?: string | undefined; lastWorkingMonth?: string | undefined; disbursementMonth?: string | undefined; employeeIds?: readonly string[] | undefined } & Paging & Sorting,
 ) {
   const params = new SqlParams();
   const where = [employeeScopePredicate(grant, { company: 's.company_id', employee: 's.employee_id' }, params)];
+  // FR-054 disbursement month (I-81 item 2): the month of the recorded payment date, so only paid settlements have one.
+  if (filter.disbursementMonth) where.push(`to_char(s.payment_date, 'YYYY-MM') = ${params.add(filter.disbursementMonth)}`);
+  // FR-054 uploaded-list selection (I-81 item 7): the employees the uploaded list resolved to, already within row scope.
+  if (filter.employeeIds) where.push(`s.employee_id = any(${params.add([...filter.employeeIds])}::uuid[])`);
   // Never one's own settlement (filtered in SQL, so pages and the total count only rows the caller may see).
   if (grant.linkedEmployeeId) where.push(`s.employee_id <> ${params.add(grant.linkedEmployeeId)}::uuid`);
   if (filter.state) where.push(`s.state = ${params.add(filter.state)}`);
@@ -636,6 +896,8 @@ export async function listSettlements(
       currencyCode: s.currency_code,
       calculationStatus: s.calculation_status,
       lastWorkingDate: s.last_working_date,
+      paymentStatus: s.state === 'PAID' ? 'PAID' : 'NOT_PAID',
+      paymentDate: s.payment_date,
       ...(showAmounts ? { netAmount: s.net_amount } : {}),
       version: s.version,
     })),
@@ -673,7 +935,7 @@ export async function exitsAwaitingSettlement(db: Queryable, grant: AccessGrant,
        join employee e on e.company_id = x.company_id and e.id = x.employee_id
        left join lateral (select s.revision, s.state from settlement s where s.company_id = x.company_id and s.exit_case_id = x.id order by s.revision desc limit 1) ls on true
       where ${scope} and x.state in ('APPROVED', 'SEPARATED') ${self}
-        and not exists (select 1 from settlement s where s.company_id = x.company_id and s.exit_case_id = x.id and s.state = any(${live}::text[]))`,
+        and not exists (select 1 from settlement s where s.company_id = x.company_id and s.exit_case_id = x.id and (s.state = any(${live}::text[]) or s.state = 'PAID'))`,
     params.values,
     '"lastWorkingDate", "employeeCode", "exitCaseId"',
     paging,
@@ -766,6 +1028,9 @@ interface ExportFile {
 
 type ExportDetail = Awaited<ReturnType<typeof present>>;
 
+/** Revisions an output (export, archive or in-app statement) may carry: approved, release-eligible or paid. */
+const EXPORTABLE_STATES = ['APPROVED', 'RELEASE_ELIGIBLE', 'PAID'];
+
 /**
  * The approved (or release-eligible) revision an output carries: within the caller's row scope and never their own. The
  * settlement amount group (the lines and the net amount are confidential) is the export grant: the routes refuse and audit
@@ -775,7 +1040,7 @@ async function exportable(db: Queryable, grant: AccessGrant, id: string): Promis
   const s =(await db.query<DetailRow>(`${DETAIL_SQL} where s.company_id = $1 and s.id = $2`, [grant.companyId, id])).rows[0];
   if (!s || !(await canAccessEmployee(db, grant, s.employee_id))) throw notFound();
   assertNotSelf(grant, s.employee_id);
-  if (s.state !== 'APPROVED' && s.state !== 'RELEASE_ELIGIBLE') throw new HttpError(409, 'NOT_APPROVED', 'Only an approved settlement is exported', { settlementId: s.id });
+  if (!EXPORTABLE_STATES.includes(s.state)) throw new HttpError(409, 'NOT_APPROVED', 'Only an approved settlement is exported', { settlementId: s.id });
   return present(db, grant, s);
 }
 
@@ -829,7 +1094,18 @@ export async function exportSettlement(tx: Queryable, grant: AccessGrant, id: st
 }
 
 /**
- * FR-054 ZIP output ("optional uploaded-list selection"): the settlements the caller selected from the list, each as
+ * FR-054, FR-018 (I-81 item 9): the statement a settlement sends to the employee's own self-service, built exactly as its export
+ * (same rows and checks) under the caller's grants. The caller (delivery.ts) re-checks the send right and stores the file.
+ */
+export async function renderStatement(tx: Queryable, grant: AccessGrant, id: string, format: 'PDF' | 'XLSX') {
+  const detail = await exportable(tx, grant, id);
+  const file = render(detail, format, new Date().toISOString(), await settlementFileContext(tx, grant, detail));
+  return { detail, file };
+}
+
+/**
+ * FR-054 ZIP output: the settlements the caller selected from the list (by hand, or from an uploaded list through
+ * selectFromUploadedList), each as
  * the file its single export gives in the chosen format, in the order selected. All or nothing: every settlement is
  * checked as its own export is (row scope, never one's own, approved, the amount group), and one that is not available
  * refuses the archive; each one included is audited as its export is, inside the caller's transaction, so a refused
@@ -875,6 +1151,8 @@ export interface UploadRowCaches {
   components: Map<string, { id: string; kind: string } | null>;
   /** Employee code -> the employee and whether the caller's row scope covers them (null: no such employee). */
   employees: Map<string, { id: string; inScope: boolean } | null>;
+  /** Settlement id -> the components its final-period payroll already pays (FR-052; componentsPaidInFinalPayroll). */
+  paidInPayroll: Map<string, ReadonlyMap<string, string>>;
 }
 
 /**
@@ -914,12 +1192,18 @@ export async function checkUploadRow(
   const s = await lockSettlement(tx, grant, draft.id);
   if (s.state !== 'DRAFT') return { error: 'INVALID_STATE' };
   if (s.prepared_by !== grant.userId) return { error: 'NOT_PREPARER' };
+  // I-88: a calculated draft takes entered lines with their reasons, never a wholesale upload.
+  if (s.calculation_id) return { error: 'CALCULATED_REVISION' };
   const exit = (await exitFor(tx, grant.companyId, s.exit_case_id))!;
-  const line = await checkLine(tx, grant.companyId, caches.components, exit.contractual_notice_days !== null, {
-    componentCode: row.componentCode,
-    amount: row.amount,
-    lineKind: row.lineKind.trim().toUpperCase(),
-  });
+  if (!caches.paidInPayroll.has(s.id)) caches.paidInPayroll.set(s.id, await componentsPaidInFinalPayroll(tx, grant.companyId, s.employee_id, exit.approved_leaving_date));
+  const line = await checkLine(
+    tx,
+    grant.companyId,
+    caches.components,
+    exit.contractual_notice_days !== null,
+    { componentCode: row.componentCode, amount: row.amount, lineKind: row.lineKind.trim().toUpperCase() },
+    caches.paidInPayroll.get(s.id),
+  );
   return 'error' in line ? line : { settlement: s, line };
 }
 
@@ -931,7 +1215,7 @@ export async function checkUploadRow(
 export async function writeUploadLine(tx: Queryable, grant: AccessGrant, s: SettlementRow, line: CheckedLine, at: { first: boolean; last: boolean; lineCount: number }) {
   if (at.first) {
     await reassertAccess(tx, grant, 'settlement', 'prepare', ['amount']);
-    await tx.query(`delete from settlement_line where company_id = $1 and settlement_id = $2`, [grant.companyId, s.id]);
+    await tx.query(`delete from settlement_line where company_id = $1 and settlement_id = $2 and source <> 'CALCULATED'`, [grant.companyId, s.id]);
   }
   await tx.query(
     `insert into settlement_line (company_id, settlement_id, component_id, amount, line_kind, source, created_by, updated_by) values ($1, $2, $3, $4::numeric, $5, 'UPLOADED', $6, $6)`,
@@ -943,4 +1227,87 @@ export async function writeUploadLine(tx: Queryable, grant: AccessGrant, s: Sett
       operational: { template: UPLOAD_TEMPLATE, revision: s.revision, rows: at.lineCount, accepted: at.lineCount, rejected: 0, applied: true, bulk: true },
     });
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// FR-054 "optional uploaded-list selection" (docs/03 I-48 item 16, I-81 item 7; decided under owner delegation, 6 Nov 2026)
+// ---------------------------------------------------------------------------------------------------------------
+
+export const SELECTION_TEMPLATE = 'SETTLEMENT_SELECTION_V1';
+/** The exact header of an uploaded selection list (served at GET /settlements/selection/template). */
+export const SELECTION_HEADER = ['employee_code'] as const;
+/** DF09's initial batch bound (10,000 rows); nothing larger is read. */
+const MAX_SELECTION_ROWS = 10_000;
+
+/**
+ * Selects settlements by an uploaded list of employee codes. Matching rules: one column, `employee_code`; each code is trimmed and
+ * compared exactly, ignoring case (employee codes are stored in capitals), never partly or by name; a blank row is INVALID_CODE;
+ * a code repeated is matched once and the later rows are DUPLICATE; a code that names no employee, an employee outside the caller's
+ * row scope or the caller's own record is NOT_FOUND alike (a list never tells who exists outside one's scope); an employee with no
+ * settlement passing the list's other filters is NO_SETTLEMENT; otherwise MATCHED with the number of settlements. The result is the
+ * settlement list (the same rows, columns and amount rule as GET /settlements, every revision, unpaged) restricted to the matched
+ * employees, which the screen offers for the ZIP output. The file is scanned in memory before reading (FR-106) and never stored;
+ * a read, so nothing is audited but the selection's counts.
+ */
+export async function selectFromUploadedList(
+  db: Queryable,
+  grant: AccessGrant,
+  verdict: ScanVerdict,
+  input: { contentBase64: string; state?: string | undefined; lastWorkingMonth?: string | undefined; disbursementMonth?: string | undefined },
+) {
+  if (verdict.verdict === 'INFECTED') throw new HttpError(422, 'UPLOAD_QUARANTINED', 'The malware scan flagged the file; it was not read');
+  if (verdict.verdict !== 'CLEAN') throw new HttpError(503, 'SCAN_UNAVAILABLE', 'The file could not be scanned now; try again later');
+  let rows: string[][];
+  try {
+    rows = parseCsv(Buffer.from(input.contentBase64, 'base64').toString('utf8'));
+  } catch (e) {
+    if (e instanceof CsvError) throw new HttpError(422, 'INVALID_FILE', 'The file is not valid CSV');
+    throw e;
+  }
+  const header = rows[0]?.map((h) => h.trim().toLowerCase());
+  if (!header || header.join(',') !== SELECTION_HEADER.join(',')) {
+    throw new HttpError(422, 'INVALID_TEMPLATE', `The file must use the ${SELECTION_TEMPLATE} header`, { expected: SELECTION_HEADER });
+  }
+  const data = rows.slice(1);
+  if (data.length === 0) throw new HttpError(422, 'EMPTY_FILE', 'The file has no employee codes');
+  if (data.length > MAX_SELECTION_ROWS) throw new HttpError(422, 'TOO_MANY_ROWS', `At most ${MAX_SELECTION_ROWS} rows per list`);
+  const codes = [...new Set(data.map((cells) => (cells.length === 1 ? (cells[0] ?? '').trim().toUpperCase() : '')).filter((c) => c !== ''))];
+  const params = new SqlParams([grant.companyId, codes]);
+  const inScope = employeeScopePredicate(grant, { company: 'e.company_id', employee: 'e.id' }, params);
+  const self = grant.linkedEmployeeId ? `and e.id <> ${params.add(grant.linkedEmployeeId)}::uuid` : '';
+  const found = new Map(
+    (await db.query<{ id: string; code: string }>(`select e.id, e.employee_code as code from employee e where e.company_id = $1 and e.employee_code = any($2::text[]) and ${inScope} ${self}`, params.values)).rows.map(
+      (r) => [r.code, r.id],
+    ),
+  );
+  // Every match, read page by page (the unpaged list stops at its cap).
+  const items: Awaited<ReturnType<typeof listSettlements>>['items'] = [];
+  const filter = { state: input.state, lastWorkingMonth: input.lastWorkingMonth, disbursementMonth: input.disbursementMonth, employeeIds: [...found.values()] };
+  for (let page = 1; ; page++) {
+    const next = await listSettlements(db, grant, { ...filter, page, pageSize: 100 });
+    items.push(...next.items);
+    if (next.items.length < 100 || items.length >= next.total) break;
+  }
+  const perEmployee = new Map<string, number>();
+  for (const s of items) perEmployee.set(s.employeeId, (perEmployee.get(s.employeeId) ?? 0) + 1);
+  const seen = new Set<string>();
+  const results = data.map((cells, i) => {
+    const code = cells.length === 1 ? (cells[0] ?? '').trim().toUpperCase() : '';
+    const row = i + 2;
+    if (code === '') return { row, employeeCode: null, outcome: 'INVALID_CODE', settlements: 0 };
+    if (seen.has(code)) return { row, employeeCode: code, outcome: 'DUPLICATE', settlements: 0 };
+    seen.add(code);
+    const id = found.get(code);
+    if (!id) return { row, employeeCode: code, outcome: 'NOT_FOUND', settlements: 0 };
+    const n = perEmployee.get(id) ?? 0;
+    return { row, employeeCode: code, outcome: n > 0 ? 'MATCHED' : 'NO_SETTLEMENT', settlements: n };
+  });
+  return {
+    template: SELECTION_TEMPLATE,
+    rows: results,
+    total: data.length,
+    matched: results.filter((r) => r.outcome === 'MATCHED').length,
+    calculation: CALCULATION_STATUS,
+    items,
+  };
 }

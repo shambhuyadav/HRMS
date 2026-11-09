@@ -16,7 +16,14 @@ describe.runIf(isModuleActive('appraisal'))('appraisal: settings and cycles', ()
   let bHr: TestActor;
   let today: string;
 
-  const cycleBody = (overrides: Record<string, unknown> = {}) => ({ code: `fy-${Math.random().toString(36).slice(2, 8)}`, name: 'Synthetic cycle', startDate: fyStart(today), ...overrides });
+  // The review due date is required with reviewer levels (I-77 item 5); it is set well after any window used here.
+  const cycleBody = (overrides: Record<string, unknown> = {}) => ({
+    code: `fy-${Math.random().toString(36).slice(2, 8)}`,
+    name: 'Synthetic cycle',
+    startDate: fyStart(today),
+    reviewDueOn: addDays(today, 60),
+    ...overrides,
+  });
 
   beforeAll(async () => {
     h = await startHarness();

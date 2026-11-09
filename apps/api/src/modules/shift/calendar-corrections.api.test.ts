@@ -43,7 +43,7 @@ const correct = (id: string, body: object, a = hr) => h.call(a, 'POST', `/v1/hol
 const withdraw = (id: string, a = hr, body: object = {}) => h.call(a, 'POST', `/v1/holidays/${id}/withdraw`, { expectedVersion: 1, reason: 'Declared by mistake (synthetic)', ...body });
 
 const newShift = async (over: object = {}) => {
-  const res = await h.call(hr, 'POST', '/v1/shifts', { code: uniq('S').toUpperCase(), name: 'Synthetic shift', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }], ...over });
+  const res = await h.call(hr, 'POST', '/v1/shifts', { code: uniq('S').toUpperCase(), name: 'Synthetic shift', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }], ...over });
   expect(res.statusCode, res.body).toBe(201);
   return res.json() as { id: string; version: number };
 };
@@ -453,7 +453,7 @@ describe('effective-dated shift revisions (FR-005, DF05)', () => {
     // The existing writes re-check too.
     const creator = await h.actor(A, 'HR_ADMINISTRATOR');
     const code = uniq('NO').toUpperCase();
-    const lateCreate = await revokedAfterGuard(creator, () => h.call(creator, 'POST', '/v1/shifts', { code, name: 'x', inTime: '09:00', outTime: '18:00', breaks: [] }));
+    const lateCreate = await revokedAfterGuard(creator, () => h.call(creator, 'POST', '/v1/shifts', { code, name: 'x', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [] }));
     expect(lateCreate.statusCode).toBe(403);
     expect((await h.db.query(`select 1 from shift where company_id = $1 and code = $2`, [A.id, code])).rowCount).toBe(0);
     const renamer = await h.actor(A, 'HR_ADMINISTRATOR');

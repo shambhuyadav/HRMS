@@ -46,7 +46,7 @@ describe.runIf(isModuleActive('timesheet'))('timesheet: paged lists and reports 
       expect(res.statusCode, res.body).toBe(201);
     }
     // One employee has a shift (a known schedule) and an approved week; the peer has a draft week.
-    const shift = await h.call(w.hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day shift', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
+    const shift = await h.call(w.hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day shift', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
     expect(shift.statusCode, shift.body).toBe(201);
     expect((await h.call(w.hr, 'POST', `/v1/employees/${w.employeeEmp}/shift`, { shiftId: shift.json().id, effectiveFrom: '2026-01-05' })).statusCode).toBe(200);
     await approvedWeek(h, w, w.employee, W1, [line(W1), line('2026-03-03', { minutes: 240 }), line('2026-03-03', { activityId: w.meetId, minutes: 240 })]);

@@ -34,6 +34,8 @@ export const lifecycleRegistration: ModuleRegistration = {
         'exit.approve.operational',
         'exit.manage.operational',
         'settlement.read.operational',
+        // I-88 (0235): the statutory rule pack registry is operational configuration to read.
+        'statutory_pack.read.operational',
       ],
       ceiling: [
         'employee_process.read.note',
@@ -50,15 +52,33 @@ export const lifecycleRegistration: ModuleRegistration = {
         'settlement.review.amount',
         'settlement.approve.amount',
         'settlement.release.amount',
+        // I-81 (0185): recording a settlement payment from evidence, and in-app sending of a statement or a letter, are rights of
+        // their own (FR-002, FR-018, FR-053, FR-054).
+        'settlement.record_payment.amount',
+        'settlement.send.amount',
+        'letter.send.letter',
+        // I-88 (0235): waiving an exit's notice recovery is its own confidential right, never a default duty; a statutory rule pack is
+        // validated by one authorised person and activated by another, each a ceiling granted per assignment.
+        'settlement.waive_notice.amount',
+        'statutory_pack.validate.operational',
+        'statutory_pack.activate.operational',
       ],
     },
     REPORTING_MANAGER: {
       defaultDuties: ['employee_process.read.operational', 'employee_process.complete_task.operational', 'exit.read.operational', 'exit.recommend.operational'],
       ceiling: ['exit.read.reason'],
     },
-    // H1/BR-053: the employee's own processes and resignation; the own reason is the catalogued own-ESS group.
+    // H1/BR-053: the employee's own processes and resignation; the own reason is the catalogued own-ESS group. The letters and
+    // settlement statements delivered to them are own outputs (own_delivery, I-81 item 9), kept after leaving (I-81 item 4).
     EMPLOYEE: {
-      defaultDuties: ['employee_process.read.operational', 'employee_process.complete_task.operational', 'exit.submit.operational', 'exit.read.operational', 'exit.read.reason'],
+      defaultDuties: [
+        'employee_process.read.operational',
+        'employee_process.complete_task.operational',
+        'exit.submit.operational',
+        'exit.read.operational',
+        'exit.read.reason',
+        'own_delivery.read.delivery',
+      ],
     },
     // Clearance and onboarding tasks may be owned by these roles; the duty is granted per assignment.
     SYSTEM_ADMINISTRATOR: { ceiling: ['employee_process.read.operational', 'employee_process.complete_task.operational'] },
@@ -71,6 +91,7 @@ export const lifecycleRegistration: ModuleRegistration = {
     { resource: 'letter_template', fieldGroup: 'operational' },
     { resource: 'exit', fieldGroup: 'operational' },
     { resource: 'settlement', fieldGroup: 'operational' },
+    { resource: 'statutory_pack', fieldGroup: 'operational' },
   ],
   workflows: [
     // F1: the direct manager recommends the last working date (HR fallback when the manager is ineligible), then
@@ -145,6 +166,35 @@ export const lifecycleRegistration: ModuleRegistration = {
       body: 'The resignation of {{employeeName}} ({{employeeCode}}) was {{outcome}}.',
       placeholders: ['employeeName', 'employeeCode', 'outcome'],
     },
+    // I-89 item 7 (0242 adds them to existing companies): an HR-entered retirement, termination, death, disablement or contract end,
+    // in its own words; its decision goes to the manager only (the employee hears through HR's letter; never a deceased's account).
+    {
+      code: 'SEPARATION_SUBMITTED',
+      eventType: 'SEPARATION_SUBMITTED',
+      selector: 'ASSIGNED_REVIEWER',
+      optional: false,
+      subject: 'Separation waiting for your recommendation',
+      body: '{{separationType}} of {{employeeName}} ({{employeeCode}}) was recorded with a last working date of {{lastWorkingDate}}. Please review it.',
+      placeholders: ['separationType', 'employeeName', 'employeeCode', 'lastWorkingDate'],
+    },
+    {
+      code: 'SEPARATION_RECOMMENDED',
+      eventType: 'SEPARATION_RECOMMENDED',
+      selector: 'ASSIGNED_REVIEWER',
+      optional: false,
+      subject: 'Separation waiting for your approval',
+      body: '{{separationType}} of {{employeeName}} ({{employeeCode}}) with a last working date of {{lastWorkingDate}} is waiting for your approval.',
+      placeholders: ['separationType', 'employeeName', 'employeeCode', 'lastWorkingDate'],
+    },
+    {
+      code: 'SEPARATION_DECIDED',
+      eventType: 'SEPARATION_DECIDED',
+      selector: 'SUBJECT_MANAGER',
+      optional: false,
+      subject: 'Separation of {{employeeName}}',
+      body: '{{separationType}} of {{employeeName}} ({{employeeCode}}) was {{outcome}}.',
+      placeholders: ['separationType', 'employeeName', 'employeeCode', 'outcome'],
+    },
     {
       code: 'EXIT_WITHDRAWAL_SUBMITTED',
       eventType: 'EXIT_WITHDRAWAL_SUBMITTED',
@@ -189,6 +239,16 @@ export const lifecycleRegistration: ModuleRegistration = {
       subject: 'Full and final settlement {{outcome}}',
       body: 'Revision {{revision}} of the full and final settlement of {{employeeName}} ({{employeeCode}}) was {{outcome}}.',
       placeholders: ['revision', 'employeeName', 'employeeCode', 'outcome'],
+    },
+    // FR-018, FR-054, DF09, H7 (I-81 item 9): "sent" is in-app; the notice names the kind of document only, never its content.
+    {
+      code: 'ESS_DOCUMENT_DELIVERED',
+      eventType: 'ESS_DOCUMENT_DELIVERED',
+      selector: 'SUBJECT_EMPLOYEE',
+      optional: false,
+      subject: 'A document is waiting in your self-service',
+      body: 'Your {{documentKind}} is available in your self-service under My documents received. Nothing is attached to this message.',
+      placeholders: ['documentKind'],
     },
   ],
 };

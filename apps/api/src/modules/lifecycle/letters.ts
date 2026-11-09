@@ -14,8 +14,10 @@ import { type AccessGrant, canAccessEmployee } from '../access/authorize.js';
 import { lockTransaction } from '../workflow/engine.js';
 import { actorOf, advisoryLock, assertInScope, assertNotSelf, audit } from './common.js';
 
+type PlaceholderDictionary = Readonly<Record<string, { source: 'EMPLOYEE' | 'COMPANY' | 'EXIT' | 'LETTER' | 'OFFER'; label: string }>>;
+
 /** Approved letter placeholders (FR-017 "permitted employee/company placeholders"; FR-055 approved exit data). */
-export const LETTER_PLACEHOLDERS: Readonly<Record<string, { source: 'EMPLOYEE' | 'COMPANY' | 'EXIT' | 'LETTER'; label: string }>> = {
+export const LETTER_PLACEHOLDERS: PlaceholderDictionary = {
   employeeCode: { source: 'EMPLOYEE', label: 'Employee code' },
   employeeName: { source: 'EMPLOYEE', label: 'Employee name' },
   workEmail: { source: 'EMPLOYEE', label: 'Work email' },
@@ -32,6 +34,37 @@ export const LETTER_PLACEHOLDERS: Readonly<Record<string, { source: 'EMPLOYEE' |
   letterDate: { source: 'LETTER', label: 'Letter date' },
 };
 
+/**
+ * The placeholders of an OFFER letter template (FR-017, FR-014; decided under owner delegation, 6 Nov 2026, docs/03 I-82 item
+ * 1). An offer letter is issued before the candidate is an employee, from the offer alone (hiring/offer-letter.ts): the
+ * candidate, the requisition's post and the terms and compensation of the approved offer revision, never a typed value. No
+ * employee or exit placeholder applies, and no other letter type may use these.
+ */
+export const OFFER_LETTER_PLACEHOLDERS: PlaceholderDictionary = {
+  candidateName: { source: 'OFFER', label: 'Candidate name' },
+  candidateCode: { source: 'OFFER', label: 'Candidate code' },
+  requisitionCode: { source: 'OFFER', label: 'Requisition code' },
+  jobTitle: { source: 'OFFER', label: 'Job title (requisition)' },
+  department: { source: 'OFFER', label: 'Department (requisition)' },
+  designation: { source: 'OFFER', label: 'Designation (requisition)' },
+  location: { source: 'OFFER', label: 'Work location (requisition)' },
+  employmentType: { source: 'OFFER', label: 'Employment type (requisition)' },
+  proposedJoiningDate: { source: 'OFFER', label: 'Proposed joining date (approved offer)' },
+  offerRevision: { source: 'OFFER', label: 'Approved offer revision' },
+  currencyCode: { source: 'OFFER', label: 'Currency (approved offer)' },
+  annualCtc: { source: 'OFFER', label: 'Annual CTC (approved offer)' },
+  monthlyGross: { source: 'OFFER', label: 'Monthly gross (approved offer)' },
+  companyName: { source: 'COMPANY', label: 'Company name' },
+  companyCode: { source: 'COMPANY', label: 'Company code' },
+  letterDate: { source: 'LETTER', label: 'Letter date' },
+};
+
+/** The letter type whose templates use OFFER_LETTER_PLACEHOLDERS and are issued only from an approved offer. */
+export const OFFER_LETTER_TYPE = 'OFFER';
+
+/** The approved placeholders of a letter type. */
+export const placeholdersFor = (letterType: string): PlaceholderDictionary => (letterType === OFFER_LETTER_TYPE ? OFFER_LETTER_PLACEHOLDERS : LETTER_PLACEHOLDERS);
+
 /** FR-055: the letter types generated from approved exit data. */
 const EXIT_LETTER_TYPES: readonly string[] = ['RELIEVING', 'EXPERIENCE'];
 /** FR-055 acceptance "the letter shows the approved employment period": mandatory in such a letter, never optional. */
@@ -46,12 +79,12 @@ function assertEmploymentPeriod(letterType: string, placeholders: readonly strin
 const TOKEN = /\{\{\s*([a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g;
 const ANY_BRACES = /\{\{[^}]*\}\}/g;
 
-/** The placeholders a body uses; unknown or malformed placeholders are refused. */
-export function parsePlaceholders(body: string): string[] {
+/** The placeholders a body uses; unknown or malformed placeholders (for the letter type's dictionary) are refused. */
+export function parsePlaceholders(body: string, dictionary: PlaceholderDictionary = LETTER_PLACEHOLDERS): string[] {
   const malformed = (body.match(ANY_BRACES) ?? []).filter((m) => !/^\{\{\s*[a-zA-Z][a-zA-Z0-9]*\s*\}\}$/.test(m));
   if (malformed.length > 0) throw new HttpError(422, 'MALFORMED_PLACEHOLDER', 'A placeholder is malformed', { placeholders: malformed });
   const used = [...new Set([...body.matchAll(TOKEN)].map((m) => m[1]!))];
-  const unknown = used.filter((p) => !(p in LETTER_PLACEHOLDERS));
+  const unknown = used.filter((p) => !Object.hasOwn(dictionary, p));
   if (unknown.length > 0) throw new HttpError(422, 'UNKNOWN_PLACEHOLDER', 'Only approved placeholders may be used', { placeholders: unknown });
   return used.sort();
 }
@@ -199,7 +232,7 @@ export async function createLetterTemplate(tx: Queryable, grant: AccessGrant, in
   if (!type) throw new HttpError(422, 'INVALID_REFERENCE', 'Unknown letter type');
   const exists = await tx.query(`select 1 from letter_template where company_id = $1 and code = $2`, [grant.companyId, input.code]);
   if ((exists.rowCount ?? 0) > 0) throw new HttpError(409, 'TEMPLATE_CODE_EXISTS', 'A letter template with this code exists');
-  const placeholders = parsePlaceholders(input.body);
+  const placeholders = parsePlaceholders(input.body, placeholdersFor(input.letterType));
   const optional = [...new Set(input.optionalPlaceholders ?? [])].sort();
   checkOptional(placeholders, optional);
   const id = (
@@ -219,8 +252,8 @@ export async function createLetterTemplate(tx: Queryable, grant: AccessGrant, in
 
 /** Saves the draft revision (opening the next one when none is being edited). */
 export async function saveLetterDraft(tx: Queryable, grant: AccessGrant, id: string, input: LetterDraftInput & { expectedVersion?: number | undefined }) {
-  await loadTemplate(tx, grant.companyId, id, true);
-  const placeholders = parsePlaceholders(input.body);
+  const template = await loadTemplate(tx, grant.companyId, id, true);
+  const placeholders = parsePlaceholders(input.body, placeholdersFor(template.letter_type));
   const optional = [...new Set(input.optionalPlaceholders ?? [])].sort();
   checkOptional(placeholders, optional);
   const draft = (
@@ -293,7 +326,11 @@ export async function updateLetterTemplate(tx: Queryable, grant: AccessGrant, id
 // Preview, final output, reading
 // ---------------------------------------------------------------------------------------------------------------
 
-async function publishedTemplate(db: Queryable, companyId: string, code: string) {
+/**
+ * The published revision of an active template. An OFFER template is issued only from an approved offer (hiring/offer-letter.ts,
+ * I-82 item 1) and an employee process uses every other type, so each side refuses the other's.
+ */
+export async function publishedTemplate(db: Queryable, companyId: string, code: string, issuedFrom: 'PROCESS' | 'OFFER' = 'PROCESS') {
   const t = (
     await db.query<{ template_id: string; code: string; active: boolean; letter_type: string; revision_id: string | null; revision: number | null; body: string | null; optional: string[] | null }>(
       `select lt.id as template_id, lt.code, lt.active, ty.code as letter_type, r.id as revision_id, r.revision, r.body, r.optional_placeholders as optional
@@ -306,6 +343,8 @@ async function publishedTemplate(db: Queryable, companyId: string, code: string)
   if (!t) throw new HttpError(422, 'INVALID_REFERENCE', 'Unknown letter template');
   if (!t.active) throw new HttpError(422, 'TEMPLATE_INACTIVE', 'The letter template is inactive');
   if (!t.revision_id || t.revision === null || t.body === null) throw new HttpError(422, 'TEMPLATE_NOT_PUBLISHED', 'The letter template has no published revision');
+  if (issuedFrom === 'OFFER' && t.letter_type !== OFFER_LETTER_TYPE) throw new HttpError(422, 'NOT_AN_OFFER_TEMPLATE', 'An offer letter uses a template of the offer letter type');
+  if (issuedFrom === 'PROCESS' && t.letter_type === OFFER_LETTER_TYPE) throw new HttpError(422, 'OFFER_TEMPLATE', 'An offer letter is issued from the approved offer in hiring, not from an employee process');
   return { templateId: t.template_id, code: t.code, letterType: t.letter_type, revisionId: t.revision_id, revision: t.revision, body: t.body, optional: t.optional ?? [] };
 }
 
@@ -457,7 +496,9 @@ export async function listLetterOutputs(db: Queryable, grant: AccessGrant, emplo
   return pageOf(
     db,
     `select o.id, o.employee_process_id as "processId", o.template_code as "templateCode", o.template_revision as "templateRevision", o.output_number as "outputNumber",
-            o.generated_at as "generatedAt", o.generated_by as "generatedBy", o.checksum, a.byte_size as "byteSize", o.delivery_state as "deliveryState"
+            o.generated_at as "generatedAt", o.generated_by as "generatedBy", o.checksum, a.byte_size as "byteSize",
+            -- FR-018 (I-81 item 9): sent means delivered in-app to the employee's own self-service (ess_delivery).
+            case when exists (select 1 from ess_delivery d where d.company_id = o.company_id and d.letter_output_id = o.id) then 'DELIVERED_IN_APP' else o.delivery_state end as "deliveryState"
        from letter_output o join attachment a on a.company_id = o.company_id and a.id = o.attachment_id
       where o.company_id = $1 and o.employee_id = $2`,
     [grant.companyId, employeeId],

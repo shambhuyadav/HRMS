@@ -63,6 +63,51 @@ export async function cycleReport(db: Queryable, grant: AccessGrant, cycleId: st
   return report;
 }
 
+/**
+ * FR-042 training needs offered to training planning as a suggestion only (I-86): no nomination or enrolment follows from it.
+ * Completed appraisals of the cycle in scope (the caller's own excluded), each with the employee's stated need and the manager's
+ * recommendation from the confirmed revision. The texts are confidential, so the route needs the rating group.
+ */
+export async function trainingNeeds(db: Queryable, grant: AccessGrant, cycleId: string, q: { departmentId?: string | undefined }) {
+  const cycle = await loadCycle(db, grant.companyId, cycleId);
+  if (!cycle) throw notFound();
+  const pop = population(grant, cycleId, q.departmentId);
+  const included = cycle.sections.includes('TRAINING_NEEDS');
+  const rows = included
+    ? (
+        await db.query<{ id: string; employee_id: string; employee_code: string; display_name: string; completed_at: Date; stated: string | null; recommended: string | null }>(
+          `select a.id, a.employee_id, e.employee_code, e.display_name, a.completed_at,
+                  (select se.body from appraisal_section_entry se join appraisal_revision r on r.company_id = se.company_id and r.id = se.revision_id
+                    where se.company_id = a.company_id and r.appraisal_id = a.id and r.revision = a.revision and se.section = 'TRAINING_NEEDS' and se.party = 'EMPLOYEE') as stated,
+                  (select se.body from appraisal_section_entry se join appraisal_revision r on r.company_id = se.company_id and r.id = se.revision_id
+                    where se.company_id = a.company_id and r.appraisal_id = a.id and r.revision = a.revision and se.section = 'TRAINING_NEEDS' and se.party = 'MANAGER') as recommended
+             from appraisal a join employee e on e.company_id = a.company_id and e.id = a.employee_id
+            where ${pop.where} and a.state = 'APPROVED'
+            order by e.employee_code limit ${EXPORT_ROW_LIMIT}`,
+          pop.params.values,
+        )
+      ).rows
+    : [];
+  return {
+    cycle: { id: cycle.id, code: cycle.code, name: cycle.name, startDate: cycle.start_date, endDate: cycle.end_date },
+    filters: { departmentId: q.departmentId ?? null },
+    scope: grant.scopeKind,
+    ownAppraisalExcluded: grant.linkedEmployeeId !== null,
+    sectionIncluded: included,
+    // A suggestion for training planning: nobody is nominated or enrolled by it.
+    suggestionOnly: true,
+    generatedAt: new Date().toISOString(),
+    population: rows.length,
+    items: rows.map((r) => ({
+      appraisalId: r.id,
+      employee: { id: r.employee_id, employeeCode: r.employee_code, displayName: r.display_name },
+      completedAt: r.completed_at,
+      employeeStated: r.stated,
+      managerRecommended: r.recommended,
+    })),
+  };
+}
+
 /** FR-065-style cell: a value a spreadsheet could read as a formula is written as text; every cell is quoted. */
 function cell(value: unknown): string {
   let text = value === null || value === undefined ? '' : value instanceof Date ? value.toISOString() : String(value);

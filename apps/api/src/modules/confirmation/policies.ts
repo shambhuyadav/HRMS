@@ -6,7 +6,8 @@
 // it. Neither may cut off a case already opened under it. Equally specific policies that could apply to the same
 // employee on overlapping dates are refused (DF11; migration 0081 guards the same rule in the database). The month-end
 // clamp and the non-inclusive count are the DF11 rule (31 January + 1 month = 28 February) and the extension limit is
-// the DF11 maximum of two; none of them is set here, and a new revision keeps what the previous one recorded. Writing
+// the DF11 maximum of two; a new code may count its start day inclusively instead (I-84 item 12), and a new revision keeps
+// what the previous one recorded. Writing
 // needs an unrestricted company-scope assignment, as for the other company-wide configuration.
 import type { FastifyInstance } from 'fastify';
 import { writeAudit } from '../../audit/audit.js';
@@ -30,6 +31,13 @@ export interface PolicyTerms {
 
 export interface PolicyInput extends PolicyTerms {
   code: string;
+  /**
+   * BRD lines 2065 and 3926 `start_day_inclusive` (I-84 item 12; I-74 item 6; decided under owner delegation, 6 Nov 2026): true counts
+   * the start date as day one, so the period ends, and the review falls due, one day earlier than the DF11 count. Joining 1 January
+   * on six calendar months: 1 July by DF11 (the default, false), 30 June counted inclusively; on 90 days: 1 April, or 31 March. Set
+   * when a code is created and carried by every later revision, like the other date rules.
+   */
+  startDayInclusive?: boolean | undefined;
   /** Employment type code (EMPLOYMENT_TYPE list); absent or null applies to every type. */
   employmentType?: string | null | undefined;
   gradeId?: string | null | undefined;
@@ -285,7 +293,7 @@ export async function createPolicy(tx: Queryable, grant: AccessGrant, input: Pol
   if ((exists.rowCount ?? 0) > 0) throw new HttpError(409, 'POLICY_EXISTS', 'A policy with this code exists; create a new revision of it instead');
   const a = await resolveApplicability(tx, grant.companyId, input);
   await refuseOverlap(tx, grant.companyId, a, input.effectiveFrom, input.effectiveTo ?? null);
-  const row = await insertPolicy(tx, grant, input.code, 1, input, a, DF11_RULES);
+  const row = await insertPolicy(tx, grant, input.code, 1, input, a, { ...DF11_RULES, start_day_inclusive: input.startDayInclusive === true });
   await audit(tx, grant, row, 'CREATE');
   return policyView(row, grant.businessDate);
 }
@@ -379,6 +387,7 @@ export async function confirmationPolicyRoutes(app: FastifyInstance, opts: { db:
             employmentType: { type: ['string', 'null'], maxLength: 40 },
             gradeId: { type: ['string', 'null'], format: 'uuid' },
             locationId: { type: ['string', 'null'], format: 'uuid' },
+            startDayInclusive: { type: 'boolean' },
           },
         },
       },

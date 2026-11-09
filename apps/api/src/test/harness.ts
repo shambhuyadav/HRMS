@@ -140,7 +140,8 @@ export async function startHarness(): Promise<Harness> {
         [company.id, user, roleCode, opts.scope ?? role.defaultScope, approver, SYSTEM_ACTOR_ID],
       )
     ).id;
-    for (const key of [...(opts.duties ?? role.defaultDuties), ...(opts.extra ?? [])]) {
+    // Once each: an extra that a role later gains as a default duty (I-84) stays a valid fixture.
+    for (const key of new Set([...(opts.duties ?? role.defaultDuties), ...(opts.extra ?? [])])) {
       const { resource, action, fieldGroup } = parsePermissionKey(key);
       await db.query(
         `insert into role_assignment_permission (company_id, role_assignment_id, permission_id, active, effective_from)

@@ -202,7 +202,7 @@ describe('leave (BR-010, DF05, ZT09)', () => {
 });
 
 describe('attendance (DF05, ZT09)', () => {
-  const HOURS = { inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] };
+  const HOURS = { inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] };
   const POLICIES = '/v1/attendance/policies';
   const thresholds = (over: Record<string, unknown>) => ({ graceMinutes: 5, presentPercent: '60', halfDayPercent: '40', overtimeEnabled: false, ...over });
   /** An employee on the day shift who worked 09:00 to 15:00 on each date: 300 of 480 minutes, 62.5%. */

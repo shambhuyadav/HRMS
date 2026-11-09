@@ -15,6 +15,7 @@ import { reassertAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
 import { holdsSalaryHistoryGrant } from '../increment/service.js';
 import { actorOf, advisoryLock, assertInScope, assertNotSelf, audit, checkAmount, requireCompanyScope, requireDate, requireText } from './common.js';
+import { requireStructureMatch } from './grade-structures.js';
 
 /**
  * docs/09 §6.5: configuration changes and independent activations re-resolve their permission inside their own
@@ -403,6 +404,13 @@ export async function createCalendar(tx: Queryable, grant: AccessGrant, input: {
   await reassertConfig(tx, grant, 'manage');
   const exists = await tx.query(`select 1 from payroll_calendar where company_id = $1 and code = $2`, [grant.companyId, code]);
   if ((exists.rowCount ?? 0) > 0) throw new HttpError(409, 'CALENDAR_EXISTS', 'A payroll calendar with this code exists');
+  // OQ-17 (I-80, decided under owner delegation, 6 Nov 2026): a payroll currency is one of the approved codes (0145, 0208), with the
+  // reference's minor unit. A second currency exists only once someone activates a calendar in it (maker-checker, as every calendar).
+  const reference = (await tx.query<{ minor_unit: number }>(`select minor_unit from currency where code = $1`, [input.currencyCode])).rows[0];
+  if (!reference) throw new HttpError(422, 'UNSUPPORTED_CURRENCY', 'The currency is not one of the approved currencies', { field: 'currencyCode' });
+  if (reference.minor_unit !== input.currencyMinorUnit) {
+    throw new HttpError(422, 'CURRENCY_MINOR_UNIT_MISMATCH', `This currency has ${reference.minor_unit} decimal places`, { field: 'currencyMinorUnit', minorUnit: reference.minor_unit });
+  }
   const id = (
     await tx.query<{ id: string }>(
       `insert into payroll_calendar (company_id, code, name, currency_code, currency_minor_unit, state, created_by, updated_by)
@@ -769,6 +777,8 @@ export async function setSalaryComponents(
     seen.add(component.id);
     rows.push({ id: component.id, amount: checkAmount(c.amount, 4, { allowZero: true }), basis: c.basis, code: component.code });
   }
+  // FR-028/029 (I-80): with a grade salary structure in force for the employee's grade on the start, the components are its derivation.
+  const structure = await requireStructureMatch(tx, grant.companyId, a, rows.map((r) => ({ componentId: r.id, code: r.code, amount: r.amount, basis: r.basis })));
   for (const r of rows) {
     await tx.query(
       `insert into salary_component (company_id, salary_arrangement_id, component_id, amount, basis, created_by, updated_by) values ($1, $2, $3, $4::numeric, $5, $6, $6)`,
@@ -776,7 +786,7 @@ export async function setSalaryComponents(
     );
   }
   await audit(tx, actorOf(grant), 'salary_arrangement', arrangementId, 'SET_COMPONENTS', null, {
-    operational: { componentCodes: rows.map((r) => r.code), count: rows.length },
+    operational: { componentCodes: rows.map((r) => r.code), count: rows.length, gradeStructureId: structure?.structureId ?? null },
     salary: { components: rows.map((r) => ({ code: r.code, amount: r.amount, basis: r.basis })) },
   });
   return salaryComponents(tx, grant, arrangementId);

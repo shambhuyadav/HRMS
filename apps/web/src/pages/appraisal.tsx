@@ -13,6 +13,13 @@
 // new DRAFT appraisals; it never submits, rates or approves anything. A goal file the malware scan has not released is
 // held unread (FR-106); the user's own uploads are listed, so a held one is opened again and checked again from the
 // file the server stored (records.tsx).
+// Competencies and sections (FR-041, FR-042; decided under owner delegation, 6 Nov 2026, I-86): HR keeps a dated goals /
+// competencies split, a competency master with one behavioural indicator per level 1 to 5, and dated competency sets per grade
+// (optionally one designation); enrolment copies the employee's set into the appraisal, fixed. The employee self-scores and the
+// manager rates each competency like a goal; the weighted result is (goals % x goal result + competencies % x competency result)
+// / 100, rounded once half up, or the goal result alone without competencies. A cycle includes any of four unscored sections
+// (improvement areas, training needs, activity performance, stretched KPIs); an included one must be filled by its party before
+// they submit, an excluded one never blocks. Training needs are listed for training planning as a suggestion only.
 // Ratings, comments, results, remarks and reasons are confidential: the server leaves them out of its answers unless the
 // selected assignment may see them, and these screens render only what it returned. One's own appraisal never shows a
 // rating, and no employee-visible result is published (no setting authorises one). The server authorises every call
@@ -44,6 +51,8 @@ const EXPORT = 'appraisal.export.operational';
 const RATE = 'appraisal.rate.rating';
 const CONFIRM = 'appraisal.confirm.rating';
 const SELF_ASSESS = 'appraisal.self_assess.self';
+/** GET /v1/appraisal-cycles/:id/training-needs (I-86): confidential section texts, so the rating group's report duty. */
+const REPORT_RATING = 'appraisal.report.rating';
 /** GET /v1/org/departments: the department filter of the register and the report. */
 const ORG_READ = 'org_master.read.operational';
 /** GET /v1/employees: whom to enrol. */
@@ -60,6 +69,7 @@ const PATHS = {
   reviews: '/appraisal/reviews',
   reports: '/appraisal/reports',
   goalUpload: '/appraisal/goal-upload',
+  competencies: '/appraisal/competencies',
 } as const;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -101,17 +111,71 @@ interface CycleWindow {
   closesOn: string;
   openToday: boolean;
 }
+/** I-77 cycle rules: FORMULA (F1 weighted manager result) or MANUAL (the manager's overall rating) final ratings. */
+type RatingMode = 'FORMULA' | 'MANUAL';
 interface Cycle {
   id: string;
   code: string;
   name: string;
   startDate: string;
   endDate: string;
+  /** Reviewer levels after the manager's rating: 0 (the manager's approval completes it), 1 or 2. */
   approvalLevels: number;
+  /** FR-041 KRA review: goals take effect once someone other than their setter reviews them. */
+  goalReviewRequired: boolean;
+  ratingMode: RatingMode;
+  /** The date reviewer confirmations are due; null when the cycle has no reviewer level or it was never set. */
+  reviewDueOn: string | null;
+  /** I-86: the cycle's goals / competencies split (absent from servers before it). */
+  scoring?: Scoring;
+  /** FR-042 sections the cycle includes. */
+  sections?: SectionInfo[];
   state: string;
   /** null: the window is unscheduled, so entries at that stage are refused. */
   windows: Partial<Record<WindowKey, CycleWindow | null>>;
   version: number;
+}
+/** I-86 scoring split: whole percentages adding to 100; competencies 0 = not assessed (the goal result alone). */
+interface Scoring {
+  goalWeightPercent: number;
+  competencyWeightPercent: number;
+  competenciesAssessed?: boolean;
+}
+type SectionParty = 'EMPLOYEE' | 'MANAGER';
+/** FR-042 section (modules/appraisal/sections.ts): meaning, who fills it; none is scored. Completion flags only, never the texts. */
+interface SectionInfo {
+  code: string;
+  title: string;
+  meaning: string;
+  filledBy: SectionParty[];
+  prompts: Partial<Record<SectionParty, string>>;
+  scored?: boolean;
+  selfEntryComplete?: boolean;
+  managerEntryComplete?: boolean;
+}
+/** FR-041 competency copied into the appraisal at enrolment and fixed (operational: no values). */
+interface CompetencyItem {
+  id: string;
+  competencyId: string;
+  sequence: number;
+  code: string;
+  name: string;
+  description: string | null;
+  indicators: { level: number; text: string }[];
+  weight: number;
+  selfEntryComplete: boolean;
+  /** Absent from one's own appraisal. */
+  managerRatingComplete?: boolean;
+}
+interface CompetencyEntry {
+  competencyId: string;
+  sequence: number;
+  score: number | null;
+  comment: string | null;
+}
+interface SectionText {
+  section: string;
+  text: string | null;
 }
 /** A decider, assignee or recorder: the user, with the employee identity when the user is linked to one. */
 interface UserRef {
@@ -145,6 +209,17 @@ interface Entry {
 interface EntrySet {
   comment: string | null;
   entries: Entry[];
+  /** I-86: absent from servers before it. */
+  competencies?: CompetencyEntry[];
+  sections?: SectionText[];
+}
+/** The manager's rating with the I-86 results: the goal result, the competency result and the split they were combined with. */
+interface ManagerRating extends EntrySet {
+  weightedResult: string | null;
+  overallRating?: number | null;
+  goalResult?: string | null;
+  competencyResult?: string | null;
+  split?: Scoring | null;
 }
 /** Confidential parts arrive only for a caller who may see them (render what is present). */
 interface Revision {
@@ -158,7 +233,10 @@ interface Revision {
   /** The explanation of a return, addressed to the employee. */
   employeeMessage?: string | null;
   selfEntry?: EntrySet;
-  managerRating?: EntrySet & { weightedResult: string | null };
+  /** `overallRating`: the manager's overall rating of a MANUAL cycle (null otherwise). */
+  managerRating?: ManagerRating;
+  /** FR-043: each reviewer level's overall score, kept apart (rating group only). */
+  reviewerScores?: { level: number; score: number; scoredAt: string }[];
 }
 interface DecisionRecord {
   revision: number;
@@ -193,17 +271,44 @@ interface Pending {
   /** The task holder; one's own appraisal shows a name only. */
   with: { userId?: string; employeeCode?: string | null; displayName: string | null };
 }
+/** FR-041 KRA review; who set and reviewed the goals is absent from one's own appraisal. */
+interface GoalReview {
+  required: boolean;
+  reviewed: boolean;
+  reviewedAt: string | null;
+  setBy?: UserRef | null;
+  setAt?: string | null;
+  reviewedBy?: UserRef | null;
+}
 interface Appraisal {
   id: string;
-  cycle: { id: string; code: string; name: string; startDate: string; endDate: string; approvalLevels: number; state: string };
+  cycle: {
+    id: string;
+    code: string;
+    name: string;
+    startDate: string;
+    endDate: string;
+    approvalLevels: number;
+    goalReviewRequired?: boolean;
+    ratingMode?: RatingMode;
+    reviewDueOn?: string | null;
+    scoring?: Scoring;
+    state: string;
+  };
   employee: EmployeeRef;
   state: string;
   revision: number;
   source: string;
   taskStatus: string;
+  /** Absent from answers of servers before I-77. */
+  goalReview?: GoalReview;
   pending: Pending | null;
   goals: Goal[];
   goalWeightTotal: number;
+  /** I-86 (absent from servers before it). */
+  competencies?: CompetencyItem[];
+  competencyWeightTotal?: number;
+  sections?: SectionInfo[];
   windows: Partial<Record<WindowKey, AppraisalWindow>>;
   revisions: Revision[];
   decisions: DecisionRecord[];
@@ -243,6 +348,9 @@ interface AppraisalTask {
   stage: string;
   level: number | null;
   assignedAt: string;
+  /** The task's due date (company-local, inclusive) and whether it has passed (I-77 item 5). */
+  dueOn?: string | null;
+  overdue?: boolean;
   /** null when the appraisal is outside the selected assignment's row scope. */
   appraisal: Appraisal | null;
 }
@@ -304,7 +412,12 @@ interface EntryChange {
 /** PUT /v1/appraisal-tasks/:id/rating and PUT /v1/me/appraisals/:id/self-entry, without the version. */
 interface EntryChanges {
   entries: EntryChange[];
+  /** I-86: changed competency scores and comments, and changed section texts (null clears). */
+  competencies?: { competencyId: string; score: number | null; comment: string | null }[];
+  sections?: SectionText[];
   comment?: string | null;
+  /** The rating of a MANUAL cycle only (FR-042). */
+  overallRating?: number | null;
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -336,6 +449,14 @@ function useKeys() {
       own: (id: string) => [...base, 'mine', 'detail', id] as const,
       departments: [...base, 'departments'] as const,
       employeeSearch: (term: string) => [...base, 'employee-search', term] as const,
+      sections: [...base, 'sections'] as const,
+      config: [...base, 'config'] as const,
+      scoring: [...base, 'config', 'scoring'] as const,
+      competencies: [...base, 'config', 'competencies'] as const,
+      competencySets: [...base, 'config', 'competency-sets'] as const,
+      grades: [...base, 'grades'] as const,
+      designations: [...base, 'designations'] as const,
+      trainingNeeds: (cycleId: string, departmentId: string) => [...base, 'reports', 'training-needs', cycleId, departmentId] as const,
     };
   }, [context]);
 }
@@ -386,6 +507,7 @@ const inOwnContext = (me: MeContext | null) => me !== null && me.roleCode === OW
 
 const TASK_STATUS_LABEL: Record<string, string> = {
   AWAITING_GOALS: 'Waiting for goals',
+  AWAITING_GOAL_REVIEW: 'Waiting for the goal review',
   AWAITING_SELF_ENTRY: 'Waiting for the self-entry',
   AWAITING_MANAGER_RATING: 'Waiting for the manager rating',
   AWAITING_REVIEW: 'Waiting for the reviewer confirmation',
@@ -411,7 +533,9 @@ const periodText = (p: { startDate: string; endDate: string }) => `${formatDate(
 function windowText(w: { opensOn: string | null; closesOn: string | null } | null | undefined): string {
   return w && w.opensOn && w.closesOn ? `${formatDate(w.opensOn)} to ${formatDate(w.closesOn)}` : 'Not scheduled (entries are refused)';
 }
-const levelsText = (n: number) => (n === 2 ? '2 (a second independent reviewer confirms after the first)' : '1 (one independent reviewer confirms)');
+const levelsText = (n: number) =>
+  n === 2 ? '2 (a second independent reviewer confirms after the first)' : n === 0 ? 'None (the manager’s approval completes the appraisal)' : '1 (one independent reviewer confirms)';
+const ratingModeText = (m: string | undefined) => (m === 'MANUAL' ? 'Manual (the manager’s overall rating is the final rating)' : 'Formula (the weighted manager result is the final rating)');
 const yesNo = (v: boolean) => (v ? 'Yes' : 'No');
 const goalList = (goals: unknown) => (Array.isArray(goals) && goals.length > 0 ? goals.join(', ') : null);
 
@@ -425,6 +549,7 @@ type Act =
   | 'cycle-close'
   | 'enrol'
   | 'goals'
+  | 'goal-review'
   | 'exception'
   | 'cancel'
   | 'rating'
@@ -434,9 +559,24 @@ type Act =
   | 'export'
   | 'upload'
   | 'commit'
-  | 'discard';
+  | 'discard'
+  | 'scoring'
+  | 'competency'
+  | 'competency-set';
 
-const isCycleAct = (a: Act) => a === 'setting' || a.startsWith('cycle');
+const isCycleAct = (a: Act) => a === 'setting' || a === 'scoring' || a.startsWith('cycle') || a.startsWith('competency');
+const sectionTitle = (code: unknown) =>
+  typeof code === 'string' ? ({ IMPROVEMENT_AREAS: 'areas for improvement', TRAINING_NEEDS: 'training needs', ACTIVITY_PERFORMANCE: 'activity performance', STRETCHED_KPIS: 'stretched KPIs' }[code] ?? readable(code).toLowerCase()) : 'section';
+/** What is still missing from a self-entry or rating (goals and competencies by number, sections by name). */
+function missingText(d: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const goals = goalList(d.goals);
+  if (goals) parts.push(`goal ${goals}`);
+  const competencies = goalList(d.competencies);
+  if (competencies) parts.push(`competency ${competencies}`);
+  if (Array.isArray(d.sections) && d.sections.length > 0) parts.push(`the ${d.sections.map(sectionTitle).join(' and ')} section${d.sections.length > 1 ? 's' : ''}`);
+  return parts.length > 0 ? `: still missing ${parts.join(', ')}` : '';
+}
 
 const INVALID_STATE_TEXT: Partial<Record<Act, string>> = {
   exception: 'The appraisal is finished, so no exception can be recorded.',
@@ -488,6 +628,77 @@ function refusalText(error: unknown, action: Act): string | null {
       return `Windows follow the process order: goal setting, then self-entry, then manager rating. The ${stageOf(d.later)} window opens or closes before the ${stageOf(d.earlier)} window.`;
     case 'LEVELS_FIXED':
       return 'The reviewer levels cannot change once an appraisal of this cycle has been submitted.';
+    case 'RULES_FIXED':
+      return 'The goal review and the rating mode cannot change once an appraisal of this cycle has been submitted.';
+    // I-86: the result split, competencies and sections.
+    case 'SPLIT_NOT_100':
+      return 'The goal and competency percentages are whole numbers that add up to exactly 100 (goals at least 1).';
+    case 'APPRAISAL_SCORING_NOT_CONFIGURED':
+      return 'No goal and competency split is in force on the cycle start date. Set one in the competency settings, or give the cycle its own.';
+    case 'COMPETENCY_USE_FIXED':
+      return 'Whether this cycle assesses competencies cannot change: an appraisal is already enrolled in it. The split itself can still change until one is submitted.';
+    case 'UNKNOWN_SECTION':
+    case 'DUPLICATE_SECTION':
+      return 'Choose each section once, from the section list.';
+    case 'SECTION_NOT_INCLUDED':
+      return `This cycle does not include the ${sectionTitle(d.section)} section.`;
+    case 'SECTION_NOT_FILLED_BY_YOU':
+      return `The ${sectionTitle(d.section)} section is filled by ${action === 'self-entry' ? 'the manager' : 'the employee'}.`;
+    case 'UNKNOWN_COMPETENCY':
+    case 'DUPLICATE_COMPETENCY':
+      return action === 'competency-set' ? 'Choose each competency once, from the competency list.' : 'The competencies changed since this was loaded. Reload and try again.';
+    case 'INVALID_INDICATORS':
+      return 'Describe each proficiency level 1 to 5 with one behavioural indicator.';
+    case 'COMPETENCY_CODE_EXISTS':
+      return 'A competency with this code already exists.';
+    case 'COMPETENCY_IN_USE':
+      return 'This competency is used in a set that is still in force: replace or end that set first. The start of a competency in use is fixed.';
+    case 'COMPETENCY_ENDED':
+      return 'An ended competency stays ended; add a new competency instead.';
+    case 'COMPETENCY_NOT_ACTIVE':
+      return 'Each competency in a set is active from the set’s start date and has no end date.';
+    case 'COMPETENCIES_REQUIRED':
+      return 'A set holds 1 to 50 competencies.';
+    case 'UNKNOWN_GRADE':
+      return 'Choose a grade.';
+    case 'UNKNOWN_DESIGNATION':
+      return 'Choose a designation, or none.';
+    case 'SET_ALREADY_PLANNED':
+      return 'A set for this grade and designation already starts on or after that date; choose a later start date.';
+    case 'SET_OVERLAP':
+      return 'A set for this grade and designation is already in force past that date.';
+    case 'SET_ENDED':
+      return 'This set already has its end date.';
+    case 'EFFECTIVE_DATE_IN_PAST':
+      return 'A new revision starts today or later; earlier periods are not changed.';
+    case 'REVISION_ALREADY_PLANNED':
+      return 'A split already starts on or after that date; choose a later start date.';
+    case 'INVALID_DATE_RANGE':
+      return 'The end date is after the start date.';
+    case 'REVIEW_DUE_REQUIRED':
+      return 'Set the review due date: with reviewer levels, the date reviewer confirmations are due is required.';
+    case 'REVIEW_DUE_NOT_USED':
+      return 'A cycle without reviewer levels has no reviewer confirmations, so leave the review due date empty.';
+    case 'REVIEW_DUE_BEFORE_RATING':
+      return `Reviewer confirmations cannot be due before the manager-rating window closes${typeof d.ratingClosesOn === 'string' ? ` (${formatDate(d.ratingClosesOn)})` : ''}.`;
+    case 'GOALS_NOT_REVIEWED':
+      return 'Your goals have not been reviewed yet, so they have not taken effect. You can enter your self-entry once they are.';
+    case 'GOAL_REVIEW_NOT_REQUIRED':
+      return 'This cycle does not review goals: they take effect when set.';
+    case 'GOAL_REVIEW_NOT_INDEPENDENT':
+      return 'You set these goals, so someone else reviews them.';
+    case 'GOALS_ALREADY_REVIEWED':
+      return 'These goals have already been reviewed.';
+    case 'GOALS_SETTER_UNKNOWN':
+      return 'These goals were set before goal reviews were recorded. Save the goals again, then someone else reviews them.';
+    case 'OVERALL_RATING_REQUIRED':
+      return 'Choose and save the overall rating before submitting the rating: this cycle rates manually.';
+    case 'OVERALL_RATING_NOT_USED':
+      return 'This cycle rates by the weighted formula, so there is no overall rating to enter.';
+    case 'REVIEWER_SCORE_REQUIRED':
+      return 'Choose your overall score (1 to 5) to confirm the rating.';
+    case 'REVIEWER_SCORE_NOT_USED':
+      return 'A reviewer score is given only with a confirmation.';
     case 'CYCLE_CLOSED':
       return action === 'cycle-close' ? 'The cycle is already closed.' : 'The appraisal cycle is closed.';
     case 'OPEN_APPRAISALS': {
@@ -513,7 +724,7 @@ function refusalText(error: unknown, action: Act): string | null {
     case 'FIELD_REQUIRED':
       return d.sequence !== undefined ? `Goal ${String(d.sequence)} needs a description.` : d.field === 'reason' ? 'Enter a reason.' : 'Fill in every required field.';
     case 'GOALS_FIXED':
-      return 'Goals are fixed once the appraisal has been submitted.';
+      return action === 'goal-review' ? 'Goals are reviewed before the appraisal is first submitted.' : 'Goals are fixed once the appraisal has been submitted.';
     case 'WINDOW_CLOSED':
       return `The ${stageOf(d.stage)} window is not open today (${windowText({ opensOn: (d.opensOn as string | null) ?? null, closesOn: (d.closesOn as string | null) ?? null }).toLowerCase()}) and no exception is recorded${action === 'self-entry' || action === 'submit' ? '. Ask HR for an exception if you need more time.' : '.'}`;
     case 'INVALID_DATE':
@@ -527,6 +738,9 @@ function refusalText(error: unknown, action: Act): string | null {
       return 'The goals changed since this was loaded. Reload and try again.';
     case 'RATING_INCOMPLETE': {
       const goals = goalList(d.goals);
+      if (goalList(d.competencies) || (Array.isArray(d.sections) && d.sections.length > 0)) {
+        return `Score every goal and competency and fill every included section, and save, before submitting the rating${missingText(d)}.`;
+      }
       return `Score every goal and save before submitting the rating${goals ? `: goal ${goals} ${Array.isArray(d.goals) && d.goals.length > 1 ? 'have' : 'has'} no saved score` : ''}.`;
     }
     case 'EMPLOYEE_MESSAGE_REQUIRED':
@@ -537,10 +751,14 @@ function refusalText(error: unknown, action: Act): string | null {
       return 'The appraisal has no goals yet. Ask HR or your manager to set them.';
     case 'WEIGHT_TOTAL_NOT_100': {
       const total = typeof d.total === 'number' ? d.total : null;
+      if (action === 'competency-set') return `The competency weights total ${total ?? 'something other than 100'}; they must total exactly 100.`;
       return `The goal weights total ${total ?? 'something other than 100'}; they must total exactly 100 before the appraisal can be submitted.${action === 'submit' ? ' Ask HR or your manager to correct the goals.' : ''}`;
     }
     case 'SELF_ENTRY_INCOMPLETE': {
       const goals = goalList(d.goals);
+      if (goalList(d.competencies) || (Array.isArray(d.sections) && d.sections.length > 0)) {
+        return `Score every goal and competency and fill every section this cycle asks of you, and save, before submitting${missingText(d)}.`;
+      }
       return `Score every goal and save before submitting${goals ? `: goal ${goals} ${Array.isArray(d.goals) && d.goals.length > 1 ? 'have' : 'has'} no saved score` : ''}.`;
     }
     case 'NO_ELIGIBLE_REVIEWER':
@@ -896,6 +1114,171 @@ function EntriesTable({ goals, set, label }: { goals: Goal[]; set: EntrySet; lab
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// FR-041 competencies and FR-042 sections (I-86): the copied competencies with their behavioural indicators, their
+// scores as the server returned them, the section texts, and the results the formula combined
+// ---------------------------------------------------------------------------------------------------------
+
+/** The behavioural indicator of each proficiency level 1 to 5 (the F1 scale). */
+function IndicatorList({ item }: { item: Pick<CompetencyItem, 'name' | 'description' | 'indicators'> }) {
+  return (
+    <details>
+      <summary>What each level means for {item.name}</summary>
+      {item.description && <p style={FLUSH}>{item.description}</p>}
+      <ol aria-label={`Levels of ${item.name}`} style={FLUSH}>
+        {item.indicators.map((i) => (
+          <li key={i.level} value={i.level}>
+            {i.text}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function CompetenciesTable({ a, label }: { a: Appraisal; label: string }) {
+  const items = a.competencies ?? [];
+  const scoring = a.cycle.scoring;
+  if (items.length === 0) {
+    return (
+      <p className="hint" style={FLUSH}>
+        {scoring && !scoring.competenciesAssessed && scoring.competencyWeightPercent === 0
+          ? 'This cycle does not assess competencies: the result is the goal result alone.'
+          : 'No competencies are mapped to this employee’s grade, so the result is the goal result alone.'}
+      </p>
+    );
+  }
+  const showManager = items.some((k) => k.managerRatingComplete !== undefined);
+  return (
+    <>
+      <div style={SCROLL}>
+        <table aria-label={label}>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Competency</th>
+              <th>Weight</th>
+              <th>Self-entry</th>
+              {showManager && <th>Manager rating</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((k) => (
+              <tr key={k.id}>
+                <td>{k.sequence}</td>
+                <td>
+                  {k.name} ({k.code})
+                  <IndicatorList item={k} />
+                </td>
+                <td>{k.weight}</td>
+                <td>{k.selfEntryComplete ? 'Entered' : 'Not entered'}</td>
+                {showManager && <td>{k.managerRatingComplete === undefined ? '—' : k.managerRatingComplete ? 'Entered' : 'Not entered'}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="hint" style={FLUSH}>
+        Copied from the grade’s competency set when the appraisal was created, and fixed. Competency weights total {a.competencyWeightTotal ?? 100}
+        {scoring ? `; the result combines goals ${scoring.goalWeightPercent}% and competencies ${scoring.competencyWeightPercent}%.` : '.'}
+      </p>
+    </>
+  );
+}
+
+function CompetencyEntriesTable({ items, entries, label }: { items: CompetencyItem[]; entries: CompetencyEntry[]; label: string }) {
+  const itemOf = new Map(items.map((k) => [k.id, k]));
+  if (entries.length === 0) return null;
+  return (
+    <div style={SCROLL}>
+      <table aria-label={label}>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Competency</th>
+            <th>Score</th>
+            <th>Comment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e) => (
+            <tr key={e.competencyId}>
+              <td>{e.sequence}</td>
+              <td>{itemOf.get(e.competencyId)?.name ?? '—'}</td>
+              <td>{e.score ?? 'Not scored'}</td>
+              <td>{e.comment ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SectionTexts({ sections, texts, label }: { sections: SectionInfo[]; texts: SectionText[] | undefined; label: string }) {
+  if (!texts || texts.length === 0) return null;
+  const titleOf = new Map(sections.map((s) => [s.code, s.title]));
+  return (
+    <dl className="kv" aria-label={label}>
+      {texts.map((t) => (
+        <Item key={t.section} term={titleOf.get(t.section) ?? readable(t.section)}>
+          {t.text ?? 'Not filled'}
+        </Item>
+      ))}
+    </dl>
+  );
+}
+
+/** FR-042 sections the cycle includes: meaning, who fills them and completion flags (never the texts). */
+function SectionsTable({ a, label }: { a: Appraisal; label: string }) {
+  const items = a.sections ?? [];
+  if (items.length === 0) return <p className="hint">This cycle includes no additional sections.</p>;
+  const party = (p: SectionParty) => (p === 'EMPLOYEE' ? 'the employee' : 'the manager');
+  return (
+    <div style={SCROLL}>
+      <table aria-label={label}>
+        <thead>
+          <tr>
+            <th>Section</th>
+            <th>Meaning</th>
+            <th>Filled by</th>
+            <th>Employee part</th>
+            <th>Manager part</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((s) => (
+            <tr key={s.code}>
+              <td>{s.title}</td>
+              <td>{s.meaning}</td>
+              <td>{s.filledBy.map(party).join(' and ')}</td>
+              <td>{s.selfEntryComplete === undefined ? '—' : s.selfEntryComplete ? 'Filled' : 'Not filled'}</td>
+              <td>{s.managerEntryComplete === undefined ? '—' : s.managerEntryComplete ? 'Filled' : 'Not filled'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** The I-86 results of a rating: G, C, the split and the weighted result the formula gives (FORMULA mode: the final rating). */
+function RatingResults({ rating }: { rating: ManagerRating }) {
+  return (
+    <p style={FLUSH}>
+      Weighted manager result: <strong>{rating.weightedResult ?? 'not calculated yet (calculated when the rating is submitted)'}</strong>
+      {rating.split && rating.goalResult && rating.competencyResult && (
+        <>
+          {' '}
+          = ({rating.split.goalWeightPercent} × goal result {rating.goalResult} + {rating.split.competencyWeightPercent} × competency result {rating.competencyResult}) / 100, rounded half up to two
+          decimals
+        </>
+      )}
+      {!rating.split && rating.goalResult && <> (the goal result alone: no competencies)</>}
+    </p>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Scores per goal (integer 1 to 5) with comments: the manager's rating and the employee's own self-entry
 // ---------------------------------------------------------------------------------------------------------
 interface ScoreDraft {
@@ -914,6 +1297,9 @@ function ScoreForm({
   saveLabel,
   busy,
   hiddenSaved,
+  overall,
+  competencies,
+  sections,
   onDirty,
   onSave,
   children,
@@ -926,6 +1312,12 @@ function ScoreForm({
   busy: boolean;
   /** Goals whose score is saved but not returned to this caller. */
   hiddenSaved: (g: Goal) => boolean;
+  /** A MANUAL cycle's rating (FR-042; I-77 item 4): the saved overall rating; absent when the cycle rates by formula. */
+  overall?: { saved: number | null } | undefined;
+  /** FR-041 / I-86: the appraisal's competencies, scored like goals. */
+  competencies?: CompetencyItem[] | undefined;
+  /** FR-042: this party's part of the sections the cycle includes. */
+  sections?: { party: SectionParty; items: SectionInfo[] } | undefined;
   onDirty: (dirty: boolean) => void;
   onSave: (changes: EntryChanges) => void;
   children?: ReactNode;
@@ -938,6 +1330,30 @@ function ScoreForm({
     }
     return out;
   }, [goals, saved]);
+  const competencyItems = competencies ?? [];
+  const initialCompetencies = useMemo(() => {
+    const out: Record<string, ScoreDraft> = {};
+    for (const k of competencies ?? []) {
+      const e = saved?.competencies?.find((x) => x.competencyId === k.id);
+      out[k.id] = { score: e?.score === null || e?.score === undefined ? '' : String(e.score), comment: e?.comment ?? '' };
+    }
+    return out;
+  }, [competencies, saved]);
+  const sectionItems = (sections?.items ?? []).filter((s) => s.filledBy.includes(sections!.party));
+  const initialTexts = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const s of sections?.items ?? []) out[s.code] = saved?.sections?.find((x) => x.section === s.code)?.text ?? '';
+    return out;
+  }, [sections, saved]);
+  const [competencyDrafts, setCompetencyDrafts] = useState<Record<string, ScoreDraft>>(initialCompetencies);
+  const [texts, setTexts] = useState<Record<string, string>>(initialTexts);
+  const changedCompetencies = competencyItems.filter((k) => {
+    const a = competencyDrafts[k.id];
+    const b = initialCompetencies[k.id];
+    return !!a && !!b && (a.score !== b.score || a.comment.trim() !== b.comment.trim());
+  });
+  const changedSections = sectionItems.filter((s) => (texts[s.code] ?? '').trim() !== (initialTexts[s.code] ?? '').trim());
+  const setCompetency = (id: string, patch: Partial<ScoreDraft>) => setCompetencyDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { score: '', comment: '' }), ...patch } }));
   const initialComment = saved?.comment ?? '';
   const [drafts, setDrafts] = useState<Record<string, ScoreDraft>>(initial);
   const [comment, setComment] = useState(initialComment);
@@ -948,7 +1364,10 @@ function ScoreForm({
     return !!a && !!b && (a.score !== b.score || a.comment.trim() !== b.comment.trim());
   });
   const commentChanged = comment.trim() !== initialComment.trim();
-  const dirty = changed.length > 0 || commentChanged;
+  const initialOverall = overall?.saved === null || overall?.saved === undefined ? '' : String(overall.saved);
+  const [overallDraft, setOverallDraft] = useState(initialOverall);
+  const overallChanged = overall !== undefined && overallDraft !== initialOverall;
+  const dirty = changed.length > 0 || commentChanged || overallChanged || changedCompetencies.length > 0 || changedSections.length > 0;
   useEffect(() => onDirty(dirty), [dirty, onDirty]);
   const set = (goalId: string, patch: Partial<ScoreDraft>) => setDrafts((prev) => ({ ...prev, [goalId]: { ...(prev[goalId] ?? { score: '', comment: '' }), ...patch } }));
   const submit = (e: FormEvent) => {
@@ -965,7 +1384,22 @@ function ScoreForm({
       return { goalId: g.id, score: d.score === '' ? null : Number(d.score), comment: text === '' ? null : text };
     });
     const text = comment.trim();
-    onSave({ entries, ...(commentChanged ? { comment: text === '' ? null : text } : {}) });
+    const competencyChanges = changedCompetencies.map((k) => {
+      const d = competencyDrafts[k.id]!;
+      const note = d.comment.trim();
+      return { competencyId: k.id, score: d.score === '' ? null : Number(d.score), comment: note === '' ? null : note };
+    });
+    const sectionChanges = changedSections.map((s) => {
+      const body = (texts[s.code] ?? '').trim();
+      return { section: s.code, text: body === '' ? null : body };
+    });
+    onSave({
+      entries,
+      ...(competencyChanges.length > 0 ? { competencies: competencyChanges } : {}),
+      ...(sectionChanges.length > 0 ? { sections: sectionChanges } : {}),
+      ...(commentChanged ? { comment: text === '' ? null : text } : {}),
+      ...(overallChanged ? { overallRating: overallDraft === '' ? null : Number(overallDraft) } : {}),
+    });
   };
   return (
     <form aria-label={label} onSubmit={submit} noValidate style={SPACED}>
@@ -1002,6 +1436,59 @@ function ScoreForm({
           </fieldset>
         );
       })}
+      {competencyItems.map((k) => {
+        const d = competencyDrafts[k.id] ?? { score: '', comment: '' };
+        return (
+          <fieldset key={k.id} style={GROUP} aria-label={`Competency ${k.sequence}`}>
+            <legend>
+              Competency {k.sequence}: {k.name} (weight {k.weight})
+            </legend>
+            <IndicatorList item={k} />
+            <div className="row">
+              <label>
+                Score for {k.name} (1 to 5)
+                <select value={d.score} onChange={(e) => setCompetency(k.id, { score: e.target.value })}>
+                  <option value="">Not scored</option>
+                  {SCORES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label>
+              Comment on {k.name} (optional)
+              <textarea rows={2} maxLength={2000} value={d.comment} onChange={(e) => setCompetency(k.id, { comment: e.target.value })} style={TEXTAREA} />
+            </label>
+          </fieldset>
+        );
+      })}
+      {sectionItems.map((s) => (
+        <label key={s.code} className="wide">
+          {s.title} (required in this cycle)
+          <span className="hint" style={{ display: 'block' }}>
+            {s.prompts[sections!.party] ?? s.meaning}
+          </span>
+          <textarea rows={3} maxLength={4000} value={texts[s.code] ?? ''} onChange={(e) => setTexts((prev) => ({ ...prev, [s.code]: e.target.value }))} style={TEXTAREA} />
+        </label>
+      ))}
+      {overall !== undefined && (
+        <div className="row">
+          <label>
+            Overall rating (1 to 5)
+            <select value={overallDraft} onChange={(e) => setOverallDraft(e.target.value)}>
+              <option value="">Not rated</option>
+              {SCORES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="hint">This cycle rates manually: the overall rating becomes the final rating; the weighted result is kept beside it.</span>
+        </div>
+      )}
       <label>
         Overall comment (optional)
         <textarea rows={3} maxLength={4000} value={comment} onChange={(e) => setComment(e.target.value)} style={TEXTAREA} />
@@ -1190,11 +1677,31 @@ interface CycleBody {
   code?: string;
   name: string;
   startDate?: string;
-  approvalLevels: 1 | 2;
+  approvalLevels: 0 | 1 | 2;
   windows: Record<WindowKey, { opensOn: string; closesOn: string } | null>;
+  goalReviewRequired: boolean;
+  ratingMode: RatingMode;
+  /** Required with reviewer levels; null without them. */
+  reviewDueOn: string | null;
+  /** I-86: both or neither (a new cycle without them takes the company split in force on its start date). */
+  goalWeightPercent?: number;
+  competencyWeightPercent?: number;
+  /** FR-042 sections included (omitted: unchanged, or none on a new cycle). */
+  sections?: string[];
 }
 
-/** A new cycle (code, name, start date, levels, windows) or an open cycle's name, levels and windows. */
+/** FR-042 section catalogue (GET /v1/appraisal-sections). */
+function useSectionCatalogue(enabled = true) {
+  const keys = useKeys();
+  return useQuery({ queryKey: keys.sections, queryFn: () => api<{ items: SectionInfo[] }>('/v1/appraisal-sections'), enabled, retry: retryTransient, staleTime: 5 * 60_000 });
+}
+
+/**
+ * A new cycle (code, name, start date, levels, windows, process rules) or an open cycle's name, levels, windows and rules.
+ * Process rules decided under owner delegation (I-77): goal review is on and the rating mode is the formula unless HR says
+ * otherwise; reviewer levels may be none (the manager's approval completes the appraisal); with reviewer levels the review
+ * due date is required.
+ */
 function CycleForm({
   initial,
   label,
@@ -1216,9 +1723,17 @@ function CycleForm({
   const [name, setName] = useState(initial?.name ?? '');
   const [startDate, setStartDate] = useState('');
   const [levels, setLevels] = useState(String(initial?.approvalLevels ?? 1));
+  const [goalReview, setGoalReview] = useState(initial?.goalReviewRequired ?? true);
+  const [ratingMode, setRatingMode] = useState<RatingMode>(initial?.ratingMode ?? 'FORMULA');
+  const [reviewDueOn, setReviewDueOn] = useState(initial?.reviewDueOn ?? '');
   const [windows, setWindows] = useState<WindowDraft>(
     () => Object.fromEntries(WINDOWS.map((w) => [w.key, { opensOn: initial?.windows[w.key]?.opensOn ?? '', closesOn: initial?.windows[w.key]?.closesOn ?? '' }])) as WindowDraft,
   );
+  // I-86: the cycle's own split (blank on a new cycle: the company split in force on its start date) and FR-042 sections.
+  const [goalPercent, setGoalPercent] = useState(initial?.scoring ? String(initial.scoring.goalWeightPercent) : '');
+  const [competencyPercent, setCompetencyPercent] = useState(initial?.scoring ? String(initial.scoring.competencyWeightPercent) : '');
+  const [sections, setSections] = useState<string[]>(initial?.sections?.map((s) => s.code) ?? []);
+  const catalogue = useSectionCatalogue();
   const [problem, setProblem] = useState<string | null>(null);
   const setWindow = (key: WindowKey, patch: Partial<{ opensOn: string; closesOn: string }>) => setWindows((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
   const submit = (e: FormEvent) => {
@@ -1234,8 +1749,33 @@ function CycleForm({
       else if (v.opensOn && v.closesOn) out[w.key] = { opensOn: v.opensOn, closesOn: v.closesOn };
       else return setProblem(`Enter both dates of the ${w.label.toLowerCase()} window, or neither to leave it unscheduled.`);
     }
+    const approvalLevels = levels === '2' ? 2 : levels === '0' ? 0 : 1;
+    if (approvalLevels > 0 && !reviewDueOn) return setProblem('Enter the review due date: the date reviewer confirmations are due.');
+    const g = goalPercent.trim();
+    const c = competencyPercent.trim();
+    let split: { goalWeightPercent: number; competencyWeightPercent: number } | null = null;
+    if (g !== '' || c !== '') {
+      if (!wholeIn(g, 1, 100) || !wholeIn(c, 0, 99) || Number(g) + Number(c) !== 100) {
+        return setProblem('The goal and competency percentages are whole numbers that add up to exactly 100 (or leave both empty for the company split).');
+      }
+      split = { goalWeightPercent: Number(g), competencyWeightPercent: Number(c) };
+    }
+    // Sent only when changed: omitted means unchanged (or, on a new cycle, the company split and no sections).
+    if (split && initial?.scoring && split.goalWeightPercent === initial.scoring.goalWeightPercent && split.competencyWeightPercent === initial.scoring.competencyWeightPercent) split = null;
+    const initialSections = initial?.sections?.map((s) => s.code) ?? [];
+    const sectionsChanged = sections.length !== initialSections.length || sections.some((s) => !initialSections.includes(s));
     setProblem(null);
-    onSubmit({ ...(initial ? {} : { code: code.trim(), startDate }), name: name.trim(), approvalLevels: levels === '2' ? 2 : 1, windows: out });
+    onSubmit({
+      ...(initial ? {} : { code: code.trim(), startDate }),
+      name: name.trim(),
+      approvalLevels,
+      windows: out,
+      goalReviewRequired: goalReview,
+      ratingMode,
+      reviewDueOn: approvalLevels > 0 ? reviewDueOn : null,
+      ...(split ?? {}),
+      ...(sectionsChanged ? { sections } : {}),
+    });
   };
   return (
     <form className="grid-form" aria-label={label} onSubmit={submit} noValidate>
@@ -1265,8 +1805,65 @@ function CycleForm({
         <select value={levels} onChange={(e) => setLevels(e.target.value)}>
           <option value="1">{levelsText(1)}</option>
           <option value="2">{levelsText(2)}</option>
+          <option value="0">{levelsText(0)}</option>
         </select>
       </label>
+      {levels !== '0' && (
+        <div>
+          <label>
+            Review due date
+            <input type="date" value={reviewDueOn} onChange={(e) => setReviewDueOn(e.target.value)} />
+          </label>
+          <p className="hint" style={FLUSH}>
+            Reviewer confirmations are due on this date (on or after the manager-rating window closes); later ones count as overdue.
+          </p>
+        </div>
+      )}
+      <label>
+        Rating mode
+        <select value={ratingMode} onChange={(e) => setRatingMode(e.target.value === 'MANUAL' ? 'MANUAL' : 'FORMULA')}>
+          <option value="FORMULA">{ratingModeText('FORMULA')}</option>
+          <option value="MANUAL">{ratingModeText('MANUAL')}</option>
+        </select>
+      </label>
+      <label>
+        <input type="checkbox" checked={goalReview} onChange={(e) => setGoalReview(e.target.checked)} /> Goals are reviewed before they take effect (KRA review)
+      </label>
+      <fieldset style={GROUP} className="wide">
+        <legend>Result split (whole percentages adding to 100)</legend>
+        <div className="row">
+          <label>
+            Goals %
+            <input inputMode="numeric" value={goalPercent} maxLength={3} onChange={(e) => setGoalPercent(e.target.value)} />
+          </label>
+          <label>
+            Competencies %
+            <input inputMode="numeric" value={competencyPercent} maxLength={2} onChange={(e) => setCompetencyPercent(e.target.value)} />
+          </label>
+        </div>
+        <p className="hint" style={FLUSH}>
+          {initial
+            ? 'Competencies 0 means the cycle does not assess them. Whether it does is fixed once an appraisal is enrolled; the split is fixed once one is submitted.'
+            : 'Leave both empty to use the company split in force on the start date. Competencies 0 means the cycle does not assess them.'}
+        </p>
+      </fieldset>
+      <fieldset style={GROUP} className="wide">
+        <legend>Sections included (none is scored)</legend>
+        {catalogue.isPending && <p className="hint">Loading the sections…</p>}
+        {(shown(catalogue)?.items ?? []).map((s) => (
+          <label key={s.code}>
+            <input
+              type="checkbox"
+              checked={sections.includes(s.code)}
+              onChange={(e) => setSections((prev) => (e.target.checked ? [...prev, s.code] : prev.filter((x) => x !== s.code)))}
+            />{' '}
+            {s.title}: {s.meaning} Filled by {s.filledBy.map((p) => (p === 'EMPLOYEE' ? 'the employee' : 'the manager')).join(' and ')}.
+          </label>
+        ))}
+        <p className="hint" style={FLUSH}>
+          An included section must be filled by its party before they submit; an excluded one never blocks a submission.
+        </p>
+      </fieldset>
       <fieldset style={GROUP} className="wide">
         <legend>Windows (inclusive dates; leave both dates empty to leave a window unscheduled)</legend>
         {WINDOWS.map((w) => (
@@ -1405,6 +2002,19 @@ function CycleDetailView({ id }: { id: string }) {
           <Item term="Name">{c.name}</Item>
           <Item term="Period">{periodText(c)}</Item>
           <Item term="Reviewer levels">{levelsText(c.approvalLevels)}</Item>
+          {c.approvalLevels > 0 && <Item term="Review due date">{c.reviewDueOn ? formatDate(c.reviewDueOn) : 'Not set: reviewer tasks have no due date until it is'}</Item>}
+          <Item term="Goal review">{c.goalReviewRequired ? 'Goals take effect once someone other than their setter reviews them' : 'None: goals take effect when set'}</Item>
+          <Item term="Rating mode">{ratingModeText(c.ratingMode)}</Item>
+          {c.scoring && (
+            <Item term="Result split">
+              {c.scoring.competencyWeightPercent > 0
+                ? `Goals ${c.scoring.goalWeightPercent}% and competencies ${c.scoring.competencyWeightPercent}% (without mapped competencies, the goal result alone)`
+                : 'Goals only: the cycle does not assess competencies'}
+            </Item>
+          )}
+          {c.sections && (
+            <Item term="Sections">{c.sections.length > 0 ? c.sections.map((s) => s.title).join(', ') : 'None (only goals and competencies)'}</Item>
+          )}
           <Item term="State">
             <StateBadge state={c.state} />
           </Item>
@@ -1429,7 +2039,7 @@ function CycleDetailView({ id }: { id: string }) {
             </tbody>
           </table>
         </div>
-        <p className="hint">Reviewer confirmation is a decision, not a windowed entry. Window exceptions are recorded per appraisal.</p>
+        <p className="hint">Reviewer confirmation is a decision, not a windowed entry: it falls due on the review due date but is never refused for lateness. Window exceptions are recorded per appraisal.</p>
         {can(READ) && (
           <p>
             <Link to={`${PATHS.appraisals}?cycleId=${c.id}`}>Appraisals in this cycle</Link>
@@ -1454,7 +2064,9 @@ function CycleDetailView({ id }: { id: string }) {
       </Section>
       {can(CYCLE_MANAGE) && open && (
         <Section title="Change the cycle">
-          <p className="hint">The code and period never change. Reviewer levels are fixed once an appraisal of the cycle has been submitted.</p>
+          <p className="hint">
+            The code and period never change. Reviewer levels, the goal review, the rating mode, the result split and the sections are fixed once an appraisal of the cycle has been submitted.
+          </p>
           <CycleForm
             key={c.version}
             initial={c}
@@ -1464,7 +2076,19 @@ function CycleDetailView({ id }: { id: string }) {
             startMonth={null}
             onSubmit={(body) => {
               setNotice(null);
-              update.mutate({ name: body.name, approvalLevels: body.approvalLevels, windows: body.windows, expectedVersion: c.version });
+              update.mutate({
+                name: body.name,
+                approvalLevels: body.approvalLevels,
+                windows: body.windows,
+                goalReviewRequired: body.goalReviewRequired,
+                ratingMode: body.ratingMode,
+                reviewDueOn: body.reviewDueOn,
+                ...(body.goalWeightPercent !== undefined && body.competencyWeightPercent !== undefined
+                  ? { goalWeightPercent: body.goalWeightPercent, competencyWeightPercent: body.competencyWeightPercent }
+                  : {}),
+                ...(body.sections !== undefined ? { sections: body.sections } : {}),
+                expectedVersion: c.version,
+              });
             }}
           >
             <Refusal error={update.error} action="cycle-update" />
@@ -1487,16 +2111,18 @@ interface ListFilters {
   page: number;
   pageSize: number;
 }
+/** FR-041 KRA review: complete goal sets waiting for their review (GET /v1/appraisals?stateGroup=AWAITING_GOAL_REVIEW). */
+const GOAL_REVIEW_GROUP = 'AWAITING_GOAL_REVIEW';
 function readFilters(params: URLSearchParams): ListFilters {
   const cycleId = params.get('cycleId') ?? '';
   const departmentId = params.get('departmentId') ?? '';
-  const state = params.get('state') ?? '';
+  const state = params.get('stateGroup') === GOAL_REVIEW_GROUP ? GOAL_REVIEW_GROUP : (params.get('state') ?? '');
   const page = Number(params.get('page') ?? '1');
   const pageSize = Number(params.get('pageSize') ?? '25');
   return {
     cycleId: UUID.test(cycleId) ? cycleId : '',
     departmentId: UUID.test(departmentId) ? departmentId : '',
-    state: (APPRAISAL_STATES as readonly string[]).includes(state) ? state : '',
+    state: state === GOAL_REVIEW_GROUP || (APPRAISAL_STATES as readonly string[]).includes(state) ? state : '',
     page: Number.isInteger(page) && page >= 1 ? page : 1,
     pageSize: (PAGE_SIZES as readonly number[]).includes(pageSize) ? pageSize : 25,
   };
@@ -1504,7 +2130,8 @@ function readFilters(params: URLSearchParams): ListFilters {
 function listQuery(f: ListFilters): string {
   const q = new URLSearchParams();
   if (f.cycleId) q.set('cycleId', f.cycleId);
-  if (f.state) q.set('state', f.state);
+  if (f.state === GOAL_REVIEW_GROUP) q.set('stateGroup', f.state);
+  else if (f.state) q.set('state', f.state);
   if (f.departmentId) q.set('departmentId', f.departmentId);
   q.set('page', String(f.page));
   q.set('pageSize', String(f.pageSize));
@@ -1552,6 +2179,7 @@ function AppraisalRegister() {
                 {readable(s)}
               </option>
             ))}
+            <option value={GOAL_REVIEW_GROUP}>{taskStatusText(GOAL_REVIEW_GROUP)}</option>
           </select>
         </label>
         <DepartmentSelect value={filters.departmentId} onChange={(departmentId) => setFilter({ departmentId })} />
@@ -1761,7 +2389,11 @@ function AppraisalDetailView({ id }: { id: string }) {
               'Nobody'
             )}
           </Item>
-          {'finalRating' in a && <Item term="Final rating (confirmed weighted manager result)">{a.finalRating ?? 'Not final yet'}</Item>}
+          {'finalRating' in a && (
+            <Item term={a.cycle.ratingMode === 'MANUAL' ? 'Final rating (confirmed overall rating of the manager)' : 'Final rating (confirmed weighted manager result)'}>
+              {a.finalRating ?? 'Not final yet'}
+            </Item>
+          )}
           <Item term="Completed">
             <When at={a.completedAt} />
           </Item>
@@ -1776,9 +2408,22 @@ function AppraisalDetailView({ id }: { id: string }) {
 
       <Section title="Goals">
         <GoalsTable a={a} label="Goals" />
+        {a.goalReview?.required && <GoalReviewBlock a={a} myUserId={myUserId} canReview={can(MANAGE) && !own} onNotice={setNotice} />}
         {can(MANAGE) && !own && a.state === 'DRAFT' && a.revision === 1 && <GoalsForm key={a.version} a={a} onNotice={setNotice} />}
         {a.state !== 'DRAFT' && <p className="hint">Goals are fixed once the appraisal has been submitted.</p>}
       </Section>
+
+      {a.competencies !== undefined && (
+        <Section title="Competencies">
+          <CompetenciesTable a={a} label="Competencies" />
+        </Section>
+      )}
+
+      {a.sections !== undefined && a.sections.length > 0 && (
+        <Section title="Sections">
+          <SectionsTable a={a} label="Sections" />
+        </Section>
+      )}
 
       <Section title="Windows">
         <div style={SCROLL}>
@@ -1893,17 +2538,107 @@ function RevisionBlock({ a, r }: { a: Appraisal; r: Revision }) {
         <>
           <h4 style={H3}>Self-entry</h4>
           <EntriesTable goals={a.goals} set={r.selfEntry} label={`Self-entry of revision ${r.revision}`} />
+          <CompetencyEntriesTable items={a.competencies ?? []} entries={r.selfEntry.competencies ?? []} label={`Competency self-entry of revision ${r.revision}`} />
+          <SectionTexts sections={a.sections ?? []} texts={r.selfEntry.sections} label={`Employee sections of revision ${r.revision}`} />
         </>
       )}
       {r.managerRating && (
         <>
           <h4 style={H3}>Manager rating</h4>
           <EntriesTable goals={a.goals} set={r.managerRating} label={`Manager rating of revision ${r.revision}`} />
-          <p style={FLUSH}>
-            Weighted manager result: <strong>{r.managerRating.weightedResult ?? 'not calculated yet (calculated when the rating is submitted)'}</strong>
-          </p>
+          <CompetencyEntriesTable items={a.competencies ?? []} entries={r.managerRating.competencies ?? []} label={`Competency rating of revision ${r.revision}`} />
+          <SectionTexts sections={a.sections ?? []} texts={r.managerRating.sections} label={`Manager sections of revision ${r.revision}`} />
+          <RatingResults rating={r.managerRating} />
+          {a.cycle.ratingMode === 'MANUAL' && (
+            <p style={FLUSH}>
+              Overall rating of the manager (the final rating in this cycle): <strong>{r.managerRating.overallRating ?? 'not entered yet'}</strong>
+            </p>
+          )}
         </>
       )}
+      {r.reviewerScores && r.reviewerScores.length > 0 && (
+        <>
+          <h4 style={H3}>Reviewer scores</h4>
+          <ul aria-label={`Reviewer scores of revision ${r.revision}`} style={FLUSH}>
+            {r.reviewerScores.map((s) => (
+              <li key={s.level}>
+                Level {s.level}: <strong>{s.score}</strong> (kept apart; the final rating is the manager’s)
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * FR-041 KRA review (I-77 item 3): whether the goals took effect, who set and reviewed them (staff views), and the review
+ * itself for an eligible user other than the setter. The server refuses the setter and anyone out of scope.
+ */
+function GoalReviewBlock({
+  a,
+  myUserId,
+  canReview,
+  onNotice,
+}: {
+  a: Appraisal;
+  myUserId: string | null;
+  canReview: boolean;
+  onNotice: (n: { text: string; ok: boolean } | null) => void;
+}) {
+  const keys = useKeys();
+  const qc = useQueryClient();
+  const review = a.goalReview!;
+  const mine = review.setBy?.userId !== undefined && review.setBy.userId === myUserId;
+  const reviewable = !review.reviewed && a.state === 'DRAFT' && a.revision === 1 && a.goals.length > 0 && a.goalWeightTotal === 100;
+  const submit = useMutation({
+    mutationFn: () => api<Appraisal>(`/v1/appraisals/${a.id}/goal-review`, { body: { expectedVersion: a.version } }),
+    onSuccess: () => {
+      onNotice({ text: 'Reviewed the goals: they have taken effect, and the employee can enter the self-entry.', ok: true });
+      void qc.invalidateQueries({ queryKey: keys.appraisals });
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && (e.code === 'STALE_VERSION' || e.code === 'GOALS_ALREADY_REVIEWED')) void qc.invalidateQueries({ queryKey: keys.appraisal(a.id) });
+    },
+  });
+  return (
+    <div role="group" aria-label="Goal review" style={GROUP}>
+      <dl className="kv">
+        <Item term="Goal review">
+          {review.reviewed ? (
+            <>
+              Reviewed <When at={review.reviewedAt} />
+            </>
+          ) : (
+            'Waiting: the goals take effect once someone other than their setter reviews them'
+          )}
+        </Item>
+        {review.setBy !== undefined && <Item term="Goals set by">{review.setBy ? userLabel(review.setBy, myUserId) : 'Not recorded'}</Item>}
+        {review.reviewedBy !== undefined && review.reviewedBy !== null && <Item term="Goals reviewed by">{userLabel(review.reviewedBy, myUserId)}</Item>}
+      </dl>
+      {canReview && reviewable && (
+        mine ? (
+          <p className="hint" style={FLUSH}>
+            You set these goals, so someone else reviews them.
+          </p>
+        ) : (
+          <div className="row">
+            <button
+              type="button"
+              disabled={submit.isPending}
+              onClick={() => {
+                onNotice(null);
+                submit.mutate();
+              }}
+            >
+              {submit.isPending ? 'Reviewing…' : 'Review the goals'}
+            </button>
+          </div>
+        )
+      )}
+      {canReview && !review.reviewed && a.goalWeightTotal !== 100 && <p className="hint" style={FLUSH}>Only a complete goal set (weights totalling 100) is reviewed.</p>}
+      <Refusal error={submit.error} action="goal-review" />
     </div>
   );
 }
@@ -1936,6 +2671,7 @@ function GoalsForm({ a, onNotice }: { a: Appraisal; onNotice: (n: { text: string
     <form className="grid-form" aria-label="Set the goals" onSubmit={submit} noValidate style={SPACED}>
       <p className="hint wide" style={FLUSH}>
         The goals are replaced as a set, inside the goal-setting window or an exception. They are fixed from the first submission.
+        {a.goalReview?.required ? ' Where the cycle reviews goals, a changed set is yours and starts unreviewed.' : ''}
       </p>
       <GoalsEditor drafts={drafts} onChange={setDrafts} />
       {problem && (
@@ -2183,6 +2919,8 @@ function AppraisalQueue({ kind }: { kind: QueueKind }) {
 function decidedText(name: string, decision: 'APPROVE' | 'RETURN', stage: string, r: DecisionResult): string {
   if (r.replayed) return `Your earlier decision on the appraisal of ${name} had already been recorded, so nothing was applied twice. Its state is now: ${readable(r.state).toLowerCase()}.`;
   if (decision === 'RETURN') return `Returned the appraisal of ${name} to the employee; revision ${r.revision} is open for the self-entry.`;
+  // BR-013 one-level manager review (I-77 item 2): the manager's approval completes the appraisal.
+  if (stage === 'MANAGER_RATING' && r.state === 'APPROVED') return `Submitted the rating of ${name}: this cycle has no reviewer level, so the appraisal is complete.`;
   if (stage === 'MANAGER_RATING') return `Submitted the rating of ${name}. It now waits for the independent reviewer confirmation.`;
   if (r.state === 'APPROVED') return `Confirmed the rating of ${name}: the appraisal is complete.`;
   if (r.pendingStep === 3) return `Confirmed the rating of ${name} at level 1. It now waits for the level-2 reviewer.`;
@@ -2202,14 +2940,16 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
   const [dirty, setDirty] = useState(false);
   const [remark, setRemark] = useState('');
   const [message, setMessage] = useState('');
+  /** FR-043 / DF04 (I-77 item 1): the reviewer's overall score, given with a confirmation. */
+  const [reviewerScore, setReviewerScore] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
   /**
    * The decision last sent and its idempotency key (ZT07). Sending that same decision again after a failure, whose
    * answer may have been lost, carries the same key: the server answers from what it recorded and never applies it
-   * twice. Any other decision, remark or message is a new action with a new key.
+   * twice. Any other decision, remark, message or score is a new action with a new key.
    */
-  const attempt = useRef<{ decision: string; remark: string; message: string; key: string } | null>(null);
+  const attempt = useRef<{ decision: string; remark: string; message: string; score: string; key: string } | null>(null);
   const name = a ? personLabel(a.employee) : 'this employee';
   const working = a?.revisions.find((r) => r.revision === a.revision);
   const save = useMutation({
@@ -2226,7 +2966,7 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
     },
   });
   const decide = useMutation({
-    mutationFn: (body: { decision: 'APPROVE' | 'RETURN'; reason?: string; employeeMessage?: string; idempotencyKey: string }) =>
+    mutationFn: (body: { decision: 'APPROVE' | 'RETURN'; reason?: string; employeeMessage?: string; reviewerScore?: number; idempotencyKey: string }) =>
       api<DecisionResult>(`/v1/appraisal-tasks/${encodeURIComponent(t.taskId)}/decision`, { body }),
     onSuccess: (result, body) => {
       attempt.current = null;
@@ -2253,12 +2993,26 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
       decide.reset();
       return;
     }
+    const confirming = decision === 'APPROVE' && !rating;
+    if (confirming && !reviewerScore) {
+      setProblem('Choose your overall score (1 to 5) to confirm the rating.');
+      decide.reset();
+      return;
+    }
     setProblem(null);
     const sentMessage = decision === 'RETURN' ? msg : '';
+    const sentScore = confirming ? reviewerScore : '';
     const last = attempt.current;
-    const key = last !== null && last.decision === decision && last.remark === rem && last.message === sentMessage ? last.key : idempotencyKey('appraisal-decision');
-    attempt.current = { decision, remark: rem, message: sentMessage, key };
-    decide.mutate({ decision, idempotencyKey: key, ...(rem ? { reason: rem } : {}), ...(decision === 'RETURN' ? { employeeMessage: msg } : {}) });
+    const key =
+      last !== null && last.decision === decision && last.remark === rem && last.message === sentMessage && last.score === sentScore ? last.key : idempotencyKey('appraisal-decision');
+    attempt.current = { decision, remark: rem, message: sentMessage, score: sentScore, key };
+    decide.mutate({
+      decision,
+      idempotencyKey: key,
+      ...(rem ? { reason: rem } : {}),
+      ...(decision === 'RETURN' ? { employeeMessage: msg } : {}),
+      ...(confirming ? { reviewerScore: Number(sentScore) } : {}),
+    });
   };
   const titleId = `${id}-title`;
   return (
@@ -2269,17 +3023,22 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
       <DelegatedBadge taskId={t.taskId} />
       <p className="hint" style={FLUSH}>
         {stepText(t.stage, t.level)} · assigned <When at={t.assignedAt} />
+        {t.dueOn ? ` · due ${formatDate(t.dueOn)}` : ' · no due date'}
         {a ? ` · revision ${a.revision}` : ''}
       </p>
+      {t.overdue && <Badge tone="warn">overdue</Badge>}
       {!a ? (
         <Empty>This appraisal is not available in the selected role’s scope.</Empty>
       ) : (
         <>
           <GoalsTable a={a} label={`Goals of ${name}`} />
+          {a.competencies !== undefined && a.competencies.length > 0 && <CompetenciesTable a={a} label={`Competencies of ${name}`} />}
           {working?.selfEntry ? (
             <>
               <h4 style={H3}>The employee’s self-entry</h4>
               <EntriesTable goals={a.goals} set={working.selfEntry} label={`Self-entry of ${name}`} />
+              <CompetencyEntriesTable items={a.competencies ?? []} entries={working.selfEntry.competencies ?? []} label={`Competency self-entry of ${name}`} />
+              <SectionTexts sections={a.sections ?? []} texts={working.selfEntry.sections} label={`Sections filled by ${name}`} />
             </>
           ) : (
             <p className="hint">The self-entry is confidential and not shown to the selected role.</p>
@@ -2288,9 +3047,14 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
             <>
               <h4 style={H3}>The manager’s rating</h4>
               <EntriesTable goals={a.goals} set={working.managerRating} label={`Manager rating of ${name}`} />
-              <p style={FLUSH}>
-                Weighted manager result: <strong>{working.managerRating.weightedResult ?? '—'}</strong>
-              </p>
+              <CompetencyEntriesTable items={a.competencies ?? []} entries={working.managerRating.competencies ?? []} label={`Competency rating of ${name}`} />
+              <SectionTexts sections={a.sections ?? []} texts={working.managerRating.sections} label={`Manager sections of ${name}`} />
+              <RatingResults rating={working.managerRating} />
+              {a.cycle.ratingMode === 'MANUAL' && (
+                <p style={FLUSH}>
+                  Overall rating of the manager (the final rating in this cycle): <strong>{working.managerRating.overallRating ?? '—'}</strong>
+                </p>
+              )}
             </>
           )}
           {!rating && !working?.managerRating && <p className="hint">The manager’s rating is confidential and not shown to the selected role.</p>}
@@ -2311,6 +3075,9 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
                 saveLabel="Save the scores"
                 busy={busy}
                 hiddenSaved={(g) => !working?.managerRating && g.managerRatingComplete === true}
+                overall={a.cycle.ratingMode === 'MANUAL' ? { saved: working?.managerRating?.overallRating ?? null } : undefined}
+                competencies={a.competencies}
+                sections={{ party: 'MANAGER', items: a.sections ?? [] }}
                 onDirty={setDirty}
                 onSave={(changes) => {
                   setSavedNote(null);
@@ -2326,6 +3093,19 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
               </ScoreForm>
             )}
             <div style={SPACED}>
+              {!rating && (
+                <label>
+                  Your overall score (1 to 5; required to confirm, kept apart from the manager’s rating)
+                  <select value={reviewerScore} onChange={(e) => setReviewerScore(e.target.value)}>
+                    <option value="">Not scored</option>
+                    {SCORES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label>
                 Private remark (optional; never shown to the employee)
                 <textarea rows={2} maxLength={1000} value={remark} onChange={(e) => setRemark(e.target.value)} style={TEXTAREA} />
@@ -2499,6 +3279,7 @@ function CycleReport({ cycleId }: { cycleId: string }) {
           <Refusal error={exportCsv.error} action="export" />
         </div>
       )}
+      {can(REPORT_RATING) && <TrainingNeeds cycleId={cycleId} departmentId={departmentId} />}
     </Section>
   );
 }
@@ -2872,11 +3653,30 @@ function OwnAppraisal({ id }: { id: string }) {
         <GoalsTable a={a} label="My goals" />
       </Section>
 
+      {a.competencies !== undefined && a.competencies.length > 0 && (
+        <Section title="My competencies">
+          <CompetenciesTable a={a} label="My competencies" />
+        </Section>
+      )}
+
+      {a.sections !== undefined && a.sections.length > 0 && (
+        <Section title="Sections in this cycle">
+          <SectionsTable a={a} label="Sections in this cycle" />
+        </Section>
+      )}
+
       <Section title="My self-assessment">
-        {editable && can(SELF_ASSESS) ? (
+        {editable && can(SELF_ASSESS) && a.goalReview?.required && !a.goalReview.reviewed ? (
+          // FR-041 KRA review (I-77 item 3): the goals take effect once reviewed; the server refuses entries before that.
+          <p role="note">Your goals are waiting for their review. Once they have been reviewed they take effect, and you can enter your self-assessment.</p>
+        ) : editable && can(SELF_ASSESS) ? (
           selfWindow?.entryAllowed ? (
             <>
-              <p className="hint">Score each goal from 1 to 5, with a comment if you like. Save as often as you need; submitting fixes this revision and sends it to your manager.</p>
+              <p className="hint">
+                Score each goal{a.competencies && a.competencies.length > 0 ? ' and competency' : ''} from 1 to 5, with a comment if you like
+                {a.sections && a.sections.some((s) => s.filledBy.includes('EMPLOYEE')) ? ', and fill the sections this cycle asks of you' : ''}. Save as often as you need; submitting fixes this revision and
+                sends it to your manager.
+              </p>
               <ScoreForm
                 key={`${a.id}:${a.version}`}
                 goals={a.goals}
@@ -2885,6 +3685,8 @@ function OwnAppraisal({ id }: { id: string }) {
                 saveLabel="Save my self-assessment"
                 busy={busy}
                 hiddenSaved={() => false}
+                competencies={a.competencies}
+                sections={{ party: 'EMPLOYEE', items: a.sections ?? [] }}
                 onDirty={setDirty}
                 onSave={(changes) => {
                   setNotice(null);
@@ -2914,7 +3716,11 @@ function OwnAppraisal({ id }: { id: string }) {
             </p>
           )
         ) : working?.selfEntry ? (
-          <EntriesTable goals={a.goals} set={working.selfEntry} label={`My self-entry of revision ${a.revision}`} />
+          <>
+            <EntriesTable goals={a.goals} set={working.selfEntry} label={`My self-entry of revision ${a.revision}`} />
+            <CompetencyEntriesTable items={a.competencies ?? []} entries={working.selfEntry.competencies ?? []} label={`My competency self-entry of revision ${a.revision}`} />
+            <SectionTexts sections={a.sections ?? []} texts={working.selfEntry.sections} label={`My sections of revision ${a.revision}`} />
+          </>
         ) : (
           <Empty>{editable ? 'Your Employee role cannot enter a self-assessment.' : 'Your self-assessment is not open for changes.'}</Empty>
         )}
@@ -2959,6 +3765,629 @@ function OwnAppraisal({ id }: { id: string }) {
 }
 
 // ---------------------------------------------------------------------------------------------------------
+// Screen: competencies and the result split (Appraisal Config: FR-041 "grade-mapped competencies"; I-86). The dated
+// goals / competencies split, the competency master with its five behavioural indicators, and the dated competency sets
+// mapped to a grade (optionally one designation). Operational configuration in the cycle duty; the server checks every rule.
+// ---------------------------------------------------------------------------------------------------------
+interface ScoringRevision {
+  id: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  goalWeightPercent: number;
+  competencyWeightPercent: number;
+  reason: string;
+  version: number;
+}
+interface CompetencyMaster {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  indicators: { level: number; text: string }[];
+  activeFrom: string;
+  activeTo: string | null;
+  activeToday: boolean;
+  usedInSets: number;
+  version: number;
+}
+interface CompetencySet {
+  id: string;
+  grade: { id: string; code: string; name: string };
+  designation: { id: string; code: string; name: string } | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  inForceToday: boolean;
+  reason: string;
+  items: { competencyId: string; code: string; name: string; sequence: number; weight: number }[];
+  weightTotal: number;
+  version: number;
+}
+const LEVELS = [1, 2, 3, 4, 5] as const;
+
+function CompetencyConfigScreen() {
+  const { can } = useSession();
+  if (!can(CYCLE_READ)) {
+    return (
+      <Section title="Appraisal competencies">
+        <NotPermitted>The selected role cannot view the appraisal configuration.</NotPermitted>
+      </Section>
+    );
+  }
+  return (
+    <div className="stack">
+      <ScoringSection />
+      <CompetencyMasterSection />
+      <CompetencySetsSection />
+    </div>
+  );
+}
+
+function ScoringSection() {
+  const { can } = useSession();
+  const keys = useKeys();
+  const qc = useQueryClient();
+  const query = useQuery({
+    queryKey: keys.scoring,
+    queryFn: () => api<{ businessDate: string; inForce: Scoring | null; items: ScoringRevision[] }>('/v1/appraisal-scoring-settings'),
+    retry: retryTransient,
+  });
+  const [from, setFrom] = useState('');
+  const [goal, setGoal] = useState('');
+  const [competency, setCompetency] = useState('');
+  const [reason, setReason] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const create = useMutation({
+    mutationFn: (body: { effectiveFrom: string; goalWeightPercent: number; competencyWeightPercent: number; reason: string }) => api<ScoringRevision>('/v1/appraisal-scoring-settings', { body }),
+    onSuccess: (r) => {
+      setNotice(`Saved: from ${formatDate(r.effectiveFrom)}, goals ${r.goalWeightPercent}% and competencies ${r.competencyWeightPercent}%.`);
+      setFrom('');
+      setGoal('');
+      setCompetency('');
+      setReason('');
+      void qc.invalidateQueries({ queryKey: keys.scoring });
+    },
+  });
+  const data = shown(query);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (create.isPending) return;
+    if (!from) return setProblem('Enter the date the new split starts.');
+    if (!wholeIn(goal, 1, 100) || !wholeIn(competency, 0, 99) || Number(goal) + Number(competency) !== 100) return setProblem('The percentages are whole numbers that add up to exactly 100.');
+    if (!reason.trim()) return setProblem('Enter a reason.');
+    setProblem(null);
+    setNotice(null);
+    create.mutate({ effectiveFrom: from, goalWeightPercent: Number(goal), competencyWeightPercent: Number(competency), reason: reason.trim() });
+  };
+  return (
+    <Section title="Result split">
+      <p className="hint">
+        How the weighted result combines goals and competencies: (goals % × goal result + competencies % × competency result) / 100, rounded once, half up, to two decimals. Without competencies the result is the goal result
+        alone. A new cycle takes the split in force on its start date and keeps its own copy.
+      </p>
+      {query.isPending && <p className="hint">Loading the split…</p>}
+      <QueryProblem error={query.error} forbidden="The selected role cannot view the result split." />
+      {data && (
+        <>
+          <p>
+            In force today:{' '}
+            <strong>{data.inForce ? `goals ${data.inForce.goalWeightPercent}%, competencies ${data.inForce.competencyWeightPercent}%` : 'none (cycles cannot take a split until one is set)'}</strong>
+          </p>
+          <div style={SCROLL}>
+            <table aria-label="Result split revisions">
+              <thead>
+                <tr>
+                  <th>From</th>
+                  <th>Until</th>
+                  <th>Goals %</th>
+                  <th>Competencies %</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((r) => (
+                  <tr key={r.id}>
+                    <td>{formatDate(r.effectiveFrom)}</td>
+                    <td>{r.effectiveTo ? formatDate(r.effectiveTo) : 'Open'}</td>
+                    <td>{r.goalWeightPercent}</td>
+                    <td>{r.competencyWeightPercent}</td>
+                    <td>{r.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      {notice && (
+        <p className="ok" role="status">
+          {notice}
+        </p>
+      )}
+      {can(CYCLE_MANAGE) && (
+        <form className="grid-form" aria-label="New result split" onSubmit={submit} noValidate>
+          <label>
+            Starts on
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </label>
+          <label>
+            Goals %
+            <input inputMode="numeric" value={goal} maxLength={3} onChange={(e) => setGoal(e.target.value)} />
+          </label>
+          <label>
+            Competencies %
+            <input inputMode="numeric" value={competency} maxLength={2} onChange={(e) => setCompetency(e.target.value)} />
+          </label>
+          <label className="wide">
+            Reason
+            <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
+          </label>
+          {problem && (
+            <p role="alert" className="error">
+              {problem}
+            </p>
+          )}
+          <div className="row">
+            <button type="submit" disabled={create.isPending}>
+              {create.isPending ? 'Saving…' : 'Save the new split'}
+            </button>
+          </div>
+          <p className="hint" style={FLUSH}>
+            It starts today or later and ends the split in force that day; earlier periods and cycles already created keep theirs.
+          </p>
+          <Refusal error={create.error} action="scoring" />
+        </form>
+      )}
+    </Section>
+  );
+}
+
+function CompetencyMasterSection() {
+  const { can } = useSession();
+  const keys = useKeys();
+  const query = useQuery({ queryKey: keys.competencies, queryFn: () => api<{ items: CompetencyMaster[] }>('/v1/appraisal-competencies'), retry: retryTransient });
+  const [editing, setEditing] = useState<string | null>(null);
+  const data = shown(query);
+  const current = data?.items.find((k) => k.id === editing) ?? null;
+  return (
+    <Section title="Competencies">
+      {query.isPending && <p className="hint">Loading competencies…</p>}
+      <QueryProblem error={query.error} forbidden="The selected role cannot view competencies." />
+      {data && data.items.length === 0 && <Empty>No competencies yet.</Empty>}
+      {data && data.items.length > 0 && (
+        <div style={SCROLL}>
+          <table aria-label="Competency master">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Competency</th>
+                <th>Active</th>
+                <th>Used in sets</th>
+                {can(CYCLE_MANAGE) && <th>Change</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((k) => (
+                <tr key={k.id}>
+                  <td>{k.code}</td>
+                  <td>
+                    {k.name}
+                    <IndicatorList item={k} />
+                  </td>
+                  <td>
+                    {formatDate(k.activeFrom)} to {k.activeTo ? formatDate(k.activeTo) : 'open'}
+                    {k.activeToday ? '' : ' (not active today)'}
+                  </td>
+                  <td>{k.usedInSets}</td>
+                  {can(CYCLE_MANAGE) && (
+                    <td>
+                      <button type="button" className="secondary" aria-pressed={editing === k.id} onClick={() => setEditing(editing === k.id ? null : k.id)}>
+                        Change {k.code}
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {can(CYCLE_MANAGE) && current && <CompetencyForm key={`${current.id}:${current.version}`} initial={current} onDone={() => setEditing(null)} />}
+      {can(CYCLE_MANAGE) && !current && <CompetencyForm key="new" initial={null} onDone={() => undefined} />}
+    </Section>
+  );
+}
+
+function CompetencyForm({ initial, onDone }: { initial: CompetencyMaster | null; onDone: () => void }) {
+  const keys = useKeys();
+  const qc = useQueryClient();
+  const [code, setCode] = useState('');
+  const [name, setName] = useState(initial?.name ?? '');
+  const [description, setDescription] = useState(initial?.description ?? '');
+  const [indicators, setIndicators] = useState<string[]>(initial ? initial.indicators.map((i) => i.text) : ['', '', '', '', '']);
+  const [activeFrom, setActiveFrom] = useState(initial?.activeFrom ?? '');
+  const [activeTo, setActiveTo] = useState(initial?.activeTo ?? '');
+  const [problem, setProblem] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      initial ? api<CompetencyMaster>(`/v1/appraisal-competencies/${initial.id}`, { method: 'PUT', body }) : api<CompetencyMaster>('/v1/appraisal-competencies', { body }),
+    onSuccess: (k) => {
+      setNotice(initial ? `Saved ${k.code}.` : `Added ${k.code}.`);
+      if (!initial) {
+        setCode('');
+        setName('');
+        setDescription('');
+        setIndicators(['', '', '', '', '']);
+        setActiveFrom('');
+      }
+      void qc.invalidateQueries({ queryKey: keys.competencies });
+      if (initial) onDone();
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'STALE_VERSION') void qc.invalidateQueries({ queryKey: keys.competencies });
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (save.isPending) return;
+    if (!initial && !code.trim()) return setProblem('Enter a code.');
+    if (!name.trim()) return setProblem('Enter a name.');
+    if (indicators.some((t) => !t.trim())) return setProblem('Describe each proficiency level 1 to 5.');
+    if (!activeFrom) return setProblem('Enter the date the competency is active from.');
+    setProblem(null);
+    setNotice(null);
+    const common = { name: name.trim(), description: description.trim() === '' ? null : description.trim(), indicators: indicators.map((t) => t.trim()), activeFrom };
+    save.mutate(initial ? { ...common, activeTo: activeTo === '' ? null : activeTo, expectedVersion: initial.version } : { ...common, code: code.trim() });
+  };
+  return (
+    <form className="grid-form" aria-label={initial ? `Change ${initial.code}` : 'New competency'} onSubmit={submit} noValidate style={SPACED}>
+      <h3 style={H3}>{initial ? `Change ${initial.code}` : 'New competency'}</h3>
+      {!initial && (
+        <label>
+          Code
+          <input value={code} maxLength={40} onChange={(e) => setCode(e.target.value)} />
+        </label>
+      )}
+      <label>
+        Name
+        <input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="wide">
+        Description (optional)
+        <textarea rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} style={TEXTAREA} />
+      </label>
+      {LEVELS.map((level, i) => (
+        <label key={level} className="wide">
+          Level {level} behaviour
+          <textarea rows={2} maxLength={1000} value={indicators[i] ?? ''} onChange={(e) => setIndicators((prev) => prev.map((t, n) => (n === i ? e.target.value : t)))} style={TEXTAREA} />
+        </label>
+      ))}
+      <label>
+        Active from
+        <input type="date" value={activeFrom} onChange={(e) => setActiveFrom(e.target.value)} />
+      </label>
+      {initial && (
+        <label>
+          Active until (exclusive; empty: open)
+          <input type="date" value={activeTo} onChange={(e) => setActiveTo(e.target.value)} />
+        </label>
+      )}
+      {problem && (
+        <p role="alert" className="error">
+          {problem}
+        </p>
+      )}
+      {notice && (
+        <p className="ok" role="status">
+          {notice}
+        </p>
+      )}
+      <div className="row">
+        <button type="submit" disabled={save.isPending}>
+          {save.isPending ? 'Saving…' : initial ? 'Save the competency' : 'Add the competency'}
+        </button>
+      </div>
+      <p className="hint" style={FLUSH}>
+        Appraisals keep the competencies as they were copied at enrolment; a change here applies to later enrolments only.
+      </p>
+      <Refusal error={save.error} action="competency" />
+    </form>
+  );
+}
+
+function useMasterList(kind: 'grades' | 'designations') {
+  const { can } = useSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: kind === 'grades' ? keys.grades : keys.designations,
+    queryFn: () => api<{ items: MasterItem[] }>(`/v1/org/${kind}`),
+    enabled: can(ORG_READ),
+    retry: retryTransient,
+    staleTime: 5 * 60_000,
+  });
+}
+
+function CompetencySetsSection() {
+  const { can } = useSession();
+  const keys = useKeys();
+  const qc = useQueryClient();
+  const query = useQuery({ queryKey: keys.competencySets, queryFn: () => api<{ items: CompetencySet[] }>('/v1/appraisal-competency-sets'), retry: retryTransient });
+  const competencies = useQuery({ queryKey: keys.competencies, queryFn: () => api<{ items: CompetencyMaster[] }>('/v1/appraisal-competencies'), retry: retryTransient });
+  const grades = useMasterList('grades');
+  const designations = useMasterList('designations');
+  const [gradeId, setGradeId] = useState('');
+  const [designationId, setDesignationId] = useState('');
+  const [from, setFrom] = useState('');
+  const [rows, setRows] = useState<{ key: number; competencyId: string; weight: string }[]>([{ key: 1, competencyId: '', weight: '' }]);
+  const [reason, setReason] = useState('');
+  const [problem, setProblem] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [ending, setEnding] = useState<{ id: string; date: string; reason: string } | null>(null);
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: keys.config });
+  };
+  const create = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api<CompetencySet>('/v1/appraisal-competency-sets', { body }),
+    onSuccess: (s) => {
+      setNotice(`Saved the set for ${s.grade.name}${s.designation ? ` (${s.designation.name})` : ''} from ${formatDate(s.effectiveFrom)}.`);
+      setRows([{ key: 1, competencyId: '', weight: '' }]);
+      setReason('');
+      refresh();
+    },
+  });
+  const end = useMutation({
+    mutationFn: (p: { id: string; body: Record<string, unknown> }) => api<CompetencySet>(`/v1/appraisal-competency-sets/${p.id}/end`, { body: p.body }),
+    onSuccess: (s) => {
+      setNotice(`The set for ${s.grade.name} ends on ${s.effectiveTo ? formatDate(s.effectiveTo) : '—'}.`);
+      setEnding(null);
+      refresh();
+    },
+  });
+  const data = shown(query);
+  const choices = (shown(competencies)?.items ?? []).filter((k) => k.activeTo === null);
+  const total = rows.reduce((t, r) => t + (wholeIn(r.weight, 1, 100) ? Number(r.weight) : 0), 0);
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (create.isPending) return;
+    if (!gradeId) return setProblem('Choose a grade.');
+    if (!from) return setProblem('Enter the date the set starts.');
+    if (rows.some((r) => !r.competencyId || !wholeIn(r.weight, 1, 100))) return setProblem('Choose a competency and a whole-number weight from 1 to 100 on every row.');
+    if (total !== 100) return setProblem(`The weights total ${total}; they must total exactly 100.`);
+    if (!reason.trim()) return setProblem('Enter a reason.');
+    setProblem(null);
+    setNotice(null);
+    create.mutate({
+      gradeId,
+      ...(designationId ? { designationId } : {}),
+      effectiveFrom: from,
+      items: rows.map((r) => ({ competencyId: r.competencyId, weight: Number(r.weight) })),
+      reason: reason.trim(),
+    });
+  };
+  return (
+    <Section title="Competency sets by grade">
+      <p className="hint">
+        Each set maps competencies, with weights totalling exactly 100, to a grade (optionally one designation, which then takes precedence). When an employee is enrolled, the set in force for their grade that day is copied
+        into the appraisal and fixed.
+      </p>
+      {query.isPending && <p className="hint">Loading the sets…</p>}
+      <QueryProblem error={query.error} forbidden="The selected role cannot view competency sets." />
+      {data && data.items.length === 0 && <Empty>No competency sets yet: appraisals are scored on goals alone.</Empty>}
+      {data && data.items.length > 0 && (
+        <div style={SCROLL}>
+          <table aria-label="Competency sets">
+            <thead>
+              <tr>
+                <th>Grade</th>
+                <th>Designation</th>
+                <th>From</th>
+                <th>Until</th>
+                <th>Competencies (weight)</th>
+                {can(CYCLE_MANAGE) && <th>End</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.grade.name}</td>
+                  <td>{s.designation?.name ?? 'Any'}</td>
+                  <td>{formatDate(s.effectiveFrom)}</td>
+                  <td>{s.effectiveTo ? formatDate(s.effectiveTo) : 'Open'}</td>
+                  <td>{s.items.map((i) => `${i.name} (${i.weight})`).join(', ')}</td>
+                  {can(CYCLE_MANAGE) && (
+                    <td>
+                      {s.effectiveTo === null && (
+                        <button type="button" className="secondary" onClick={() => setEnding({ id: s.id, date: '', reason: '' })}>
+                          End the {s.grade.name} set
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {notice && (
+        <p className="ok" role="status">
+          {notice}
+        </p>
+      )}
+      {can(CYCLE_MANAGE) && ending && (
+        <form
+          className="grid-form"
+          aria-label="End a competency set"
+          noValidate
+          onSubmit={(e) => {
+            e.preventDefault();
+            const s = data?.items.find((x) => x.id === ending.id);
+            if (!s || !ending.date || !ending.reason.trim()) return;
+            end.mutate({ id: s.id, body: { effectiveTo: ending.date, reason: ending.reason.trim(), expectedVersion: s.version } });
+          }}
+        >
+          <label>
+            Ends on
+            <input type="date" value={ending.date} onChange={(e) => setEnding({ ...ending, date: e.target.value })} />
+          </label>
+          <label className="wide">
+            Reason
+            <textarea rows={2} maxLength={1000} value={ending.reason} onChange={(e) => setEnding({ ...ending, reason: e.target.value })} style={TEXTAREA} />
+          </label>
+          <div className="row">
+            <button type="submit" disabled={end.isPending || !ending.date || !ending.reason.trim()}>
+              {end.isPending ? 'Saving…' : 'End the set'}
+            </button>
+            <button type="button" className="secondary" onClick={() => setEnding(null)}>
+              Keep it
+            </button>
+          </div>
+          <Refusal error={end.error} action="competency-set" />
+        </form>
+      )}
+      {can(CYCLE_MANAGE) && (
+        <form className="grid-form" aria-label="New competency set" onSubmit={submit} noValidate style={SPACED}>
+          <h3 style={H3}>New competency set</h3>
+          {!can(ORG_READ) ? (
+            <NotPermitted>The selected role cannot list grades and designations, so it cannot map a set.</NotPermitted>
+          ) : (
+            <>
+              <label>
+                Grade
+                <select value={gradeId} onChange={(e) => setGradeId(e.target.value)}>
+                  <option value="">Choose…</option>
+                  {(shown(grades)?.items ?? []).map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Designation (optional)
+                <select value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
+                  <option value="">Any designation of the grade</option>
+                  {(shown(designations)?.items ?? []).map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+          <label>
+            Starts on
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </label>
+          {rows.map((r, i) => (
+            <div className="row wide" key={r.key}>
+              <label>
+                Competency {i + 1}
+                <select value={r.competencyId} onChange={(e) => setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, competencyId: e.target.value } : x)))}>
+                  <option value="">Choose…</option>
+                  {choices.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.name} ({k.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Weight of competency {i + 1}
+                <input inputMode="numeric" maxLength={3} value={r.weight} onChange={(e) => setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, weight: e.target.value } : x)))} />
+              </label>
+              {rows.length > 1 && (
+                <button type="button" className="secondary" onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}>
+                  Remove competency {i + 1}
+                </button>
+              )}
+            </div>
+          ))}
+          <div className="row">
+            <button type="button" className="secondary" disabled={rows.length >= 50} onClick={() => setRows((prev) => [...prev, { key: prev.reduce((m, x) => Math.max(m, x.key), 0) + 1, competencyId: '', weight: '' }])}>
+              Add a competency
+            </button>
+            <span className="hint" role="status">
+              Weights entered: {total} of 100.
+            </span>
+          </div>
+          <label className="wide">
+            Reason
+            <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
+          </label>
+          {problem && (
+            <p role="alert" className="error">
+              {problem}
+            </p>
+          )}
+          <div className="row">
+            <button type="submit" disabled={create.isPending}>
+              {create.isPending ? 'Saving…' : 'Save the set'}
+            </button>
+          </div>
+          <p className="hint" style={FLUSH}>
+            It starts today or later and ends the set in force for the same grade and designation that day.
+          </p>
+          <Refusal error={create.error} action="competency-set" />
+        </form>
+      )}
+    </Section>
+  );
+}
+
+/** FR-042 training needs from completed appraisals, offered to training planning as a suggestion only (nobody is enrolled). */
+function TrainingNeeds({ cycleId, departmentId }: { cycleId: string; departmentId: string }) {
+  const keys = useKeys();
+  const query = useQuery({
+    queryKey: keys.trainingNeeds(cycleId, departmentId),
+    queryFn: () =>
+      api<{
+        sectionIncluded: boolean;
+        population: number;
+        items: { appraisalId: string; employee: { employeeCode: string; displayName: string }; employeeStated: string | null; managerRecommended: string | null }[];
+      }>(`/v1/appraisal-cycles/${cycleId}/training-needs${departmentId ? `?departmentId=${departmentId}` : ''}`),
+    retry: retryTransient,
+  });
+  const data = shown(query);
+  return (
+    <div style={SPACED}>
+      <h3 style={H3}>Training needs (suggestions for training planning)</h3>
+      {query.isPending && <p className="hint">Loading training needs…</p>}
+      <QueryProblem error={query.error} forbidden="Training needs are confidential: the selected role cannot see them." />
+      {data && !data.sectionIncluded && <Empty>This cycle does not include the training needs section.</Empty>}
+      {data && data.sectionIncluded && data.items.length === 0 && <Empty>No completed appraisal in scope has training needs yet.</Empty>}
+      {data && data.items.length > 0 && (
+        <div style={SCROLL}>
+          <table aria-label="Training needs">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Stated by the employee</th>
+                <th>Recommended by the manager</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((r) => (
+                <tr key={r.appraisalId}>
+                  <td>{personLabel(r.employee)}</td>
+                  <td>{r.employeeStated ?? '—'}</td>
+                  <td>{r.managerRecommended ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="hint" style={FLUSH}>
+        A suggestion only: nominate people from the training module; nobody is enrolled from here.
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
 // Exports for the navigation step (App.tsx wires these)
 // ---------------------------------------------------------------------------------------------------------
 
@@ -2977,6 +4406,8 @@ export const APPRAISAL_SCREENS: ScreenRoute[] = [
   { path: PATHS.reviews, title: 'Appraisal reviews', permission: CONFIRM, nav: true, component: ReviewsScreen },
   { path: PATHS.reports, title: 'Appraisal reports', permission: REPORT, nav: true, component: ReportsScreen },
   { path: PATHS.goalUpload, title: 'KRA upload', permission: IMPORT, nav: true, component: GoalUploadScreen },
+  // FR-041 / I-86: the result split, the competency master and the grade mapping (Appraisal Config).
+  { path: PATHS.competencies, title: 'Appraisal competencies', permission: CYCLE_READ, nav: true, component: CompetencyConfigScreen },
 ];
 
 /** H3 TN18 in the Employee OWN context (registration essTabs: GET /v1/me/appraisals). */

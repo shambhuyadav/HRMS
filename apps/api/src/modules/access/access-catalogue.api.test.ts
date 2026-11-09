@@ -94,6 +94,8 @@ describe('role catalogue (FR-066, DF02)', () => {
       'exit.read.reason',
       'expense.view_receipt.receipt',
       'leave.read.reason',
+      // FR-018 / FR-054 (I-81 item 9): letters and settlement statements delivered in-app to the employee (own record only, BR-053).
+      'own_delivery.read.delivery',
       // FR-034 / H3 TN15: the employee's own loan and advance requests (own record only, H1/BR-053).
       'own_loan.read.loan',
       'own_loan.request.loan',

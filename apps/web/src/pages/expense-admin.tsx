@@ -468,7 +468,182 @@ export function ExpensePoliciesPage() {
       </Section>
       {canManage && <NewRevision onChanged={refresh} />}
       {canManage && <CategoriesSection />}
+      {canManage && <CurrenciesSection canActivate={canActivate} />}
+      {canManage && <RatesSection canActivate={canActivate} />}
     </>
+  );
+}
+
+interface ExchangeRate {
+  id: string;
+  currencyCode: string;
+  effectiveFrom: string;
+  rate: string;
+  reason: string;
+  state: string;
+  createdBy: string;
+  version: number;
+}
+
+/** I-87: dated rates to INR for enabled currencies, entered by one person and activated by another; claim lines convert once at submission. */
+function RatesSection({ canActivate }: { canActivate: boolean }) {
+  const { me } = useSession();
+  const qc = useQueryClient();
+  const rates = useQuery({ queryKey: ['expense-rates'], queryFn: () => api<{ companyCurrency: string; items: ExchangeRate[] }>('/v1/expense/exchange-rates') });
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['expense-rates'] });
+  const [currency, setCurrency] = useState('');
+  const [from, setFrom] = useState('');
+  const [rate, setRate] = useState('');
+  const [reason, setReason] = useState('');
+  const add = useMutation({
+    mutationFn: () => api('/v1/expense/exchange-rates', { body: { currencyCode: currency.trim().toUpperCase(), effectiveFrom: from, rate: rate.trim(), reason: reason.trim() } }),
+    onSuccess: refresh,
+  });
+  const decide = useMutation({
+    mutationFn: (v: { r: ExchangeRate; action: 'ACTIVATE' | 'CANCEL' }) => api(`/v1/expense/exchange-rates/${encodeURIComponent(v.r.id)}/decision`, { body: { action: v.action, expectedVersion: v.r.version } }),
+    onSuccess: refresh,
+  });
+  const ready = currency.trim().length === 3 && from && rate.trim() && reason.trim();
+  return (
+    <Section title="Exchange rates">
+      <p className="hint">
+        {`${rates.data?.companyCurrency ?? 'INR'} for one unit of an enabled currency, from a date. A claim line in that currency converts once, at submission, at the rate in force on its expense date; a later rate never changes a submitted claim.`}
+      </p>
+      <ErrorNote error={rates.error ?? add.error ?? decide.error} />
+      {rates.data?.items.length === 0 && <Empty>No exchange rate yet.</Empty>}
+      {rates.data && rates.data.items.length > 0 && (
+        <ul aria-label="Exchange rates">
+          {rates.data.items.map((r) => (
+            <li key={r.id}>
+              {`${r.currencyCode} from ${formatDate(r.effectiveFrom)}: ${r.rate} (${r.reason}) `}
+              <StateBadge state={r.state} />
+              {canActivate && r.state === 'DRAFT' && r.createdBy !== me?.userId && (
+                <button type="button" className="secondary" onClick={() => decide.mutate({ r, action: 'ACTIVATE' })} disabled={decide.isPending}>
+                  Activate
+                </button>
+              )}
+              {canActivate && r.state === 'DRAFT' && (
+                <button type="button" className="secondary" onClick={() => decide.mutate({ r, action: 'CANCEL' })} disabled={decide.isPending}>
+                  Cancel
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="row"
+        aria-label="Enter an exchange rate"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (ready && !add.isPending) add.mutate();
+        }}
+      >
+        <label>
+          Currency
+          <input maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value)} />
+        </label>
+        <label>
+          From
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          Rate
+          <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} />
+        </label>
+        <label>
+          Source
+          <input maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </label>
+        <button type="submit" disabled={!ready || add.isPending}>
+          Enter rate
+        </button>
+      </form>
+    </Section>
+  );
+}
+
+interface EnabledCurrency {
+  id: string;
+  currencyCode: string;
+  state: string;
+  reason: string;
+  createdBy: string;
+  version: number;
+}
+
+/** OQ-17 (I-80): the currencies Finance enables for claims, asked for by one person and enabled by another. */
+function CurrenciesSection({ canActivate }: { canActivate: boolean }) {
+  const { me } = useSession();
+  const qc = useQueryClient();
+  const list = useQuery({
+    queryKey: ['expense-currencies'],
+    queryFn: () => api<{ companyCurrency: string; reference: { code: string; minorUnit: number }[]; items: EnabledCurrency[] }>('/v1/expense/currencies'),
+  });
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['expense-currencies'] });
+  const [code, setCode] = useState('');
+  const [reason, setReason] = useState('');
+  const ask = useMutation({ mutationFn: () => api('/v1/expense/currencies', { body: { currencyCode: code, reason: reason.trim() } }), onSuccess: refresh });
+  const decide = useMutation({
+    mutationFn: (v: { c: EnabledCurrency; action: 'ACTIVATE' | 'RETIRE' }) => api(`/v1/expense/currencies/${encodeURIComponent(v.c.id)}/decision`, { body: { action: v.action, expectedVersion: v.c.version } }),
+    onSuccess: refresh,
+  });
+  const others = list.data?.reference.filter((r) => r.code !== list.data?.companyCurrency) ?? [];
+  return (
+    <Section title="Claim currencies">
+      <p className="hint">
+        {`Claims are in ${list.data?.companyCurrency ?? 'the company currency'}. Another approved currency is usable once one person asks for it and another enables it; a claim in it is then refused at submission until an exchange rate converts it.`}
+      </p>
+      <ErrorNote error={list.error ?? ask.error ?? decide.error} />
+      {list.data?.items.length === 0 && <Empty>No other currency is enabled.</Empty>}
+      {list.data && list.data.items.length > 0 && (
+        <ul aria-label="Claim currencies">
+          {list.data.items.map((c) => (
+            <li key={c.id}>
+              {`${c.currencyCode}: ${c.reason} `}
+              <StateBadge state={c.state} />
+              {canActivate && c.state === 'DRAFT' && c.createdBy !== me?.userId && (
+                <button type="button" className="secondary" onClick={() => decide.mutate({ c, action: 'ACTIVATE' })} disabled={decide.isPending}>
+                  Enable
+                </button>
+              )}
+              {canActivate && c.state === 'ACTIVE' && (
+                <button type="button" className="secondary" onClick={() => decide.mutate({ c, action: 'RETIRE' })} disabled={decide.isPending}>
+                  Retire
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <form
+        className="row"
+        aria-label="Ask for a claim currency"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (code && reason.trim() && !ask.isPending) ask.mutate();
+        }}
+      >
+        <label>
+          Currency
+          <select value={code} onChange={(e) => setCode(e.target.value)}>
+            <option value="">Choose</option>
+            {others.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.code}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Reason
+          <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
+        </label>
+        <button type="submit" disabled={!code || !reason.trim() || ask.isPending}>
+          Ask to enable
+        </button>
+      </form>
+    </Section>
   );
 }
 

@@ -647,19 +647,24 @@ describe('cross-table invariants, by direct data writes (BRD lines 81, 4532)', (
         await refused(byKey('payroll_adjustment', 'company_id', 'origin_payroll_record_id', 'origin_run_id'), () => insertAdjustment({ record: otherRunRecord }));
       });
 
-      it('two applied adjustments cannot name one payroll line', async () => {
+      // 0206 (I-79): several cases of one record are paid on the same component line, each through its own snapshot row, so a line is no
+      // longer one case's alone; what an applied case cannot lack is the policy it was valued under, and a difference.
+      it('an applied adjustment was valued under a policy; two of one record may name the same payroll line', async () => {
         const line = randomUUID();
-        const applied = async (revision: string) => {
+        const applied = async (revision: string, policy: string | null) => {
           const id = randomUUID();
           const txn = await seedTransaction('timesheet_adjustment', e1, 'APPLIED');
           await insertRow(db, shapes, 'payroll_adjustment', {
             id, company_id: a.company, employee_id: e1, source_timesheet_id: sheet, source_revision: revision, origin_payroll_record_id: record, origin_run_id: run, target_run_id: otherRun, transaction_id: txn,
-            applied_payroll_line_id: line, adjustment_kind: 'LATE_TIMESHEET', previous_recognized_units: '1', corrected_units: '2', delta_amount: '1', currency_code: 'INR', rule_snapshot: '{}', explanation: 'Synthetic', state: 'APPLIED',
-            submitted_at: '2026-02-01T00:00:00Z', decided_at: '2026-02-02T00:00:00Z', decided_by: u2,
+            applied_payroll_line_id: line, adjustment_kind: 'LATE_TIMESHEET', previous_recognized_units: '1', corrected_units: '2', delta_amount: '1', valuation_policy_id: policy, currency_code: 'INR',
+            rule_snapshot: '{}', explanation: 'Synthetic', state: 'APPLIED', submitted_at: '2026-02-01T00:00:00Z', decided_at: '2026-02-02T00:00:00Z', decided_by: u2,
           });
         };
-        await asReplica(() => applied('1'));
-        await refused(byIndex('payroll_adjustment_one_applied_line'), () => asReplica(() => applied('2')));
+        await refused(await byCheck('payroll_adjustment', 'valuation_policy_id IS NOT NULL) AND (delta_amount <>'), () => asReplica(() => applied('1', null)));
+        await accepted(() => asReplica(async () => {
+          await applied('1', randomUUID());
+          await applied('2', randomUUID());
+        }));
       });
     });
 

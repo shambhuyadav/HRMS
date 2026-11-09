@@ -32,6 +32,8 @@ import type { EssPanel, ScreenRoute } from '../screens';
 import { type MeContext, useSession } from '../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, nextSort, Pager, pageParams, Section, SortHeader, type SortState, sortParams, StateBadge } from '../ui';
 import { DelegatedBadge } from './delegations';
+import { VerifiedEvidencePicker } from './exit-finance';
+import { EnterSeparationForm } from './separation-entry';
 
 // ---------------------------------------------------------------------------------------------------------
 // Permission keys (modules/lifecycle/registration.ts; migration 0038_lifecycle.sql; the requireAccess calls of
@@ -294,6 +296,14 @@ interface ExitCase {
   releasedAt: string | null;
   submittedAt: string;
   version: number;
+  /** I-81 item 3: EMPLOYEE (self-service) or HR (entered from a resignation given outside the system). */
+  origin?: string;
+  enteredBy?: string | null;
+}
+/** I-81 item 3: records approved for days after the last working date, kept and listed (never cancelled by the exit). */
+interface AfterLastWorkingDate {
+  treatment: string;
+  items: { kind: string; id: string; startDate: string; endDate: string }[];
 }
 interface ExitWithdrawal {
   id: string;
@@ -325,6 +335,7 @@ interface ExitEvent {
   occurredAt: string;
 }
 interface ExitDetail extends ExitCase {
+  afterLastWorkingDate?: AfterLastWorkingDate;
   clearance: { started: boolean; complete: boolean; processIds: string[]; incompleteRequired: string[] };
   withdrawals: ExitWithdrawal[];
   decisions: ExitDecision[];
@@ -1764,6 +1775,8 @@ function EmployeeLifecycle({ employeeId }: { employeeId: string }) {
         )}
       </Section>
       {can(PROCESS_MANAGE) && !own && <StartProcessForm employeeId={employeeId} exits={exitList} />}
+      {can(EXIT_MANAGE) && !own && <EnterResignationForm employeeId={employeeId} />}
+      {can(EXIT_MANAGE) && !own && <EnterSeparationForm employeeId={employeeId} exitsKey={keys.exits} />}
       {canReadExits && (
         <Section title="Exit cases">
           {exits.isPending && <Loading>Loading the exit cases…</Loading>}
@@ -1775,6 +1788,84 @@ function EmployeeLifecycle({ employeeId }: { employeeId: string }) {
       )}
       <RestrictedNotes employeeId={employeeId} own={own} processes={processList ?? []} exits={exitList ?? []} />
     </>
+  );
+}
+
+/** Refusals of an HR-entered resignation (I-81 item 3), in plain words. */
+const ENTER_WORDS: Record<string, string> = {
+  OPEN_EXIT_EXISTS: 'The employee already has an open resignation.',
+  EMPLOYEE_NOT_ACTIVE: 'Only an active employee can resign.',
+  INVALID_LAST_WORKING_DATE: 'The proposed last working date must be a valid date from today.',
+  EVIDENCE_NOT_VERIFIED: 'The resignation letter must be released by the malware scan and verified by someone independent first.',
+  INVALID_EVIDENCE: 'The evidence must be a document of this employee.',
+  SELF_ACTION_NOT_ALLOWED: 'You cannot enter a resignation on your own record.',
+};
+
+/**
+ * FR-051 (I-81 item 3): a resignation the employee gave outside the system (a letter or e-mail), entered by HR with its reference and
+ * the verified document. It follows the same route as the employee's own; whoever enters it never recommends or approves it.
+ */
+function EnterResignationForm({ employeeId }: { employeeId: string }) {
+  const keys = useKeys();
+  const qc = useQueryClient();
+  const [date, setDate] = useState('');
+  const [reference, setReference] = useState('');
+  const [doc, setDoc] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const enter = useMutation({
+    mutationFn: () => api<{ exitCaseId: string }>(`/v1/employees/${employeeId}/resignation`, { body: { proposedLastWorkingDate: date, evidenceReference: reference.trim(), evidenceDocumentIds: [doc] } }),
+    onSuccess: () => {
+      setDate('');
+      setReference('');
+      setDoc(null);
+      void qc.invalidateQueries({ queryKey: keys.exits });
+    },
+  });
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (enter.isPending) return;
+    if (!ISO_DATE.test(date) || !reference.trim() || !doc) return setProblem('Give the proposed last working date, the reference of the resignation received and its verified document.');
+    setProblem(null);
+    enter.mutate();
+  };
+  const refusal = enter.error instanceof ApiError ? ENTER_WORDS[enter.error.code] : undefined;
+  return (
+    <Section title="Enter a resignation received outside the system">
+      <p className="hint">For a resignation the employee handed in by letter or e-mail. It follows the employee’s own route; you will not recommend or approve it.</p>
+      <form onSubmit={submit} className="grid-form" aria-label="Enter a resignation">
+        <label>
+          Proposed last working date
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+        <label>
+          Reference of the resignation received
+          <input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
+        </label>
+        <VerifiedEvidencePicker employeeId={employeeId} chosen={doc} onChange={setDoc} legend="The resignation letter or e-mail (released and verified)" />
+        <div className="row">
+          <button type="submit" disabled={enter.isPending}>
+            Enter the resignation
+          </button>
+        </div>
+      </form>
+      {problem && (
+        <p role="alert" className="error">
+          {problem}
+        </p>
+      )}
+      {refusal ? (
+        <p role="alert" className="error">
+          {refusal}
+        </p>
+      ) : (
+        <ErrorNote error={enter.error} />
+      )}
+      {enter.isSuccess && (
+        <p role="status" className="ok">
+          The resignation is entered and waits for the manager’s recommendation.
+        </p>
+      )}
+    </Section>
   );
 }
 
@@ -2918,6 +3009,7 @@ function ExitView({ exitId }: { exitId: string }) {
           </p>
         )}
       </Section>
+      {x.afterLastWorkingDate && <AfterLastWorkingDateList after={x.afterLastWorkingDate} />}
       {can(EXIT_MANAGE) && !own && live && <NoticePeriodForm exit={x} onDone={done} />}
       <ClearanceSection exit={x} own={own} onDone={done} />
       {can(EXIT_MANAGE) && !own && releasable && <FinalRelease exit={x} onDone={done} />}
@@ -2925,6 +3017,35 @@ function ExitView({ exitId }: { exitId: string }) {
       <DecisionTrail decisions={x.decisions} />
       <ExitHistory history={x.history} />
     </>
+  );
+}
+
+const AFTER_KIND_LABEL: Record<string, string> = {
+  LEAVE_REQUEST: 'Leave',
+  OUTDOOR_DUTY_REQUEST: 'Outdoor duty',
+  HOLIDAY_WORK_REQUEST: 'Holiday work',
+  RESOURCE_ALLOCATION: 'Project allocation',
+  TIMESHEET: 'Timesheet',
+};
+
+/**
+ * FR-051 (I-81 item 3): what was approved for days after the last working date stays as approved (a withdrawal can revive it, and
+ * nothing approved is deleted), with no effect after that date; HR cancels any of it in its own module.
+ */
+function AfterLastWorkingDateList({ after }: { after: AfterLastWorkingDate }) {
+  return (
+    <Section title="Approved for days after the last working date">
+      <p className="hint">These are kept, not cancelled by the exit. Payroll and attendance stop at the last working date, so none of them takes effect after it.</p>
+      {after.items.length === 0 ? (
+        <Empty>Nothing is approved for days after the last working date.</Empty>
+      ) : (
+        <ul>
+          {after.items.map((i) => (
+            <li key={i.id}>{`${AFTER_KIND_LABEL[i.kind] ?? readable(i.kind)}: ${formatDate(i.startDate)} to ${formatDate(i.endDate)}`}</li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
 
@@ -2936,6 +3057,7 @@ function ExitFacts({ x, ownView = false }: { x: ExitCase; ownView?: boolean }) {
         <StateBadge state={x.state} /> <span className="hint">{EXIT_STATE_HINT[x.state] ?? ''}</span>
       </Item>
       <Item term="Separation type">{readable(x.separationType)}</Item>
+      {x.origin === 'HR' && <Item term="Entered by">HR, from a resignation given outside the system (with its evidence)</Item>}
       <Item term="Resignation date">{formatDate(x.requestDate)}</Item>
       <Item term="Proposed last working date">{formatDate(x.proposedLastWorkingDate)}</Item>
       <Item term="Recommended last working date">{formatDate(x.recommendedLastWorkingDate)}</Item>

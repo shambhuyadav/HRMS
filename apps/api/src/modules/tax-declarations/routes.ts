@@ -8,6 +8,7 @@ import { notFound } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import type { FileStore } from '../../storage/files.js';
 import { evidenceContent } from '../employee/evidence.js';
+import { form16PartB } from './form16.js';
 import {
   activatePack,
   createOwnDeclaration,
@@ -62,6 +63,25 @@ export async function taxDeclarationRoutes(app: FastifyInstance, opts: { db: Dat
   const review = (request: Req, action: 'read' | 'review', recordKey?: string) =>
     requireAccess(db, request, 'tax_declaration', action, ['tax'], { requireAll: true, ...(recordKey ? { recordKey } : {}) });
 
+  // FR-107 (I-90): Form 16 Part B working data for one employee and year, for a tax reviewer; Part A stays an outside input.
+  app.get(
+    '/payroll/form16/part-b',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['employeeId', 'fiscalYear'],
+          properties: { employeeId: { type: 'string', format: 'uuid' }, fiscalYear: { type: 'string', pattern: '^\\d{4}-\\d{2}$' } },
+        },
+      },
+    },
+    async (request) => {
+      const q = request.query as { employeeId: string; fiscalYear: string };
+      return form16PartB(db, await review(request, 'read', q.employeeId), q.employeeId, q.fiscalYear);
+    },
+  );
+
   // Rule pack registry: what a supplied pack lists; no rate.
   app.get('/payroll/tax-rule-packs', async (request) => listPacks(db, await requireAccess(db, request, 'payroll_config', 'read', ['operational'])));
   app.post(
@@ -93,7 +113,17 @@ export async function taxDeclarationRoutes(app: FastifyInstance, opts: { db: Dat
                 properties: {
                   code,
                   name,
-                  categories: { type: 'array', maxItems: 200, items: { type: 'object', additionalProperties: false, required: ['code', 'name'], properties: { code, name } } },
+                  categories: {
+                    type: 'array',
+                    maxItems: 200,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['code', 'name'],
+                      // I-90: the category's limit and its section reference (to be validated against the law in force).
+                      properties: { code, name, limitAmount: { type: ['string', 'null'], maxLength: 20 }, sectionReference: { type: ['string', 'null'], maxLength: 300 } },
+                    },
+                  },
                 },
               },
             },

@@ -41,7 +41,7 @@ beforeAll(async () => {
   expect(grade.statusCode, grade.body).toBe(201);
   gradeId = grade.json().id;
   const shift = async (name: string) => {
-    const res = await h.call(hr, 'POST', '/v1/shifts', { code: uniq('SH').toUpperCase().slice(0, 30), name, inTime: '09:00', outTime: '18:00', breaks: [] });
+    const res = await h.call(hr, 'POST', '/v1/shifts', { code: uniq('SH').toUpperCase().slice(0, 30), name, inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [] });
     expect(res.statusCode, res.body).toBe(201);
     return res.json().id as string;
   };

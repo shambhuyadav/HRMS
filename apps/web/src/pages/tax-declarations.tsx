@@ -468,7 +468,129 @@ function TaxReviewScreen() {
           )}
         </Section>
       )}
+      {can(REVIEW_READ) && <Form16PartB declarations={declarations.data?.items ?? []} />}
     </div>
+  );
+}
+
+interface PartB {
+  status: string;
+  message?: string;
+  regime?: string;
+  regimeSource?: string;
+  salary: {
+    processedMonths: number;
+    grossSalary: string;
+    exemptAllowances: string;
+    tdsDeducted: string;
+    finalSettlement?: { taxableSalary: string; exemptAllowances: string; tdsDeducted: string } | null;
+  };
+  standardDeduction?: string;
+  hraExemption?: { exemption: string; hraReceived: string; salaryForHra: string; rentPaid: string; metro: boolean } | null;
+  previousEmployment?: { salary: string; tds: string } | null;
+  deductions?: { categoryCode: string; amount: string; limit: string | null; allowed: string }[];
+  taxableIncome?: string;
+  tax?: { slabTax: string; rebate: string; surcharge: string; cess: string; total: string };
+  balance?: string;
+  partA: { status: string; reason: string };
+}
+
+/**
+ * FR-107 (I-90): Form 16 Part B working data of one employee and year, as the server computes it from processed payroll, the accepted
+ * declaration and proofs, and the active INCOME_TAX pack. It is the reviewer's working data, never the certificate (Part A comes from
+ * TRACES); figures are shown exactly as returned.
+ */
+function Form16PartB({ declarations }: { declarations: (Declaration & { employeeId?: string })[] }) {
+  const [employeeId, setEmployeeId] = useState('');
+  const [fiscalYear, setFiscalYear] = useState('2026-27');
+  const [asked, setAsked] = useState<{ employeeId: string; fiscalYear: string } | null>(null);
+  const partB = useQuery({
+    queryKey: ['form16-part-b', asked],
+    enabled: asked !== null,
+    queryFn: () => api<PartB>(`/v1/payroll/form16/part-b?employeeId=${encodeURIComponent(asked!.employeeId)}&fiscalYear=${encodeURIComponent(asked!.fiscalYear)}`),
+  });
+  const amount = (v: string | undefined) => (v === undefined ? '—' : formatAmount(v, 'INR'));
+  const d = partB.data;
+  return (
+    <Section title="Form 16 Part B (working data)">
+      <p className="hint">Salary and tax for a year, from processed payroll and accepted proofs, valued under the income tax pack two people validated and activated. Part A comes from TRACES; no certificate is issued here.</p>
+      {declarations.some((x) => x.employeeId) && (
+        <ul aria-label="Part B by declaration">
+          {declarations
+            .filter((x) => x.employeeId)
+            .map((x) => (
+              <li key={x.id}>
+                <button type="button" className="secondary" onClick={() => setAsked({ employeeId: x.employeeId!, fiscalYear: x.fiscalPeriodCode })}>
+                  {`Part B: ${x.employeeCode ?? ''} ${x.fiscalPeriodCode}`}
+                </button>
+              </li>
+            ))}
+        </ul>
+      )}
+      <form
+        className="row"
+        aria-label="Form 16 Part B"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (employeeId.trim() && fiscalYear.trim()) setAsked({ employeeId: employeeId.trim(), fiscalYear: fiscalYear.trim() });
+        }}
+      >
+        <label>
+          Employee ID
+          <input value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} />
+        </label>
+        <label>
+          Financial year
+          <input value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} placeholder="2026-27" />
+        </label>
+        <button type="submit">Show Part B</button>
+      </form>
+      <ErrorNote error={partB.error} />
+      {d && (
+        <dl className="kv" aria-label="Part B figures">
+          <dt>Status</dt>
+          <dd>{d.status === 'CALCULATED' ? `Calculated (${d.regime} regime, ${d.regimeSource === 'DECLARATION' ? 'as declared' : 'the default'})` : (d.message ?? d.status)}</dd>
+          <dt>Months processed</dt>
+          <dd>{d.salary.processedMonths}</dd>
+          {d.salary.finalSettlement && (
+            <>
+              <dt>Final settlement (included)</dt>
+              <dd>{`${amount(d.salary.finalSettlement.taxableSalary)} taxable, ${amount(d.salary.finalSettlement.tdsDeducted)} TDS`}</dd>
+            </>
+          )}
+          <dt>Gross salary</dt>
+          <dd>{amount(d.salary.grossSalary)}</dd>
+          <dt>Exempt allowances</dt>
+          <dd>{amount(d.salary.exemptAllowances)}</dd>
+          {d.previousEmployment && (
+            <>
+              <dt>Earlier employer this year (Form 12B)</dt>
+              <dd>{`${amount(d.previousEmployment.salary)} salary, ${amount(d.previousEmployment.tds)} tax deducted`}</dd>
+            </>
+          )}
+          {d.hraExemption && (
+            <>
+              <dt>House rent allowance exempt</dt>
+              <dd>{`${amount(d.hraExemption.exemption)} (allowance ${amount(d.hraExemption.hraReceived)}, rent ${amount(d.hraExemption.rentPaid)}${d.hraExemption.metro ? ', metro city' : ''})`}</dd>
+            </>
+          )}
+          <dt>Standard deduction</dt>
+          <dd>{amount(d.standardDeduction)}</dd>
+          <dt>Deductions allowed</dt>
+          <dd>{d.deductions && d.deductions.length > 0 ? d.deductions.map((x) => `${x.categoryCode} ${amount(x.allowed)}`).join('; ') : '—'}</dd>
+          <dt>Taxable income</dt>
+          <dd>{amount(d.taxableIncome)}</dd>
+          <dt>Tax for the year</dt>
+          <dd>{amount(d.tax?.total)}</dd>
+          <dt>TDS deducted</dt>
+          <dd>{amount(d.salary.tdsDeducted)}</dd>
+          <dt>Balance</dt>
+          <dd>{amount(d.balance)}</dd>
+          <dt>Part A</dt>
+          <dd>{d.partA.reason}</dd>
+        </dl>
+      )}
+    </Section>
   );
 }
 

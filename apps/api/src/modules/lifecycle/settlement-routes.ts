@@ -7,8 +7,14 @@ import { requireAccess } from '../../http/guard.js';
 import { attachmentDisposition } from '../../storage/files.js';
 import { type ScanProvider, scanInMemory } from '../../storage/scan.js';
 import { sendTemplate } from '../imports/routes.js';
-import { expectedVersion, idempotencyKey, idParams, pagingQuery, reason } from './process-routes.js';
+import { date, expectedVersion, idempotencyKey, idParams, pagingQuery, reason } from './process-routes.js';
 import {
+  type PaymentInput,
+  recordSettlementPayment,
+  SELECTION_HEADER,
+  SELECTION_TEMPLATE,
+  selectFromUploadedList,
+  voidSettlement,
   approveSettlement,
   CALCULATION_STATUS,
   cancelDraft,
@@ -37,6 +43,8 @@ import {
 } from './settlement.js';
 
 const taskParams = { type: 'object', required: ['taskId'], properties: { taskId: { type: 'string', format: 'uuid' } } } as const;
+const state = { type: 'string', enum: ['DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE', 'PAID', 'RETURNED', 'REJECTED', 'CANCELLED'] } as const;
+const month = { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$' } as const;
 const UUID_TEXT = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const version = { type: 'object', additionalProperties: false, required: ['expectedVersion'], properties: { expectedVersion } } as const;
 const decision = {
@@ -51,7 +59,7 @@ export async function settlementRoutes(app: FastifyInstance, opts: { db: Databas
   const read = (request: Parameters<typeof requireAccess>[1], recordKey?: string) =>
     requireAccess(db, request, 'settlement', 'read', ['operational', 'amount'], { requireGroups: ['operational'], ...(recordKey ? { recordKey } : {}) });
 
-  // FR-052: no approved full-and-final policy or rate pack, so there is no calculation.
+  // FR-052 (I-88): how a draft is calculated (POST /settlements/:id/calculate, settlement-calculation-routes.ts).
   app.get('/settlements/calculation', async (request) => {
     await requireAccess(db, request, 'settlement', 'read', ['operational']);
     return CALCULATION_STATUS;
@@ -90,16 +98,44 @@ export async function settlementRoutes(app: FastifyInstance, opts: { db: Databas
           type: 'object',
           additionalProperties: false,
           properties: {
-            state: { type: 'string', enum: ['DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIGIBLE', 'RETURNED', 'REJECTED', 'CANCELLED'] },
+            state,
             employeeCode: { type: 'string', minLength: 1, maxLength: 60 },
-            lastWorkingMonth: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$' },
+            lastWorkingMonth: month,
+            // FR-054 disbursement month (I-81 item 2): the month of the recorded payment date.
+            disbursementMonth: month,
             ...optionalPaging,
             ...sortQuery(SETTLEMENT_SORTS),
           },
         },
       },
     },
-    async (request) => listSettlements(db, await read(request), request.query as { state?: string; employeeCode?: string; lastWorkingMonth?: string } & Paging & Sorting),
+    async (request) => listSettlements(db, await read(request), request.query as { state?: string; employeeCode?: string; lastWorkingMonth?: string; disbursementMonth?: string } & Paging & Sorting),
+  );
+
+  // FR-054 uploaded-list selection (I-81 item 7): the list's settlements for the employees an uploaded SETTLEMENT_SELECTION_V1 file
+  // names, with each row's outcome. A read under the list's own grant; the file is scanned in memory and never stored.
+  app.get('/settlements/selection/template', async (request, reply) => {
+    await read(request);
+    return sendTemplate(reply, { code: SELECTION_TEMPLATE, columns: SELECTION_HEADER });
+  });
+  app.post(
+    '/settlements/selection',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['contentBase64'],
+          properties: { contentBase64: { type: 'string', minLength: 4, maxLength: 1_000_000 }, state, lastWorkingMonth: month, disbursementMonth: month },
+        },
+      },
+    },
+    async (request) => {
+      const grant = await read(request);
+      const body = request.body as { contentBase64: string; state?: string; lastWorkingMonth?: string; disbursementMonth?: string };
+      const verdict = await scanInMemory(scanner, Buffer.from(body.contentBase64, 'base64'));
+      return selectFromUploadedList(db, grant, verdict, body);
+    },
   );
 
   app.get('/settlements/:id', { schema: { params: idParams } }, async (request) => {
@@ -129,6 +165,8 @@ export async function settlementRoutes(app: FastifyInstance, opts: { db: Databas
                   componentCode: { type: 'string', minLength: 1, maxLength: 40 },
                   amount: { type: 'string', minLength: 1, maxLength: 24 },
                   lineKind: { type: 'string', enum: ['STANDARD', 'NOTICE_ADJUSTMENT'] },
+                  // FR-052 (I-88): why the line is entered; required on a calculated revision.
+                  reason: { type: 'string', maxLength: 500 },
                 },
               },
             },
@@ -207,6 +245,44 @@ export async function settlementRoutes(app: FastifyInstance, opts: { db: Databas
     const grant = await requireAccess(db, request, 'settlement', 'release', ['amount'], { requireAll: true, recordKey: id });
     return withTransaction(db, (tx) => markReleaseEligible(tx, grant, id, request.body as { expectedVersion: number }));
   });
+
+  // FR-053, DF07 (I-81 item 2): the payment made outside the system, recorded from evidence by an independent person.
+  app.post(
+    '/settlements/:id/payment',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['paymentDate', 'evidenceKey', 'evidenceReference', 'evidenceDocumentIds', 'expectedVersion'],
+          properties: {
+            paymentDate: date,
+            evidenceKey: idempotencyKey,
+            evidenceReference: { type: 'string', minLength: 1, maxLength: 500 },
+            evidenceDocumentIds: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string', format: 'uuid' } },
+            expectedVersion,
+          },
+        },
+      },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'settlement', 'record_payment', ['amount'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => recordSettlementPayment(tx, grant, id, request.body as PaymentInput));
+    },
+  );
+
+  // FR-052, FR-053 (I-81 items 5, 6): an independent approver voids a live revision that must not be paid.
+  app.post(
+    '/settlements/:id/void',
+    { schema: { params: idParams, body: { type: 'object', additionalProperties: false, required: ['expectedVersion', 'reason'], properties: { expectedVersion, reason } } } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'settlement', 'approve', ['amount'], { requireAll: true, recordKey: id });
+      return withTransaction(db, (tx) => voidSettlement(tx, grant, id, request.body as { expectedVersion: number; reason: string }));
+    },
+  );
 
   // FR-054 outputs, built on request under the caller's current grants and never stored or sent: CSV (the default),
   // Excel (XLSX) or PDF of one approved revision, under the separate settlement export grant (FR-002, 0119).

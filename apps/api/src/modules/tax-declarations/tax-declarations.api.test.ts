@@ -170,8 +170,13 @@ describe.runIf(isModuleActive('tax-declarations'))('tax declarations and proofs 
   });
 
   describe('until a rule pack is activated', () => {
-    it('ships no pack: both tabs say NOT_CONFIGURED in plain words and link nowhere, even with a draft pack', async () => {
-      expect((await h.one<{ n: number }>(`select count(*)::int as n from tax_rule_pack where company_id = $1`, [A.id])).n).toBe(0);
+    it('ships only a draft pack: both tabs say NOT_CONFIGURED in plain words and link nowhere, even with a draft pack', async () => {
+      // I-90 (0225): every company starts with the FY 2026-27 pack as a DRAFT by the system actor, to be validated; nothing is active.
+      expect(await h.one(`select code, state, created_by from tax_rule_pack where company_id = $1`, [A.id])).toEqual({
+        code: 'INCOME_TAX_2026_27',
+        state: 'DRAFT',
+        created_by: '00000000-0000-4000-8000-000000000001',
+      });
       await ok(await h.call(configA, 'POST', '/v1/payroll/tax-rule-packs', packBody()), 201);
       const tabs = (await ok<{ tabs: { id: string; status: string; unavailable?: { code: string; message: string }; links: unknown[] }[] }>(await h.call(employee, 'GET', '/v1/me/ess'))).tabs;
       for (const id of ['TN08', 'TN09']) {
@@ -195,11 +200,44 @@ describe.runIf(isModuleActive('tax-declarations'))('tax declarations and proofs 
   });
 
   describe('rule pack registry', () => {
-    it('holds no calculation content: the schema has no rate, slab, limit or formula and the API keeps none', async () => {
+    it('I-90: the seeded FY 2026-27 draft lists both regimes and their categories, with limits and section references to be validated', async () => {
+      type Pack = { code: string; state: string; fiscalPeriodCode: string; sourceReference: string; regimes: { code: string; categories: { code: string; limitAmount: string | null; sectionReference: string }[] }[] };
+      const seeded = (await ok<{ items: Pack[] }>(await h.call(configA, 'GET', '/v1/payroll/tax-rule-packs'))).items.find((p) => p.code === 'INCOME_TAX_2026_27')!;
+      expect(seeded).toMatchObject({ state: 'DRAFT', fiscalPeriodCode: '2026-27' });
+      expect(seeded.sourceReference).toContain('To be validated');
+      const limits = Object.fromEntries(seeded.regimes.flatMap((r) => r.categories.map((c) => [`${r.code}:${c.code}`, c.limitAmount])));
+      expect(limits).toEqual({
+        'NEW:SEC_80CCD_2': null,
+        // 0239: an earlier employment this year (Form 12B), in both regimes; joined to the year's salary and tax, not deducted.
+        'NEW:PREV_EMPLOYER_SALARY': null,
+        'NEW:PREV_EMPLOYER_TDS': null,
+        'OLD:PREV_EMPLOYER_SALARY': null,
+        'OLD:PREV_EMPLOYER_TDS': null,
+        'OLD:HRA': null,
+        // 0238: rent for a house in one of the four cities (the HRA exemption is computed from rent, not deducted).
+        'OLD:HRA_METRO': null,
+        'OLD:SEC_24B': '200000.0000',
+        'OLD:SEC_80C': '150000.0000',
+        'OLD:SEC_80CCD_1B': '50000.0000',
+        'OLD:SEC_80D_PARENTS': '50000.0000',
+        'OLD:SEC_80D_SELF': '25000.0000',
+        'OLD:SEC_80E': null,
+      });
+      expect(seeded.regimes.flatMap((r) => r.categories).every((c) => c.sectionReference.includes('to be validated'))).toBe(true);
+      // A pack written by a person may carry limits too; a limit that is not a positive amount is refused by name.
+      const bad = await h.call(configA, 'POST', '/v1/payroll/tax-rule-packs', {
+        ...packBody({ fiscalPeriodCode: 'FY-LIMIT' }),
+        regimes: [{ code: 'SYNTH_REGIME_A', name: 'x', categories: [{ code: 'SYNTH_CAT_1', name: 'x', limitAmount: '0' }] }],
+      });
+      expect(bad.json().error).toBe('INVALID_LIMIT');
+    });
+
+    it('holds no calculation content: the schema has no rate, slab or formula (only a category limit, I-90) and the API keeps none', async () => {
       const columns = (
         await h.db.query<{ column_name: string }>(`select column_name from information_schema.columns where table_schema = 'public' and table_name in ('tax_rule_pack', 'tax_rule_pack_regime', 'tax_rule_pack_category', 'tax_declaration', 'tax_proof')`)
       ).rows.map((r) => r.column_name);
-      expect(columns.filter((c) => /rate|slab|percent|formula|limit|ceiling|exempt|deduction|tax_amount/i.test(c))).toEqual([]);
+      // I-90 (0225): a category carries its limit; the computation itself is the INCOME_TAX statutory pack, never these tables.
+      expect(columns.filter((c) => /rate|slab|percent|formula|limit|ceiling|exempt|deduction|tax_amount/i.test(c))).toEqual(['limit_amount']);
       // The route's schema strips what it does not know, so a rate sent with a category goes nowhere.
       const res = await h.call(configA, 'POST', '/v1/payroll/tax-rule-packs', {
         ...packBody({ fiscalPeriodCode: 'FY-NORATE' }),

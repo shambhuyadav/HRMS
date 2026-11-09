@@ -10,9 +10,11 @@
 // PROCESSED_LOCKED, so it never advances recovery. The instalment is entered into payroll as an approved input of the
 // recovery head through the core's input approval (no automatic deduction here); the core's calculation blocks a line
 // the loan does not cover and its processing checks again (payroll/calculate.ts loanRecoveryBreaches). No interest rate
-// and no early-settlement rule is configured, so a request with interest is refused (INTEREST_NOT_CONFIGURED) and there
-// is no loan early-settlement route; the balance shown is principal minus recognised recoveries minus what payroll has
-// deducted and is not yet recognised (payroll/common.ts loanOutstandingSql, the core's own check). The full-and-final
+// is configured, so a request with interest is refused (INTEREST_NOT_CONFIGURED). An early settlement (I-81 item 1, 0186)
+// closes a disbursed loan in full from a recorded repayment and/or waiver, decided independently; a closed loan stops every
+// further deduction on its head (the core's NOT_DISBURSED check). The balance shown is principal minus recognised recoveries
+// minus what payroll has deducted and is not yet recognised (payroll/common.ts loanOutstandingSql, the core's own check),
+// less what an approved early settlement settled (loanBalanceSql). The full-and-final
 // settlement detail shows the outstanding balances read-only (FR-034 "settlement shows remaining balance";
 // outstandingLoans); it computes no recovery.
 import { type Paging, pageOf } from '../../db/paging.js';
@@ -298,6 +300,215 @@ export async function disburseLoan(tx: Queryable, grant: AccessGrant, loanId: st
   return { ...(await loanDetail(tx, grant, loanId)), replayed: false };
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// FR-034 early settlement (docs/03 I-48 item 12, I-81 item 1; decided under owner delegation, 6 Nov 2026; migration 0186)
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface EarlySettlementInput {
+  repaidAmount: string;
+  repaymentRoute?: 'DIRECT_REPAYMENT' | 'FINAL_SETTLEMENT' | undefined;
+  repaymentDate?: string | undefined;
+  evidenceKey?: string | undefined;
+  evidenceReference?: string | undefined;
+  evidenceDocumentIds?: string[] | undefined;
+  settlementId?: string | undefined;
+  waivedAmount?: string | undefined;
+  waiverKind?: 'WAIVER' | 'WRITE_OFF' | undefined;
+  reason: string;
+  expectedVersion: number;
+}
+
+/** Deducted by payroll and not yet recognised: an early settlement waits until recognition has run (the balance must be final). */
+async function awaitingRecognition(tx: Queryable, companyId: string, loanId: string): Promise<boolean> {
+  return (await tx.query<{ waiting: boolean }>(`select ${loanAwaitingRecognitionSql('l')} > 0 as waiting from payroll_loan l where l.company_id = $1 and l.id = $2`, [companyId, loanId])).rows[0]!.waiting;
+}
+
+/**
+ * Records an early settlement of a disbursed loan for an independent decision. The whole balance (principal less the recoveries
+ * recognised from processed payroll) is settled at once, as repaid by the employee and, for the rest, waived or written off; the
+ * person recording enters both amounts and they must add up to that balance, so nothing is computed. A repayment is evidenced:
+ * outside payroll (DIRECT_REPAYMENT) by its date, an idempotent evidence key, the reference and one released, verified document;
+ * through the full-and-final settlement (FINAL_SETTLEMENT) by that settlement, which must be recorded as paid (I-81 item 2: a
+ * settlement's loan recovery counts once its payment is recorded) and carry a deduction on the loan's recovery head equal to the
+ * repaid amount. Recorded by someone holding the disbursement duty (who records money outcomes from evidence, DF07), never the
+ * beneficiary; a payroll deduction still awaiting recognition, or another settlement waiting, stops it.
+ */
+export async function recordEarlySettlement(tx: Queryable, grant: AccessGrant, loanId: string, input: EarlySettlementInput) {
+  const l = await lockLoan(tx, grant, loanId);
+  await reassertLoan(tx, grant, 'disburse');
+  await assertIndependent(tx, grant, l);
+  if (l.version !== input.expectedVersion) stale();
+  if (l.state !== 'DISBURSED') throw new HttpError(409, 'INVALID_STATE', 'Only a disbursed loan is settled early');
+  const open = await tx.query(`select 1 from payroll_loan_settlement where company_id = $1 and loan_id = $2 and state = 'PROPOSED'`, [grant.companyId, loanId]);
+  if (open.rowCount) throw new HttpError(409, 'SETTLEMENT_PENDING', 'An early settlement of this loan is waiting for its decision');
+  if (await awaitingRecognition(tx, grant.companyId, loanId)) {
+    throw new HttpError(409, 'RECOVERY_AWAITING_RECOGNITION', 'Processed payroll deducted from this loan and the recovery is not recognised yet; recognise it first');
+  }
+  const minor = await minorUnit(tx, grant.companyId, l.currency_code);
+  const repaid = checkAmount(input.repaidAmount, minor, { allowZero: true, field: 'repaid amount' });
+  const waived = checkAmount(input.waivedAmount ?? '0', minor, { allowZero: true, field: 'waived amount' });
+  const sums = (
+    await tx.query<{ balance: string; balanced: boolean; repaid_positive: boolean; waived_positive: boolean }>(
+      `select (principal - recovered_amount)::text as balance, $3::numeric + $4::numeric = principal - recovered_amount as balanced, $3::numeric > 0 as repaid_positive, $4::numeric > 0 as waived_positive
+         from payroll_loan where company_id = $1 and id = $2`,
+      [grant.companyId, loanId, repaid, waived],
+    )
+  ).rows[0]!;
+  if (!sums.balanced) throw new HttpError(422, 'SETTLEMENT_NOT_BALANCED', 'The repaid and waived amounts must add up to the balance left on the loan', { balance: sums.balance });
+  const reason = requireText(input.reason, 'reason', 1000);
+  let route: 'DIRECT_REPAYMENT' | 'FINAL_SETTLEMENT' | null = null;
+  let repaymentDate: string | null = null;
+  let evidence: { key: string; reference: string; documentId: string } | null = null;
+  let settlementId: string | null = null;
+  if (sums.repaid_positive) {
+    route = input.repaymentRoute ?? null;
+    if (route === 'DIRECT_REPAYMENT') {
+      repaymentDate = requireDate(input.repaymentDate ?? '', 'repayment date');
+      if (repaymentDate > grant.businessDate) throw new HttpError(422, 'REPAYMENT_IN_FUTURE', 'A repayment is recorded once it has happened');
+      const key = optionalKey(input.evidenceKey);
+      if (!key) throw new HttpError(422, 'EVIDENCE_KEY_REQUIRED', 'A repayment carries its evidence key');
+      const reused = await tx.query(`select 1 from payroll_loan_settlement where company_id = $1 and evidence_key = $2`, [grant.companyId, key]);
+      if (reused.rowCount) throw new HttpError(409, 'EVIDENCE_KEY_REUSED', 'This evidence key already recorded a repayment');
+      const reference = requireText(input.evidenceReference, 'evidence reference', 500, 'EVIDENCE_REQUIRED');
+      const docs = await requireVerifiedEvidence(tx, grant.companyId, l.employee_id, input.evidenceDocumentIds, { required: true });
+      if (docs.length !== 1) throw new HttpError(422, 'ONE_EVIDENCE_DOCUMENT', 'A repayment is evidenced by one released, verified document');
+      evidence = { key, reference, documentId: docs[0]! };
+    } else if (route === 'FINAL_SETTLEMENT') {
+      const s = (
+        await tx.query<{ id: string; state: string; currency_code: string; payment_date: string | null; recovered: boolean }>(
+          `select s.id, s.state, s.currency_code, to_char(s.payment_date, 'YYYY-MM-DD') as payment_date,
+                  exists (select 1 from settlement_line sl where sl.company_id = s.company_id and sl.settlement_id = s.id and sl.component_id = $4 and sl.amount = -($5::numeric)) as recovered
+             from settlement s where s.company_id = $1 and s.id = $2 and s.employee_id = $3`,
+          [grant.companyId, input.settlementId ?? null, l.employee_id, l.recovery_component_id, repaid],
+        )
+      ).rows[0];
+      if (!s) throw new HttpError(422, 'SETTLEMENT_NOT_FOUND', 'Name the full and final settlement of this employee that recovered the loan');
+      if (s.state !== 'PAID') throw new HttpError(409, 'SETTLEMENT_NOT_PAID', 'A recovery through the full and final settlement counts once its payment is recorded');
+      if (s.currency_code !== l.currency_code || !s.recovered) {
+        throw new HttpError(422, 'SETTLEMENT_RECOVERY_MISMATCH', 'The settlement must deduct exactly the repaid amount on the loan’s recovery head, in the loan’s currency');
+      }
+      const used = await tx.query(`select 1 from payroll_loan_settlement where company_id = $1 and settlement_id = $2 and loan_id <> $3 and state <> 'REJECTED'`, [grant.companyId, s.id, loanId]);
+      if (used.rowCount) throw new HttpError(409, 'SETTLEMENT_ALREADY_USED', 'This settlement already evidences another loan’s recovery');
+      settlementId = s.id;
+      repaymentDate = s.payment_date;
+    } else {
+      throw new HttpError(422, 'REPAYMENT_ROUTE_REQUIRED', 'Say how the employee repaid: outside payroll, or through the full and final settlement');
+    }
+  }
+  let waiverKind: 'WAIVER' | 'WRITE_OFF' | null = null;
+  if (sums.waived_positive) {
+    waiverKind = input.waiverKind ?? null;
+    if (waiverKind !== 'WAIVER' && waiverKind !== 'WRITE_OFF') throw new HttpError(422, 'WAIVER_KIND_REQUIRED', 'Say whether the rest is waived or written off');
+  }
+  const id = (
+    await tx.query<{ id: string }>(
+      `insert into payroll_loan_settlement (company_id, loan_id, employee_id, currency_code, balance, repaid_amount, repayment_route, repayment_date, evidence_key, evidence_reference,
+                                            evidence_document_id, settlement_id, waived_amount, waiver_kind, reason, state, recorded_by, recorded_assignment_id, created_by)
+       values ($1, $2, $3, $4, $5::numeric, $6::numeric, $7, $8, $9, $10, $11, $12, $13::numeric, $14, $15, 'PROPOSED', $16, $17, $16) returning id`,
+      [
+        grant.companyId,
+        loanId,
+        l.employee_id,
+        l.currency_code,
+        sums.balance,
+        repaid,
+        route,
+        repaymentDate,
+        evidence?.key ?? null,
+        evidence?.reference ?? null,
+        evidence?.documentId ?? null,
+        settlementId,
+        waived,
+        waiverKind,
+        reason,
+        grant.userId,
+        grant.assignmentId,
+      ],
+    )
+  ).rows[0]!.id;
+  await audit(tx, actorOf(grant), 'payroll_loan', loanId, 'EARLY_SETTLEMENT_RECORD', null, {
+    operational: { settlementRecordId: id, route, waiverKind, evidenceDocuments: evidence ? 1 : 0 },
+    loan: { balance: sums.balance, repaid, waived },
+  });
+  return loanDetail(tx, grant, loanId);
+}
+
+/**
+ * The independent decision on a recorded early settlement: someone holding the loan decision duty who neither recorded it nor is
+ * the beneficiary. Waiving or writing off any part also needs `payroll_loan.waive.loan`, which no role holds by default (a company
+ * that forgives balances grants it to the approvers it chooses). Approval closes the loan in the database (0186) if the balance is
+ * still the recorded one; a rejection needs its reason, and the loan stays disbursed and recovered by payroll as scheduled.
+ */
+export async function decideEarlySettlement(tx: Queryable, grant: AccessGrant, recordId: string, input: { decision: 'APPROVE' | 'REJECT'; reason?: string | undefined; expectedVersion: number }) {
+  const found = (await tx.query<{ loan_id: string }>(`select loan_id from payroll_loan_settlement where company_id = $1 and id = $2`, [grant.companyId, recordId])).rows[0];
+  if (!found) throw notFound();
+  // Lock order: the loan, then its settlement record.
+  const l = await lockLoan(tx, grant, found.loan_id);
+  const r = (
+    await tx.query<{ id: string; state: string; recorded_by: string; waived_amount: string; balance: string; version: number }>(
+      `select id, state, recorded_by, waived_amount::text as waived_amount, balance::text as balance, version from payroll_loan_settlement where company_id = $1 and id = $2 for update`,
+      [grant.companyId, recordId],
+    )
+  ).rows[0]!;
+  await reassertLoan(tx, grant, 'decide');
+  await assertIndependent(tx, grant, l);
+  if (r.recorded_by === grant.userId) throw new HttpError(403, 'NOT_INDEPENDENT', 'Whoever recorded an early settlement does not decide it');
+  if (r.version !== input.expectedVersion) stale();
+  if (r.state !== 'PROPOSED') throw new HttpError(409, 'INVALID_STATE', 'This early settlement was already decided');
+  if (input.decision === 'REJECT') {
+    const reason = requireText(input.reason, 'reason', 1000);
+    await tx.query(
+      `update payroll_loan_settlement set state = 'REJECTED', decided_by = $3, decided_assignment_id = $4, decided_at = now(), decision_reason = $5, updated_by = $3 where company_id = $1 and id = $2`,
+      [grant.companyId, recordId, grant.userId, grant.assignmentId, reason],
+    );
+    await audit(tx, actorOf(grant), 'payroll_loan', l.id, 'EARLY_SETTLEMENT_REJECT', { operational: { state: 'PROPOSED' } }, { operational: { settlementRecordId: recordId, state: 'REJECTED' } }, reason);
+    return loanDetail(tx, grant, l.id);
+  }
+  const waives = (await tx.query<{ yes: boolean }>(`select $1::numeric > 0 as yes`, [r.waived_amount])).rows[0]!.yes;
+  // FR-002: forgiving a balance is a right of its own, never implied by the decision duty.
+  if (waives) await reassertAccess(tx, grant, 'payroll_loan', 'waive', ['loan']);
+  if (await awaitingRecognition(tx, grant.companyId, l.id)) {
+    throw new HttpError(409, 'RECOVERY_AWAITING_RECOGNITION', 'Processed payroll deducted from this loan since it was recorded; recognise the recovery and record the settlement again');
+  }
+  const unchanged = (await tx.query<{ same: boolean }>(`select principal - recovered_amount = $3::numeric as same from payroll_loan where company_id = $1 and id = $2`, [grant.companyId, l.id, r.balance])).rows[0]!.same;
+  if (!unchanged || l.state !== 'DISBURSED') throw new HttpError(409, 'LOAN_BALANCE_CHANGED', 'The loan balance changed since the settlement was recorded; reject it and record it again');
+  const reason = input.reason === undefined ? null : requireText(input.reason, 'reason', 1000);
+  await tx.query(
+    `update payroll_loan_settlement set state = 'APPROVED', decided_by = $3, decided_assignment_id = $4, decided_at = now(), decision_reason = $5, updated_by = $3 where company_id = $1 and id = $2`,
+    [grant.companyId, recordId, grant.userId, grant.assignmentId, reason],
+  );
+  await audit(tx, actorOf(grant), 'payroll_loan', l.id, 'EARLY_SETTLEMENT_APPROVE', { operational: { state: 'DISBURSED' } }, { operational: { settlementRecordId: recordId, state: 'CLOSED' } }, reason);
+  return loanDetail(tx, grant, l.id);
+}
+
+async function earlySettlements(db: Queryable, companyId: string, loanId: string) {
+  return (
+    await db.query(
+      `select id, state, balance::text as balance, repaid_amount::text as "repaidAmount", repayment_route as "repaymentRoute", to_char(repayment_date, 'YYYY-MM-DD') as "repaymentDate",
+              evidence_reference as "evidenceReference", settlement_id as "settlementId", waived_amount::text as "waivedAmount", waiver_kind as "waiverKind", reason,
+              recorded_by as "recordedBy", recorded_at as "recordedAt", decided_by as "decidedBy", decided_at as "decidedAt", decision_reason as "decisionReason", version
+         from payroll_loan_settlement where company_id = $1 and loan_id = $2 order by recorded_at, id`,
+      [companyId, loanId],
+    )
+  ).rows;
+}
+
+/** Early settlements waiting for a decision, within the caller's row scope (never their own), oldest first. */
+export async function pendingEarlySettlements(db: Queryable, grant: AccessGrant) {
+  const params = new SqlParams([grant.companyId]);
+  const where = [`x.company_id = $1`, `x.state = 'PROPOSED'`];
+  if (!unrestricted(grant)) where.push(employeeScopePredicate(grant, { company: 'x.company_id', employee: 'x.employee_id' }, params));
+  if (grant.linkedEmployeeId) where.push(`x.employee_id <> ${params.add(grant.linkedEmployeeId)}::uuid`);
+  const rows = await db.query(
+    `select x.id, x.loan_id as "loanId", e.employee_code as "employeeCode", x.currency_code as "currencyCode", x.balance::text as balance, x.repaid_amount::text as "repaidAmount",
+            x.repayment_route as "repaymentRoute", x.waived_amount::text as "waivedAmount", x.waiver_kind as "waiverKind", x.recorded_by as "recordedBy", x.recorded_at as "recordedAt", x.version
+       from payroll_loan_settlement x join employee e on e.company_id = x.company_id and e.id = x.employee_id
+      where ${where.join(' and ')} order by x.recorded_at, x.id limit 500`,
+    params.values,
+  );
+  return { items: rows.rows };
+}
+
 /**
  * Recognises the recoveries of a processed run: for each disbursed loan of an employee in the run, the frozen line of
  * its recovery head (bounded per call; `remaining` > 0 means call again). A line of a run processed before the loan was
@@ -366,10 +577,18 @@ export async function recognizeRecoveries(tx: Queryable, grant: AccessGrant, run
 // Reads
 // ---------------------------------------------------------------------------------------------------------------
 
+/**
+ * What is left to recover, as the views show it: the payroll core's figure (loanOutstandingSql) less what an approved early
+ * settlement repaid, waived or wrote off (I-81 item 1). Both are zero until the settlement closes the loan, so for a loan payroll
+ * may still deduct from this is exactly the core's figure.
+ */
+const loanBalanceSql = (l: string) => `greatest(${loanOutstandingSql(l)} - ${l}.settled_amount - ${l}.waived_amount, 0::numeric(19, 4))`;
+
 const LOAN_VIEW = `select l.id, l.employee_id as "employeeId", e.employee_code as "employeeCode", l.loan_kind as "loanKind", l.request_origin as "requestOrigin",
     l.currency_code as "currencyCode", l.principal::text as principal, l.purpose, l.state, l.requested_at as "requestedAt", c.code as "recoveryHead",
     l.decided_at as "decidedAt", l.decision_reason as "decisionReason", to_char(l.disbursement_date, 'YYYY-MM-DD') as "disbursementDate",
-    l.disbursement_reference as "disbursementReference", l.recovered_amount::text as recovered, ${loanAwaitingRecognitionSql('l')}::text as "awaitingRecognition", ${loanOutstandingSql('l')}::text as outstanding,
+    l.disbursement_reference as "disbursementReference", l.recovered_amount::text as recovered, ${loanAwaitingRecognitionSql('l')}::text as "awaitingRecognition", ${loanBalanceSql('l')}::text as outstanding,
+    l.settled_amount::text as "settledEarly", l.waived_amount::text as waived,
     l.closed_at as "closedAt", l.close_reason as "closeReason", l.version, l.requested_by as "requestedBy", l.decided_by as "decidedBy", l.disbursed_by as "disbursedBy"
   from payroll_loan l join employee e on e.company_id = l.company_id and e.id = l.employee_id
   left join pay_component c on c.company_id = l.company_id and c.id = l.recovery_component_id`;
@@ -398,7 +617,7 @@ export async function loanDetail(db: Queryable, grant: AccessGrant, loanId: stri
   if (!l) throw notFound();
   await assertInScope(db, grant, l.employeeId);
   assertNotSelf(grant, l.employeeId);
-  return { ...l, ...(await schedule(db, grant.companyId, loanId)) };
+  return { ...l, ...(await schedule(db, grant.companyId, loanId)), earlySettlements: await earlySettlements(db, grant.companyId, loanId) };
 }
 
 /** Loans answered without page/pageSize (the list's first answer before it could page). */
@@ -420,7 +639,8 @@ export async function listLoans(db: Queryable, grant: AccessGrant, q: { state?: 
 
 const OWN_VIEW = `select l.id, l.loan_kind as "loanKind", l.request_origin as "requestOrigin", l.currency_code as "currencyCode", l.principal::text as principal, l.purpose,
     l.state, l.requested_at as "requestedAt", l.decided_at as "decidedAt", l.decision_reason as "decisionReason", to_char(l.disbursement_date, 'YYYY-MM-DD') as "disbursementDate",
-    l.recovered_amount::text as recovered, ${loanAwaitingRecognitionSql('l')}::text as "awaitingRecognition", ${loanOutstandingSql('l')}::text as outstanding, l.closed_at as "closedAt", l.version
+    l.recovered_amount::text as recovered, ${loanAwaitingRecognitionSql('l')}::text as "awaitingRecognition", ${loanBalanceSql('l')}::text as outstanding,
+    l.settled_amount::text as "settledEarly", l.waived_amount::text as waived, l.close_reason as "closeReason", l.closed_at as "closedAt", l.version
   from payroll_loan l`;
 
 async function ownLoanView(db: Queryable, companyId: string, employeeId: string, loanId: string) {
@@ -455,5 +675,6 @@ export async function ownLoans(db: Queryable, grant: AccessGrant) {
   const rows = (await db.query<{ id: string }>(`${OWN_VIEW} where l.company_id = $1 and l.employee_id = $2 order by l.requested_at desc, l.id`, [grant.companyId, employeeId])).rows;
   const items = [];
   for (const r of rows) items.push({ ...r, ...(await schedule(db, grant.companyId, r.id)) });
-  return { items, interest: { status: 'NOT_CONFIGURED' }, earlySettlement: { status: 'NOT_CONFIGURED' } };
+  // I-81 item 1: an early settlement is recorded by HR from the employee's repayment (or the company's waiver) and decided independently.
+  return { items, interest: { status: 'NOT_CONFIGURED' }, earlySettlement: { status: 'RECORDED_BY_HR', parts: ['REPAYMENT', 'WAIVER', 'WRITE_OFF'] } };
 }

@@ -89,7 +89,7 @@ describe('attendance control (FR-021, E07)', () => {
     expect(await screen.findByText('SYN1 Synthetic One')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toBe('26 days');
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'PRESENT' } });
-    fireEvent.change(screen.getByLabelText('Minutes'), { target: { value: 'SHORTFALL' } });
+    fireEvent.change(screen.getByLabelText('Entity (minutes of)'), { target: { value: 'SHORTFALL' } });
     await waitFor(() => expect(calls.some((c) => c.url.includes('status=PRESENT'))).toBe(true));
     expect(calls.some((c) => c.url.includes('minuteField'))).toBe(false);
     fireEvent.change(screen.getByLabelText('Compared'), { target: { value: 'GTE' } });
@@ -97,6 +97,21 @@ describe('attendance control (FR-021, E07)', () => {
     await waitFor(() => expect(calls.some((c) => c.url.includes('minuteField=SHORTFALL') && c.url.includes('minuteOp=GTE') && c.url.includes('minuteValue=30'))).toBe(true));
     fireEvent.click(screen.getByText('Next page'));
     await waitFor(() => expect(calls.some((c) => c.url.includes('page=2'))).toBe(true));
+  });
+
+  it('E07 the entity of the minute comparison includes late and overtime-candidate minutes, shown on the row (I-78 item 6)', async () => {
+    const calls = mockApi({ 'GET /v1/attendance/records': [200, { items: [row({ lateMinutes: 11, overtimeCandidateMinutes: 45 })], total: 1, page: 1, pageSize: 25 }] });
+    open();
+    choosePeriod();
+    expect(await screen.findByText('late 11 min')).toBeTruthy();
+    expect(screen.getByText('overtime candidate 45 min')).toBeTruthy();
+    expect(screen.getByText(/Organisation and working organisation: the company you are acting for/)).toBeTruthy();
+    const entity = screen.getByLabelText('Entity (minutes of)') as HTMLSelectElement;
+    expect([...entity.options].map((o) => o.value)).toEqual(['', 'WORKED', 'SCHEDULED', 'SHORTFALL', 'LATE', 'OVERTIME_CANDIDATE']);
+    fireEvent.change(entity, { target: { value: 'OVERTIME_CANDIDATE' } });
+    fireEvent.change(screen.getByLabelText('Compared'), { target: { value: 'GTE' } });
+    fireEvent.change(screen.getByLabelText('Number of minutes'), { target: { value: '30' } });
+    await waitFor(() => expect(calls.some((c) => c.url.includes('minuteField=OVERTIME_CANDIDATE') && c.url.includes('minuteValue=30'))).toBe(true));
   });
 
   it('opens a day with its source punches, policy revision and why the status changed', async () => {

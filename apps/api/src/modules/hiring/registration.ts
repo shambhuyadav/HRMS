@@ -38,6 +38,8 @@ export const hiringRegistration: ModuleRegistration = {
         'offer.read.compensation',
         'offer.manage.compensation',
         'offer.approve.compensation',
+        // I-82 item 1 (0190): issuing an offer letter from the approved offer (preview, final output, recorded delivery).
+        'offer.issue_letter.compensation',
       ],
     },
     // F1: the Recruiter sees and works the operational pipeline (company scope); no confidential groups.
@@ -181,5 +183,8 @@ export const hiringRegistration: ModuleRegistration = {
   referenceValues: {
     CANDIDATE_SOURCE: { DIRECT: 'Direct application', VENDOR: 'Recruitment vendor' },
     CANDIDATE_DOCUMENT_TYPE: { CV: 'Curriculum vitae', OTHER: 'Other candidate document' },
+    // I-82 item 1: how an offer letter reached the candidate outside the system (DF09 disables confidential e-mail
+    // attachments). A company list HR maintains (reference/maintenance.ts); these two are the conservative starting values.
+    OFFER_LETTER_DELIVERY: { IN_PERSON: 'Handed to the candidate in person', POST: 'Sent by post or courier' },
   },
 };

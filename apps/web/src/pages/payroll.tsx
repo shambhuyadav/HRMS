@@ -26,6 +26,7 @@ import { api, ApiError, download, fileToBase64, formatAmount, formatDate, idempo
 import { isReportRefusal } from '../report-failures';
 import type { EssPanel, ScreenRoute } from '../screens';
 import { type MeContext, useSession } from '../session';
+import { statutoryWorkingsNote } from '../statutory-note';
 import { Badge, Empty, LIST_PAGE_SIZE, Pager, pageParams, Section } from '../ui';
 import { DelegatedBadge } from './delegations';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from './records';
@@ -170,6 +171,7 @@ interface RunRow {
   revision: number;
   state: string;
   periodCode: string;
+  financialYear: string;
   periodId: string;
   calendarCode: string;
   memberCount: number;
@@ -388,6 +390,7 @@ function useKeys() {
   return useMemo(
     () => ({
       ownPayslips: ['payroll-own-payslips', context] as const,
+      ownPayslipFile: (id: string) => ['payroll-own-payslips', context, 'file', id] as const,
       ownHolds: ['payroll-own-holds', context] as const,
       ownLoans: ['payroll-own-loans', context] as const,
       runsAll: ['payroll-runs', context] as const,
@@ -425,6 +428,7 @@ function useKeys() {
       disbursement: (runId: string) => ['payroll-report', context, runId, 'disbursement'] as const,
       comparison: (runId: string) => ['payroll-report', context, runId, 'comparison'] as const,
       journal: (runId: string) => ['payroll-report', context, runId, 'journal'] as const,
+      statutoryRegister: (runId: string, code: string, after: string) => ['payroll-report', context, runId, 'statutory-register', code, after] as const,
       reportExport: (id: string) => ['payroll-report-export', context, id] as const,
       statutory: ['payroll-statutory', context] as const,
       employeeSearch: (term: string) => ['payroll-employee-search', context, term] as const,
@@ -712,6 +716,8 @@ const REFUSALS: Record<string, string> = {
   INPUTS_CHANGED: 'Inputs were approved after the calculation: return the run to calculate a new revision.',
   SALARY_STOPS_CHANGED: 'Salary stops changed after the calculation: return the run to calculate a new revision.',
   LOAN_BALANCE_CHANGED: 'A loan changed after the calculation, so a recovery line is no longer covered: return the run to calculate a new revision.',
+  MASTERS_CHANGED: 'A salary arrangement, unpaid leave, reviewed attendance or a leaving date was approved after the calculation: return the run to calculate a new revision.',
+  STATUTORY_CHANGED: 'A statutory rule pack, PF option, work location state or accepted tax declaration changed after the calculation: return the run to calculate a new revision.',
   PROCESSING_STARTED: 'Processing has started: the revision can only be completed.',
   RUN_LOCKED: 'A processed run cannot be cancelled; corrections follow as linked adjustments in a later run.',
   NOT_CALCULATED: 'This revision has no completed calculation.',
@@ -1035,6 +1041,7 @@ function OwnPayslipList() {
   const list = useQuery({ queryKey: keys.ownPayslips, queryFn: () => api<OwnPayslips>('/v1/me/payslips'), retry: retryTransient });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [failure, setFailure] = useState<unknown>(null);
+  const [viewing, setViewing] = useState<OwnPayslip | null>(null);
   const fetchFile = async (p: OwnPayslip) => {
     if (busyId) return;
     setBusyId(p.id);
@@ -1097,6 +1104,9 @@ function OwnPayslipList() {
                     <td colSpan={4}>See the current version</td>
                   )}
                   <td>
+                    <button type="button" className="secondary" onClick={() => setViewing(p)} aria-label={`View payslip ${p.periodCode} version ${p.version}`}>
+                      View
+                    </button>{' '}
                     <button type="button" className="secondary" disabled={busyId !== null} onClick={() => void fetchFile(p)} aria-label={`Download payslip ${p.periodCode} version ${p.version}`}>
                       {busyId === p.id ? 'Downloading…' : 'Download'}
                     </button>
@@ -1109,6 +1119,118 @@ function OwnPayslipList() {
       )}
       {failure !== null && <Problem error={failure} act="download" />}
       {data?.form16?.status === 'NOT_CONFIGURED' && <p className="hint">Form 16 is not available: no statutory Form 16 template is configured yet.</p>}
+      {viewing && <PayslipDocument payslip={viewing} onClose={() => setViewing(null)} />}
+    </Section>
+  );
+}
+
+interface PayslipStatutory {
+  componentCode: string;
+  componentName: string;
+  status: string;
+  amount: string | null;
+  workings: Record<string, unknown>;
+}
+interface PayslipDoc {
+  period: { code: string; serviceStart: string; serviceEnd: string; paymentDate: string | null };
+  version: number;
+  currencyCode: string;
+  paidDays: string | null;
+  daysInMonth: number;
+  lines: { componentCode: string; componentName: string; headType: string; amount: string }[];
+  statutory?: PayslipStatutory[];
+  totals: { earnings: string | null; reimbursements: string | null; gross: string | null; deductions: string | null; net: string | null; employerContributions: string | null };
+  paymentAtPublication: { earned: string; held: string; reserved: string; paid: string };
+  notices: string[];
+}
+
+const LINE_GROUPS: [string, string][] = [
+  ['EARNING', 'Earnings'],
+  ['REIMBURSEMENT', 'Reimbursements'],
+  ['DEDUCTION', 'Deductions'],
+  ['EMPLOYER_CONTRIBUTION', 'Paid by the employer (not part of your pay)'],
+];
+
+/**
+ * How a statutory line was worked out, in plain words, from the workings the calculation recorded on the payslip (I-85, I-90, FR-039):
+ * the employee sees the basis of each deduction, never a figure computed here.
+ */
+export function statutoryNote(s: PayslipStatutory, currency: string): string {
+  return statutoryWorkingsNote(s.status === 'VALUED', s.workings, (v) => money(v, currency));
+}
+
+/** The issued payslip itself, read from the stored file (the same bytes the download gives, re-checked on every read, CI30). */
+function PayslipDocument({ payslip, onClose }: { payslip: OwnPayslip; onClose: () => void }) {
+  const keys = useKeys();
+  const doc = useQuery({
+    queryKey: keys.ownPayslipFile(payslip.id),
+    queryFn: () => api<PayslipDoc>(`/v1/me/payslips/${encodeURIComponent(payslip.id)}/file`),
+    retry: retryTransient,
+  });
+  const d = doc.data;
+  const cur = d?.currencyCode;
+  return (
+    <Section title={`Payslip ${payslip.periodCode}, version ${payslip.version}`}>
+      <button type="button" className="secondary" onClick={onClose}>
+        Close
+      </button>
+      {doc.isPending && <p className="hint">Loading the payslip…</p>}
+      {doc.error && <Problem error={doc.error} act="own" />}
+      {d && (
+        <>
+          <dl className="kv" aria-label="Payslip period">
+            <Fact term="Period">{`${d.period.code} (${formatDate(d.period.serviceStart)} to ${formatDate(d.period.serviceEnd)})`}</Fact>
+            <Fact term="Paid days">{`${d.paidDays ?? '—'} of ${d.daysInMonth}`}</Fact>
+          </dl>
+          {LINE_GROUPS.map(([type, title]) => {
+            const lines = d.lines.filter((l) => l.headType === type);
+            if (lines.length === 0) return null;
+            return (
+              <table key={type} aria-label={title}>
+                <caption>{title}</caption>
+                <tbody>
+                  {lines.map((l) => (
+                    <tr key={l.componentCode}>
+                      <td>{l.componentName}</td>
+                      <td>{money(l.amount, cur)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })}
+          <dl className="kv" aria-label="Payslip totals">
+            <Fact term="Gross">{money(d.totals.gross, cur)}</Fact>
+            <Fact term="Deductions">{money(d.totals.deductions, cur)}</Fact>
+            <Fact term="Net pay">{money(d.totals.net, cur)}</Fact>
+          </dl>
+          {d.statutory && d.statutory.length > 0 && (
+            <table aria-label="How statutory amounts were worked out">
+              <caption>How statutory amounts were worked out</caption>
+              <tbody>
+                {d.statutory.map((s) => (
+                  <tr key={s.componentCode}>
+                    <td>{s.componentName}</td>
+                    <td>{s.amount === null ? '—' : money(s.amount, cur)}</td>
+                    <td>{statutoryNote(s, d.currencyCode)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <dl className="kv" aria-label="Payment at publication">
+            <Fact term="Earned">{money(d.paymentAtPublication.earned, cur)}</Fact>
+            <Fact term="Held">{money(d.paymentAtPublication.held, cur)}</Fact>
+            <Fact term="Reserved">{money(d.paymentAtPublication.reserved, cur)}</Fact>
+            <Fact term="Paid (confirmed)">{money(d.paymentAtPublication.paid, cur)}</Fact>
+          </dl>
+          {d.notices.map((n) => (
+            <p key={n} className="hint">
+              {n}
+            </p>
+          ))}
+        </>
+      )}
     </Section>
   );
 }
@@ -1348,6 +1470,8 @@ function LoanRequestForm() {
 // =========================================================================================================
 
 const RUN_FILTERS = ['DRAFT', 'CALCULATED', 'IN_REVIEW', 'APPROVED', 'PROCESSED_LOCKED', 'RETURNED', 'CANCELLED'];
+/** A calendar's financial year label (payroll/config.ts), in any case: what GET /v1/payroll/runs takes as `financialYear`. */
+const FINANCIAL_YEAR = /^[A-Za-z0-9][A-Za-z0-9_/-]{0,19}$/;
 
 function RunsScreen() {
   const { can } = useSession();
@@ -1369,48 +1493,71 @@ function RunsScreen() {
 function RunList() {
   const keys = useKeys();
   const [state, setState] = useState('');
+  // BR-012: the financial year label the calendar gives its periods; sent only once it can be one.
+  const [year, setYear] = useState('');
+  const yearFilter = FINANCIAL_YEAR.test(year.trim()) ? year.trim().toUpperCase() : '';
   const [page, setPage] = useState(1);
   // FR-056: one page at a time; `total` counts every run revision the selected role may see.
   const runs = useQuery({
-    queryKey: [...keys.runs(state), page],
-    queryFn: () => api<{ items: RunRow[]; total?: number }>(`/v1/payroll/runs?${state ? `state=${encodeURIComponent(state)}&` : ''}${pageParams(page)}`),
+    queryKey: [...keys.runs(state), yearFilter, page],
+    queryFn: () =>
+      api<{ items: RunRow[]; total?: number }>(
+        `/v1/payroll/runs?${state ? `state=${encodeURIComponent(state)}&` : ''}${yearFilter ? `financialYear=${encodeURIComponent(yearFilter)}&` : ''}${pageParams(page)}`,
+      ),
     retry: retryTransient,
   });
   return (
     <Section
       title="Payroll runs"
       actions={
-        <label className="inline">
-          State
-          <select
-            value={state}
-            onChange={(e) => {
-              setState(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All</option>
-            {RUN_FILTERS.map((s) => (
-              <option key={s} value={s}>
-                {label(RUN_STATE, s)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <>
+          <label className="inline">
+            State
+            <select
+              value={state}
+              onChange={(e) => {
+                setState(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All</option>
+              {RUN_FILTERS.map((s) => (
+                <option key={s} value={s}>
+                  {label(RUN_STATE, s)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="inline">
+            Financial year
+            <input
+              value={year}
+              placeholder="All"
+              maxLength={20}
+              autoComplete="off"
+              onChange={(e) => {
+                setYear(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+        </>
       }
     >
       <p className="hint">
         Each revision of a run is listed separately. Payment is not tracked on a run: it comes only from the outcomes recorded on its bank manifests. <Link to={PATHS.decisions}>Run decisions</Link>
       </p>
+      {year.trim() !== '' && !yearFilter && <p className="hint">A financial year is the label its calendar gives it, for example FY2026: letters, digits, _, / or -.</p>}
       {runs.isPending && <p className="hint">Loading payroll runs…</p>}
       {runs.error && <Problem error={runs.error} act="read" />}
-      {runs.data && runs.data.items.length === 0 && <Empty>No payroll runs yet.</Empty>}
+      {runs.data && runs.data.items.length === 0 && <Empty>{state || yearFilter ? 'No payroll runs match these filters.' : 'No payroll runs yet.'}</Empty>}
       {runs.data && runs.data.items.length > 0 && (
         <div style={SCROLL}>
           <table aria-label="Payroll runs">
             <thead>
               <tr>
                 <th>Period</th>
+                <th>Financial year</th>
                 <th>Calendar</th>
                 <th>Revision</th>
                 <th>State</th>
@@ -1426,6 +1573,7 @@ function RunList() {
                   <td>
                     <Link to={PATHS.run(r.id)}>{`${r.periodCode} revision ${r.revision}`}</Link>
                   </td>
+                  <td>{r.financialYear}</td>
                   <td>{r.calendarCode}</td>
                   <td>{r.revision}</td>
                   <td>
@@ -1875,6 +2023,137 @@ function exceptionDetail(detail: unknown): string {
     .join(', ');
 }
 
+interface RecordDetailView {
+  calculationStatus: string;
+  currencyCode: string;
+  segments: { segmentStart: string; segmentEnd: string; calendarDays: number; leaveLopUnits: string; attendanceLopUnits: string; paidDays: string }[];
+  inputs: { inputId: string; componentCode: string; amount: string; reference: string }[];
+  lines: { componentCode: string; componentName: string; headType: string; calculationBasis: string; amount: string }[];
+  statutory: { componentCode: string; rulePackCode: string; headType: string; status: string; amount: string | null; workings: Record<string, unknown> }[];
+}
+
+/**
+ * One member's record as the calculation wrote it (GET /v1/payroll/runs/:id/records/:employeeId, the run amount grant): the paid-day
+ * segments, the lines by kind, approved inputs, and how each statutory head was valued (the recorded workings, in plain words), so a
+ * reviewer or approver can see where a figure came from before deciding.
+ */
+function RecordDetailPanel({ runId, record, onClose }: { runId: string; record: RunRecord; onClose: () => void }) {
+  const keys = useKeys();
+  const detail = useQuery({
+    queryKey: [...keys.records(runId, null, false), 'detail', record.employeeId] as const,
+    queryFn: () => api<RecordDetailView>(`/v1/payroll/runs/${encodeURIComponent(runId)}/records/${encodeURIComponent(record.employeeId)}`),
+    retry: retryTransient,
+  });
+  const d = detail.data;
+  const cur = d?.currencyCode ?? record.currencyCode;
+  const name = (code: string) => d?.lines.find((l) => l.componentCode === code)?.componentName ?? code;
+  return (
+    <Section title={`Record of ${record.employeeCode} ${record.employeeName}`}>
+      <button type="button" className="secondary" onClick={onClose}>
+        Close
+      </button>
+      {detail.isPending && <p className="hint">Loading the record…</p>}
+      {detail.error && <Problem error={detail.error} act="read" />}
+      {d && (
+        <>
+          {d.segments.length > 0 && (
+            <table aria-label="Paid days">
+              <thead>
+                <tr>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Calendar days</th>
+                  <th>Unpaid leave</th>
+                  <th>Attendance loss of pay</th>
+                  <th>Paid days</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.segments.map((g) => (
+                  <tr key={g.segmentStart}>
+                    <td>{formatDate(g.segmentStart)}</td>
+                    <td>{formatDate(g.segmentEnd)}</td>
+                    <td>{g.calendarDays}</td>
+                    <td>{g.leaveLopUnits}</td>
+                    <td>{g.attendanceLopUnits}</td>
+                    <td>{g.paidDays}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {d.lines.length === 0 ? (
+            <Empty>{`No lines: the record is ${readable(d.calculationStatus).toLowerCase()}.`}</Empty>
+          ) : (
+            <table aria-label="Record lines">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Kind</th>
+                  <th>Basis</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.lines.map((l) => (
+                  <tr key={l.componentCode}>
+                    <td>{l.componentName}</td>
+                    <td>{readable(l.headType)}</td>
+                    <td>{readable(l.calculationBasis)}</td>
+                    <td>{money(l.amount, cur)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {d.inputs.length > 0 && (
+            <table aria-label="Approved inputs">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Reference</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.inputs.map((i) => (
+                  <tr key={i.inputId}>
+                    <td>{i.componentCode}</td>
+                    <td>{i.reference}</td>
+                    <td>{money(i.amount, cur)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {d.statutory.length > 0 && (
+            <table aria-label="Statutory workings">
+              <thead>
+                <tr>
+                  <th>Component</th>
+                  <th>Pack</th>
+                  <th>Amount</th>
+                  <th>How it was worked out</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.statutory.map((s) => (
+                  <tr key={s.componentCode}>
+                    <td>{name(s.componentCode)}</td>
+                    <td>{`${String(s.workings.packCode ?? '—')}${s.workings.packRevision ? ` revision ${String(s.workings.packRevision)}` : ''}`}</td>
+                    <td>{s.amount === null ? '—' : money(s.amount, cur)}</td>
+                    <td>{statutoryNote({ componentCode: s.componentCode, componentName: name(s.componentCode), status: s.status, amount: s.amount, workings: s.workings }, cur)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
 function RunRecords({ run }: { run: RunDetail }) {
   const { can } = useSession();
   const keys = useKeys();
@@ -1884,6 +2163,7 @@ function RunRecords({ run }: { run: RunDetail }) {
   const [onlyExceptions, setOnlyExceptions] = useState(false);
   const [resolving, setResolving] = useState<{ exception: RunException; employee: string } | null>(null);
   const [holding, setHolding] = useState<RunRecord | null>(null);
+  const [detail, setDetail] = useState<RunRecord | null>(null);
   const [note, setNote] = useState<string | null>(null);
   // A hold applies to a processed record: its balance (hold read) and a proposal (hold propose) start from the member list.
   const holdColumn = run.state === 'PROCESSED_LOCKED' && (can(HOLD_READ) || can(HOLD_PROPOSE));
@@ -1942,7 +2222,11 @@ function RunRecords({ run }: { run: RunDetail }) {
             <tbody>
               {records.data.items.map((rec) => (
                 <tr key={rec.id}>
-                  <td>{`${rec.employeeCode} ${rec.employeeName}`}</td>
+                  <td>
+                    <button type="button" className="link" onClick={() => setDetail(rec)} aria-label={`Details of ${rec.employeeCode}`}>
+                      {`${rec.employeeCode} ${rec.employeeName}`}
+                    </button>
+                  </td>
                   <td>{readable(rec.calculationStatus)}</td>
                   <td>{rec.paidUnits ?? '—'}</td>
                   <td>{money(rec.gross, rec.currencyCode)}</td>
@@ -2002,6 +2286,7 @@ function RunRecords({ run }: { run: RunDetail }) {
         </div>
       )}
       {holding && <RecordHoldPanel key={holding.id} record={holding} />}
+      {detail && <RecordDetailPanel key={detail.id} runId={run.id} record={detail} onClose={() => setDetail(null)} />}
       <div className="row" style={{ marginTop: '0.5rem' }}>
         {previous.length > 0 && (
           <button
@@ -3418,6 +3703,8 @@ interface HoldTotals {
   currencyCode: string;
   reserved: string;
   confirmed: string;
+  /** I-80: held salary still owed until its payment is confirmed, counted once per payroll record. */
+  outstanding?: string;
 }
 interface SalaryStop {
   id: string;
@@ -3798,10 +4085,12 @@ function HoldList() {
       {holds.data?.totals && holds.data.totals.length > 0 && (
         <>
           <p className="hint">
-            Totals of every hold matching the filter, on all pages: what the payment allocations of released holds have reserved, and what the bank confirmed paid less reversals.
+            Totals of every hold matching the filter, on all pages: the held salary still owed until its payment is confirmed (once per payroll record, never more than the record pays), what the payment
+            allocations of released holds have reserved, and what the bank confirmed paid less reversals.
           </p>
           {holds.data.totals.map((t) => (
             <dl key={t.currencyCode} className="kv" aria-label={`Hold totals in ${t.currencyCode}`}>
+              {t.outstanding !== undefined && <Fact term="Outstanding (held, not yet confirmed paid)">{money(t.outstanding, t.currencyCode)}</Fact>}
               <Fact term="Reserved for payment, not paid">{money(t.reserved, t.currencyCode)}</Fact>
               <Fact term="Paid (confirmed from bank evidence)">{money(t.confirmed, t.currencyCode)}</Fact>
             </dl>
@@ -6226,6 +6515,14 @@ function RunReportsScreen() {
       <DisbursementReport runId={id} />
       <ComparisonReport runId={id} />
       <JournalReport runId={id} />
+      <StatutoryRegisters runId={id} />
+      {/* FR-038 reimbursement register (I-40 item 11, I-89 item 1): an export only, under the same export key. */}
+      {can(REPORT_EXPORT) && (
+        <Section title="Reimbursement register">
+          <p className="hint">Each reimbursement line of the run’s calculated records; the columns await the owner’s approval with samples.</p>
+          <RunReportExport runId={id} reportCode="REIMBURSEMENT_REGISTER" name="reimbursement register" />
+        </Section>
+      )}
     </div>
   );
 }
@@ -6419,6 +6716,162 @@ function ComparisonReport({ runId }: { runId: string }) {
   );
 }
 
+interface StatutoryRegister {
+  sourceLabel: string;
+  notice: string;
+  run: { currencyCode: string };
+  packs: { packCode: string; packRevision: number | null }[];
+  scope: string;
+  totals: { records: number; amounts: Record<string, string> };
+  items: { recordId: string; employeeCode: string; employeeName: string; packCode: string; facts: Record<string, unknown>; amounts: Record<string, string | null>; notApplicable: Record<string, string> }[];
+  next: string | null;
+}
+
+/** FR-039 working registers (I-90 follow-up): the columns each register shows, in order, with their labels. */
+const STATUTORY_REGISTERS: { code: string; title: string; facts: [string, string][]; amounts: [string, string][] }[] = [
+  {
+    code: 'PF_REGISTER',
+    title: 'PF register',
+    facts: [
+      ['pfWages', 'PF wages'],
+      ['contributionWages', 'Contribution wages'],
+      ['option', 'Basis'],
+    ],
+    amounts: [
+      ['employee', 'Employee'],
+      ['pension', 'Pension (EPS)'],
+      ['employerEpf', 'Employer EPF'],
+      ['edli', 'EDLI'],
+      ['adminCharges', 'Admin charges'],
+    ],
+  },
+  {
+    code: 'ESIC_REGISTER',
+    title: 'ESIC register',
+    facts: [
+      ['esicWages', 'ESIC wages'],
+      ['covered', 'Coverage'],
+    ],
+    amounts: [
+      ['employee', 'Employee'],
+      ['employer', 'Employer'],
+    ],
+  },
+  {
+    code: 'PT_REGISTER',
+    title: 'Professional tax register',
+    facts: [
+      ['stateCode', 'State'],
+      ['gross', 'Gross'],
+      ['slab', 'Slab'],
+    ],
+    amounts: [['tax', 'Tax']],
+  },
+  {
+    code: 'LWF_REGISTER',
+    title: 'Labour welfare fund register',
+    facts: [
+      ['stateCode', 'State'],
+      ['wages', 'Wages'],
+      ['slab', 'Slab'],
+    ],
+    amounts: [
+      ['employee', 'Employee'],
+      ['employer', 'Employer'],
+    ],
+  },
+];
+
+const MONEY_FACTS = new Set(['pfWages', 'contributionWages', 'esicWages', 'gross', 'wages']);
+
+function StatutoryRegisters({ runId }: { runId: string }) {
+  const keys = useKeys();
+  const [code, setCode] = useState('PF_REGISTER');
+  const [after, setAfter] = useState('');
+  const def = STATUTORY_REGISTERS.find((r) => r.code === code)!;
+  const register = useQuery({
+    queryKey: keys.statutoryRegister(runId, code, after),
+    queryFn: () => api<StatutoryRegister>(`/v1/payroll-outputs/runs/${encodeURIComponent(runId)}/statutory-registers/${code}${after ? `?after=${encodeURIComponent(after)}` : ''}`),
+    retry: retryTransient,
+  });
+  const d = register.data;
+  const cur = d?.run.currencyCode;
+  return (
+    <Section title="Statutory registers">
+      <label>
+        Register
+        <select
+          value={code}
+          onChange={(e) => {
+            setCode(e.target.value);
+            setAfter('');
+          }}
+        >
+          {STATUTORY_REGISTERS.map((r) => (
+            <option key={r.code} value={r.code}>
+              {r.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      {register.isPending && <p className="hint">Loading the register…</p>}
+      {register.error && <Problem error={register.error} act="read" />}
+      {d && (
+        <>
+          <p className="hint">{d.notice}</p>
+          <dl className="kv" aria-label={`${def.title} totals`}>
+            <Fact term="Records">{d.totals.records}</Fact>
+            {def.amounts.map(([k, l]) => (
+              <Fact key={k} term={l}>
+                {money(d.totals.amounts[k], cur)}
+              </Fact>
+            ))}
+            <Fact term="Pack revisions">{d.packs.map((p) => `${p.packCode} ${p.packRevision === null ? 'none active' : `revision ${p.packRevision}`}`).join('; ') || '—'}</Fact>
+          </dl>
+          {d.scope === 'ROW_SCOPE' && <p className="hint">Only the records within your scope are listed and totalled.</p>}
+          {d.items.length === 0 ? (
+            <Empty>No record of this run has a valuation for this register.</Empty>
+          ) : (
+            <div style={SCROLL}>
+              <table aria-label={def.title}>
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    {def.facts.map(([k, l]) => (
+                      <th key={k}>{l}</th>
+                    ))}
+                    {def.amounts.map(([k, l]) => (
+                      <th key={k}>{l}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.items.map((i) => (
+                    <tr key={i.recordId}>
+                      <td>{`${i.employeeCode} ${i.employeeName}`}</td>
+                      {def.facts.map(([k]) => (
+                        <td key={k}>{i.facts[k] === undefined || i.facts[k] === null ? '—' : MONEY_FACTS.has(k) ? money(String(i.facts[k]), cur) : readable(String(i.facts[k]))}</td>
+                      ))}
+                      {def.amounts.map(([k]) => (
+                        <td key={k}>{i.amounts[k] === null || i.amounts[k] === undefined ? readable(i.notApplicable[k] ?? 'NOT_APPLICABLE') : money(i.amounts[k], cur)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {d.next && (
+            <button type="button" className="secondary" onClick={() => setAfter(d.next!)}>
+              Next page
+            </button>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
 function JournalReport({ runId }: { runId: string }) {
   const keys = useKeys();
   const jv = useQuery({ queryKey: keys.journal(runId), queryFn: () => api<unknown>(`/v1/payroll-outputs/runs/${encodeURIComponent(runId)}/journal`), retry: retryTransient });
@@ -6436,7 +6889,7 @@ function JournalReport({ runId }: { runId: string }) {
   );
 }
 
-const OUTPUT_STATUS: Record<string, string> = { NOT_CONFIGURED: 'Not configured' };
+const OUTPUT_STATUS: Record<string, string> = { NOT_CONFIGURED: 'Not configured', AVAILABLE: 'Working register' };
 
 function StatutoryScreen() {
   const { can } = useSession();
@@ -6452,7 +6905,7 @@ function StatutoryScreen() {
   return (
     <Section title="Statutory outputs">
       <p className="hint">
-        Each statutory register, certificate and return needs an activated rule pack and the payroll owner’s period template. Until they exist nothing is produced; the source labels are kept as written until the owner confirms them.
+        Each statutory register, certificate and return needs an activated rule pack and the payroll owner’s period template. While a PF, ESIC, professional tax or labour welfare fund pack is active, its register is a working register on each run’s reports page: what the calculation recorded, not a filing. Filing formats and the other outputs are not produced until the template and an approved sample exist; the source labels are kept as written until the owner confirms them.
       </p>
       {outputs.isPending && <p className="hint">Loading statutory outputs…</p>}
       {outputs.error && <Problem error={outputs.error} act="read" />}
@@ -6473,7 +6926,7 @@ function StatutoryScreen() {
                   <td>{o.sourceLabel}</td>
                   <td>{o.code}</td>
                   <td>
-                    <Badge tone="warn">{label(OUTPUT_STATUS, o.status)}</Badge>
+                    <Badge tone={o.status === 'AVAILABLE' ? 'good' : 'warn'}>{label(OUTPUT_STATUS, o.status)}</Badge>
                   </td>
                   <td>{o.needs.join('; ')}</td>
                 </tr>
@@ -6481,6 +6934,104 @@ function StatutoryScreen() {
             </tbody>
           </table>
         </div>
+      )}
+      {can(REPORT_READ) && <TdsRegister />}
+    </Section>
+  );
+}
+
+interface TdsRegisterView {
+  from: string;
+  to: string;
+  notice: string;
+  scope: string;
+  totals: { employees: number; tds: string; months: { month: string; taxableSalary: string; tds: string }[] };
+  items: { employeeId: string; employeeCode: string; employeeName: string; tds: string; months: { month: string; source: string; taxableSalary: string; tds: string }[] }[];
+}
+
+/** FR-039 Form 24Q working data (I-90 follow-up): the quarter's TDS on salary per employee and month, as the server reads it. */
+function TdsRegister() {
+  const keys = useKeys();
+  const [fiscalYear, setFiscalYear] = useState('2026-27');
+  const [quarter, setQuarter] = useState('1');
+  const [asked, setAsked] = useState<{ fiscalYear: string; quarter: string } | null>(null);
+  const register = useQuery({
+    queryKey: [...keys.reportsAll, 'tds-register', asked] as const,
+    enabled: asked !== null,
+    queryFn: () => api<TdsRegisterView>(`/v1/payroll-outputs/tds-register?fiscalYear=${encodeURIComponent(asked!.fiscalYear)}&quarter=${encodeURIComponent(asked!.quarter)}`),
+    retry: retryTransient,
+  });
+  const d = register.data;
+  return (
+    <Section title="TDS register (Form 24Q working data)">
+      <form
+        className="row"
+        aria-label="TDS register"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          setAsked({ fiscalYear: fiscalYear.trim(), quarter });
+        }}
+      >
+        <label>
+          Financial year
+          <input value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} placeholder="2026-27" />
+        </label>
+        <label>
+          Quarter
+          <select value={quarter} onChange={(e) => setQuarter(e.target.value)}>
+            <option value="1">Q1 (April to June)</option>
+            <option value="2">Q2 (July to September)</option>
+            <option value="3">Q3 (October to December)</option>
+            <option value="4">Q4 (January to March)</option>
+          </select>
+        </label>
+        <button type="submit">Show</button>
+      </form>
+      {register.isFetching && <p className="hint">Loading the register…</p>}
+      {register.error && <Problem error={register.error} act="read" />}
+      {d && (
+        <>
+          <p className="hint">{d.notice}</p>
+          <dl className="kv" aria-label="TDS register totals">
+            <Fact term="Period">{`${formatDate(d.from)} to ${formatDate(d.to)}`}</Fact>
+            <Fact term="Employees">{d.totals.employees}</Fact>
+            <Fact term="TDS deducted">{money(d.totals.tds, 'INR')}</Fact>
+            {d.totals.months.map((m) => (
+              <Fact key={m.month} term={m.month}>{`${money(m.tds, 'INR')} on ${money(m.taxableSalary, 'INR')}`}</Fact>
+            ))}
+          </dl>
+          {d.scope === 'ROW_SCOPE' && <p className="hint">Only the employees within your scope are listed and totalled.</p>}
+          {d.items.length === 0 ? (
+            <Empty>No TDS was deducted on processed payroll or paid final settlements in this quarter.</Empty>
+          ) : (
+            <div style={SCROLL}>
+              <table aria-label="TDS by employee">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Month</th>
+                    <th>Source</th>
+                    <th>Taxable salary</th>
+                    <th>TDS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.items.flatMap((i) =>
+                    i.months.map((m, n) => (
+                      <tr key={`${i.employeeId}-${m.month}-${m.source}`}>
+                        <td>{n === 0 ? `${i.employeeCode} ${i.employeeName}` : ''}</td>
+                        <td>{m.month}</td>
+                        <td>{m.source === 'FINAL_SETTLEMENT' ? 'Final settlement' : 'Payroll'}</td>
+                        <td>{money(m.taxableSalary, 'INR')}</td>
+                        <td>{money(m.tds, 'INR')}</td>
+                      </tr>
+                    )),
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </Section>
   );

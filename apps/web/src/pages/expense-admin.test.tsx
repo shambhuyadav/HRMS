@@ -230,3 +230,70 @@ describe('categories', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ expectedVersion: 1, active: false }));
   });
 });
+
+describe('claim currencies (OQ-17, I-80)', () => {
+  it('lists enabled currencies, asks for one from the approved reference with a reason, and enables or retires by decision', async () => {
+    session.permissions = [MANAGE, ACTIVATE];
+    const calls = mockApi({
+      'GET /v1/expense/policies': [200, { items: [] }],
+      'GET /v1/expense/categories': [200, { items: [] }],
+      'GET /v1/expense/currencies': [
+        200,
+        {
+          companyCurrency: 'INR',
+          reference: ['AED', 'INR', 'USD'].map((code) => ({ code, minorUnit: 2 })),
+          items: [
+            { id: 'cc-1', currencyCode: 'USD', state: 'DRAFT', reason: 'Conference travel', createdBy: 'someone', version: 1 },
+            { id: 'cc-2', currencyCode: 'AED', state: 'ACTIVE', reason: 'Gulf office visits', createdBy: 'someone', version: 2 },
+          ],
+        },
+      ],
+      'POST /v1/expense/currencies/cc-1/decision': [200, {}],
+      'POST /v1/expense/currencies': [201, {}],
+    });
+    open();
+    const list = await screen.findByRole('list', { name: 'Claim currencies' });
+    expect(list.textContent).toContain('USD: Conference travel');
+    const form = screen.getByRole('form', { name: 'Ask for a claim currency' });
+    const options = within(form).getAllByRole('option').map((o) => o.textContent);
+    expect(options).toEqual(['Choose', 'AED', 'USD']);
+    fireEvent.click(within(list).getByRole('button', { name: 'Enable' }));
+    await waitFor(() => expect(calls.find((c) => c.url === '/v1/expense/currencies/cc-1/decision')?.body).toEqual({ action: 'ACTIVATE', expectedVersion: 1 }));
+    expect(within(list).getByRole('button', { name: 'Retire' })).toBeTruthy();
+    type(within(form).getByLabelText('Currency'), 'USD');
+    type(within(form).getByLabelText('Reason'), 'Overseas training');
+    fireEvent.click(within(form).getByRole('button', { name: 'Ask to enable' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.url === '/v1/expense/currencies')?.body).toEqual({ currencyCode: 'USD', reason: 'Overseas training' }));
+  });
+});
+
+describe('exchange rates (I-87)', () => {
+  it('lists rates, enters one with its source, and activates or cancels a draft', async () => {
+    session.permissions = [MANAGE, ACTIVATE];
+    const calls = mockApi({
+      'GET /v1/expense/policies': [200, { items: [] }],
+      'GET /v1/expense/categories': [200, { items: [] }],
+      'GET /v1/expense/currencies': [200, { companyCurrency: 'INR', reference: [], items: [] }],
+      'GET /v1/expense/exchange-rates': [
+        200,
+        { companyCurrency: 'INR', items: [{ id: 'xr-1', currencyCode: 'EUR', effectiveFrom: '2026-10-01', rate: '90.12345678', reason: 'Reference rate', state: 'DRAFT', createdBy: 'someone', version: 1 }] },
+      ],
+      'POST /v1/expense/exchange-rates/xr-1/decision': [200, {}],
+      'POST /v1/expense/exchange-rates': [201, {}],
+    });
+    open();
+    const list = await screen.findByRole('list', { name: 'Exchange rates' });
+    expect(list.textContent).toContain('EUR from 2026-10-01: 90.12345678 (Reference rate)');
+    fireEvent.click(within(list).getByRole('button', { name: 'Activate' }));
+    await waitFor(() => expect(calls.find((c) => c.url === '/v1/expense/exchange-rates/xr-1/decision')?.body).toEqual({ action: 'ACTIVATE', expectedVersion: 1 }));
+    const form = screen.getByRole('form', { name: 'Enter an exchange rate' });
+    type(within(form).getByLabelText('Currency'), 'usd');
+    type(within(form).getByLabelText('From'), '2026-11-01');
+    type(within(form).getByLabelText('Rate'), '83.5');
+    type(within(form).getByLabelText('Source'), 'Bank reference rate');
+    fireEvent.click(within(form).getByRole('button', { name: 'Enter rate' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.url === '/v1/expense/exchange-rates')?.body).toEqual({ currencyCode: 'USD', effectiveFrom: '2026-11-01', rate: '83.5', reason: 'Bank reference rate' }),
+    );
+  });
+});

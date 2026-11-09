@@ -9,10 +9,11 @@ import { assertMinuteFilter, ATTENDANCE_CONTROL_FROM, attendanceControlCondition
 import { auditEventQuery } from '../audit-trail/service.js';
 import { BIOMETRIC_REPORTS } from '../biometric/reports.js';
 import { CONFIRMATION_VIEWS, type ConfirmationView, listConfirmations } from '../confirmation/service.js';
+import { EMPLOYEE_DETAIL_REPORTS } from '../employee/detail-reports.js';
 import { type EmployeeFilters, employeeFilterConditions, employeeOrderBy } from '../employee/service.js';
 import { claimsInScope, EXPENSE_REPORTS } from '../expense/reports.js';
 import { requireDayOrMonth, SALARY_MASTER_ORDER, salaryMasterSelect } from '../increment/salary-master.js';
-import { comparisonRows, disbursementRows, payrollRegisterRows, payrollRunRevision, requirePayrollRun, requireWholePayrollRun } from '../payroll-outputs/reports.js';
+import { comparisonRows, disbursementRows, payrollRegisterRows, payrollRunRevision, reimbursementRegisterRows, requirePayrollRun, requireWholePayrollRun } from '../payroll-outputs/reports.js';
 import { NOTIFICATION_REPORTS } from '../notification/reports.js';
 import { isModuleActive } from '../registry.js';
 import { CURRENT_MEMBER_STATUSES, TEAM_SORTS, teamExportRows } from '../team/service.js';
@@ -467,6 +468,8 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
   // FR-093, section 11.2: the notification delivery log, upcoming celebrations, and the biometric sync and exception reports.
   ...NOTIFICATION_REPORTS,
   ...BIOMETRIC_REPORTS,
+  // FR-007 family, qualification and prior-employment exports (I-82 item 2).
+  ...EMPLOYEE_DETAIL_REPORTS,
 
   INCREMENT_HISTORY: {
     code: 'INCREMENT_HISTORY',
@@ -809,6 +812,37 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
       { key: 'difference', header: 'Difference', ...PAYROLL_MONEY },
     ],
     rows: (db, grant, f) => comparisonRows(db, grant, f.runId!),
+  },
+
+  // FR-038 "reimbursement"; BRD line 345 "Reimbursement Register" among the payroll reports (I-40 item 11; decided under owner
+  // delegation, 6 Nov 2026, docs/03 I-89 item 1). One payroll run, like the run reports above, under the same confidential export
+  // grant (payroll_report.export.amount, never a default) and the payroll register's record scope: each REIMBURSEMENT-head line of
+  // the run's calculated records (payroll-outputs/reports.ts reimbursementRegisterRows). A record's rows add up to its
+  // reimbursements in PAYROLL_REGISTER. Its columns await the owner's approval with samples before release (section 11, I-40
+  // item 12, docs/10 A29).
+  REIMBURSEMENT_REGISTER: {
+    code: 'REIMBURSEMENT_REGISTER',
+    title: 'Reimbursement register',
+    resource: 'payroll_report',
+    fieldGroup: 'amount',
+    requiresPeriod: false,
+    module: 'payroll-outputs',
+    recordFilters: ['runId'],
+    xlsx: true,
+    checkFilters: requireRunOnly,
+    checkRequest: (db, grant, f) => requirePayrollRun(db, grant.companyId, f.runId!),
+    sourceRevision: (db, grant, f) => payrollRunRevision(db, grant.companyId, f.runId!),
+    columns: [
+      { key: 'recordId', header: 'Record id' },
+      { key: 'employeeCode', header: 'Employee code' },
+      { key: 'employeeName', header: 'Employee name' },
+      { key: 'componentCode', header: 'Component code' },
+      { key: 'componentName', header: 'Component name' },
+      { key: 'calculationBasis', header: 'Basis' },
+      { key: 'amount', header: 'Amount', ...PAYROLL_MONEY },
+      { key: 'currencyCode', header: 'Currency' },
+    ],
+    rows: (db, grant, f) => reimbursementRegisterRows(db, grant, f.runId!),
   },
 
   // FR-058: audit export is its own permission (audit.export), separate from ordinary report exports. It shows

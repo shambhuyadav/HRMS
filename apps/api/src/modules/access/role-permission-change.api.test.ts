@@ -6,7 +6,7 @@ import { revokedAfterGuard } from '../../test/after-guard.fixtures.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
 import { type AccessGrant, canAccessEmployee, resolveAccess } from './authorize.js';
-import type { PermissionKey } from './baseline.js';
+import { BASELINE_ROLES, type PermissionKey } from './baseline.js';
 import { provisionCompany } from './provision.js';
 
 let h: Harness;
@@ -213,6 +213,35 @@ describe('independent decision (C3 "no own approval"; C4; FR-067)', () => {
     expect(await rolePermission(A, 'SYSTEM_ADMINISTRATOR', 'audit.export.operational')).toBe('ALLOW');
     expect((await reject(approver, id)).json().error).toBe('AFFECTED_APPROVER');
     expect((await h.db.query(`select 1 from role_permission_change where id = $1 and state = 'PROPOSED'`, [id])).rowCount).toBe(1);
+  });
+
+  it('I-84 item 2: an HR Administrator granted the approval duty decides a change to the System Administrator role, never one to its own role; a default HR Administrator cannot', async () => {
+    const world = await freshWorld();
+    const ask = async (roleCode: string, permission: string) => {
+      const res = await h.call(world.proposer, 'POST', PATH, { roleCode, permission, change: 'REMOVE', reason: 'Access review (synthetic)' });
+      expect(res.statusCode, res.body).toBe(201);
+      return res.json().id as string;
+    };
+    const id = await ask('SYSTEM_ADMINISTRATOR', 'audit.export.operational');
+    expect((await approve(world.approver, id)).json().error).toBe('AFFECTED_APPROVER');
+    // The duty is a ceiling of the HR Administrator, never a default one.
+    expect((await approve(world.hr, id)).statusCode).toBe(403);
+    expect(BASELINE_ROLES.find((r) => r.code === 'HR_ADMINISTRATOR')!.defaultDuties).not.toContain('access.approve_role_grant.operational');
+    const hrApprover = await h.actor(world.company, 'HR_ADMINISTRATOR', { extra: ['access.read_users.operational', 'access.approve_role_grant.operational'] });
+    const listed = await h.call(hrApprover, 'GET', PATH);
+    expect(listed.statusCode, listed.body).toBe(200);
+    expect((listed.json().items as { id: string }[]).map((i) => i.id)).toContain(id);
+    expect((await approve(hrApprover, id)).statusCode).toBe(200);
+    expect(await rolePermission(world.company, 'SYSTEM_ADMINISTRATOR', 'audit.export.operational')).toBe(null);
+    // A change to the HR Administrator role stays with someone who does not hold it.
+    const own = await ask('HR_ADMINISTRATOR', 'holiday.manage.operational');
+    expect((await approve(hrApprover, own)).json().error).toBe('AFFECTED_APPROVER');
+    expect((await approve(world.approver, own)).statusCode).toBe(200);
+    // And a grant the System Administrator proposes can be checked by HR, never by its beneficiary.
+    const grant = await h.call(world.proposer, 'POST', '/v1/access/assignments', { userId: world.hr.user, roleCode: 'AUDITOR', effectiveFrom: '2026-01-01T00:00:00Z' });
+    expect(grant.statusCode, grant.body).toBe(201);
+    expect((await h.call(world.hr, 'POST', `/v1/access/assignments/${grant.json().id}/approve`, { expectedVersion: 1 })).statusCode).toBe(403);
+    expect((await h.call(hrApprover, 'POST', `/v1/access/assignments/${grant.json().id}/approve`, { expectedVersion: 1 })).statusCode).toBe(200);
   });
 
   it('an approver restricted by filters cannot decide a company-wide change; a stale decision is refused; a decided change stays decided', async () => {

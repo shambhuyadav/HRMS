@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PAYROLL_ESS_PANELS, PAYROLL_SCREENS, PAYROLL_TASK_QUEUES } from './payroll';
+import { PAYROLL_ESS_PANELS, PAYROLL_SCREENS, PAYROLL_TASK_QUEUES, statutoryNote } from './payroll';
 
 const session = vi.hoisted(() => ({
   permissions: [] as string[],
@@ -419,8 +419,8 @@ describe('TN06 own issued payslips', () => {
     renderPanel('TN06', [OWN_PAYSLIP]);
     const table = await screen.findByRole('table', { name: 'My payslips' });
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(cells(rows[0]!)).toEqual(['2026-09', '2', 'Current version', '2026-10-02', '48,250.50', '5,000.00', '43,250.50', '0.00', 'Download']);
-    expect(cells(rows[1]!)).toEqual(['2026-09', '1', 'Replaced by a later version on 2026-10-02', '2026-10-01', 'See the current version', 'Download']);
+    expect(cells(rows[0]!)).toEqual(['2026-09', '2', 'Current version', '2026-10-02', '48,250.50', '5,000.00', '43,250.50', '0.00', 'View Download']);
+    expect(cells(rows[1]!)).toEqual(['2026-09', '1', 'Replaced by a later version on 2026-10-02', '2026-10-01', 'See the current version', 'View Download']);
     expect(screen.getByRole('note').textContent).toContain('Publication of a payslip does not mean the salary has been paid.');
     expect(document.body.textContent).toContain('Form 16 is not available: no statutory Form 16 template is configured yet.');
     expect(table.textContent).not.toMatch(/\bpaid\b(?! \(confirmed\))/i);
@@ -438,6 +438,69 @@ describe('TN06 own issued payslips', () => {
     } finally {
       files.restore();
     }
+  });
+
+  it('views a payslip in place: lines by kind, totals, and how each statutory amount was worked out, from the issued file', async () => {
+    asEmployee();
+    const doc = {
+      document: 'PAYSLIP',
+      period: { code: '2026-09', serviceStart: '2026-09-01', serviceEnd: '2026-09-30', paymentDate: '2026-09-30' },
+      version: 1,
+      currencyCode: 'INR',
+      paidDays: '30.0000',
+      daysInMonth: 30,
+      lines: [
+        { componentCode: 'BASIC', componentName: 'Basic', headType: 'EARNING', amount: '200000.0000' },
+        { componentCode: 'PF_EE', componentName: 'Provident fund', headType: 'DEDUCTION', amount: '1800.0000' },
+        { componentCode: 'TDS', componentName: 'Income tax', headType: 'DEDUCTION', amount: '24375.0000' },
+        { componentCode: 'PF_EPS', componentName: 'Pension (employer)', headType: 'EMPLOYER_CONTRIBUTION', amount: '1250.0000' },
+      ],
+      statutory: [
+        { componentCode: 'ESI_EE', componentName: 'ESIC', status: 'NOT_APPLICABLE', amount: null, workings: { reason: 'NOT_COVERED', esicWages: '200000.0000' } },
+        { componentCode: 'PF_EE', componentName: 'Provident fund', status: 'VALUED', amount: '1800.0000', workings: { output: 'EMPLOYEE', pfWages: '200000.0000', contributionWages: '15000.00', option: 'STATUTORY_CEILING', ratePercent: '12' } },
+        {
+          componentCode: 'TDS',
+          componentName: 'Income tax',
+          status: 'VALUED',
+          amount: '24375.0000',
+          workings: { output: 'TDS', regime: 'NEW', projectedAnnualSalary: '2400000.00', taxableIncome: '2325000.00', annualTax: '292500.00', tdsEarlier: '0.00', monthsLeft: 12 },
+        },
+      ],
+      totals: { earnings: '200000.0000', reimbursements: '0.0000', gross: '200000.0000', deductions: '26175.0000', net: '173825.0000', employerContributions: '1250.0000' },
+      paymentAtPublication: { earned: '173825.0000', held: '0.0000', reserved: '0.0000', paid: '0.0000' },
+      notices: ['Publication of this payslip does not imply payment or statutory filing.'],
+    };
+    serve({ 'GET /v1/me/payslips': [200, OWN_PAYSLIPS], 'GET /v1/me/payroll-holds': [200, { items: [], total: 0 }], [`GET /v1/me/payslips/${P_OLD}/file`]: [200, doc] });
+    renderPanel('TN06', [OWN_PAYSLIP]);
+    fireEvent.click(await screen.findByRole('button', { name: 'View payslip 2026-09 version 1' }));
+    const deductions = await screen.findByRole('table', { name: 'Deductions' });
+    expect(deductions.textContent).toContain('Income tax');
+    expect(screen.getByRole('table', { name: 'Paid by the employer (not part of your pay)' }).textContent).toContain('Pension (employer)');
+    expect(screen.getByLabelText('Payslip totals').textContent).toContain('Net pay');
+    const statutory = screen.getByRole('table', { name: 'How statutory amounts were worked out' });
+    expect(cells(rowWith(statutory, 'ESIC'))[2]).toBe('Not covered: your wages are above the ESIC ceiling');
+    expect(cells(rowWith(statutory, 'Provident fund'))[2]).toContain('12% of');
+    expect(cells(rowWith(statutory, 'Income tax'))[2]).toContain('the rest spread over 12 month(s)');
+    expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('table', { name: 'Deductions' })).toBeNull();
+  });
+
+  it('says how professional tax, the labour welfare fund and the pension share were worked out, from the recorded workings only', () => {
+    const note = (status: string, workings: Record<string, unknown>) => statutoryNote({ componentCode: 'X', componentName: 'X', status, amount: status === 'VALUED' ? '1.0000' : null, workings }, 'INR');
+    expect(note('VALUED', { gross: '14000.0000', stateCode: 'MH', slab: 3, month: 10 })).toBe('Professional tax, MH, slab 3 for a monthly gross of INR 14,000.00');
+    expect(note('VALUED', { wages: '20000.0000', stateCode: 'MH', slab: 2, month: 6, contributionMonths: [6, 12] })).toBe('Labour welfare fund, MH, slab 2');
+    expect(note('NOT_APPLICABLE', { reason: 'NOT_A_CONTRIBUTION_MONTH', contributionMonths: [6, 12] })).toBe('Not due this month');
+    expect(note('VALUED', { output: 'EPS', pfWages: '25000.0000', pensionWages: '15000.00', ratePercent: '8.33' })).toBe('8.33% of INR 15,000.00 (pension)');
+    expect(note('VALUED', { output: 'EMPLOYEE', pfWages: '25000.0000', contributionWages: '25000.0000', option: 'HIGHER_WAGES', ratePercent: '12' })).toBe(
+      '12% of INR 25,000.00 (your option to contribute on higher wages)',
+    );
+    // The old regime's HRA exemption, when there is one, is named with the projection.
+    expect(
+      note('VALUED', { output: 'TDS', regime: 'OLD', projectedAnnualSalary: '1800000.00', hraExemption: '480000.00', taxableIncome: '1270000.00', annualTax: '201240.00', tdsEarlier: '0.00', monthsLeft: 12 }),
+    ).toBe(
+      'Old regime: projected salary for the year INR 18,00,000.00, less INR 4,80,000.00 of house rent allowance exempt, taxable income INR 12,70,000.00, tax for the year INR 2,01,240.00; INR 0.00 deducted earlier this year, the rest spread over 12 month(s)',
+    );
   });
 
   it('shows the status of the employee’s own held salary: period, state and dates, never a reason or amount (H7)', async () => {
@@ -608,12 +671,12 @@ describe('payroll runs', () => {
     serve({
       'GET /v1/payroll/runs': [
         200,
-        { items: [{ id: RUN, lineageId: RUN, revision: 2, state: 'IN_REVIEW', periodCode: '2026-10', periodId: PERIOD, calendarCode: 'MONTHLY', memberCount: 12, unresolvedExceptions: 1, createdAt: '2026-10-20T08:00:00.000Z', processedAt: null, version: 4 }] },
+        { items: [{ id: RUN, lineageId: RUN, revision: 2, state: 'IN_REVIEW', periodCode: '2026-10', financialYear: 'FY2026', periodId: PERIOD, calendarCode: 'MONTHLY', memberCount: 12, unresolvedExceptions: 1, createdAt: '2026-10-20T08:00:00.000Z', processedAt: null, version: 4 }] },
       ],
     });
     renderScreen('/payroll/runs', [RUN_STATUS]);
     const table = await screen.findByRole('table', { name: 'Payroll runs' });
-    expect(cells(rowWith(table, '2026-10 revision 2'))).toEqual(['2026-10 revision 2', 'MONTHLY', '2', 'In review', '12', '1', '2026-10-20', '—']);
+    expect(cells(rowWith(table, '2026-10 revision 2'))).toEqual(['2026-10 revision 2', 'FY2026', 'MONTHLY', '2', 'In review', '12', '1', '2026-10-20', '—']);
     // Starting a run needs the prepare duty.
     expect(screen.queryByRole('heading', { name: 'Start a payroll run' })).toBeNull();
     cleanup();
@@ -628,6 +691,7 @@ describe('payroll runs', () => {
       revision: 1,
       state: 'DRAFT',
       periodCode: `2026-P${n}`,
+      financialYear: 'FY2026',
       periodId: PERIOD,
       calendarCode: 'MONTHLY',
       memberCount: 1,
@@ -657,6 +721,20 @@ describe('payroll runs', () => {
     await waitFor(() => expect(callsTo('GET', '/v1/payroll/runs').at(-1)?.query.toString()).toBe('state=DRAFT&page=1&pageSize=25'));
     fireEvent.click(within(await screen.findByRole('navigation', { name: 'Payroll run pages' })).getByRole('button', { name: 'Next page' }));
     await waitFor(() => expect(callsTo('GET', '/v1/payroll/runs').at(-1)?.query.toString()).toBe('state=DRAFT&page=2&pageSize=25'));
+  });
+
+  it('BR-012: filters the runs by the financial year their calendar gives the period, kept with the state filter and from the first page', async () => {
+    serve({ 'GET /v1/payroll/runs': [200, { items: [], total: 0, page: 1, pageSize: 25 }] });
+    renderScreen('/payroll/runs', [RUN_STATUS]);
+    await waitFor(() => expect(callsTo('GET', '/v1/payroll/runs')).toHaveLength(1));
+    fireEvent.change(screen.getByLabelText('State'), { target: { value: 'APPROVED' } });
+    fireEvent.change(screen.getByLabelText('Financial year'), { target: { value: 'fy2026' } });
+    await waitFor(() => expect(callsTo('GET', '/v1/payroll/runs').at(-1)?.query.toString()).toBe('state=APPROVED&financialYear=FY2026&page=1&pageSize=25'));
+    expect(await screen.findByText('No payroll runs match these filters.')).toBeTruthy();
+    // Something that cannot be a label is never sent; the screen says what a label looks like.
+    fireEvent.change(screen.getByLabelText('Financial year'), { target: { value: 'FY 2026' } });
+    expect(await screen.findByText(/A financial year is the label its calendar gives it/)).toBeTruthy();
+    expect([...new Set(callsTo('GET', '/v1/payroll/runs').map((c) => c.query.get('financialYear')).filter(Boolean))]).toEqual(['FY2026']);
   });
 
   it('starts a run from a previewed scope and opens it', async () => {
@@ -749,6 +827,68 @@ describe('payroll runs', () => {
     const components = await screen.findByRole('table', { name: 'Component totals' });
     expect(within(components).getAllByRole('columnheader').map((h) => h.textContent)).toContain('Prior period (2026-09)');
     expect(cells(within(components).getAllByRole('row')[1]!)).toEqual(['BASIC', 'Earning', 'INR 60,000.00', 'INR 58,000.00', 'INR 2,000.00']);
+  });
+
+  it('opens a member’s record: paid days, lines by kind, inputs and how each statutory head was valued, as returned', async () => {
+    const member = {
+      id: 'r1',
+      employeeId: 'e1',
+      employeeCode: 'SYN-001',
+      employeeName: 'Asha Synthetic',
+      calculationStatus: 'CALCULATED',
+      paidUnits: '31.0000',
+      currencyCode: 'INR',
+      gross: '200000.0000',
+      deductions: '26175.0000',
+      net: '173825.0000',
+      priorNet: null,
+      salaryStopMode: null,
+      bankStatus: 'VERIFIED',
+      exceptions: [],
+    };
+    serve({
+      [`GET ${RUN_PATH}`]: [200, runDetail({ ...CALCULATED, totals: TOTALS, scopeComplete: true })],
+      [`GET ${RUN_PATH}/records`]: [200, { items: [member], nextAfter: null }],
+      [`GET ${RUN_PATH}/components`]: [200, { runId: RUN, basis: 'RUN', priorPeriodCode: null, priorRunIds: [], items: [] }],
+      [`GET ${RUN_PATH}/records/e1`]: [
+        200,
+        {
+          calculationStatus: 'CALCULATED',
+          currencyCode: 'INR',
+          segments: [{ segmentStart: '2026-10-01', segmentEnd: '2026-10-31', calendarDays: 31, leaveLopUnits: '0.0000', attendanceLopUnits: '0.0000', paidDays: '31.0000' }],
+          inputs: [{ inputId: 'i1', componentCode: 'BONUS', amount: '5000.0000', reference: 'SYN-INPUT-1' }],
+          lines: [
+            { componentCode: 'BASIC', componentName: 'Basic', headType: 'EARNING', calculationBasis: 'FIXED', amount: '200000.0000' },
+            { componentCode: 'TDS', componentName: 'Income tax', headType: 'DEDUCTION', calculationBasis: 'RULE_PACK', amount: '24375.0000' },
+          ],
+          statutory: [
+            {
+              componentCode: 'TDS',
+              rulePackCode: 'TDS',
+              headType: 'DEDUCTION',
+              status: 'VALUED',
+              amount: '24375.0000',
+              workings: { packCode: 'INCOME_TAX', packRevision: 1, output: 'TDS', regime: 'NEW', projectedAnnualSalary: '2400000.00', taxableIncome: '2325000.00', annualTax: '292500.00', tdsEarlier: '0.00', monthsLeft: 12 },
+            },
+          ],
+        },
+      ],
+    });
+    renderScreen(`/payroll/runs/${RUN}`, [RUN_STATUS, RUN_AMOUNT]);
+    const members = await screen.findByRole('table', { name: 'Run members' });
+    // The employee cell reads as before; it opens the record.
+    expect(cells(rowWith(members, 'SYN-001 Asha Synthetic'))[0]).toBe('SYN-001 Asha Synthetic');
+    fireEvent.click(within(members).getByRole('button', { name: 'Details of SYN-001' }));
+    const lines = await screen.findByRole('table', { name: 'Record lines' });
+    expect(cells(rowWith(lines, 'Income tax'))).toEqual(['Income tax', 'Deduction', 'Rule pack', 'INR 24,375.00']);
+    expect(cells(rowWith(screen.getByRole('table', { name: 'Paid days' }), '31.0000'))).toEqual(['2026-10-01', '2026-10-31', '31', '0.0000', '0.0000', '31.0000']);
+    expect(cells(rowWith(screen.getByRole('table', { name: 'Approved inputs' }), 'SYN-INPUT-1'))).toEqual(['BONUS', 'SYN-INPUT-1', 'INR 5,000.00']);
+    const statutory = cells(rowWith(screen.getByRole('table', { name: 'Statutory workings' }), 'Income tax'));
+    expect(statutory.slice(0, 3)).toEqual(['Income tax', 'INCOME_TAX revision 1', 'INR 24,375.00']);
+    expect(statutory[3]).toContain('tax for the year INR 2,92,500.00');
+    expect(callsTo('GET', `${RUN_PATH}/records/e1`)).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('table', { name: 'Record lines' })).toBeNull();
   });
 
   it('shows a status-only reader no amounts and asks for none', async () => {
@@ -1379,13 +1519,15 @@ describe('salary holds and salary stops', () => {
               total: 2,
               page: 1,
               pageSize: 25,
-              totals: [{ currencyCode: 'INR', reserved: '20000.0000', confirmed: '19900.0000' }],
+              totals: [{ currencyCode: 'INR', reserved: '20000.0000', confirmed: '19900.0000', outstanding: '50100.0000' }],
             },
       ],
     });
     renderScreen('/payroll/holds', [HOLD_READ]);
     const list = await section('Salary holds');
     const totals = await within(list).findByLabelText('Hold totals in INR');
+    // I-80: the outstanding figure is the API's, shown as returned.
+    expect(totals.textContent).toContain('Outstanding (held, not yet confirmed paid)INR 50,100.00');
     expect(totals.textContent).toContain('Reserved for payment, not paidINR 20,000.00');
     expect(totals.textContent).toContain('Paid (confirmed from bank evidence)INR 19,900.00');
     expect(list.textContent).toContain('Totals of every hold matching the filter, on all pages');
@@ -2426,6 +2568,48 @@ describe('payroll reports', () => {
     }
   });
 
+  it('exports the reimbursement register of the run with the export key only (FR-038, I-89 item 1)', async () => {
+    const EXEC_3 = 'f0000000-0000-4000-8000-000000000003';
+    const reports: Record<string, Handler> = {
+      [`GET /v1/payroll-outputs/runs/${RUN}/register`]: [
+        200,
+        {
+          run: header,
+          scope: 'COMPANY',
+          totals: { records: 0, earnings: '0', reimbursements: '0', deductions: '0', net: '0', employerContributions: '0', held: '0.0000', reserved: '0.0000', paid: '0.0000' },
+          items: [],
+          next: null,
+        },
+      ],
+      [`GET /v1/payroll-outputs/runs/${RUN}/disbursement`]: [
+        200,
+        { run: header, totals: { payable: '0.0000', held: '0.0000', reserved: '0.0000', paid: '0.0000', ready: '0.0000', reconciles: true }, manifests: [], paymentStatusSource: 'RECORDED_OUTCOME_EVIDENCE_ONLY' },
+      ],
+      [`GET /v1/payroll-outputs/runs/${RUN}/comparison`]: [200, { runId: RUN, basis: 'RUN', priorPeriodCode: null, items: [] }],
+      [`GET /v1/payroll-outputs/runs/${RUN}/journal`]: refusal(409, 'NOT_CONFIGURED'),
+    };
+    // Without the export key there is nothing to offer, so the section is not shown.
+    serve({ ...reports });
+    renderScreen(`/payroll/runs/${RUN}/reports`, [REPORT_READ]);
+    await section('Payroll register');
+    await settle();
+    expect(screen.queryByRole('heading', { name: 'Reimbursement register' })).toBeNull();
+    cleanup();
+
+    serve({
+      ...reports,
+      'POST /v1/reports': [202, { id: EXEC_3, state: 'QUEUED', format: 'CSV' }],
+      [`GET /v1/reports/${EXEC_3}`]: [200, { id: EXEC_3, reportCode: 'REIMBURSEMENT_REGISTER', state: 'COMPLETED', rowCount: 2, failureCode: null, format: 'CSV' }],
+    });
+    renderScreen(`/payroll/runs/${RUN}/reports`, [REPORT_READ, REPORT_EXPORT]);
+    const reimbursement = await section('Reimbursement register');
+    expect(within(reimbursement).getByText(/columns await the owner’s approval with samples/)).toBeTruthy();
+    fireEvent.click(button(within(reimbursement).getByRole('form', { name: 'Export the reimbursement register' }), 'Export the reimbursement register'));
+    const ready = await within(reimbursement).findByRole('status', { name: 'Export of the reimbursement register' });
+    await waitFor(() => expect(ready.textContent).toContain('Ready to download · 2 rows'));
+    expect(bodiesTo('POST', '/v1/reports')).toEqual([{ reportCode: 'REIMBURSEMENT_REGISTER', filters: { runId: RUN }, format: 'CSV' }]);
+  });
+
   it('is hidden without the report key and links from the run only with it', async () => {
     serve({});
     renderScreen(`/payroll/runs/${RUN}/reports`, [RUN_STATUS]);
@@ -2453,6 +2637,116 @@ describe('payroll reports', () => {
     renderScreen('/payroll/statutory-outputs', [STATUTORY_READ]);
     const table = await screen.findByRole('table', { name: 'Statutory outputs' });
     expect(cells(rowWith(table, 'Form 16 / Form 130'))).toEqual(['Form 16 / Form 130', 'FORM_16', 'Not configured', 'activated statutory rule pack (rates and applicability); owner-supplied period template']);
+  });
+
+  it('shows a register whose pack is active as a working register, still needing the filing template', async () => {
+    serve({
+      'GET /v1/payroll-outputs/statutory-outputs': [
+        200,
+        { items: [{ code: 'PF_REGISTER', sourceLabel: 'PF register', status: 'AVAILABLE', format: 'WORKING_REGISTER', reason: 'WORKING_REGISTER', needs: ['owner-supplied period template and approved sample for the filing format'] }] },
+      ],
+    });
+    renderScreen('/payroll/statutory-outputs', [STATUTORY_READ]);
+    const table = await screen.findByRole('table', { name: 'Statutory outputs' });
+    expect(cells(rowWith(table, 'PF register'))).toEqual(['PF register', 'PF_REGISTER', 'Working register', 'owner-supplied period template and approved sample for the filing format']);
+  });
+
+  it('FR-039: the quarter’s TDS register (Form 24Q working data) for a report reader, per employee and month with its source', async () => {
+    serve({
+      'GET /v1/payroll-outputs/statutory-outputs': [200, { items: [] }],
+      'GET /v1/payroll-outputs/tds-register': [
+        200,
+        {
+          from: '2026-04-01',
+          to: '2026-06-30',
+          notice: 'Working data for Form 24Q / Form 138. Not the return.',
+          scope: 'COMPANY',
+          totals: { employees: 1, tds: '292500.0000', months: [{ month: '2026-04', taxableSalary: '200000.0000', tds: '24375.0000' }, { month: '2026-05', taxableSalary: '2200000.0000', tds: '268125.0000' }] },
+          items: [
+            {
+              employeeId: 'e1',
+              employeeCode: 'SYN-001',
+              employeeName: 'Asha Synthetic',
+              tds: '292500.0000',
+              months: [
+                { month: '2026-04', source: 'PAYROLL', taxableSalary: '200000.0000', tds: '24375.0000' },
+                { month: '2026-05', source: 'FINAL_SETTLEMENT', taxableSalary: '2200000.0000', tds: '268125.0000' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    renderScreen('/payroll/statutory-outputs', [STATUTORY_READ, REPORT_READ]);
+    const form = await screen.findByRole('form', { name: 'TDS register' });
+    fireEvent.change(within(form).getByLabelText('Quarter'), { target: { value: '1' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Show' }));
+    const table = await screen.findByRole('table', { name: 'TDS by employee' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(cells(rows[0]!)).toEqual(['SYN-001 Asha Synthetic', '2026-04', 'Payroll', 'INR 2,00,000.00', 'INR 24,375.00']);
+    expect(cells(rows[1]!)).toEqual(['', '2026-05', 'Final settlement', 'INR 22,00,000.00', 'INR 2,68,125.00']);
+    expect(callsTo('GET', '/v1/payroll-outputs/tds-register')[0]?.query.toString()).toBe('fiscalYear=2026-27&quarter=1');
+    expect(screen.getByLabelText('TDS register totals').textContent).toContain('INR 2,92,500.00');
+  });
+
+  it('offers the TDS register only with the report key', async () => {
+    serve({ 'GET /v1/payroll-outputs/statutory-outputs': [200, { items: [] }] });
+    renderScreen('/payroll/statutory-outputs', [STATUTORY_READ]);
+    await screen.findByText(/Each statutory register/);
+    expect(screen.queryByRole('form', { name: 'TDS register' })).toBeNull();
+  });
+
+  it('FR-039: a run’s working registers show the recorded valuations with totals, and a not-covered employee by reason', async () => {
+    const register = (code: string, body: Record<string, unknown>): [string, [number, unknown]] => [`GET /v1/payroll-outputs/runs/${RUN}/statutory-registers/${code}`, [200, body]];
+    const common = { notice: 'A working register of what the calculation recorded; not a statutory filing.', run: { currencyCode: 'INR' }, scope: 'COMPANY', next: null };
+    serve(
+      Object.fromEntries([
+        register('PF_REGISTER', {
+          ...common,
+          sourceLabel: 'PF register',
+          packs: [{ packCode: 'PF', packRevision: 1 }],
+          totals: { records: 1, amounts: { employee: '1200.0000', pension: '833.0000', employerEpf: '367.0000', edli: '50.0000', adminCharges: '50.0000' } },
+          items: [
+            {
+              recordId: 'r1',
+              employeeCode: 'SYN-001',
+              employeeName: 'Asha Synthetic',
+              packCode: 'PF',
+              facts: { pfWages: '10000.0000', contributionWages: '10000.0000', option: 'STATUTORY_CEILING' },
+              amounts: { employee: '1200.0000', pension: '833.0000', employerEpf: '367.0000', edli: '50.0000', adminCharges: '50.0000' },
+              notApplicable: {},
+            },
+          ],
+        }),
+        register('ESIC_REGISTER', {
+          ...common,
+          sourceLabel: 'ESIC register',
+          packs: [{ packCode: 'ESIC', packRevision: 1 }],
+          totals: { records: 1, amounts: { employee: '0.0000', employer: '0.0000' } },
+          items: [
+            {
+              recordId: 'r2',
+              employeeCode: 'SYN-002',
+              employeeName: 'Bina Synthetic',
+              packCode: 'ESIC',
+              facts: { esicWages: '35000.0000' },
+              amounts: { employee: null, employer: null },
+              notApplicable: { employee: 'NOT_COVERED', employer: 'NOT_COVERED' },
+            },
+          ],
+        }),
+      ]),
+    );
+    renderScreen(`/payroll/runs/${RUN}/reports`, [REPORT_READ]);
+    const s = await section('Statutory registers');
+    const pf = await within(s).findByRole('table', { name: 'PF register' });
+    expect(cells(rowWith(pf, 'SYN-001 Asha Synthetic'))).toEqual(['SYN-001 Asha Synthetic', 'INR 10,000.00', 'INR 10,000.00', 'Statutory ceiling', 'INR 1,200.00', 'INR 833.00', 'INR 367.00', 'INR 50.00', 'INR 50.00']);
+    expect(within(s).getByLabelText('PF register totals').textContent).toContain('PF revision 1');
+    expect(s.textContent).toContain('not a statutory filing');
+    fireEvent.change(within(s).getByLabelText('Register'), { target: { value: 'ESIC_REGISTER' } });
+    const esic = await within(s).findByRole('table', { name: 'ESIC register' });
+    expect(cells(rowWith(esic, 'SYN-002 Bina Synthetic'))).toEqual(['SYN-002 Bina Synthetic', 'INR 35,000.00', '—', 'Not covered', 'Not covered']);
+    expect(calls.filter((c) => c.path.includes('/statutory-registers/')).map((c) => c.path.split('/').pop())).toEqual(['PF_REGISTER', 'ESIC_REGISTER']);
   });
 });
 

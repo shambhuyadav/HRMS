@@ -19,12 +19,29 @@ import {
   listOwnAppraisals,
   recordException,
   replaceGoals,
+  reviewGoals,
   staffScope,
 } from './appraisals.js';
-import { readAppraisal, type Stage, STAGES, taskAction } from './common.js';
-import { closeCycle, createCycle, type CycleInput, CYCLE_START_MONTHS, getCycle, getSetting, listCycles, putSetting, updateCycle, type WindowsInput } from './cycles.js';
+import { RATING_MODES, readAppraisal, type Stage, STAGES, taskAction } from './common.js';
+import {
+  type CompetencyInput,
+  type CompetencyUpdate,
+  createCompetency,
+  createCompetencySet,
+  endCompetencySet,
+  getCompetency,
+  getCompetencySet,
+  listCompetencies,
+  listCompetencySets,
+  listScoringSettings,
+  type SetInput,
+  startScoringRevision,
+  updateCompetency,
+} from './competencies.js';
+import { closeCycle, createCycle, type CycleInput, CYCLE_START_MONTHS, type CycleUpdate, getCycle, getSetting, listCycles, putSetting, updateCycle } from './cycles.js';
 import { goalImportRoutes } from './goal-import.js';
-import { cycleExport, cycleReport } from './reports.js';
+import { cycleExport, cycleReport, trainingNeeds } from './reports.js';
+import { SECTION_CODES, SECTIONS } from './sections.js';
 import { type DecisionInput, decideAppraisal, type RatingInput, reviewTasks, saveRating } from './review.js';
 import { type SelfEntryInput, saveSelfEntry, submitSelfEntry } from './self-entry.js';
 
@@ -37,7 +54,19 @@ const reason = { type: 'string', minLength: 1, maxLength: 1000 } as const;
 const nullableText = (maxLength: number) => ({ anyOf: [{ type: 'string', maxLength }, { type: 'null' }] }) as const;
 const window = { anyOf: [{ type: 'object', additionalProperties: false, required: ['opensOn', 'closesOn'], properties: { opensOn: date, closesOn: date } }, { type: 'null' }] } as const;
 const windows = { type: 'object', additionalProperties: false, properties: { goalSetting: window, selfEntry: window, managerRating: window } } as const;
-const approvalLevels = { type: 'integer', enum: [1, 2] } as const;
+// I-77: 0 reviewer levels (BR-013 one-level manager review), 1 (F1 default) or 2 (explicit second level).
+const approvalLevels = { type: 'integer', enum: [0, 1, 2] } as const;
+const sectionCode = { type: 'string', enum: [...SECTION_CODES] } as const;
+const cycleRules = {
+  goalReviewRequired: { type: 'boolean' },
+  ratingMode: { type: 'string', enum: [...RATING_MODES] },
+  reviewDueOn: { anyOf: [date, { type: 'null' }] },
+  // I-86: the cycle's goals / competencies split (both or neither) and its FR-042 sections.
+  goalWeightPercent: { type: 'integer', minimum: 1, maximum: 100 },
+  competencyWeightPercent: { type: 'integer', minimum: 0, maximum: 99 },
+  sections: { type: 'array', maxItems: SECTION_CODES.length, items: sectionCode },
+} as const;
+const score = { type: 'integer', minimum: 1, maximum: 5 } as const;
 const goals = {
   type: 'array',
   maxItems: 100,
@@ -64,7 +93,75 @@ const entries = {
     properties: { goalId: uuid, score: { anyOf: [{ type: 'integer', minimum: 1, maximum: 5 }, { type: 'null' }] }, comment: nullableText(2000) },
   },
 } as const;
-const entryBody = { type: 'object', additionalProperties: false, required: ['entries', 'expectedVersion'], properties: { entries, comment: nullableText(4000), expectedVersion } } as const;
+// FR-041 / I-86: scores (integer 1..5, null clears) and comments on the appraisal's own competencies.
+const competencyEntries = {
+  type: 'array',
+  maxItems: 50,
+  items: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['competencyId'],
+    properties: { competencyId: uuid, score: { anyOf: [{ type: 'integer', minimum: 1, maximum: 5 }, { type: 'null' }] }, comment: nullableText(2000) },
+  },
+} as const;
+// FR-042: one party's text per included section (null or blank clears it).
+const sectionEntries = {
+  type: 'array',
+  maxItems: SECTION_CODES.length,
+  items: { type: 'object', additionalProperties: false, required: ['section', 'text'], properties: { section: sectionCode, text: nullableText(4000) } },
+} as const;
+const entryBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['entries', 'expectedVersion'],
+  properties: { entries, competencies: competencyEntries, sections: sectionEntries, comment: nullableText(4000), expectedVersion },
+} as const;
+// The manager's rating also takes the overall rating of a MANUAL cycle (FR-042; null clears it).
+const ratingBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['entries', 'expectedVersion'],
+  // A type list rather than anyOf with null: a 0 is refused, not coerced into null (a clear).
+  properties: {
+    entries,
+    competencies: competencyEntries,
+    sections: sectionEntries,
+    comment: nullableText(4000),
+    overallRating: { type: ['integer', 'null'], minimum: 1, maximum: 5 },
+    expectedVersion,
+  },
+} as const;
+const configReason = { type: 'string', minLength: 1, maxLength: 1000 } as const;
+const indicatorList = { type: 'array', minItems: 5, maxItems: 5, items: { type: 'string', minLength: 1, maxLength: 1000 } } as const;
+const competencyBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['code', 'name', 'indicators', 'activeFrom'],
+  properties: { code: { type: 'string', minLength: 1, maxLength: 40 }, name: { type: 'string', minLength: 1, maxLength: 200 }, description: nullableText(2000), indicators: indicatorList, activeFrom: date },
+} as const;
+const competencyUpdateBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['name', 'indicators', 'activeFrom', 'activeTo', 'expectedVersion'],
+  properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, description: nullableText(2000), indicators: indicatorList, activeFrom: date, activeTo: { anyOf: [date, { type: 'null' }] }, expectedVersion },
+} as const;
+const setBody = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['gradeId', 'effectiveFrom', 'items', 'reason'],
+  properties: {
+    gradeId: uuid,
+    designationId: { anyOf: [uuid, { type: 'null' }] },
+    effectiveFrom: date,
+    items: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 50,
+      items: { type: 'object', additionalProperties: false, required: ['competencyId', 'weight'], properties: { competencyId: uuid, weight: { type: 'integer', minimum: 1, maximum: 100 } } },
+    },
+    reason: configReason,
+  },
+} as const;
 const departmentQuery = { type: 'object', additionalProperties: false, properties: { departmentId: uuid } } as const;
 
 export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database; files: FileStore; scanner: ScanProvider }): Promise<void> {
@@ -102,7 +199,7 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
           type: 'object',
           additionalProperties: false,
           required: ['code', 'name', 'startDate'],
-          properties: { code: { type: 'string', minLength: 1, maxLength: 40 }, name: { type: 'string', minLength: 1, maxLength: 200 }, startDate: date, approvalLevels, windows },
+          properties: { code: { type: 'string', minLength: 1, maxLength: 40 }, name: { type: 'string', minLength: 1, maxLength: 200 }, startDate: date, approvalLevels, windows, ...cycleRules },
         },
       },
     },
@@ -128,14 +225,14 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
           type: 'object',
           additionalProperties: false,
           required: ['name', 'approvalLevels', 'windows', 'expectedVersion'],
-          properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, approvalLevels, windows, expectedVersion },
+          properties: { name: { type: 'string', minLength: 1, maxLength: 200 }, approvalLevels, windows, ...cycleRules, expectedVersion },
         },
       },
     },
     async (request) => {
       const { id } = request.params as { id: string };
       const grant = await requireAccess(db, request, 'appraisal_cycle', 'manage', ['operational'], { requireAll: true, recordKey: id });
-      await withTransaction(db, (tx) => updateCycle(tx, grant, id, request.body as { name: string; approvalLevels: 1 | 2; windows: WindowsInput; expectedVersion: number }));
+      await withTransaction(db, (tx) => updateCycle(tx, grant, id, request.body as CycleUpdate));
       return getCycle(db, grant, id);
     },
   );
@@ -145,6 +242,96 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
     const grant = await requireAccess(db, request, 'appraisal_cycle', 'manage', ['operational'], { requireAll: true, recordKey: id });
     await withTransaction(db, (tx) => closeCycle(tx, grant, id, request.body as { expectedVersion: number }));
     return getCycle(db, grant, id);
+  });
+
+  // -------------------------------------------------------------------------------------------------------
+  // Appraisal Config: scoring split, competency master and grade mapping (FR-041; I-86). Operational configuration in the cycle
+  // duty; company-wide changes need an unrestricted company-scope assignment (checked in competencies.ts).
+  // -------------------------------------------------------------------------------------------------------
+  app.get('/appraisal-sections', async (request) => {
+    await requireAccess(db, request, 'appraisal_cycle', 'read', ['operational']);
+    return { items: SECTIONS };
+  });
+
+  app.get('/appraisal-scoring-settings', async (request) => listScoringSettings(db, await requireAccess(db, request, 'appraisal_cycle', 'read', ['operational'])));
+
+  app.post(
+    '/appraisal-scoring-settings',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['effectiveFrom', 'goalWeightPercent', 'competencyWeightPercent', 'reason'],
+          properties: { effectiveFrom: date, goalWeightPercent: cycleRules.goalWeightPercent, competencyWeightPercent: cycleRules.competencyWeightPercent, reason: configReason },
+        },
+      },
+    },
+    async (request, reply) => {
+      const grant = await requireAccess(db, request, 'appraisal_cycle', 'manage', ['operational'], { requireAll: true });
+      const created = await withTransaction(db, (tx) =>
+        startScoringRevision(tx, grant, request.body as { effectiveFrom: string; goalWeightPercent: number; competencyWeightPercent: number; reason: string }),
+      );
+      reply.status(201);
+      return created;
+    },
+  );
+
+  app.get('/appraisal-competencies', async (request) => listCompetencies(db, await requireAccess(db, request, 'appraisal_cycle', 'read', ['operational'])));
+
+  app.post('/appraisal-competencies', { schema: { body: competencyBody } }, async (request, reply) => {
+    const grant = await requireAccess(db, request, 'appraisal_cycle', 'manage', ['operational'], { requireAll: true });
+    const id = await withTransaction(db, (tx) => createCompetency(tx, grant, request.body as CompetencyInput));
+    reply.status(201);
+    return getCompetency(db, grant, id);
+  });
+
+  app.get('/appraisal-competencies/:id', { schema: { params: idParams } }, async (request) => {
+    const { id } = request.params as { id: string };
+    return getCompetency(db, await requireAccess(db, request, 'appraisal_cycle', 'read', ['operational'], { recordKey: id }), id);
+  });
+
+  app.put('/appraisal-competencies/:id', { schema: { params: idParams, body: competencyUpdateBody } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'appraisal_cycle', 'manage', ['operational'], { requireAll: true, recordKey: id });
+    await withTransaction(db, (tx) => updateCompetency(tx, grant, id, request.body as CompetencyUpdate));
+    return getCompetency(db, grant, id);
+  });
+
+  app.get(
+    '/appraisal-competency-sets',
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { gradeId: uuid } } } },
+    async (request) => listCompetencySets(db, await requireAccess(db, request, 'appraisal_cycle', 'read', ['operational']), request.query as { gradeId?: string }),
+  );
+
+  app.post('/appraisal-competency-sets', { schema: { body: setBody } }, async (request, reply) => {
+    const grant = await requireAccess(db, request, 'appraisal_cycle', 'manage', ['operational'], { requireAll: true });
+    const id = await withTransaction(db, (tx) => createCompetencySet(tx, grant, request.body as SetInput));
+    reply.status(201);
+    return getCompetencySet(db, grant, id);
+  });
+
+  app.post(
+    '/appraisal-competency-sets/:id/end',
+    {
+      schema: {
+        params: idParams,
+        body: { type: 'object', additionalProperties: false, required: ['effectiveTo', 'reason', 'expectedVersion'], properties: { effectiveTo: date, reason: configReason, expectedVersion } },
+      },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'appraisal_cycle', 'manage', ['operational'], { requireAll: true, recordKey: id });
+      await withTransaction(db, (tx) => endCompetencySet(tx, grant, id, request.body as { effectiveTo: string; reason: string; expectedVersion: number }));
+      return getCompetencySet(db, grant, id);
+    },
+  );
+
+  // FR-042 / I-86: training needs as a suggestion for training planning (confidential texts: the rating group is required).
+  app.get('/appraisal-cycles/:id/training-needs', { schema: { params: idParams, querystring: departmentQuery } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'appraisal', 'report', ['rating'], { requireAll: true, recordKey: id });
+    return trainingNeeds(db, grant, id, request.query as { departmentId?: string });
   });
 
   // FR-044 report and export within row scope; rating content only with the confidential rating group.
@@ -177,7 +364,7 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
             employeeId: uuid,
             departmentId: uuid,
             state: { type: 'string', enum: ['DRAFT', 'SUBMITTED', 'IN_REVIEW', 'RETURNED', 'APPROVED', 'CANCELLED'] },
-            stateGroup: { type: 'string', enum: ['AWAITING_DECISION'] },
+            stateGroup: { type: 'string', enum: ['AWAITING_DECISION', 'AWAITING_GOAL_REVIEW'] },
             page: { type: 'integer', minimum: 1, default: 1 },
             pageSize: { type: 'integer', enum: [25, 50, 100], default: 25 },
           },
@@ -215,6 +402,14 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
     },
   );
 
+  // FR-041 KRA review (I-77 item 3): the goal-setting duty, by someone other than the person who set the goals.
+  app.post('/appraisals/:id/goal-review', { schema: { params: idParams, body: versionBody } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'appraisal', 'manage', ['operational'], { requireAll: true, recordKey: id });
+    await withTransaction(db, (tx) => reviewGoals(tx, grant, id, request.body as { expectedVersion: number }));
+    return getAppraisal(db, grant, id);
+  });
+
   app.post(
     '/appraisals/:id/window-exceptions',
     {
@@ -246,9 +441,13 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
   // -------------------------------------------------------------------------------------------------------
   // Rating and review tasks (FR-043)
   // -------------------------------------------------------------------------------------------------------
-  app.get('/appraisal-tasks/mine', async (request) => reviewTasks(db, await requireAccess(db, request, 'appraisal', 'read', ['operational', 'rating'])));
+  app.get(
+    '/appraisal-tasks/mine',
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { overdue: { type: 'boolean' } } } } },
+    async (request) => reviewTasks(db, await requireAccess(db, request, 'appraisal', 'read', ['operational', 'rating']), request.query as { overdue?: boolean }),
+  );
 
-  app.put('/appraisal-tasks/:id/rating', { schema: { params: idParams, body: entryBody } }, async (request) => {
+  app.put('/appraisal-tasks/:id/rating', { schema: { params: idParams, body: ratingBody } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'appraisal', 'rate', ['rating'], { requireAll: true, recordKey: id });
     const appraisalId = await withTransaction(db, (tx) => saveRating(tx, grant, id, request.body as RatingInput));
@@ -270,6 +469,8 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
             decision: { type: 'string', enum: ['APPROVE', 'RETURN'] },
             reason,
             employeeMessage: { type: 'string', minLength: 1, maxLength: 2000 },
+            // FR-043 / DF04: the reviewer's overall score, given with a confirmation (F1 scale 1..5).
+            reviewerScore: score,
             idempotencyKey: { type: 'string', minLength: 8, maxLength: 100, pattern: '^[A-Za-z0-9._:-]+$' },
           },
         },

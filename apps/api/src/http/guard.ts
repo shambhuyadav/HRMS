@@ -56,12 +56,33 @@ export async function reassertAccess(tx: Queryable, grant: AccessGrant, resource
   if (!current.allowed || fieldGroups.some((g) => !current.allowedFieldGroups.includes(g))) throw forbidden();
 }
 
+/**
+ * Records a refusal in the audit trail of the company the request named (FR-098: no confidential payload), but only when the signed-in
+ * user has a tie to that company: a role assignment in any state, or an employee link, at any time. I-84 item 16 (I-74 item 11; decided
+ * under owner delegation, 6 Nov 2026): a request naming a company the user never belonged to, such as a replayed header, writes nothing
+ * there, so nobody can add rows to a company's trail by knowing its id; it goes to the application's security log instead, with the
+ * request id, the user, the named company, the action and the reason. The answer is the same 403 either way.
+ */
 export async function auditDenial(
   db: Queryable,
   request: FastifyRequest,
   info: { resource: string; action: string; reason: string; fieldGroups?: string[]; recordKey?: string | undefined },
 ): Promise<void> {
   const actor = actorOf(request);
+  const tied = (
+    await db.query<{ tied: boolean }>(
+      `select exists (select 1 from role_assignment where company_id = $1 and user_id = $2)
+           or exists (select 1 from user_employee_link where company_id = $1 and user_id = $2) as tied`,
+      [actor.companyId, actor.userId],
+    )
+  ).rows[0]?.tied;
+  if (!tied) {
+    request.log.warn(
+      { event: 'ACCESS_DENIED_OUTSIDE_COMPANY', userId: actor.userId, namedCompanyId: actor.companyId, resource: info.resource, action: info.action, reason: info.reason },
+      'Refused a request naming a company the user has no tie to',
+    );
+    return;
+  }
   // Only record against a company that exists; the acting assignment is omitted because a denied
   // assignment id may not belong to the actor.
   await writeAudit(db, {

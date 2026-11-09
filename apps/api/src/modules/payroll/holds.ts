@@ -630,10 +630,15 @@ const HOLD_GROUP = 'hold';
  * group (omitted without it): `reserved` is the pending reservation of the holds' release allocations (DB114: a bank
  * line's hold_id links the allocation paying a released hold; DB118: RESERVED, SUBMITTED and UNKNOWN stay reserved,
  * FAILED and CANCELLED free it) and `confirmed` their confirmed net paid (DB118: confirmations minus authorised
- * reversals). The outstanding total is not computed: the BRD does not define whether outstanding held liability
- * includes pending reservations (the expense rule "approved = net confirmed paid + outstanding" includes them; the
- * H2/BR-052 release allocation bound excludes them) nor how one record's overlapping holds (a released hold followed
- * by its safety block) share one liability; it awaits the owner's definition.
+ * reversals).
+ *
+ * `outstanding` (H7; I-45; decided under owner delegation, 6 Nov 2026, docs/03 I-80): held salary the company still owes,
+ * until its payment is confirmed. A pending reservation is money not yet paid, so it stays in outstanding (as in the
+ * expense rule "approved = net confirmed paid + outstanding"); `reserved` shows how much of it is in payment. Counted once
+ * per payroll record and never above what the record pays: its live holds (proposed, active or past review) at their
+ * amounts, and its released holds at their amount less what their release allocations confirmed paid, unless a payment
+ * safety block on the same record, raised at or after that release, took the money over (it is counted there instead).
+ * Rejected and withdrawn holds never held anything.
  */
 export async function listHolds(db: Queryable, grant: AccessGrant, q: { state?: string | undefined; runId?: string | undefined; employeeId?: string | undefined } & Paging) {
   const params = new SqlParams([grant.companyId, q.state ?? null, q.runId ?? null, q.employeeId ?? null, grant.linkedEmployeeId]);
@@ -644,13 +649,35 @@ export async function listHolds(db: Queryable, grant: AccessGrant, q: { state?: 
   const items = page.items.map(({ transactionId: _t, ...r }) => r);
   if (!grant.allowedFieldGroups.includes(HOLD_GROUP)) return { ...page, items };
   const totals = (
-    await db.query<{ currencyCode: string; reserved: string; confirmed: string }>(
-      `select h.currency_code as "currencyCode",
-              coalesce(sum(l.payable_amount) filter (where l.payment_state in ('RESERVED', 'SUBMITTED', 'UNKNOWN')), 0)::numeric(19, 4)::text as reserved,
-              coalesce(sum(l.confirmed_amount - l.reversed_amount), 0)::numeric(19, 4)::text as confirmed
-         from payroll_hold h left join payroll_bank_line l on l.company_id = h.company_id and l.hold_id = h.id
-        where ${where}
-        group by h.currency_code order by h.currency_code`,
+    await db.query<{ currencyCode: string; reserved: string; confirmed: string; outstanding: string }>(
+      `with paid as (
+         select h.currency_code,
+                coalesce(sum(l.payable_amount) filter (where l.payment_state in ('RESERVED', 'SUBMITTED', 'UNKNOWN')), 0) as reserved,
+                coalesce(sum(l.confirmed_amount - l.reversed_amount), 0) as confirmed
+           from payroll_hold h left join payroll_bank_line l on l.company_id = h.company_id and l.hold_id = h.id
+          where ${where}
+          group by h.currency_code),
+       held as (select h.* from payroll_hold h where ${where} and h.state not in ('REJECTED', 'WITHDRAWN')),
+       per_record as (
+         select hl.currency_code, hl.payroll_record_id,
+                sum(case when hl.state in ('PROPOSED', 'APPROVED_ACTIVE', 'EXPIRED_REVIEW') then hl.hold_amount
+                         when hl.state = 'RELEASED' and not exists (
+                                select 1 from payroll_hold sb
+                                 where sb.company_id = hl.company_id and sb.payroll_record_id = hl.payroll_record_id and sb.id <> hl.id and sb.hold_kind = 'PAYMENT_SAFETY_BLOCK'
+                                   and sb.state not in ('REJECTED', 'WITHDRAWN') and sb.proposed_at >= hl.released_at)
+                           then greatest(hl.hold_amount - coalesce((select sum(l.confirmed_amount - l.reversed_amount) from payroll_bank_line l
+                                                                     where l.company_id = hl.company_id and l.hold_id = hl.id), 0), 0)
+                         else 0 end) as amount
+           from held hl
+          group by hl.currency_code, hl.payroll_record_id),
+       owed as (
+         select pr.currency_code, sum(least(pr.amount, rec.net)) as amount
+           from per_record pr join payroll_record rec on rec.company_id = $1 and rec.id = pr.payroll_record_id
+          group by pr.currency_code)
+       select p.currency_code as "currencyCode", p.reserved::numeric(19, 4)::text as reserved, p.confirmed::numeric(19, 4)::text as confirmed,
+              coalesce(o.amount, 0)::numeric(19, 4)::text as outstanding
+         from paid p left join owed o on o.currency_code = p.currency_code
+        order by p.currency_code`,
       params.values,
     )
   ).rows;

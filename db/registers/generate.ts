@@ -19,7 +19,7 @@ import { migrate } from '../migrate.js';
 import { type AccessMatrix, buildAccessMatrix, readTrace, type TestRef } from './access.js';
 import { BLOCKED, checkBlockedSources } from './blocked.js';
 import { parseRequirements } from './requirements.js';
-import { loadRun, type RunEvidence } from './runs.js';
+import { loadRun, markExpectedFailures, type RunEvidence } from './runs.js';
 import { buildSchemaRegister, parseEnforcementRecord, type SchemaRegister } from './schema.js';
 import { buildVerification, type Disposition, type VerificationRow } from './verification.js';
 
@@ -76,7 +76,8 @@ function renderVerification(rows: readonly VerificationRow[], runs: readonly Run
   const actual = (r: VerificationRow) => {
     if (!r.named.length) return 'No named test';
     const count = (s: string) => r.named.filter((t) => t.status === s).length;
-    return `${count('passed')} passed, ${count('failed')} failed, ${count('skipped')} skipped`;
+    const declared = r.named.filter((t) => t.status === 'passed' && t.expectedFailure).length;
+    return `${count('passed')} passed, ${count('failed')} failed, ${count('skipped')} skipped${declared ? `; ${declared} of those passed declared it.fails` : ''}`;
   };
   const evidence = (r: VerificationRow) => {
     const passedFirst = [...r.named].sort((a, b) => Number(b.status === 'passed') - Number(a.status === 'passed'));
@@ -93,7 +94,7 @@ ${runsLine(runs)}
 ## What each disposition means
 
 - **Pass**: at least one test whose own name states the identifier ran and passed in the run above, none failed, and no open block applies. It does not mean the whole of the requirement's acceptance clause is covered, and it does not clear an open audit finding (\`docs/audit\`, \`docs/06_traceability_register.md\`): read the count and the test names. A name is the only link used, so a test that proves a rule without naming it earns nothing here.
-- **Fail**: a test naming the identifier failed in that run.
+- **Fail**: a test naming the identifier failed in that run, or passed only because it is declared \`it.fails\`: such a test records a behaviour known to be wrong (I-84).
 - **Blocked**: the project's own registers say it waits on an owner input or an environment that does not exist (\`db/registers/blocked.ts\`, each entry citing its source). Passing tests do not clear this (BRD line 126).
 - **Not evidenced**: nothing above applies. This is a gap in the evidence, not a statement that the behaviour is missing. A test file that mentions the identifier without any test naming it is noted as a place to look.
 
@@ -200,6 +201,13 @@ npx tsx db/registers/generate.ts --results C:\\somewhere\\run.json --label "Run 
 \`\`\`
 
 The Coverage Log is a separate record with its own statuses (Documented, Restricted, Not reachable), and is not here.
+
+Whether a release may go out is the release gate's answer, read from these files and a pre-go-live check report (I-84; BR-028, ZT20, ZT21). It writes only where \`--out\` points:
+
+\`\`\`powershell
+npm run --silent db:check-go-live > C:\\somewhere\\go-live.json   # on a copy of the live database
+npm run release:gate -- --go-live C:\\somewhere\\go-live.json --out C:\\somewhere\\gate.md
+\`\`\`
 `;
 }
 
@@ -236,14 +244,16 @@ export async function generateRegisters(options: { results: { path: string; labe
   const read = (path: string) => readFileSync(join(ROOT, path), 'utf8');
   checkBlockedSources(read);
   const requirements = parseRequirements(read(BRD));
-  const runs = options.results.map((r) => loadRun(r.label, r.path, ROOT));
+  const loaded = options.results.map((r) => loadRun(r.label, r.path, ROOT));
   const docs06 = read('docs/06_traceability_register.md');
   const docs07 = read('docs/07_register_templates.md');
 
   const testSources = new Map<string, string>();
-  for (const file of new Set(runs.flatMap((r) => r.tests.map((t) => t.file)))) {
+  for (const file of new Set(loaded.flatMap((r) => r.tests.map((t) => t.file)))) {
     if (existsSync(join(ROOT, file))) testSources.set(file, read(file));
   }
+  // A test declared with it.fails passes only while its behaviour is wrong (I-84): marked here, so the register and the evidence say so.
+  const runs = markExpectedFailures(loaded, testSources);
 
   const verification = buildVerification(requirements, runs, BLOCKED, testSources);
   const trace = options.accessTrace ? readTrace(options.accessTrace) : null;

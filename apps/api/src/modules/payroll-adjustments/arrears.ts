@@ -1,13 +1,16 @@
-// Arrears cases and the arrear register (FR-035; DF05; DF15; H2; BR-047; CI25). Migration 0130. An authorised person records a
-// retroactive difference: an approved salary revision a processed record was not calculated from, for that record's period, with
-// the per-component amounts they enter. An independent person decides it. The employee/revision/period key is unique while a case
-// is live, so the same revision cannot be raised twice. No value is computed and an approved case pays nothing: how an arrear
-// reaches payroll, closed periods, tax differences and the formula are the owner's (FR-035; OQ-07; OQ-25).
+// Arrears cases and the arrear register (FR-035; DF05; DF15; H2; BR-047; CI25). Migrations 0130, 0205. An authorised person raises a
+// retroactive difference: an approved salary revision a processed record was not calculated from, for that record's period. Decided
+// under owner delegation, 6 Nov 2026 (docs/03 I-79): the amounts are calculated (computeArrears, DF05 as a month is paid), an
+// independent person decides the case under an active valuation policy, and the first later payroll of the employee pays it once, on
+// the policy's arrears component (or recovers a negative total on its deduction). Closed periods are never reopened; an arrear is paid
+// and taxed in the month it is paid (any relief is the employee's claim under the tax rules in force). The employee/revision/period key
+// is unique while a case is live or paid, so the same revision cannot be paid twice (FR-035).
 import { type Paging, pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { valuationPolicyOn } from '../payroll/calculate.js';
 import { actorOf, advisoryLock, assertInScope, audit, emit, newTransaction, optionalKey, priorDecision, requireText, taskIsPending, taskTransaction, unrestricted } from '../payroll/common.js';
 import { decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
 import { assertNotOwn, checkSigned } from './adjustments.js';
@@ -15,11 +18,12 @@ import { assertNotOwn, checkSigned } from './adjustments.js';
 export const ARREARS_KIND = 'payroll_arrears_case';
 const LIST_CAP = 200;
 
-/** The named state of the register: amounts are people's entries and an approved case is not paid. */
+/** How the register's amounts come about (I-79). */
 export const ARREARS_CALCULATION = {
-  status: 'NOT_CONFIGURED',
-  code: 'ARREARS_CALCULATION_NOT_CONFIGURED',
-  message: 'Arrears are not calculated or paid here. Amounts are entered and decided by people; how they reach payroll, closed periods and tax differences wait for the owner.',
+  status: 'CALCULATED',
+  code: 'ARREARS_CALCULATED',
+  message:
+    'Amounts are calculated from the processed record and the salary revision, as a month is paid (paid days over the days of the month). An independently approved case is paid once by the first later payroll, under the active valuation policy; closed months are never reopened.',
 } as const;
 
 const VIEW = `select c.id, c.employee_id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName",
@@ -31,7 +35,13 @@ const VIEW = `select c.id, c.employee_id as "employeeId", e.employee_code as "em
                 from payroll_arrears_line l join pay_component pc on pc.company_id = l.company_id and pc.id = l.component_id
                where l.company_id = c.company_id and l.case_id = c.id), '[]'::json) as lines,
     (select sum(l.amount)::text from payroll_arrears_line l where l.company_id = c.company_id and l.case_id = c.id) as "totalEntered",
-    c.created_by as "createdBy", c.created_at as "createdAt", c.decided_by as "decidedBy", c.decided_at as "decidedAt", c.version
+    c.created_by as "createdBy", c.created_at as "createdAt", c.decided_by as "decidedBy", c.decided_at as "decidedAt", c.version,
+    c.applied_record_id as "appliedRecordId",
+    (select ap.period_code from payroll_record ar join payroll_run au on au.company_id = ar.company_id and au.id = ar.run_id
+       join payroll_period ap on ap.company_id = au.company_id and ap.id = au.period_id
+      where ar.company_id = c.company_id and ar.id = c.applied_record_id) as "appliedPeriodCode",
+    -- I-88 follow-up (0214): or the final settlement that paid it.
+    c.applied_settlement_id as "appliedSettlementId"
   from payroll_arrears_case c
   join employee e on e.company_id = c.company_id and e.id = c.employee_id
   join salary_arrangement sa on sa.company_id = c.company_id and sa.id = c.source_arrangement_id
@@ -84,7 +94,7 @@ export async function arrearsCandidates(db: Queryable, grant: AccessGrant, q: { 
       where rec.calculation_status = 'CALCULATED' and ${where.join(' and ')}
         and not exists (select 1 from payroll_record_segment s where s.company_id = rec.company_id and s.record_id = rec.id and s.salary_arrangement_id = sa.id)
         and not exists (select 1 from payroll_arrears_case c where c.company_id = rec.company_id and c.employee_id = rec.employee_id and c.source_arrangement_id = sa.id
-                           and c.origin_period_id = ru.period_id and c.state in ('SUBMITTED', 'APPROVED'))`,
+                           and c.origin_period_id = ru.period_id and c.state in ('SUBMITTED', 'APPROVED', 'APPLIED'))`,
     params.values,
     '"hrms_start" desc, "originRecordId", "sourceRevisionId"',
     q,
@@ -96,8 +106,58 @@ export interface ArrearsInput {
   sourceRevisionId: string;
   originRecordId: string;
   reason: string;
-  lines: { componentCode: string; amount: string }[];
+  /** Optional: the amounts are calculated; sent, they must equal the calculation. */
+  lines?: { componentCode: string; amount: string }[] | undefined;
   idempotencyKey: string;
+}
+
+/**
+ * FR-035 formula (I-79, decided under owner delegation, 6 Nov 2026; DF05 as the calculation pays a month). For each part of the origin
+ * record's segments that the source revision covers and that was valued on another arrangement: the paid days of that part (its
+ * calendar days less the loss-of-pay units on them) times the monthly difference of each FIXED head's component (source revision less
+ * the segment's arrangement), over the record's days in month, summed per component and rounded half-up to the currency minor unit.
+ * Earnings count up and employee deductions down; employer contributions are a cost, not pay, and are left out. The heads are the
+ * origin run's. Components with no difference are left out.
+ */
+export async function computeArrears(db: Queryable, companyId: string, originRecordId: string, sourceArrangementId: string) {
+  const rows = (
+    await db.query<{ component_id: string; code: string; amount: string }>(
+      `with rec as (
+         select r.id, r.run_id, r.days_in_month::numeric as dim, ru.currency_minor_unit::smallint as mu
+           from payroll_record r join payroll_run ru on ru.company_id = r.company_id and ru.id = r.run_id
+          where r.company_id = $1 and r.id = $2),
+       src as (select id, effective_from, effective_to from salary_arrangement where company_id = $1 and id = $3),
+       part as (
+         select s.salary_arrangement_id as old_id, greatest(s.segment_start, src.effective_from) as f,
+                least(s.segment_end, coalesce(src.effective_to - 1, s.segment_end)) as t
+           from payroll_record_segment s cross join src
+          where s.company_id = $1 and s.record_id = $2 and s.salary_arrangement_id <> src.id),
+       paid as (
+         select p.old_id, (p.t - p.f + 1) - coalesce((select sum(lp.units) from payroll_record_lop lp
+                                                     where lp.company_id = $1 and lp.record_id = $2 and lp.day between p.f and p.t), 0) as days
+           from part p where p.t >= p.f),
+       diff as (
+         select sc.component_id, paid.days * sc.amount as signed
+           from paid cross join src
+           join salary_component sc on sc.company_id = $1 and sc.salary_arrangement_id = src.id and sc.basis = 'MONTHLY'
+         union all
+         select sc.component_id, -(paid.days * sc.amount)
+           from paid join salary_component sc on sc.company_id = $1 and sc.salary_arrangement_id = paid.old_id and sc.basis = 'MONTHLY')
+       select d.component_id, pc.code,
+              ((case when h.head_type = 'DEDUCTION' then -1 else 1 end) * sign(sum(d.signed))
+                 * hrms_payroll_round_half_up(abs(sum(d.signed)), (select dim from rec), (select mu from rec)))::numeric(19, 4)::text as amount
+         from diff d
+         join pay_component pc on pc.company_id = $1 and pc.id = d.component_id
+         join payroll_run_head rh on rh.company_id = $1 and rh.run_id = (select run_id from rec) and rh.component_id = d.component_id
+         join payroll_head_revision h on h.company_id = rh.company_id and h.id = rh.head_revision_id
+              and h.in_use and h.calculation_basis = 'FIXED' and h.head_type in ('EARNING', 'DEDUCTION')
+        group by d.component_id, pc.code, h.head_type
+       having sum(d.signed) <> 0
+        order by pc.code`,
+      [companyId, originRecordId, sourceArrangementId],
+    )
+  ).rows;
+  return rows.filter((r) => Number(r.amount) !== 0);
 }
 
 export async function proposeArrears(tx: Queryable, grant: AccessGrant, input: ArrearsInput) {
@@ -143,19 +203,23 @@ export async function proposeArrears(tx: Queryable, grant: AccessGrant, input: A
       [grant.companyId, origin.employee_id, input.sourceRevisionId, origin.period_id],
     )
   ).rows;
-  const live = prior.find((p) => p.state === 'SUBMITTED' || p.state === 'APPROVED');
+  const live = prior.find((p) => p.state === 'SUBMITTED' || p.state === 'APPROVED' || p.state === 'APPLIED');
   // FR-035 "rerunning the same revision does not pay the same arrears twice".
   if (live) throw new HttpError(409, 'ARREARS_CASE_EXISTS', 'This salary revision already has a case for that period', { caseId: live.id });
   const reason = requireText(input.reason, 'reason', 2000);
-  const lines = input.lines.map((l) => {
-    const amount = checkSigned(l.amount, origin.minor, 'amount');
-    if (/^-?0*(\.0*)?$/.test(amount)) throw new HttpError(422, 'INVALID_AMOUNT', 'A zero line says nothing; leave it out', { field: 'amount' });
-    return { code: l.componentCode.trim().toUpperCase(), amount };
-  });
-  if (new Set(lines.map((l) => l.code)).size !== lines.length) throw new HttpError(422, 'DUPLICATE_COMPONENT', 'A component appears once in a case');
-  const components = (await tx.query<{ id: string; code: string }>(`select id, code from pay_component where company_id = $1 and code = any($2::text[])`, [grant.companyId, lines.map((l) => l.code)])).rows;
-  const idOf = new Map(components.map((c) => [c.code, c.id]));
-  for (const l of lines) if (!idOf.has(l.code)) throw new HttpError(422, 'UNKNOWN_COMPONENT', 'A pay component is not defined in this company', { componentCode: l.code });
+  // I-79: the amounts are the calculation's. Amounts sent with the request are a check on it, never a replacement.
+  const computed = await computeArrears(tx, grant.companyId, input.originRecordId, input.sourceRevisionId);
+  if (computed.length === 0) throw new HttpError(422, 'NO_DIFFERENCE', 'This salary revision leaves no difference for that payroll record');
+  if (input.lines) {
+    const sent = input.lines.map((l) => ({ code: l.componentCode.trim().toUpperCase(), amount: checkSigned(l.amount, origin.minor, 'amount') }));
+    const same = sent.length === computed.length && sent.every((s) => computed.some((c) => c.code === s.code && Number(c.amount) === Number(s.amount)));
+    if (!same) {
+      throw new HttpError(422, 'ARREARS_LINES_DIFFER', 'The amounts sent differ from the calculation; send none to take the calculation', {
+        calculated: computed.map((c) => ({ componentCode: c.code, amount: c.amount })),
+      });
+    }
+  }
+  const lines = computed.map((c) => ({ code: c.code, id: c.component_id, amount: c.amount }));
 
   const transactionId = await newTransaction(tx, grant.companyId, ARREARS_KIND, origin.employee_id, 'SUBMITTED', grant.userId);
   const id = (
@@ -166,7 +230,7 @@ export async function proposeArrears(tx: Queryable, grant: AccessGrant, input: A
     )
   ).rows[0]!.id;
   for (const l of lines) {
-    await tx.query(`insert into payroll_arrears_line (company_id, case_id, component_id, amount, created_by) values ($1, $2, $3, $4::numeric, $5)`, [grant.companyId, id, idOf.get(l.code), l.amount, grant.userId]);
+    await tx.query(`insert into payroll_arrears_line (company_id, case_id, component_id, amount, created_by) values ($1, $2, $3, $4::numeric, $5)`, [grant.companyId, id, l.id, l.amount, grant.userId]);
   }
   const { taskId } = await startApproval(tx, { companyId: grant.companyId, kind: ARREARS_KIND, transactionId, ownerEmployeeId: origin.employee_id, actorUserId: grant.userId, excludeUserIds: [grant.userId] });
   await audit(
@@ -176,7 +240,10 @@ export async function proposeArrears(tx: Queryable, grant: AccessGrant, input: A
     id,
     'PROPOSE',
     null,
-    { operational: { sourceRevisionId: input.sourceRevisionId, originRecordId: input.originRecordId, periodCode: origin.period_code, state: 'SUBMITTED', lineCount: lines.length }, amount: { lines, currencyCode: origin.currency_code } },
+    {
+      operational: { sourceRevisionId: input.sourceRevisionId, originRecordId: input.originRecordId, periodCode: origin.period_code, state: 'SUBMITTED', lineCount: lines.length },
+      amount: { lines: lines.map((l) => ({ code: l.code, amount: l.amount })), currencyCode: origin.currency_code },
+    },
     reason,
   );
   await emit(tx, grant.companyId, 'payroll_arrears.assigned', id, id, { caseId: id, taskId });
@@ -218,11 +285,16 @@ export async function decideArrears(tx: Queryable, grant: AccessGrant, taskId: s
       )
     ).rows[0]!;
     if (facts.superseded) throw new HttpError(409, 'SOURCE_SUPERSEDED', 'This salary revision was corrected after the case was raised; return or reject the case');
-    // H2: "Negative recovery requires an activated applicable recovery policy and authorization; default is review".
-    if (facts.negative) {
-      throw new HttpError(409, 'NOT_CONFIGURED', 'A negative arrear is a recovery and needs an activated recovery policy; none is configured, so return or reject the case', {
+    // H2 "An unresolved policy/rate/currency question blocks adjustment approval": approval needs the active valuation policy (I-79),
+    // and a negative total, a recovery, needs that policy to name its recovery deduction ("Negative recovery requires an activated
+    // applicable recovery policy and authorization").
+    const policy = await valuationPolicyOn(tx, grant.companyId, grant.businessDate);
+    if (!policy) {
+      throw new HttpError(409, 'NOT_CONFIGURED', 'Arrears are approved under an active valuation policy; none is in effect', { code: 'VALUATION_POLICY_NOT_CONFIGURED' });
+    }
+    if (facts.negative && !policy.recovery_component_id) {
+      throw new HttpError(409, 'NOT_CONFIGURED', 'A negative arrear is a recovery, and the valuation policy in effect names no recovery deduction; return or reject the case', {
         code: 'RECOVERY_POLICY_NOT_CONFIGURED',
-        needs: ['activated applicable recovery policy (H2, H8)'],
       });
     }
   } else {

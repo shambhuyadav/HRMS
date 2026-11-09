@@ -360,7 +360,8 @@ describe.runIf(isModuleActive('payroll-outputs'))('payroll report exports and he
     const outcomes = await h.actor(A, 'HR_ADMINISTRATOR', { extra: B_OUTCOME });
     const holds = async (a: TestActor, query: string) => ok<HoldList>(await h.call(a, 'GET', `/v1/payroll/holds?${query}`));
     const totals = async (query: string) => (await holds(holdReader, query)).totals;
-    const inr = (reserved: string, confirmed: string) => [{ currencyCode: 'INR', reserved, confirmed }];
+    // `outstanding` (H7, I-80) is checked exactly in holds.api.test.ts; this file checks the reserved and confirmed totals.
+    const inr = (reserved: string, confirmed: string) => [{ currencyCode: 'INR', reserved, confirmed, outstanding: expect.stringMatching(/^\d+\.\d{4}$/) }];
     const outcome = (batchId: string, lineId: string, kind: string) =>
       h.call(outcomes, 'POST', `/v1/payroll-outputs/bank-manifests/${batchId}/outcomes`, { outcomes: [{ lineId, outcome: kind, eventKey: key('ev-'), evidenceReference: 'SYNTH-BANK-STATEMENT-PX' }] });
 

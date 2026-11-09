@@ -10,7 +10,11 @@ import {
   decideWithdrawal,
   EXIT_SORTS,
   type ExitDecisionInput,
+  type EnteredResignationInput,
+  type EnteredSeparationInput,
   employeeExits,
+  enterResignation,
+  enterSeparation,
   exitDetail,
   exitTasks,
   finalRelease,
@@ -23,7 +27,9 @@ import {
   submitResignation,
   withdrawResignation,
 } from './exit.js';
+import { listLifecycleReferenceValues } from './options.js';
 import { date, expectedVersion, idempotencyKey, idParams, pagingQuery, reason } from './process-routes.js';
+import { HR_ENTERED_TYPES } from './separation-types.js';
 
 const taskParams = { type: 'object', required: ['taskId'], properties: { taskId: { type: 'string', format: 'uuid' } } } as const;
 const exitStates = ['SUBMITTED', 'RECOMMENDED', 'APPROVED', 'SEPARATED', 'REJECTED', 'WITHDRAWN'];
@@ -157,6 +163,72 @@ export async function exitRoutes(app: FastifyInstance, opts: { db: Database }): 
   );
 
   // ---- HR administration ----
+  // FR-051 (I-81 item 3): a resignation the employee gave outside the system, entered by HR with its evidence.
+  app.post(
+    '/employees/:id/resignation',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['proposedLastWorkingDate', 'evidenceReference', 'evidenceDocumentIds'],
+          properties: {
+            proposedLastWorkingDate: date,
+            reasonCode: { type: 'string', pattern: '^[A-Z0-9][A-Z0-9_]{0,59}$' },
+            reason,
+            evidenceReference: { type: 'string', minLength: 1, maxLength: 500 },
+            evidenceDocumentIds: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string', format: 'uuid' } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'exit', 'manage', ['operational'], { requireAll: true, recordKey: id });
+      const result = await withTransaction(db, (tx) => enterResignation(tx, grant, id, request.body as EnteredResignationInput));
+      reply.status(201);
+      return result;
+    },
+  );
+
+  // I-92: the company's exit reason codes for HR's separation and resignation entry forms (a termination needs one, I-89 item 7),
+  // under the entry's own duty; the employee's resignation form reads the same list under exit.submit (/lifecycle/reference-values).
+  // Codes and labels only: the reason recorded on an exit stays in its confidential reason group.
+  app.get('/exit-reasons', async (request) =>
+    listLifecycleReferenceValues(db, await requireAccess(db, request, 'exit', 'manage', ['operational'], { requireAll: true }), 'EXIT_REASON'),
+  );
+
+  // I-89 item 7 (0242): retirement, termination, death, disablement or end of contract, entered by HR only with its evidence.
+  app.post(
+    '/employees/:id/separations',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['separationType', 'proposedLastWorkingDate', 'evidenceReference', 'evidenceDocumentIds'],
+          properties: {
+            separationType: { type: 'string', enum: [...HR_ENTERED_TYPES] },
+            proposedLastWorkingDate: date,
+            reasonCode: { type: 'string', pattern: '^[A-Z0-9][A-Z0-9_]{0,59}$' },
+            reason,
+            evidenceReference: { type: 'string', minLength: 1, maxLength: 500 },
+            evidenceDocumentIds: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string', format: 'uuid' } },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const grant = await requireAccess(db, request, 'exit', 'manage', ['operational'], { requireAll: true, recordKey: id });
+      const result = await withTransaction(db, (tx) => enterSeparation(tx, grant, id, request.body as EnteredSeparationInput));
+      reply.status(201);
+      return result;
+    },
+  );
+
   app.put(
     '/exit-cases/:id/notice-period',
     {

@@ -17,6 +17,7 @@ import {
   updateAdjustment,
 } from './adjustments.js';
 import { arrearsCandidates, arrearsDetail, type ArrearsInput, arrearsTasks, decideArrears, listArrears, proposeArrears } from './arrears.js';
+import { activateValuationPolicy, createValuationPolicy, listValuationPolicies, type ValuationPolicyInput } from './policy.js';
 
 const uuid = { type: 'string', format: 'uuid' } as const;
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
@@ -106,8 +107,47 @@ export async function payrollAdjustmentRoutes(app: FastifyInstance, opts: { db: 
     ownAdjustments(db, await requireAccess(db, request, 'timesheet', 'read', ['operational']), request.query as Paging),
   );
 
+  // I-79 valuation policy: payroll configuration duties (read, manage, activate), like the paid-day policy.
+  const config = (request: Req, action: 'read' | 'manage' | 'activate') => requireAccess(db, request, 'payroll_config', action, ['operational'], { requireAll: true });
+  app.get('/payroll/valuation-policies', async (request) => listValuationPolicies(db, await config(request, 'read')));
+  app.post(
+    '/payroll/valuation-policies',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['effectiveFrom', 'arrearsComponentCode', 'adjustmentComponentCode', 'timesheetUnit'],
+          properties: {
+            effectiveFrom: { type: 'string', format: 'date' },
+            arrearsComponentCode: { type: 'string', minLength: 1, maxLength: 40 },
+            adjustmentComponentCode: { type: 'string', minLength: 1, maxLength: 40 },
+            recoveryComponentCode: { type: ['string', 'null'], minLength: 1, maxLength: 40 },
+            timesheetUnit: { type: 'string', enum: ['DAY', 'HOUR'] },
+            hoursPerDay: { type: ['string', 'null'], maxLength: 6 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const grant = await config(request, 'manage');
+      const result = await withTransaction(db, (tx) => createValuationPolicy(tx, grant, request.body as ValuationPolicyInput));
+      reply.status(201);
+      return result;
+    },
+  );
+  app.post(
+    '/payroll/valuation-policies/:id/activate',
+    { schema: { params: idParams, body: { type: 'object', additionalProperties: false, required: ['expectedVersion'], properties: { expectedVersion } } } },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await config(request, 'activate');
+      return withTransaction(db, (tx) => activateValuationPolicy(tx, grant, id, request.body as { expectedVersion: number }));
+    },
+  );
+
   // FR-035 arrear register and cases.
-  app.get('/payroll/arrears-cases', { schema: { querystring: filter(['SUBMITTED', 'APPROVED', 'RETURNED', 'REJECTED']) } }, async (request) =>
+  app.get('/payroll/arrears-cases', { schema: { querystring: filter(['SUBMITTED', 'APPROVED', 'APPLIED', 'RETURNED', 'REJECTED']) } }, async (request) =>
     listArrears(db, await arrears(request, 'read'), request.query as { state?: string; employeeId?: string } & Paging),
   );
   app.get('/payroll/arrears-cases/candidates', { schema: { querystring: employeeFilter } }, async (request) =>
@@ -125,7 +165,8 @@ export async function payrollAdjustmentRoutes(app: FastifyInstance, opts: { db: 
         body: {
           type: 'object',
           additionalProperties: false,
-          required: ['sourceRevisionId', 'originRecordId', 'reason', 'lines', 'idempotencyKey'],
+          // `lines` is optional (I-79): the amounts are calculated; sent, they must equal the calculation.
+          required: ['sourceRevisionId', 'originRecordId', 'reason', 'idempotencyKey'],
           properties: {
             sourceRevisionId: uuid,
             originRecordId: uuid,

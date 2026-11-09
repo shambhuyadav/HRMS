@@ -10,6 +10,10 @@ import { type Database, withTransaction } from '../../db/transaction.js';
 import { requireAccess } from '../../http/guard.js';
 import { type ScanProvider, scanInMemory } from '../../storage/scan.js';
 import { sendTemplate } from '../imports/routes.js';
+import type { FileStore } from '../../storage/files.js';
+import { externalDeductionRoutes } from './external-deductions.js';
+import { payrollInputImportRoutes } from './input-import.js';
+import { gradeStructureRoutes } from './grade-structures.js';
 import {
   activateCalendar,
   activateHeadRevision,
@@ -126,8 +130,13 @@ const decisionBody = (decisions: readonly string[], extra: Record<string, unknow
     properties: { decision: { type: 'string', enum: [...decisions] }, reason, idempotencyKey, ...extra },
   }) as const;
 
-export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; scanner: ScanProvider }): Promise<void> {
+export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; files: FileStore; scanner: ScanProvider }): Promise<void> {
   const { db, scanner } = opts;
+  // FR-028/029 grade salary structures and CTC categories (I-80; grade-structures.ts).
+  await gradeStructureRoutes(app, { db });
+  // FR-028 external deduction mapping and the PAYROLL_INPUTS_V2 import on the stored framework (I-91).
+  await externalDeductionRoutes(app, { db });
+  await payrollInputImportRoutes(app, opts);
   type Req = Parameters<typeof requireAccess>[1];
   const config = (request: Req, action: 'read' | 'manage' | 'activate') => requireAccess(db, request, 'payroll_config', action, ['operational'], { requireAll: true });
   const run = (request: Req, action: 'prepare' | 'review' | 'approve' | 'process' | 'cancel', recordKey?: string) =>
@@ -417,7 +426,7 @@ export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; 
     async (request, reply) => {
       const grant = await run(request, 'prepare');
       const result = await withTransaction(db, (tx) => createRun(tx, grant, request.body as ScopeInput & { scopeToken: string }));
-      reply.status(201);
+      reply.status(result.replayed ? 200 : 201);
       return result;
     },
   );
@@ -429,13 +438,21 @@ export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; 
         querystring: {
           type: 'object',
           additionalProperties: false,
-          properties: { periodId: uuid, state: { type: 'string', maxLength: 30 }, states: { type: 'string', pattern: '^[A-Z_]{1,30}(,[A-Z_]{1,30}){0,9}$' }, coversDate: date, ...optionalPaging },
+          properties: {
+            periodId: uuid,
+            state: { type: 'string', maxLength: 30 },
+            states: { type: 'string', pattern: '^[A-Z_]{1,30}(,[A-Z_]{1,30}){0,9}$' },
+            coversDate: date,
+            // BR-012: the financial year label each calendar gives its periods (case does not matter).
+            financialYear: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_/-]{0,19}$' },
+            ...optionalPaging,
+          },
         },
       },
     },
     async (request) => {
       const grant = await requireAccess(db, request, 'payroll_run', 'read', ['operational', 'amount']);
-      return listRuns(db, grant, request.query as { periodId?: string; state?: string; states?: string; coversDate?: string } & Paging);
+      return listRuns(db, grant, request.query as { periodId?: string; state?: string; states?: string; coversDate?: string; financialYear?: string } & Paging);
     },
   );
 
@@ -629,10 +646,12 @@ export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; 
               items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['employeeId', 'componentCode', 'inputKind', 'amount', 'currencyCode', 'effectiveDate', 'reference'],
+                // I-91: componentCode or externalCode (an outside deduction code), exactly one (checkLines: COMPONENT_OR_EXTERNAL_CODE).
+                required: ['employeeId', 'inputKind', 'amount', 'currencyCode', 'effectiveDate', 'reference'],
                 properties: {
                   employeeId: uuid,
                   componentCode: code,
+                  externalCode: { type: 'string', minLength: 1, maxLength: 40 },
                   inputKind: { type: 'string', minLength: 1, maxLength: 60 },
                   amount: money,
                   currencyCode: { type: 'string', pattern: '^[A-Z]{3}$' },

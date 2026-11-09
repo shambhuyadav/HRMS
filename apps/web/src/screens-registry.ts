@@ -12,6 +12,7 @@ import { DELEGATION_SCREENS } from './pages/delegations';
 import { DOCUMENTS_ESS_PANELS, DOCUMENTS_SCREENS, DOCUMENTS_TASK_QUEUES } from './pages/documents';
 import { EMPLOYEE_SCREENS } from './pages/employee';
 import { EMPLOYEE_HISTORY_SCREENS } from './pages/employee-history';
+import { EXIT_FINANCE_SCREENS, EXIT_FINANCE_TASK_QUEUES } from './pages/exit-finance';
 import { EXPENSE_ADMIN_SCREENS } from './pages/expense-admin';
 import { HOME_SCREENS } from './pages/home';
 import { HIRING_PIPELINE_ESS_PANELS, HIRING_PIPELINE_SCREENS, HIRING_PIPELINE_TASK_QUEUES } from './pages/hiring-pipeline';
@@ -23,9 +24,14 @@ import { NOTIFICATION_SCREENS } from './pages/notifications';
 import { ORG_SCREENS } from './pages/org';
 import { ORG_ADMIN_SCREENS } from './pages/org-admin';
 import { PAYROLL_ESS_PANELS, PAYROLL_SCREENS, PAYROLL_TASK_QUEUES } from './pages/payroll';
+import { GRADE_STRUCTURE_SCREENS } from './pages/grade-structures';
 import { PAYROLL_ADJUSTMENT_SCREENS, PAYROLL_ADJUSTMENT_TASK_QUEUES } from './pages/payroll-adjustments';
+import { REPORTING_SCREENS } from './pages/reporting';
 import { ROLE_PERMISSION_SCREENS } from './pages/role-permissions';
 import { SALARY_SCREENS } from './pages/salary';
+import { SETTLEMENT_SETTINGS_SCREENS } from './pages/settlement-settings';
+import { STATUTORY_PACK_SCREENS } from './pages/statutory-packs';
+import { STATUTORY_SETTINGS_SCREENS } from './pages/statutory-settings';
 import { TAX_ESS_PANELS, TAX_SCREENS, TAX_TASK_QUEUES } from './pages/tax-declarations';
 import { TIMESHEET_ESS_PANELS, TIMESHEET_SCREENS, TIMESHEET_TASK_QUEUES } from './pages/timesheet';
 import { TRAINING_ESS_PANELS, TRAINING_SCREENS, TRAINING_TASK_QUEUES } from './pages/training';
@@ -51,13 +57,20 @@ export const MODULE_SCREENS: readonly ScreenRoute[] = [
   ...HIRING_PIPELINE_SCREENS,
   ...LIFECYCLE_PROCESSES_SCREENS,
   ...LIFECYCLE_DOCUMENTS_SCREENS,
+  ...SETTLEMENT_SETTINGS_SCREENS,
+  // I-85: the statutory rule packs (gratuity, PF, ESIC, professional tax): read, validated, activated by another person, retired.
+  ...STATUTORY_PACK_SCREENS,
+  // I-85, FR-039: the dated settings the evaluator reads (work location states, PF options).
+  ...STATUTORY_SETTINGS_SCREENS,
   ...APPRAISAL_SCREENS,
   ...TIMESHEET_SCREENS,
   ...ASSETS_SCREENS,
   ...TRAINING_SCREENS,
   ...PAYROLL_SCREENS,
-  // FR-035, FR-100 later-period cases and FR-036, FR-108 tax declarations: recorded and reviewed; nothing calculated.
+  // FR-035, FR-100 later-period cases, calculated by the server and paid by a later payroll (I-79), and their valuation policy.
   ...PAYROLL_ADJUSTMENT_SCREENS,
+  // FR-028/029 grade salary structures and CTC categories (I-80).
+  ...GRADE_STRUCTURE_SCREENS,
   ...TAX_SCREENS,
   // FR-029 salary master: no My ESS panel and no decision queue (the upload records initial salaries without a separate approval).
   ...SALARY_SCREENS,
@@ -88,6 +101,10 @@ export const MODULE_SCREENS: readonly ScreenRoute[] = [
   ...EMPLOYEE_SCREENS,
   // FR-078 expense policies: the same; claims and their decisions stay on the core /expenses and /tasks pages.
   ...EXPENSE_ADMIN_SCREENS,
+  // FR-034 loan early settlement and the employee's documents received in-app (I-81).
+  ...EXIT_FINANCE_SCREENS,
+  // FR-038 salary progression chart and the dated reporting settings (I-83): no My ESS panel and no decision queue.
+  ...REPORTING_SCREENS,
 ];
 
 const ALL_ESS_PANELS: readonly EssPanel[] = [
@@ -127,4 +144,5 @@ export const MODULE_TASK_QUEUES: readonly TaskQueue[] = [
   ...PAYROLL_ADJUSTMENT_TASK_QUEUES,
   ...TAX_TASK_QUEUES,
   ...DOCUMENTS_TASK_QUEUES,
+  ...EXIT_FINANCE_TASK_QUEUES,
 ];

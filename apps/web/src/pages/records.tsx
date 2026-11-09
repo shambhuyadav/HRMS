@@ -128,6 +128,33 @@ const TEMPLATES: ImportTemplate[] = [
       OUT_OF_SCOPE: 'This employee is outside your role’s scope, or it is your own balance, which another administrator must record.',
     },
   },
+  {
+    // FR-031, FR-028 (I-91): payroll inputs of any active period, naming a pay component or an outside deduction code; one input batch
+    // per period, submitted and approved as before. The one-period upload (PAYROLL_INPUTS_V1) stays on the payroll inputs screen.
+    code: 'PAYROLL_INPUTS_V2',
+    label: 'Payroll inputs',
+    permissions: ['payroll_input.read.amount', 'payroll_input.prepare.amount'],
+    base: '/v1/payroll/input-imports',
+    columns: 'period_code,employee_code,component_code,external_code,input_kind,amount,currency_code,effective_date,reference',
+    keyLabel: 'Employee / reference',
+    noun: ['input', 'inputs'],
+    verb: 'Record',
+    note: 'Each row names its payroll period by code and either a pay component or an outside deduction code (never both). The inputs of each period become one batch in draft, which you submit for approval as usual. One row with a problem rejects the whole file.',
+    problems: {
+      COMPONENT_OR_EXTERNAL_CODE: 'Give either a component code or an external deduction code, not both and not neither.',
+      EXTERNAL_CODE_UNKNOWN: 'No external deduction mapping has this code.',
+      EXTERNAL_CODE_UNMAPPED: 'This external code has no mapping in force on the effective date.',
+      EXTERNAL_CODE_RETIRED: 'The mapping of this external code was retired; ask payroll configuration to map it again.',
+      UNKNOWN_PERIOD: 'No period of an active payroll calendar has this code.',
+      PERIOD_AMBIGUOUS: 'More than one active payroll calendar has a period with this code.',
+      INPUT_CUTOFF_PASSED: 'The input cutoff of this period has passed; enter the input for a later period.',
+      INPUT_HEAD_INVALID: 'The component has no input head in effect.',
+      DUPLICATE_REFERENCE: 'This reference is already used in the period, or earlier in the file.',
+      UNKNOWN_EMPLOYEE: 'No employee in your scope has this employee code.',
+      DATE_OUTSIDE_PERIOD: 'The effective date is outside the period.',
+      CURRENCY_MISMATCH: 'The currency is not the payroll calendar’s.',
+    },
+  },
 ];
 
 export interface ImportRow {

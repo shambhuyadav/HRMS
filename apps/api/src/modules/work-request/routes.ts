@@ -6,6 +6,7 @@ import type { FileStore } from '../../storage/files.js';
 import { evidenceContent, MAX_EVIDENCE_DOCUMENTS } from '../employee/evidence.js';
 import { myOpenTasks } from '../workflow/engine.js';
 import {
+  cancelWorkRequest,
   decideWorkRequest,
   isWorkRequestKind,
   listEmployeeWorkRequests,
@@ -88,6 +89,24 @@ export async function workRequestRoutes(app: FastifyInstance, opts: { db: Databa
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'work_request', 'withdraw', ['operational'], { requireAll: true, recordKey: id });
     return withTransaction(db, (tx) => withdrawWorkRequest(tx, grant, kindOf(request), id));
+  });
+
+  // I-84 item 15: an approved request is cancelled with a reason, by its employee before its first day, or by HR (service.ts).
+  const cancelBody = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['reason', 'expectedVersion'],
+    properties: { reason: { type: 'string', minLength: 1, maxLength: 1000 }, expectedVersion: { type: 'integer', minimum: 1 } },
+  } as const;
+  app.post('/work-requests/:kind/:id/cancel', { schema: { params: kindIdParams, body: cancelBody } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'work_request', 'withdraw', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => cancelWorkRequest(tx, grant, kindOf(request), id, request.body as { reason: string; expectedVersion: number }, 'OWN'));
+  });
+  app.post('/work-requests/:kind/:id/cancel-for-employee', { schema: { params: kindIdParams, body: cancelBody } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'work_request', 'cancel', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => cancelWorkRequest(tx, grant, kindOf(request), id, request.body as { reason: string; expectedVersion: number }, 'HR'));
   });
 
   // Reviewers decide on the leave route with the leave decision duty (DF03).

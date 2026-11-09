@@ -426,12 +426,13 @@ export async function recordCandidateScanVerdict(db: Queryable, grant: AccessGra
   await audit(db, grant, 'candidate_document', documentId, scanState === 'CLEAN' ? 'SCAN_RELEASED' : 'SCAN_QUARANTINED', null, { scanState });
 }
 
-const DOCUMENT_SELECT = `select d.id, d.candidate_id as "candidateId", c.candidate_code as "candidateCode", t.code as "documentType", a.file_name as "fileName",
-       a.media_type as "mediaType", a.byte_size as "byteSize", a.scan_state as "scanState", d.created_at as "uploadedAt"
-  from candidate_document d
+const DOCUMENT_COLUMNS = `d.id, d.candidate_id as "candidateId", c.candidate_code as "candidateCode", t.code as "documentType", a.file_name as "fileName",
+       a.media_type as "mediaType", a.byte_size as "byteSize", a.scan_state as "scanState", d.created_at as "uploadedAt"`;
+const DOCUMENT_FROM = `candidate_document d
   join candidate c on c.company_id = d.company_id and c.id = d.candidate_id
   join reference_value t on t.company_id = d.company_id and t.id = d.document_type_id
   join attachment a on a.company_id = d.company_id and a.id = d.attachment_id`;
+const DOCUMENT_SELECT = `select ${DOCUMENT_COLUMNS} from ${DOCUMENT_FROM}`;
 
 export async function listCandidateDocuments(db: Queryable, grant: AccessGrant, candidateId: string) {
   if (!(await canAccessCandidate(db, grant, candidateId))) throw notFound();
@@ -441,13 +442,22 @@ export async function listCandidateDocuments(db: Queryable, grant: AccessGrant, 
 /** Without page or pageSize the CV search answers its latest 200 hits, as before paging; `total` counts them all. */
 export const DOCUMENT_SEARCH_CAP = 200;
 
-/** FR-013 CV metadata search (file name, type, candidate code) within the caller's candidate scope. */
+/**
+ * FR-013 CV search within the caller's candidate scope: the metadata (file name, type, candidate code) and the approved
+ * searchable content (I-82 item 4, hiring/cv-text.ts). Content matches only approved text of a candidate whose consent is GIVEN
+ * and whose retention date has not passed; a hit says that it matched there (`contentMatch`), never what the text says.
+ */
 export async function searchCandidateDocuments(db: Queryable, grant: AccessGrant, search: string, paging: Paging = {}) {
   const p = new SqlParams();
   const pattern = p.add(`%${search.trim().replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
+  const words = p.add(search.trim());
+  const today = p.add(grant.businessDate);
+  const contentMatch = `exists (select 1 from candidate_cv_text cv where cv.company_id = d.company_id and cv.candidate_document_id = d.id and cv.state = 'APPROVED'
+      and c.consent_status = 'GIVEN' and (c.retain_until is null or c.retain_until >= ${today}::date) and cv.search_vector @@ plainto_tsquery('simple', ${words}))`;
   return pageOf(
     db,
-    `${DOCUMENT_SELECT} where ${candidateScope(grant, 'c', p)} and (a.file_name ilike ${pattern} or t.code ilike ${pattern} or c.candidate_code ilike ${pattern})`,
+    `select * from (select ${DOCUMENT_COLUMNS}, ${contentMatch} as "contentMatch" from ${DOCUMENT_FROM} where ${candidateScope(grant, 'c', p)}) hit
+      where hit."fileName" ilike ${pattern} or hit."documentType" ilike ${pattern} or hit."candidateCode" ilike ${pattern} or hit."contentMatch"`,
     p.values,
     `"uploadedAt" desc, id`,
     paging,

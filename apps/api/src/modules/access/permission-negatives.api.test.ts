@@ -498,7 +498,7 @@ describe('a permission chosen by the step of a real task', () => {
     await setGrant(w.rev1, key, false);
     await expectRefused(w.rev1, key, 'POST', `/v1/appraisal-tasks/${task.taskId}/decision`, { decision: 'APPROVE', idempotencyKey: IDEMPOTENCY_KEY });
     await setGrant(w.rev1, key, true);
-    expect((await decideAppraisal(h, w.rev1, task.taskId, { decision: 'APPROVE' })).json().state).toBe('APPROVED');
+    expect((await decideAppraisal(h, w.rev1, task.taskId, { decision: 'APPROVE', reviewerScore: 4 })).json().state).toBe('APPROVED');
   });
 });
 

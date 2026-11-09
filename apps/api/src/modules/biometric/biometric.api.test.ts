@@ -316,7 +316,7 @@ describe('time normalisation and no false absence (BR-036, DF09)', () => {
   });
 
   it('a failed fetch for the day makes missing punches an exception, never ABSENT', async () => {
-    const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [] })).json();
+    const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [] })).json();
     const policy = (await h.call(hr, 'GET', '/v1/attendance/policies')).json().items[0];
     await h.call(hr, 'POST', `/v1/attendance/policies/${policy.id}/activate`, { expectedVersion: policy.version });
     const worker = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json();

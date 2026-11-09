@@ -19,14 +19,10 @@ interface Kind {
 }
 
 /**
- * Non-terminal in the catalogue with no way out. Nothing reads transaction_state.terminal to decide anything, so this is harmless
- * as it stands; whether an approved outdoor duty or holiday-work request should be cancellable or simply flagged terminal is
- * left to the owner, like leave_request (whose APPROVED leads to CANCELLED). See the report.
+ * Non-terminal in the catalogue with no way out. None now: the approved outdoor-duty and holiday-work requests that were listed here
+ * lead to CANCELLED since 0202 (I-84 item 15, decided under owner delegation, 6 Nov 2026), like leave_request.
  */
-const DEAD_ENDS: Record<string, string[]> = {
-  holiday_work: ['APPROVED'],
-  outdoor_duty: ['APPROVED'],
-};
+const DEAD_ENDS: Record<string, string[]> = {};
 
 describe('the transaction catalogue (ZT10; CI12; CI15)', () => {
   let testDb: TestDatabase;

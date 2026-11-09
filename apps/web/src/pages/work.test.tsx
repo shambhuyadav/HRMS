@@ -111,6 +111,26 @@ describe('expense claim submission (web-2)', () => {
     expect((screen.getByLabelText('Business purpose') as HTMLInputElement).value).toBe('');
   });
 
+  it('I-87: a line paid in another currency is sent with its code and its own amount, in an INR claim; the server converts it', async () => {
+    session.permissions = ['expense.draft.operational', 'expense.submit.operational', 'expense.read.operational'];
+    const calls = mockApi({
+      'GET /v1/employees/emp-1/expense-claims': { items: [] },
+      'POST /v1/expense/receipts': () => [201, { receiptId: 'rc-1', mediaType: 'application/pdf', byteSize: 18 }],
+      'POST /v1/expense/claims': () => [201, { claimId: 'cl-20', revision: 1, state: 'DRAFT' }],
+      'GET /v1/expense/claims/cl-20': () => [200, { id: 'cl-20', state: 'DRAFT', version: 1, purpose: 'Synthetic client visit', currency: 'INR', lines: [] }],
+      'POST /v1/expense/claims/cl-20/submit': () => [200, { claimId: 'cl-20', state: 'MANAGER_PENDING' }],
+    });
+    renderPage(<ExpensesPage />);
+    await fillClaim();
+    fireEvent.change(screen.getByLabelText('Paid in another currency (code, if not INR)'), { target: { value: 'eur' } });
+    expect(screen.getByLabelText('Amount (EUR)')).toBeTruthy();
+    fireEvent.click(screen.getByText('Submit claim'));
+    expect(await screen.findByText('Claim submitted for review.')).toBeTruthy();
+    const created = calls.find((c) => c.method === 'POST' && c.url === '/v1/expense/claims')!.body as { currency: string; lines: unknown[] };
+    expect(created.currency).toBe('INR');
+    expect(created.lines).toEqual([{ ...LINE, currency: 'EUR', receipt: { receiptId: 'rc-1' } }]);
+  });
+
   it('a retry after a submission whose answer was lost does not file the claim a second time', async () => {
     session.permissions = ['expense.draft.operational', 'expense.submit.operational'];
     let state = 'DRAFT';
@@ -1132,6 +1152,39 @@ describe('payments (DF07)', () => {
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(3));
     expect(calls.filter((c) => c.method === 'POST')[2]!.body).toMatchObject({ amount: '200' });
     expect(calls.filter((c) => c.method === 'POST')[2]!.body!.idempotencyKey).not.toBe(keys[0]);
+  });
+
+  it('BR-024 lists the payroll reimbursements to review and sends the preparer’s recorded review with the same payment', async () => {
+    session.permissions = ['payment.read.operational', 'payment.prepare.operational'];
+    let posts = 0;
+    const calls = mockApi({
+      'GET /v1/expense/payables': { items: [PAYABLE] },
+      'GET /v1/expense/claims/cl-5/payments': { items: [] },
+      'POST /v1/expense/payments': () => {
+        posts += 1;
+        if (posts === 1) {
+          return [
+            409,
+            {
+              error: 'PAYROLL_REIMBURSEMENT_REVIEW_REQUIRED',
+              message: 'Review',
+              details: { payrollInputs: [{ inputId: 'pi-x', periodCode: '2026-11', reference: 'REIMB-1', state: 'APPROVED', effectiveDate: '2026-11-05', matchesAmount: true }] },
+            },
+          ];
+        }
+        return [201, { instructionId: 'pi-1', state: 'PREPARED', replayed: false }];
+      },
+    });
+    renderPage(<PaymentsPage />);
+    fireEvent.click(await screen.findByText('Manage'));
+    fireEvent.click(await screen.findByText('Prepare payment'));
+    expect(await screen.findByText(/Period 2026-11, reference REIMB-1, approved, dated .*for the same amount as this payment/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Why these do not pay this claim'), { target: { value: 'Fuel allowance, not this claim (synthetic)' } });
+    fireEvent.click(screen.getByText('Prepare payment'));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
+    const [first, second] = calls.filter((c) => c.method === 'POST');
+    expect(first!.body).not.toHaveProperty('payrollReimbursementReview');
+    expect(second!.body).toMatchObject({ payrollReimbursementReview: 'Fuel allowance, not this claim (synthetic)', idempotencyKey: first!.body!.idempotencyKey });
   });
 
   it('another claim gets its own payment form: nothing typed or keyed for one claim carries over', async () => {

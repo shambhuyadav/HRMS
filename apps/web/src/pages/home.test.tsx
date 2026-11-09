@@ -1,7 +1,8 @@
 // Home, My Team and employee lists, jsdom. Employee list sorting (FR-007): a heading asks the server for that column and
 // direction, the next click reverses it, a new sort goes back to the first page, and the current order is announced. The
 // dashboard links a figure and offers a shortcut only as the server says (FR-097, DF17); My Team pages and filters at the
-// server, in the address (DF16); the member page shows what the server returned, a section with no source in plain words.
+// server, in the address (DF16); the member page shows what the server returned, a section with no source in plain words. The
+// employee list offers BR-003's reference views as status choices, and the record-section exports (FR-007) under their own duty.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
@@ -370,6 +371,48 @@ describe('member detail (FR-095, DF16)', () => {
     expect(screen.getByText('110000.00')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Open documents' }).getAttribute('href')).toBe('/employees/e-1/documents');
   });
+
+  // I-89 item 4 (I-62, I-86 item 6): the copied competencies beside the goals, names, weights and completion flags only.
+  it('goals and tasks list each appraisal’s competencies beside its goals, and nothing for a cycle without them', async () => {
+    const goal = { sequence: 1, name: 'Synthetic goal', weight: 100, selfEntryComplete: true, managerRatingComplete: false };
+    mockRoutes(
+      detail({
+        goalsAndTasks: {
+          available: true,
+          sections: {
+            goals: {
+              available: true,
+              items: [
+                {
+                  cycleCode: 'FY-2',
+                  cycleName: 'Competency cycle',
+                  state: 'SELF_SUBMITTED',
+                  taskStatus: 'AWAITING_RATING',
+                  goals: [goal],
+                  competencies: [
+                    { sequence: 1, name: 'Synthetic teamwork', weight: 60, selfEntryComplete: true, managerRatingComplete: false },
+                    { sequence: 2, name: 'Synthetic ownership', weight: 40, selfEntryComplete: false, managerRatingComplete: false },
+                  ],
+                },
+                { cycleCode: 'FY-1', cycleName: 'Goals-only cycle', state: 'APPROVED', taskStatus: 'COMPLETED', goals: [goal], competencies: [] },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    renderMember();
+    const competencies = within(await screen.findByLabelText('Competencies of FY-2'));
+    expect(competencies.getByText('Synthetic teamwork')).toBeTruthy();
+    expect(competencies.getByText('60')).toBeTruthy();
+    expect(competencies.getByText('Synthetic ownership')).toBeTruthy();
+    expect(competencies.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['sequence', 'name', 'weight', 'selfEntryComplete', 'managerRatingComplete']);
+    expect(competencies.getAllByText('yes')).toHaveLength(1);
+    // A cycle that does not assess competencies shows its goals and no competency table.
+    expect(screen.getByText(/Goals-only cycle \(FY-1\)/)).toBeTruthy();
+    expect(screen.queryByLabelText('Competencies of FY-1')).toBeNull();
+    expect(screen.getAllByRole('heading', { name: 'Competencies' })).toHaveLength(1);
+  });
 });
 
 describe('employee list links (FR-008)', () => {
@@ -452,7 +495,7 @@ describe('employee list sorting (FR-007)', () => {
     renderPage('/employees?statusGroup=ACTIVE');
     await screen.findByText('SYN-1');
     expect(params().get('statusGroup')).toBe('ACTIVE');
-    expect(screen.getByText(/Status: active/)).toBeTruthy();
+    expect(screen.getByText(/Status: Active \(probation, confirmed or notice\)/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
     await waitFor(() => expect(params().has('statusGroup')).toBe(false));
     cleanup();
@@ -516,7 +559,17 @@ describe('employee list filters and export (FR-007, I-37)', () => {
     renderWithAddress('/employees?statusGroup=ACTIVE');
     await screen.findByText('SYN-1');
     const select = screen.getByLabelText('Status') as HTMLSelectElement;
-    expect([...select.options].map((o) => o.value)).toEqual(['', 'statusGroup:ACTIVE', 'DRAFT', 'ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE', 'INACTIVE_SEPARATED', 'ARCHIVED']);
+    expect([...select.options].map((o) => o.value)).toEqual([
+      '',
+      'statusGroup:ACTIVE',
+      ...['CURRENT', 'OFFERED', 'OFFERED_REJECTED', 'ON_PROBATION', 'ON_NOTICE', 'LEFT'].map((v) => `statusGroup:${v}`),
+      'DRAFT',
+      'ACTIVE_PROBATION',
+      'ACTIVE_CONFIRMED',
+      'NOTICE',
+      'INACTIVE_SEPARATED',
+      'ARCHIVED',
+    ]);
     expect(select.value).toBe('statusGroup:ACTIVE');
 
     change('Status', 'DRAFT');
@@ -649,5 +702,98 @@ describe('employee list filters and export (FR-007, I-37)', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Export this list' }));
     expect((await screen.findByRole('alert')).textContent).toContain('Not permitted');
     expect(screen.queryByRole('link', { name: 'Reports' })).toBeNull();
+  });
+
+  it('BR-003 offers the reference views and asks the list and the export for the chosen view', async () => {
+    session.granted.add(EXPORT);
+    const { posts } = mockRoutes(answers);
+    renderWithAddress('/employees?status=DRAFT');
+    await screen.findByText('SYN-1');
+    const select = screen.getByLabelText('Status') as HTMLSelectElement;
+    const views = select.querySelector('optgroup[label="Views"]')!;
+    expect([...views.querySelectorAll('option')].map((o) => [o.value, o.textContent])).toEqual([
+      ['statusGroup:CURRENT', 'Current (probation, confirmed or notice)'],
+      ['statusGroup:OFFERED', 'Offered (pre-joining, not yet activated)'],
+      ['statusGroup:OFFERED_REJECTED', 'Offered, rejected (closed before joining)'],
+      ['statusGroup:ON_PROBATION', 'On probation'],
+      ['statusGroup:ON_NOTICE', 'On notice'],
+      ['statusGroup:LEFT', 'Left'],
+    ]);
+
+    // A view replaces the status chosen; the list, the address and the export all carry it.
+    change('Status', 'statusGroup:OFFERED_REJECTED');
+    await waitFor(() => expect(list().get('statusGroup')).toBe('OFFERED_REJECTED'));
+    expect(list().has('status')).toBe(false);
+    expect(screen.getByTestId('address').textContent).toBe('?statusGroup=OFFERED_REJECTED');
+    expect(select.value).toBe('statusGroup:OFFERED_REJECTED');
+    expect(screen.getByText(/Status: Offered, rejected \(closed before joining\)/)).toBeTruthy();
+    // Without Hiring's read duty there is no pointer to its offer list.
+    expect(screen.queryByRole('link', { name: 'offer list' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Export this list' }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({ url: '/v1/reports', body: { reportCode: 'EMPLOYEE_REGISTER', filters: { statusGroup: 'OFFERED_REJECTED', sort: 'employeeCode', direction: 'ASC' } } });
+
+    change('Status', 'statusGroup:ON_NOTICE');
+    await waitFor(() => expect(list().get('statusGroup')).toBe('ON_NOTICE'));
+    expect(screen.getByText(/Status: On notice/)).toBeTruthy();
+    // A status replaces the view in turn.
+    change('Status', 'NOTICE');
+    await waitFor(() => expect(list().get('status')).toBe('NOTICE'));
+    expect(list().has('statusGroup')).toBe(false);
+    cleanup();
+
+    // An address opens on its own view; with Hiring's read duty, offers that are not employee records are pointed to Hiring.
+    session.granted.add('offer.read.operational');
+    mockRoutes(answers);
+    renderWithAddress('/employees?statusGroup=OFFERED');
+    await screen.findByText('SYN-1');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('statusGroup:OFFERED');
+    expect(list().get('statusGroup')).toBe('OFFERED');
+    expect(screen.getByText(/awaiting the candidate’s answer, and offers the candidate declined, are candidates rather than employee records/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'offer list' }).getAttribute('href')).toBe('/hiring/offers');
+    change('Status', 'statusGroup:CURRENT');
+    await waitFor(() => expect(list().get('statusGroup')).toBe('CURRENT'));
+    expect(screen.queryByRole('link', { name: 'offer list' })).toBeNull();
+  });
+
+  it('FR-007 offers the section exports only with employee.export.private and sends the list’s filters', async () => {
+    const SECTION_EXPORTS = ['Export family details', 'Export qualifications', 'Export prior employment'];
+    session.granted.add(EXPORT);
+    mockRoutes(answers);
+    renderPage();
+    await screen.findByText('SYN-1');
+    expect(screen.getByRole('button', { name: 'Export this list' })).toBeTruthy();
+    for (const name of SECTION_EXPORTS) expect(screen.queryByRole('button', { name })).toBeNull();
+    cleanup();
+
+    session.granted.add('employee.export.private');
+    const { posts } = mockRoutes(answers);
+    renderPage('/employees?statusGroup=LEFT&joinedFrom=2026-01-01');
+    await screen.findByText('SYN-1');
+    fireEvent.change(screen.getByLabelText(/Search/), { target: { value: 'syn' } });
+    await waitFor(() => expect(list().get('search')).toBe('syn'));
+    for (const name of ['Export this list', ...SECTION_EXPORTS]) fireEvent.click(screen.getByRole('button', { name }));
+    await waitFor(() => expect(posts).toHaveLength(4));
+    const filters = { statusGroup: 'LEFT', joinedFrom: '2026-01-01', search: 'syn', sort: 'employeeCode', direction: 'ASC' };
+    expect(posts.every((p) => p.url === '/v1/reports')).toBe(true);
+    const requested = posts.map((p) => p.body as { reportCode: string }).sort((a, b) => a.reportCode.localeCompare(b.reportCode));
+    expect(requested).toEqual(['EMPLOYEE_FAMILY', 'EMPLOYEE_PRIOR_EMPLOYMENT', 'EMPLOYEE_QUALIFICATIONS', 'EMPLOYEE_REGISTER'].map((reportCode) => ({ reportCode, filters })));
+    // Each export holds what the list was asked for, the page aside.
+    const { page, pageSize, ...asked } = Object.fromEntries(list());
+    expect(asked).toEqual(filters);
+    expect([page, pageSize]).toEqual(['1', '25']);
+    // Each says where to collect it; a changed list takes every one of those away.
+    await waitFor(() => expect(screen.getAllByRole('link', { name: 'Reports' })).toHaveLength(4));
+    change('Status', 'NOTICE');
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Reports' })).toBeNull());
+    cleanup();
+
+    // They follow their own duty, not the register's.
+    session.granted.delete(EXPORT);
+    mockRoutes(answers);
+    renderPage();
+    await screen.findByText('SYN-1');
+    expect(screen.queryByRole('button', { name: 'Export this list' })).toBeNull();
+    for (const name of SECTION_EXPORTS) expect(screen.getByRole('button', { name })).toBeTruthy();
   });
 });

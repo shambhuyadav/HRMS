@@ -17,7 +17,7 @@ const LIST_PERIOD = `from=${mondayAfter(0)}&to=${mondayAfter(400)}`;
 async function world(): Promise<World> {
   const company = await h.makeCompany();
   const hr = await h.actor(company, 'HR_ADMINISTRATOR');
-  const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [] })).json().id as string;
+  const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [] })).json().id as string;
   const person = async (managerId?: string) => {
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(company))).json() as { id: string; employeeCode: string };
     await h.setStatus(company, e.id, 'ACTIVE_CONFIRMED');

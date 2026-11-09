@@ -1,7 +1,8 @@
-// Later-period payroll cases over HTTP: late or amended timesheets held pending (FR-100; DB111; H2; H4; BR-047; BR-048; CI25; CI26;
-// ZT37) and arrears cases with the arrear register (FR-035; DF05; DF15). Nothing is valued or computed, approval of a timesheet
-// adjustment is refused until an adjustment valuation policy exists, and a processed run and the next calculation stay exactly as
-// they were. Synthetic employees, weeks and amounts only.
+// Later-period payroll cases over HTTP: late or amended timesheets (FR-100; DB111; H2; H4; BR-047; BR-048; CI25; CI26; ZT37) and
+// arrears cases with the arrear register (FR-035; DF05; DF15), under the active valuation policy of this company (I-79, decided under
+// owner delegation, 6 Nov 2026). Each late week here restores one unpaid day of a 31-day March on 30,000: 30,000 / 31 = 967.74. A
+// processed run never changes. Without a policy, and payment by a later payroll: adjustments-payroll.api.test.ts and
+// arrears-payroll.api.test.ts. Synthetic employees, weeks and amounts only.
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withTransaction } from '../../db/transaction.js';
@@ -10,6 +11,7 @@ import type { PermissionKey } from '../access/baseline.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
 import {
   APPROVE,
+  approvedLeave,
   calculate,
   calendar,
   CONFIG,
@@ -32,6 +34,7 @@ import {
   salary,
   submitAndApprove,
   trailText,
+  valuationPolicy,
 } from '../payroll/payroll.fixtures.js';
 import { isModuleActive } from '../registry.js';
 import { allocate, approvedWeek, decide as decideTimesheet, openWeek, submit as submitTimesheet, taskFor, type TimesheetWorld, timesheetWorld } from '../timesheet/timesheet.fixtures.js';
@@ -55,6 +58,7 @@ interface Adjustment {
   targetRunId: string | null;
   appliedPayrollLineId: string | null;
   followsAdjustmentId: string | null;
+  valuationPolicyId: string | null;
   ruleSnapshot: Record<string, unknown>;
   sourceMinutes: number;
   originPaidUnits: string;
@@ -105,9 +109,10 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
   };
   const open = (a: TestActor, timesheetId: string, originRecordId: string, extra: Record<string, unknown> = {}, revision = 1) =>
     h.call(a, 'POST', '/v1/payroll/adjustments', { timesheetId, revision, originRecordId, ...extra });
-  /** A processed March for a fresh employee and one week approved after the freeze. */
+  /** A processed March for a fresh employee with Tuesday 10 March unpaid, and the week approved after the freeze with work that day. */
   const lateCase = async () => {
     const s = await staff();
+    await approvedLeave(h, A, s.id, 'UNPAID', '2026-03-10', '2026-03-10', '1');
     const { runId, recordId } = await processed('2026-03', s);
     const timesheetId = await approvedWeek(h, w, s.actor, '2026-03-09', [line('2026-03-10')]);
     return { ...s, runId, recordId, timesheetId };
@@ -166,6 +171,8 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
     await reviewers(h, w.hr, 'payroll_arrears_case', [decider]);
     await head(h, configA, configB, { code: 'HD_ADJ_BASIC', headType: 'EARNING', basis: 'FIXED', sequence: 1 });
     await head(h, configA, configB, { code: 'HD_ADJ_OTHER', headType: 'EARNING', basis: 'FIXED', sequence: 2 });
+    // I-79: arrears are approved under an active valuation policy (its effect on payroll: arrears-payroll.api.test.ts).
+    await valuationPolicy(h, configA, configB, { prefix: 'HD_ADJ' });
     periods = (await calendar(h, configA, configB, months(2026))).periods;
   });
 
@@ -189,22 +196,24 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       expect(candidates.some((c) => c.originPeriodCode === '2026-04')).toBe(false);
     });
 
-    it('records source, origin and a snapshot reference, computing nothing', async () => {
+    it('records source, origin and a snapshot reference, and values the week against the frozen record (BR-048)', async () => {
       const c = await lateCase();
       const a = await ok<Adjustment>(await open(maker, c.timesheetId, c.recordId), 201);
       expect(a).toMatchObject({
         state: 'DRAFT',
         adjustmentKind: 'LATE_TIMESHEET',
         sourceRevision: 1,
-        previousRecognizedUnits: null,
-        correctedUnits: null,
-        deltaAmount: null,
+        // The week of 9 to 15 March: 6 days paid of 7; the late week records work on the unpaid one.
+        previousRecognizedUnits: '6.0000',
+        correctedUnits: '7.0000',
+        deltaAmount: '967.7400',
+        valuationPolicyId: expect.any(String),
         targetRunId: null,
         appliedPayrollLineId: null,
         sourceMinutes: 480,
-        valuation: { status: 'NOT_CONFIGURED', code: 'ADJUSTMENT_VALUATION_POLICY_NOT_CONFIGURED' },
+        valuation: { status: 'CONFIGURED', code: 'ADJUSTMENT_VALUATION_POLICY_ACTIVE' },
       });
-      expect(a.ruleSnapshot).toMatchObject({ originRunId: c.runId, periodCode: '2026-03', valuationPolicy: null });
+      expect(a.ruleSnapshot).toMatchObject({ originRunId: c.runId, periodCode: '2026-03' });
     });
 
     it('is unique per source revision, origin and kind, even when opened twice at once (ZT37)', async () => {
@@ -270,25 +279,32 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       expect(amended).toMatchObject({ adjustmentKind: 'AMENDED_TIMESHEET', sourceRevision: 2 });
     });
 
-    it('holds figures only as a person enters them on the draft, and only the maker changes it', async () => {
+    it('calculates the figures: those sent must match, never replace them; only the maker changes the draft', async () => {
       const c = await lateCase();
       expect((await open(maker, c.timesheetId, c.recordId, { deltaAmount: '12.345' })).json().error).toBe('INVALID_AMOUNT');
       expect((await open(maker, c.timesheetId, c.recordId, { correctedUnits: '-1' })).json().error).toBe('INVALID_UNITS');
-      const a = await ok<Adjustment>(await open(maker, c.timesheetId, c.recordId, { deltaAmount: '-250.50', previousRecognizedUnits: '10.5', correctedUnits: '9' }), 201);
-      // H4 "positive/negative sign retained".
-      expect(a).toMatchObject({ deltaAmount: '-250.5000', previousRecognizedUnits: '10.5000', correctedUnits: '9.0000' });
+      const entered = await open(maker, c.timesheetId, c.recordId, { deltaAmount: '-250.50', previousRecognizedUnits: '10.5', correctedUnits: '9' });
+      expect([entered.statusCode, entered.json().error, entered.json().details?.calculated]).toEqual([
+        422,
+        'FIGURES_DIFFER',
+        { previousRecognizedUnits: '6.0000', correctedUnits: '7.0000', deltaAmount: '967.7400' },
+      ]);
+      const a = await ok<Adjustment>(await open(maker, c.timesheetId, c.recordId, { deltaAmount: '967.74' }), 201);
+      expect(a).toMatchObject({ deltaAmount: '967.7400', previousRecognizedUnits: '6.0000', correctedUnits: '7.0000' });
       const another = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ADJ_MAKER });
       expect((await h.call(another, 'PUT', `/v1/payroll/adjustments/${a.id}`, { expectedVersion: a.version, deltaAmount: '1.00' })).json().error).toBe('NOT_MAKER');
       expect((await h.call(another, 'POST', `/v1/payroll/adjustments/${a.id}/submit`, { expectedVersion: a.version })).json().error).toBe('NOT_MAKER');
-      // H2 "approves amount and explanation": the figures may wait; the explanation may not.
+      // H2 "approves amount and explanation": the explanation may not wait.
       expect((await h.call(maker, 'POST', `/v1/payroll/adjustments/${a.id}/submit`, { expectedVersion: a.version })).json().error).toBe('EXPLANATION_REQUIRED');
       expect((await h.call(maker, 'PUT', `/v1/payroll/adjustments/${a.id}`, { expectedVersion: a.version + 5, explanation: 'x' })).json().error).toBe('STALE_VERSION');
+      expect((await h.call(maker, 'PUT', `/v1/payroll/adjustments/${a.id}`, { expectedVersion: a.version, explanation: 'x', deltaAmount: '1.00' })).json().error).toBe('FIGURES_DIFFER');
       const saved = await ok<Adjustment>(await h.call(maker, 'PUT', `/v1/payroll/adjustments/${a.id}`, { expectedVersion: a.version, explanation: 'Synthetic explanation' }));
-      expect(saved.deltaAmount).toBeNull();
+      expect(saved.deltaAmount).toBe('967.7400');
       const submitted = await ok<Adjustment>(await h.call(maker, 'POST', `/v1/payroll/adjustments/${a.id}/submit`, { expectedVersion: saved.version }));
-      expect(submitted.state).toBe('SUBMITTED');
+      expect(submitted).toMatchObject({ state: 'SUBMITTED', deltaAmount: '967.7400' });
       expect((await h.call(maker, 'PUT', `/v1/payroll/adjustments/${a.id}`, { expectedVersion: submitted.version, explanation: 'y' })).json().error).toBe('INVALID_STATE');
       await expect(h.db.query(`update payroll_adjustment set delta_amount = 1 where id = $1`, [a.id])).rejects.toThrow(/immutable/);
+      await expect(h.db.query(`update payroll_adjustment set valuation_policy_id = null where id = $1`, [a.id])).rejects.toThrow(/immutable/);
     });
 
     it('routes to an independent reviewer: not the maker and not the manager who approved the timesheet', async () => {
@@ -309,17 +325,16 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       expect(excluded.e).toEqual(expect.arrayContaining([both.user, w.manager.user]));
     });
 
-    it('refuses approval in plain words until a valuation policy exists: the task stays open and nothing is recorded (H2)', async () => {
+    it('approves the calculated amount and explanation; the processed origin and its run stay exactly as they were (BR-047)', async () => {
       const c = await submittedCase();
       const before = await frozen(c.runId);
-      const res = await decideAdj(decider, c.adjustment.id, { decision: 'APPROVE', reason: 'Synthetic' });
-      expect(res.statusCode).toBe(409);
-      expect(res.json()).toMatchObject({ error: 'NOT_CONFIGURED', details: { code: 'ADJUSTMENT_VALUATION_POLICY_NOT_CONFIGURED' } });
-      expect(res.json().message).toContain('adjustment valuation policy');
-      expect(await adjustmentTask(decider, c.adjustment.id)).toBeDefined();
+      const res = await ok<{ state: string; replayed: boolean }>(await decideAdj(decider, c.adjustment.id, { decision: 'APPROVE' }));
+      expect(res).toMatchObject({ state: 'APPROVED', replayed: false });
+      expect(await adjustmentTask(decider, c.adjustment.id)).toBeUndefined();
       const row = await h.one<{ state: string; decided_by: string | null; target_run_id: string | null; applied_payroll_line_id: string | null }>(`select state, decided_by, target_run_id, applied_payroll_line_id from payroll_adjustment where id = $1`, [c.adjustment.id]);
-      expect(row).toEqual({ state: 'SUBMITTED', decided_by: null, target_run_id: null, applied_payroll_line_id: null });
-      expect((await h.one<{ n: number }>(`select count(*)::int as n from approval_decision d join approval_task t on t.id = d.task_id join approval_instance i on i.id = t.instance_id where i.transaction_id = (select transaction_id from payroll_adjustment where id = $1)`, [c.adjustment.id])).n).toBe(0);
+      // Applied only when a later payroll is processed (adjustments-payroll.api.test.ts).
+      expect(row).toEqual({ state: 'APPROVED', decided_by: decider.user, target_run_id: null, applied_payroll_line_id: null });
+      expect((await h.one<{ n: number }>(`select count(*)::int as n from approval_decision d join approval_task t on t.id = d.task_id join approval_instance i on i.id = t.instance_id where i.transaction_id = (select transaction_id from payroll_adjustment where id = $1)`, [c.adjustment.id])).n).toBe(1);
       expect(await frozen(c.runId)).toBe(before);
     });
 
@@ -352,10 +367,9 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       await expect(h.db.query(`update payroll_adjustment set state = 'SUBMITTED' where id = $1`, [nextSubmitted.id])).rejects.toThrow(/cannot become/);
     });
 
-    it('holds DB111 in the database: approved needs figures, applied needs one line, the origin is never the target, no delete', async () => {
+    it('holds DB111 in the database: applied needs one line, the target is set only by application, the origin is never the target, no delete', async () => {
       const c = await submittedCase();
-      await expect(h.db.query(`update payroll_adjustment set state = 'APPROVED', decided_at = now(), decided_by = $2 where id = $1`, [c.adjustment.id, decider.user])).rejects.toThrow(/payroll_adjustment_check/);
-      await expect(h.db.query(`update payroll_adjustment set target_run_id = origin_run_id where id = $1`, [c.adjustment.id])).rejects.toThrow(/payroll_adjustment_check/);
+      await expect(h.db.query(`update payroll_adjustment set target_run_id = origin_run_id where id = $1`, [c.adjustment.id])).rejects.toThrow(/set when it is applied/);
       await expect(h.db.query(`update payroll_adjustment set state = 'APPLIED' where id = $1`, [c.adjustment.id])).rejects.toThrow(/cannot become/);
       await expect(h.db.query(`delete from payroll_adjustment where id = $1`, [c.adjustment.id])).rejects.toThrow();
     });
@@ -387,13 +401,14 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
 
     it('shows the employee the linked case on TN13: week, period and state, never figures or notes (H3)', async () => {
       const c = await lateCase();
-      const a = await ok<Adjustment>(await open(maker, c.timesheetId, c.recordId, { explanation: 'SECRET-EXPLANATION', deltaAmount: '777.25' }), 201);
+      const a = await ok<Adjustment>(await open(maker, c.timesheetId, c.recordId, { explanation: 'SECRET-EXPLANATION' }), 201);
+      expect(a.deltaAmount).toBe('967.7400');
       expect((await ok<{ items: unknown[] }>(await h.call(c.actor, 'GET', '/v1/me/payroll-adjustments'))).items).toEqual([]);
       await ok(await h.call(maker, 'POST', `/v1/payroll/adjustments/${a.id}/submit`, { expectedVersion: a.version }));
       const res = await h.call(c.actor, 'GET', '/v1/me/payroll-adjustments');
       const items = (await ok<{ items: Record<string, unknown>[] }>(res)).items;
       expect(items).toEqual([{ id: a.id, timesheetId: c.timesheetId, revision: 1, serviceStart: '2026-03-09', serviceEnd: '2026-03-15', originPeriodCode: '2026-03', adjustmentKind: 'LATE_TIMESHEET', state: 'SUBMITTED', submittedAt: expect.any(String) }]);
-      expect(res.body).not.toContain('777.25');
+      expect(res.body).not.toContain('967.74');
       expect(res.body).not.toContain('SECRET-EXPLANATION');
       // Someone else's case is not listed, and another role switches to its Employee context (BR-055).
       expect((await ok<{ items: { id: string }[] }>(await h.call(w.peer, 'GET', '/v1/me/payroll-adjustments'))).items.map((x) => x.id)).not.toContain(a.id);
@@ -466,19 +481,23 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       expect(JSON.stringify(items)).not.toMatch(/6000|36000|amount|difference/i);
     });
 
-    it('records component and month detail as entered, naming source revision and period in the register (FR-035)', async () => {
+    it('FR-035: calculates component and month detail, refuses amounts that differ from it, and names source revision and period in the register', async () => {
       const c = await retroactive();
-      const created = await ok<ArrearsCase>(await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '5000.00' }, { componentCode: 'HD_ADJ_OTHER', amount: '1000.25' }] }), 201);
+      // 30,000 to 36,000 over all of March, every day paid: 6,000 x 31 / 31.
+      const differs = await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '5000.00' }, { componentCode: 'HD_ADJ_OTHER', amount: '1000.25' }] });
+      expect(differs.statusCode).toBe(422);
+      expect(differs.json()).toMatchObject({ error: 'ARREARS_LINES_DIFFER', details: { calculated: [{ componentCode: 'HD_ADJ_BASIC', amount: '6000.0000' }] } });
+      const created = await ok<ArrearsCase>(await propose(maker, c, { lines: undefined }), 201);
       expect(created).toMatchObject({
         state: 'SUBMITTED',
         sourceRevisionId: c.revisionId,
         periodCode: '2026-03',
-        lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '5000.0000' }, { componentCode: 'HD_ADJ_OTHER', amount: '1000.2500' }],
-        totalEntered: '6000.2500',
-        calculation: { status: 'NOT_CONFIGURED' },
+        lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '6000.0000' }],
+        totalEntered: '6000.0000',
+        calculation: { status: 'CALCULATED' },
       });
       const register = await ok<{ items: { id: string; sourceRevisionId: string; sourceEffectiveFrom: string; periodCode: string; serviceStart: string; serviceEnd: string }[]; calculation: { status: string } }>(await h.call(maker, 'GET', `/v1/payroll/arrears-cases?employeeId=${c.id}`));
-      expect(register.calculation.status).toBe('NOT_CONFIGURED');
+      expect(register.calculation.status).toBe('CALCULATED');
       expect(register.items).toEqual([expect.objectContaining({ id: created.id, sourceRevisionId: c.revisionId, sourceEffectiveFrom: '2026-03-01', periodCode: '2026-03', serviceStart: '2026-03-01', serviceEnd: '2026-03-31' })]);
     });
 
@@ -528,10 +547,10 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       const run = await createRun(h, preparer, periods['2026-05']!, { departmentIds: [c.dept] });
       await calculate(h, preparer, run.id);
       expect((await propose(maker, { revisionId: c.revisionId, recordId: (await record(h, preparer, run.id, c.id)).id })).json().error).toBe('ORIGIN_NOT_PROCESSED');
-      // Lines.
-      expect((await propose(maker, c, { lines: [{ componentCode: 'NOT_A_HEAD', amount: '1.00' }] })).json().error).toBe('UNKNOWN_COMPONENT');
-      expect((await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '1.00' }, { componentCode: 'HD_ADJ_BASIC', amount: '2.00' }] })).json().error).toBe('DUPLICATE_COMPONENT');
-      expect((await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '0.00' }] })).json().error).toBe('INVALID_AMOUNT');
+      // Lines sent are a check on the calculation (I-79): anything else is refused, and an amount below the currency unit is invalid.
+      expect((await propose(maker, c, { lines: [{ componentCode: 'NOT_A_HEAD', amount: '6000.00' }] })).json().error).toBe('ARREARS_LINES_DIFFER');
+      expect((await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '3000.00' }, { componentCode: 'HD_ADJ_BASIC', amount: '3000.00' }] })).json().error).toBe('ARREARS_LINES_DIFFER');
+      expect((await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '0.00' }] })).json().error).toBe('ARREARS_LINES_DIFFER');
       expect((await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '1.234' }] })).json().error).toBe('INVALID_AMOUNT');
       // A corrected revision is out of the chain.
       await h.db.query(`update salary_arrangement set superseded_at = now(), effective_to = effective_from where id = $1`, [c.revisionId]);
@@ -581,16 +600,16 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       expect((await h.call(d, 'POST', `/v1/payroll/arrears-tasks/${taskId}/decision`, { decision: 'APPROVE', idempotencyKey: key() })).json().error).toBe('SELF_ACTION_NOT_ALLOWED');
     });
 
-    it('keeps a negative arrear as a record: approving it needs a recovery policy, and rejection frees the key with a link (H2)', async () => {
-      const c = await retroactive();
-      const a = await ok<ArrearsCase>(await propose(maker, c, { lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '-500.00' }] }), 201);
-      expect(a.totalEntered).toBe('-500.0000');
-      const refused = await decideCase(decider, a.id, { decision: 'APPROVE' });
-      expect(refused.statusCode).toBe(409);
-      expect(refused.json()).toMatchObject({ error: 'NOT_CONFIGURED', details: { code: 'RECOVERY_POLICY_NOT_CONFIGURED' } });
-      expect(await arrearsTask(decider, a.id)).toBeDefined();
-      await ok(await decideCase(decider, a.id, { decision: 'RETURN', reason: 'Synthetic: a recovery policy is needed' }));
-      const next = await ok<ArrearsCase>(await propose(maker, c), 201);
+    // A recovery refused for want of a recovery deduction, and recovered through payroll: arrears-payroll.api.test.ts.
+    it('calculates a lower revision as a negative arrear, and a returned case frees its key with a link (H2)', async () => {
+      const s = await staff();
+      const { runId, recordId } = await processed('2026-03', s);
+      const lower = await laterArrangement(h, A, s.id, '2026-03-01', '24000', [{ code: 'HD_ADJ_BASIC', amount: '24000' }]);
+      const c = { ...s, runId, recordId, revisionId: lower };
+      const a = await ok<ArrearsCase>(await propose(maker, c, { lines: undefined }), 201);
+      expect(a.lines).toEqual([{ componentCode: 'HD_ADJ_BASIC', amount: '-6000.0000' }]);
+      await ok(await decideCase(decider, a.id, { decision: 'RETURN', reason: 'Synthetic: check the revision' }));
+      const next = await ok<ArrearsCase>(await propose(maker, c, { lines: undefined }), 201);
       expect(next.followsCaseId).toBe(a.id);
     });
 
@@ -632,8 +651,12 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
     });
 
     it('notifies with no amount or reason', async () => {
-      const c = await retroactive();
-      const a = await ok<ArrearsCase>(await propose(maker, c, { reason: 'SECRET-ARREARS-REASON', lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '4242.42' }] }), 201);
+      // A revision whose arrear is a figure found nowhere else: 34,242.42 over all of March gives 4,242.42.
+      const s = await staff();
+      const { runId, recordId } = await processed('2026-03', s);
+      const c = { ...s, runId, recordId, revisionId: await laterArrangement(h, A, s.id, '2026-03-01', '34242.42', [{ code: 'HD_ADJ_BASIC', amount: '34242.42' }]) };
+      const a = await ok<ArrearsCase>(await propose(maker, c, { reason: 'SECRET-ARREARS-REASON', lines: undefined }), 201);
+      expect(a.lines).toEqual([{ componentCode: 'HD_ADJ_BASIC', amount: '4242.4200' }]);
       await ok(await decideCase(decider, a.id, { decision: 'APPROVE' }));
       await dispatchOutbox(h.pool, 500);
       expect((await h.call(decider, 'GET', '/v1/me/notifications')).body).toContain('arrears case');
@@ -645,14 +668,15 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
     });
   });
 
-  describe('nothing feeds a processed run or the calculation', () => {
-    it('leaves a processed run and the next calculation exactly as they were', async () => {
+  describe('a processed run never changes; an approved arrear reaches only the next calculation (I-79)', () => {
+    it('leaves a processed run as it was, and the next calculation pays the approved arrear once beside its own salary', async () => {
       const c = await submittedCase();
       const revisionId = await laterArrangement(h, A, c.id, '2026-03-01', '36000', [{ code: 'HD_ADJ_BASIC', amount: '36000' }]);
       const before = await frozen(c.runId);
       const netBefore = (await record(h, processor, c.runId, c.id)).net;
+      // March paid 30 of its 31 days (10 March unpaid): 6,000 x 30 / 31 = 5,806.45.
       const arrears = await ok<ArrearsCase>(
-        await h.call(maker, 'POST', '/v1/payroll/arrears-cases', { sourceRevisionId: revisionId, originRecordId: c.recordId, reason: 'Synthetic', idempotencyKey: key('arr-'), lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '6000.00' }] }),
+        await h.call(maker, 'POST', '/v1/payroll/arrears-cases', { sourceRevisionId: revisionId, originRecordId: c.recordId, reason: 'Synthetic', idempotencyKey: key('arr-'), lines: [{ componentCode: 'HD_ADJ_BASIC', amount: '5806.45' }] }),
         201,
       );
       const arrearsTaskId = (await arrearsTask(decider, arrears.id))!;
@@ -660,18 +684,30 @@ describe.runIf(isModuleActive('payroll-adjustments'))('later-period payroll case
       await ok(await decideAdj(decider, c.adjustment.id, { decision: 'REJECT', reason: 'Synthetic' }));
       expect(await frozen(c.runId)).toBe(before);
       expect((await record(h, processor, c.runId, c.id)).net).toBe(netBefore);
-      // The next month is calculated from its own salary revision alone: no arrear and no correction reaches it.
+      // The next month: its own salary revision, and the approved arrear on the policy's component; the rejected correction never.
       const next = await createRun(h, preparer, periods['2026-04']!, { departmentIds: [c.dept] });
       await calculate(h, preparer, next.id);
       const after = await record(h, preparer, next.id, c.id);
-      expect(after.net).toBe('36000.0000');
-      const lines = (await h.db.query<{ code: string; amount: string }>(`select pc.code, l.amount::text from payroll_line l join pay_component pc on pc.company_id = l.company_id and pc.id = l.component_id where l.company_id = $1 and l.record_id = $2`, [A.id, after.id])).rows;
-      expect(lines).toEqual([{ code: 'HD_ADJ_BASIC', amount: '36000.0000' }]);
+      expect(after.net).toBe('41806.4500');
+      const lines = (
+        await h.db.query<{ code: string; amount: string }>(
+          `select pc.code, l.amount::text from payroll_line l join pay_component pc on pc.company_id = l.company_id and pc.id = l.component_id where l.company_id = $1 and l.record_id = $2 order by pc.code`,
+          [A.id, after.id],
+        )
+      ).rows;
+      expect(lines).toEqual([
+        { code: 'HD_ADJ_ARREARS', amount: '5806.4500' },
+        { code: 'HD_ADJ_BASIC', amount: '36000.0000' },
+      ]);
     });
 
-    it('the calculation code reads none of these tables', () => {
-      const source = ['calculate.ts', 'runs.ts', 'inputs.ts'].map((f) => readFileSync(new URL(`../payroll/${f}`, import.meta.url), 'utf8')).join('\n');
-      expect(source).not.toMatch(/payroll_adjustment|payroll_arrears/);
+    it('the calculation only reads cases; only processing marks an arrear or a timesheet adjustment applied, once each', () => {
+      const read = (f: string) => readFileSync(new URL(`../payroll/${f}`, import.meta.url), 'utf8');
+      const calculation = read('calculate.ts');
+      expect(calculation).not.toMatch(/(update|insert into|delete from) payroll_(arrears_case|arrears_line|adjustment)\b/);
+      expect(read('inputs.ts')).not.toMatch(/payroll_adjustment|payroll_arrears/);
+      expect(read('runs.ts').match(/update payroll_arrears_case/g)).toHaveLength(1);
+      expect(read('runs.ts').match(/update payroll_adjustment/g)).toHaveLength(1);
     });
   });
 });

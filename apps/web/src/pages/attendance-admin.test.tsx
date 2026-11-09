@@ -185,7 +185,18 @@ describe('attendance policies (FR-020, BR-009)', () => {
           items: [
             revision({ effectiveTo: '2026-06-01' }),
             revision({ id: 'p-2', code: 'NIGHT', state: 'DRAFT', mappings: [], warnings: [{ code: 'UNMAPPED', text: 'No grade, location or company-wide mapping is set, so this policy applies to nobody.' }] }),
-            revision({ id: 'p-3', code: 'SITE', revision: 2, state: 'RETIRED', mappings: [{ id: 'm-3', grade: 'G1', location: 'HQ', priority: 2 }], overtimeEnabled: true }),
+            revision({
+              id: 'p-3',
+              code: 'SITE',
+              revision: 2,
+              state: 'RETIRED',
+              mappings: [{ id: 'm-3', grade: 'G1', location: 'HQ', priority: 2 }],
+              overtimeEnabled: true,
+              overtimeBasis: 'AFTER_SHIFT_END',
+              overtimeMinimumMinutes: 30,
+              overtimeRoundingMinutes: 15,
+            }),
+            revision({ id: 'p-4', code: 'OLD', state: 'ACTIVE', overtimeEnabled: true }),
           ],
         },
       ],
@@ -194,13 +205,39 @@ describe('attendance policies (FR-020, BR-009)', () => {
     const table = await screen.findByRole('table', { name: 'Attendance policy revisions' });
     const row = (name: string) => within(table).getByText(name).closest('tr')!;
     expect(row('DEFAULT revision 1').textContent).toContain('from 2026-01-01, until before 2026-06-01');
-    expect(row('DEFAULT revision 1').textContent).toContain('Grace 10 minutes; present from 75%; half day from 50%; overtime setting off');
+    expect(row('DEFAULT revision 1').textContent).toContain('Grace 10 minutes; present from 75%; half day from 50%; overtime off');
     expect(row('DEFAULT revision 1').textContent).toContain('the whole company');
     expect(row('NIGHT revision 1').textContent).toContain('unmapped');
     expect(row('NIGHT revision 1').textContent).toContain('applies to nobody');
     expect(row('SITE revision 2').textContent).toContain('grade G1, location HQ');
-    expect(row('SITE revision 2').textContent).toContain('overtime setting on');
-    expect(screen.getByText(/The overtime setting is recorded only/)).toBeTruthy();
+    // FR-020 DF05 (I-78 item 5): candidates only, with the rules in words.
+    expect(row('SITE revision 2').textContent).toContain('overtime candidates: minutes worked after the shift ends, from 30 minutes, rounded down to 15-minute units');
+    expect(row('OLD revision 1').textContent).toContain('overtime on, its rules not set');
+    expect(screen.getByText(/Nothing pays them/)).toBeTruthy();
+  });
+
+  it('FR-020 DF05 overtime on asks for its basis, minimum and rounding, none proposed; off sends none (I-78 item 5)', async () => {
+    session.permissions = [MANAGE];
+    const calls = mockApi({ [`GET ${POLICIES}`]: [200, { items: [] }], [`POST ${POLICIES}`]: [201, { id: 'p-9', revision: 1, state: 'DRAFT', version: 1 }] });
+    open('/attendance/policies');
+    const form = await screen.findByRole('form', { name: 'New policy revision' });
+    expect(within(form).queryByLabelText('Overtime basis')).toBeNull();
+    click(within(form).getByLabelText(/Overtime candidates/));
+    const basis = within(form).getByLabelText('Overtime basis') as HTMLSelectElement;
+    const minimum = within(form).getByLabelText('Overtime from (minutes)') as HTMLInputElement;
+    const rounding = within(form).getByLabelText('Rounded down to units of (minutes)') as HTMLInputElement;
+    expect([basis.value, minimum.value, rounding.value, basis.required, minimum.required, rounding.required]).toEqual(['', '', '', true, true, true]);
+    type(within(form).getByLabelText('Policy code'), 'SITE');
+    type(within(form).getByLabelText('Effective from'), '2026-12-01');
+    type(within(form).getByLabelText('Grace (minutes)'), '10');
+    type(within(form).getByLabelText(/Present from/), '75');
+    type(within(form).getByLabelText(/Half day from/), '50');
+    type(basis, 'BEYOND_SCHEDULED_NET');
+    type(minimum, '30');
+    type(rounding, '15');
+    click(within(form).getByRole('button', { name: 'Create draft' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ overtimeEnabled: true, overtimeBasis: 'BEYOND_SCHEDULED_NET', overtimeMinimumMinutes: 30, overtimeRoundingMinutes: 15 });
   });
 
   it('creates a draft with exactly the values entered and proposes none', async () => {

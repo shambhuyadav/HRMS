@@ -128,10 +128,12 @@ describe('leave policies (FR-024, E06)', () => {
     fireEvent.change(screen.getByLabelText('Accrual rule'), { target: { value: 'MONTHLY_PRORATED' } });
     fireEvent.change(screen.getByLabelText('Annual entitlement (days)'), { target: { value: '12.5' } });
     fireEvent.change(screen.getByLabelText('Minimum service (days)'), { target: { value: '30' } });
+    // FR-024 (I-78 item 3): the leave year proposes no month.
+    expect((screen.getByLabelText('Leave year starts in') as HTMLSelectElement).value).toBe('');
     fireEvent.click(screen.getByText('Create draft'));
     await waitFor(() =>
       expect(calls.filter((c) => c.method === 'POST' && c.url === '/v1/leave/policies').map((c) => c.body)).toEqual([
-        { leaveType: 'ANNUAL', effectiveFrom: '2027-01-01', effectiveTo: null, eligibility: 'ALL_STAFF', accrualRule: 'MONTHLY_PRORATED', annualEntitlement: '12.5', minServiceDays: 30, carryCap: '0' },
+        { leaveType: 'ANNUAL', effectiveFrom: '2027-01-01', effectiveTo: null, eligibility: 'ALL_STAFF', accrualRule: 'MONTHLY_PRORATED', annualEntitlement: '12.5', minServiceDays: 30, carryCap: '0', leaveYearStartMonth: null },
       ]),
     );
 
@@ -240,6 +242,46 @@ describe('before accrual (FR-024 acceptance)', () => {
     open('/leave/before-accrual');
     fireEvent.change(screen.getByLabelText('Accrual month'), { target: { value: '2026-02' } });
     expect(await screen.findByText(/resolves to one policy/)).toBeTruthy();
+  });
+
+  it('FR-024 FR-025 queues the year-end expiry for a date and lists the pending requests that hold employees back (I-78 item 3)', async () => {
+    session.permissions = ['leave.accrue.operational'];
+    const calls = mockApi({
+      'GET /v1/leave/year-end-runs/pending-requests': [
+        200,
+        { yearEnd: '2025-12-31', total: 1, page: 1, pageSize: 25, items: [{ requestId: 'r-1', employeeId: 'e-1', employeeCode: 'SYN1', employeeName: 'Synthetic One', leaveType: 'ANNUAL', startDate: '2025-12-29', endDate: '2025-12-29' }] },
+      ],
+      'POST /v1/leave/year-end-runs': [202, { jobId: 'job-1' }],
+    });
+    open('/leave/before-accrual');
+    const form = screen.getByRole('form', { name: 'Leave year end' });
+    expect((within(form).getByLabelText('Last day of the leave year') as HTMLInputElement).value).toBe('');
+    fireEvent.change(within(form).getByLabelText('Last day of the leave year'), { target: { value: '2025-12-31' } });
+    const table = await screen.findByRole('table', { name: 'Pending requests at the leave year end' });
+    expect(within(table).getByText('SYN1')).toBeTruthy();
+    expect(screen.getByText(/1 pending request holds its employee back until decided/)).toBeTruthy();
+    fireEvent.click(within(form).getByRole('button', { name: 'Expire balances above the carry cap' }));
+    expect(await screen.findByRole('link', { name: 'My background jobs' })).toBeTruthy();
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ yearEnd: '2025-12-31' });
+  });
+});
+
+describe('leave year of a revision (FR-024; I-78 item 3)', () => {
+  it('FR-024 shows the leave year in words and edits it on a draft; unset says nothing expires', async () => {
+    session.permissions = [P];
+    const calls = mockApi({
+      'GET /v1/leave/types': [200, types],
+      'GET /v1/leave/policies': [200, { items: [revision({ state: 'DRAFT', leaveYearStartMonth: 4 }), revision({ id: 'p-2', revision: 2, leaveYearStartMonth: null })] }],
+      'PATCH /v1/leave/policies/p-1': [200, { id: 'p-1', version: 3 }],
+    });
+    open('/leave/policies');
+    expect(await screen.findByText(/leave year from April/)).toBeTruthy();
+    expect(screen.getByText(/no leave year set, so nothing expires/)).toBeTruthy();
+    fireEvent.click(screen.getByText('Edit ANNUAL revision 1'));
+    const select = screen.getAllByLabelText('Leave year starts in').find((s) => (s as HTMLSelectElement).value === '4') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: '1' } });
+    fireEvent.click(screen.getByText('Save draft'));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({ expectedVersion: 2, leaveYearStartMonth: 1 }));
   });
 });
 

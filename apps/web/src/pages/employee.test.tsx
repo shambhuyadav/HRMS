@@ -1,4 +1,4 @@
-// One employee (jsdom; FR-006, FR-008; BR-002; DF04; DF08; I-55): a field group the server leaves out is not shown, a form is offered
+// One employee (jsdom; FR-006, FR-008; BR-002; DF04; DF08; I-55; I-82): a field group the server leaves out is not shown, a form is offered
 // only with the duty its route checks, changes name the version on screen where the route takes one and send only what changed,
 // activation names what is missing, refusals read in plain words beside what was typed, and the client adds no rule of its own.
 // Synthetic data only.
@@ -18,6 +18,9 @@ const LIST = 'employee.list.operational';
 const CREATE = 'employee.create.operational';
 const UPDATE = 'employee.update.operational';
 const ACTIVATE = 'employee.activate.operational';
+// Synthetic PANs, assembled at run time so no shared file holds a PAN-shaped string (ZT21; db/registers/privacy.ts).
+const PAN_F = ['ABCDE', '1234', 'F'].join('');
+const PAN_G = ['ABCDE', '1234', 'G'].join('');
 
 type Reply = [number, unknown];
 type Call = { method: string; url: string; body: Record<string, unknown> | undefined };
@@ -216,11 +219,6 @@ describe('the record (FR-006, FR-008)', () => {
     expect(screen.getByRole('link', { name: 'Documents' }).getAttribute('href')).toBe('/employees/e-1/documents');
   });
 
-  it('says that the sections waiting on the field dictionary are not offered (I-48 item 3)', async () => {
-    await openRecord([READ], {});
-    expect(screen.getByText(/Family, qualification, prior-employment and payroll-identifier sections are not offered/)).toBeTruthy();
-    for (const name of ['Family', 'Qualifications', 'Prior employment', 'Payroll identifiers']) expect(screen.queryByRole('heading', { name })).toBeNull();
-  });
 });
 
 describe('private details (FR-008, under the role’s own grant)', () => {
@@ -263,6 +261,285 @@ describe('private details (FR-008, under the role’s own grant)', () => {
     await openRecord(['employee.read.private', READ], { [PRIVATE]: [403, { error: 'FORBIDDEN', message: 'Not permitted' }] });
     click(button('Show private details'));
     expect(await screen.findByText('Your role is not permitted to read this.')).toBeTruthy();
+  });
+});
+
+describe('record sections (FR-008, I-82 item 2: family, qualifications, prior employment, payroll identifiers)', () => {
+  const SECTIONS = 'GET /v1/employees/e-1/record-sections';
+  const SECTIONS_PATH = '/v1/employees/e-1/record-sections';
+  const READ_PRIVATE = 'employee.read.private';
+  const READ_PAYROLL = 'employee.read.payroll_id';
+  const MANAGE_PRIVATE = 'employee.manage.private';
+  const MANAGE_PAYROLL = 'employee.manage.payroll_id';
+  const SHOW = 'Show family, qualifications and prior employment';
+  const META = { createdAt: '2026-03-01T06:00:00Z', updatedAt: '2026-03-01T06:00:00Z', removedAt: null, removalReason: null };
+  const FAMILY = { id: 'f-1', version: 1, ...META, relationship: 'SPOUSE', relationshipLabel: 'Spouse', fullName: 'Synthetic Partner', dateOfBirth: '1991-07-09', dependant: true };
+  const QUALIFICATION = { id: 'q-1', version: 2, ...META, level: 'GRADUATE', levelLabel: 'Graduate', qualification: 'Synthetic Degree', specialisation: null, institution: 'Synthetic University', completionYear: 2012 };
+  const PRIOR = { id: 'p-1', version: 1, ...META, employerName: 'Synthetic Earlier Co', designation: 'Analyst', fromDate: '2015-01-01', toDate: '2025-12-31' };
+  const MASKED = { values: { pan: '••••234F', uan: null, esicIpNumber: '••••7890' }, masked: true, version: 3 };
+  const ALL = { employeeId: 'e-1', 'family-members': [FAMILY], qualifications: [QUALIFICATION], 'prior-employments': [PRIOR], 'payroll-identifiers': MASKED };
+  const RELATIONSHIPS = { category: 'FAMILY_RELATIONSHIP', items: [{ code: 'CHILD', label: 'Child' }, { code: 'SPOUSE', label: 'Spouse' }] };
+  const LEVELS = { category: 'QUALIFICATION_LEVEL', items: [{ code: 'GRADUATE', label: 'Graduate' }, { code: 'POSTGRADUATE', label: 'Postgraduate' }] };
+  const ADD_PRIOR = 'POST /v1/employees/e-1/record-sections/prior-employments';
+  const rowsOf = (name: string) =>
+    within(screen.getByRole('table', { name }))
+      .getAllByRole('row')
+      .slice(1)
+      .map((r) => within(r).getAllByRole('cell').map((c) => c.textContent));
+  const sectionReads = (calls: Call[]) => asked(calls, SECTIONS_PATH);
+  /** Opens the add form of a prior employment and saves what it is given. */
+  const addPrior = async () => {
+    click(button(SHOW));
+    await screen.findByRole('table', { name: 'Prior employment' });
+    const form = openForm('Add a prior employment');
+    type(within(form).getByLabelText('Employer'), ' Synthetic Later Co ');
+    type(within(form).getByLabelText('From'), '2025-06-01');
+    type(within(form).getByLabelText('To (inclusive)'), '2026-03-31');
+    click(within(form).getByRole('button', { name: 'Save prior employment' }));
+    return form;
+  };
+
+  it('FR-008 shows only the sections the grant reads (absent keys hidden) and masks identifiers', async () => {
+    // Neither read grant: nothing is offered and nothing is read, whatever the change duties.
+    let calls = await openRecord([READ, MANAGE_PRIVATE, MANAGE_PAYROLL], {});
+    expect(screen.queryByRole('heading', { name: 'Family, qualifications and prior employment' })).toBeNull();
+    expect(screen.queryByText(/open owner question/)).toBeNull();
+    expect(sectionReads(calls)).toEqual([]);
+    cleanup();
+
+    // The private group: the list sections, and the identifiers masked; read only when asked for.
+    calls = await openRecord([READ, READ_PRIVATE], { [SECTIONS]: [200, ALL] });
+    expect(sectionReads(calls)).toEqual([]);
+    click(button(SHOW));
+    await screen.findByRole('table', { name: 'Family and dependants' });
+    expect(sectionReads(calls).map((c) => c.url)).toEqual([SECTIONS_PATH]);
+    expect(rowsOf('Family and dependants')).toEqual([['Spouse', 'Synthetic Partner', '1991-07-09', 'Yes']]);
+    expect(rowsOf('Qualifications')).toEqual([['Graduate', 'Synthetic Degree', '—', 'Synthetic University', '2012']]);
+    expect(rowsOf('Prior employment')).toEqual([['Synthetic Earlier Co', 'Analyst', '2015-01-01', '2025-12-31']]);
+    expect(within(screen.getByRole('heading', { name: /^Payroll identifiers/ })).getByText('masked')).toBeTruthy();
+    expect(factOf('PAN')).toBe('••••234F');
+    expect(factOf('UAN (EPF)')).toBe('—');
+    expect(factOf('ESIC IP number')).toBe('••••7890');
+    for (const text of ['SPOUSE', 'GRADUATE', 'f-1', 'q-1']) expect(document.body.textContent).not.toContain(text);
+    click(button('Hide family, qualifications and prior employment'));
+    expect(screen.queryByText('Synthetic Partner')).toBeNull();
+    cleanup();
+
+    // The payroll-identifier group alone: the parts the server left out are not shown, not even as blanks; values come in full.
+    await openRecord([READ, READ_PAYROLL], { [SECTIONS]: [200, { employeeId: 'e-1', 'payroll-identifiers': { values: { pan: PAN_F, uan: null, esicIpNumber: null }, masked: false, version: 3 } }] });
+    click(button(SHOW));
+    await screen.findByRole('heading', { name: 'Payroll identifiers' });
+    expect(factOf('PAN')).toBe(PAN_F);
+    expect(screen.queryByText('masked')).toBeNull();
+    for (const name of ['Family and dependants', 'Qualifications', 'Prior employment']) expect(screen.queryByRole('heading', { name })).toBeNull();
+    expect(screen.queryByText('Nothing recorded yet.')).toBeNull();
+    expect(screen.queryByLabelText('Show removed entries')).toBeNull();
+    cleanup();
+
+    // A refusal to read reads in plain words.
+    await openRecord([READ, READ_PRIVATE], { [SECTIONS]: [403, { error: 'FORBIDDEN', message: 'Not permitted' }] });
+    click(button(SHOW));
+    expect(await screen.findByText('Your role is not permitted to read this.')).toBeTruthy();
+  });
+
+  it('FR-008 offers the section forms only with the manage duty and says a refusal in plain words', async () => {
+    await openRecord([READ, READ_PRIVATE, MANAGE_PAYROLL], { [SECTIONS]: [200, ALL] });
+    click(button(SHOW));
+    await screen.findByRole('table', { name: 'Family and dependants' });
+    for (const name of ['Add a family member', 'Add a qualification', 'Add a prior employment', 'Edit', 'Remove']) expect(screen.queryByRole('button', { name })).toBeNull();
+    // The identifiers' own duty offers their form, beside the part that was read.
+    expect(button('Change payroll identifiers')).toBeTruthy();
+    cleanup();
+
+    const calls = await openRecord([READ, READ_PRIVATE, MANAGE_PRIVATE], {
+      [SECTIONS]: [200, ALL],
+      [ADD_PRIOR]: [422, { error: 'CHRONOLOGY_CONFLICT', message: 'A prior employment ends before this employment’s joining date', details: { field: 'toDate', joiningDate: '2026-02-01' } }],
+    });
+    const form = await addPrior();
+    expect(await refusal(form)).toBe('A prior employment must end before the joining date of this employment, 2026-02-01.');
+    expect(writes(calls)).toEqual([{ method: 'POST', url: '/v1/employees/e-1/record-sections/prior-employments', body: { employerName: 'Synthetic Later Co', fromDate: '2025-06-01', toDate: '2026-03-31' } }]);
+    expect(valueOf(within(form).getByLabelText('Employer'))).toBe(' Synthetic Later Co ');
+    expect(valueOf(within(form).getByLabelText('To (inclusive)'))).toBe('2026-03-31');
+    for (const name of ['Add a family member', 'Add a qualification']) expect(button(name)).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: 'Qualifications' })).getByRole('button', { name: 'Edit' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Change payroll identifiers' })).toBeNull();
+  });
+
+  it.each([
+    [422, { error: 'INVALID_PERIOD', message: 'x', details: { field: 'toDate' } }, 'The prior employment ends before it starts. Check the start and end dates.'],
+    [422, { error: 'INVALID_DATE', message: 'x', details: { field: 'fromDate' } }, 'The start date must be a calendar date, and not in the future.'],
+    [422, { error: 'FIELD_REQUIRED', message: 'x', details: { field: 'employerName' } }, 'The employer is required. Fill it in and try again.'],
+    [422, { error: 'INVALID_FIELD', message: 'x', details: { field: 'designation' } }, 'The designation is not valid. Check it and try again.'],
+    [422, { error: 'UNKNOWN_FIELD', message: 'x', details: { field: 'salary' } }, 'The server does not keep one of the fields sent, so nothing was saved. Reload the page and try again.'],
+    [403, { error: 'SELF_ACTION_NOT_ALLOWED', message: 'x' }, 'This change involves your own record, so another administrator must make it.'],
+  ])('FR-008 a refused entry reads in plain words and keeps what was typed (%i %#)', async (status, body, words) => {
+    await openRecord([READ, READ_PRIVATE, MANAGE_PRIVATE], { [SECTIONS]: [200, ALL], [ADD_PRIOR]: [status, body] });
+    const form = await addPrior();
+    expect(await refusal(form)).toBe(words);
+    expect(valueOf(within(form).getByLabelText('From'))).toBe('2025-06-01');
+  });
+
+  it('FR-008 a family member is added with a relationship from the company list, and the sections are read again', async () => {
+    const calls = await openRecord([READ, READ_PRIVATE, MANAGE_PRIVATE], {
+      [SECTIONS]: [200, ALL],
+      'GET /v1/reference-values?category=FAMILY_RELATIONSHIP': [200, RELATIONSHIPS],
+      'POST /v1/employees/e-1/record-sections/family-members': [201, { id: 'f-2', section: 'family-members' }],
+    });
+    click(button(SHOW));
+    await screen.findByRole('table', { name: 'Family and dependants' });
+    const form = openForm('Add a family member');
+    await within(form).findByRole('option', { name: 'Child' });
+    type(within(form).getByLabelText('Relationship'), 'CHILD');
+    type(within(form).getByLabelText('Full name'), ' Synthetic Child ');
+    click(within(form).getByLabelText('Dependant'));
+    click(within(form).getByRole('button', { name: 'Save family member' }));
+    expect(await screen.findByText('Family member added.')).toBeTruthy();
+    // A blank optional field is not sent; the dependant answer always is.
+    expect(writes(calls)).toEqual([{ method: 'POST', url: '/v1/employees/e-1/record-sections/family-members', body: { relationship: 'CHILD', fullName: 'Synthetic Child', dependant: true } }]);
+    expect(screen.queryByRole('form', { name: 'Add a family member' })).toBeNull();
+    await waitFor(() => expect(sectionReads(calls)).toHaveLength(2));
+  });
+
+  it('FR-008 an entry is changed with all its fields and its version, and removed with a reason; removed entries show only when asked for', async () => {
+    const REMOVED = { ...FAMILY, id: 'f-0', fullName: 'Synthetic Former', removedAt: '2026-04-01T06:00:00Z', removalReason: 'Recorded in error' };
+    const calls = await openRecord([READ, READ_PRIVATE, MANAGE_PRIVATE], {
+      [SECTIONS]: (c) => [200, c.url.endsWith('?includeRemoved=true') ? { ...ALL, 'family-members': [REMOVED, FAMILY] } : ALL],
+      'GET /v1/reference-values?category=QUALIFICATION_LEVEL': [200, LEVELS],
+      'PUT /v1/employees/e-1/record-sections/qualifications/q-1': [200, { id: 'q-1', section: 'qualifications', version: 3 }],
+      'POST /v1/employees/e-1/record-sections/family-members/f-1/remove': [200, { id: 'f-1', section: 'family-members', removed: true }],
+    });
+    click(button(SHOW));
+    click(within(await screen.findByRole('table', { name: 'Qualifications' })).getByRole('button', { name: 'Edit' }));
+    const form = screen.getByRole('form', { name: 'Edit qualification' });
+    await within(form).findByRole('option', { name: 'Postgraduate' });
+    expect(valueOf(within(form).getByLabelText('Level'))).toBe('GRADUATE');
+    expect(valueOf(within(form).getByLabelText('Year of completion'))).toBe('2012');
+    type(within(form).getByLabelText('Level'), 'POSTGRADUATE');
+    type(within(form).getByLabelText('Institution or board'), ' ');
+    type(within(form).getByLabelText('Year of completion'), '2014');
+    click(within(form).getByRole('button', { name: 'Save qualification' }));
+    expect(await screen.findByText('Qualification saved.')).toBeTruthy();
+    // Every field is named; a blank optional one as null, which clears it.
+    expect(writes(calls)).toEqual([
+      { method: 'PUT', url: '/v1/employees/e-1/record-sections/qualifications/q-1', body: { level: 'POSTGRADUATE', qualification: 'Synthetic Degree', specialisation: null, institution: null, completionYear: 2014, expectedVersion: 2 } },
+    ]);
+
+    click(within(screen.getByRole('table', { name: 'Family and dependants' })).getByRole('button', { name: 'Remove' }));
+    const remove = screen.getByRole('form', { name: 'Remove family member' });
+    expect((within(remove).getByLabelText('Reason') as HTMLInputElement).required).toBe(true);
+    type(within(remove).getByLabelText('Reason'), ' Recorded in error ');
+    click(within(remove).getByRole('button', { name: 'Confirm removal' }));
+    expect(await screen.findByText(/^Family member removed\./)).toBeTruthy();
+    expect(writes(calls)[1]).toEqual({ method: 'POST', url: '/v1/employees/e-1/record-sections/family-members/f-1/remove', body: { reason: 'Recorded in error', expectedVersion: 1 } });
+
+    expect(sectionReads(calls).filter((c) => c.url.includes('includeRemoved'))).toEqual([]);
+    expect(screen.queryByText('Synthetic Former')).toBeNull();
+    click(screen.getByLabelText('Show removed entries'));
+    const row = (await screen.findByText('Synthetic Former')).closest('tr')!;
+    expect(sectionReads(calls).at(-1)!.url).toBe('/v1/employees/e-1/record-sections?includeRemoved=true');
+    expect(within(row).getByText('removed')).toBeTruthy();
+    expect(row.textContent).toContain('Recorded in error');
+    expect(within(row).queryByRole('button')).toBeNull();
+  });
+
+  it('FR-008 a stale entry reloads the sections and keeps what was typed; the next save names the version now read', async () => {
+    let current = ALL;
+    const calls = await openRecord([READ, READ_PRIVATE, MANAGE_PRIVATE], {
+      [SECTIONS]: () => [200, current],
+      'PUT /v1/employees/e-1/record-sections/prior-employments/p-1': (c) => {
+        if (c.body!.expectedVersion === 2) return [200, { id: 'p-1', section: 'prior-employments', version: 3 }];
+        current = { ...ALL, 'prior-employments': [{ ...PRIOR, designation: 'Senior Analyst', version: 2 }] };
+        return [409, { error: 'STALE_VERSION', message: 'The entry changed; reload and retry' }];
+      },
+    });
+    click(button(SHOW));
+    click(within(await screen.findByRole('table', { name: 'Prior employment' })).getByRole('button', { name: 'Edit' }));
+    const form = screen.getByRole('form', { name: 'Edit prior employment' });
+    type(within(form).getByLabelText('Employer'), 'Synthetic Renamed Co');
+    click(within(form).getByRole('button', { name: 'Save prior employment' }));
+    expect(await refusal(form)).toContain('What you typed is still here');
+    await waitFor(() => expect(rowsOf('Prior employment')[0]![1]).toBe('Senior Analyst'));
+    expect(valueOf(within(form).getByLabelText('Employer'))).toBe('Synthetic Renamed Co');
+    click(within(form).getByRole('button', { name: 'Save prior employment' }));
+    expect(await screen.findByText('Prior employment saved.')).toBeTruthy();
+    expect(writes(calls).at(-1)!.body).toEqual({ employerName: 'Synthetic Renamed Co', designation: 'Analyst', fromDate: '2015-01-01', toDate: '2025-12-31', expectedVersion: 2 });
+  });
+
+  it('FR-008 payroll identifiers form sends only changed identifiers with the read version', async () => {
+    let current = { values: { pan: PAN_F, uan: null as string | null, esicIpNumber: '1234567890' as string | null }, masked: false, version: 3 };
+    const PUT = 'PUT /v1/employees/e-1/payroll-identifiers';
+    const calls = await openRecord([READ, READ_PAYROLL, MANAGE_PAYROLL], {
+      [SECTIONS]: () => [200, { employeeId: 'e-1', 'payroll-identifiers': current }],
+      [PUT]: () => {
+        current = { values: { pan: PAN_F, uan: '100120023003', esicIpNumber: null }, masked: false, version: current.version + 1 };
+        return [200, { employeeId: 'e-1', recorded: ['PAN', 'UAN'], changed: ['ESIC_IP', 'UAN'], version: current.version }];
+      },
+    });
+    click(button(SHOW));
+    await screen.findByRole('heading', { name: 'Payroll identifiers' });
+    let form = openForm('Change payroll identifiers');
+    // Nothing is filled in from the record, and only an identifier on record can be cleared.
+    for (const label of ['PAN', 'UAN (EPF)', 'ESIC IP number']) expect(valueOf(within(form).getByLabelText(label))).toBe('');
+    expect(within(form).queryByLabelText('Clear the UAN (EPF)')).toBeNull();
+    type(within(form).getByLabelText('UAN (EPF)'), ' 100120023003 ');
+    click(within(form).getByLabelText('Clear the ESIC IP number'));
+    click(within(form).getByRole('button', { name: 'Save payroll identifiers' }));
+    expect(await screen.findByText('Payroll identifiers saved: ESIC IP number, UAN (EPF) changed.')).toBeTruthy();
+    expect(writes(calls)).toEqual([{ method: 'PUT', url: '/v1/employees/e-1/payroll-identifiers', body: { uan: '100120023003', esicIpNumber: null, expectedVersion: 3 } }]);
+    // What was typed is cleared, and the next change names the version read again.
+    expect(screen.queryByRole('form', { name: 'Change payroll identifiers' })).toBeNull();
+    await waitFor(() => expect(factOf('ESIC IP number')).toBe('—'));
+    form = openForm('Change payroll identifiers');
+    expect(valueOf(within(form).getByLabelText('UAN (EPF)'))).toBe('');
+    type(within(form).getByLabelText('PAN'), PAN_G);
+    click(within(form).getByRole('button', { name: 'Save payroll identifiers' }));
+    await waitFor(() => expect(writes(calls)).toHaveLength(2));
+    expect(writes(calls)[1]!.body).toEqual({ pan: PAN_G, expectedVersion: 4 });
+    cleanup();
+
+    // Nothing recorded yet: no version to name and nothing to clear; nothing typed asks nothing of the server.
+    const first = await openRecord([READ, READ_PRIVATE, MANAGE_PAYROLL], {
+      [SECTIONS]: [200, { employeeId: 'e-1', 'family-members': [], qualifications: [], 'prior-employments': [], 'payroll-identifiers': { values: { pan: null, uan: null, esicIpNumber: null }, masked: true, version: null } }],
+      [PUT]: [422, { error: 'INVALID_IDENTIFIER', message: 'x', details: { field: 'pan' } }],
+    });
+    click(button(SHOW));
+    await screen.findByRole('heading', { name: /^Payroll identifiers/ });
+    form = openForm('Change payroll identifiers');
+    expect(within(form).queryByLabelText(/^Clear the/)).toBeNull();
+    click(within(form).getByRole('button', { name: 'Save payroll identifiers' }));
+    expect(await within(form).findByText('Nothing changed.')).toBeTruthy();
+    expect(writes(first)).toEqual([]);
+    type(within(form).getByLabelText('PAN'), 'abcde1234');
+    click(within(form).getByRole('button', { name: 'Save payroll identifiers' }));
+    expect(await refusal(form)).toBe('The PAN is five letters, four digits and a letter. Check it and try again.');
+    expect(writes(first)).toEqual([{ method: 'PUT', url: '/v1/employees/e-1/payroll-identifiers', body: { pan: 'abcde1234' } }]);
+    expect(valueOf(within(form).getByLabelText('PAN'))).toBe('abcde1234');
+    cleanup();
+
+    // The duty to change them without any part read offers no form: there is no version to name.
+    const none = await openRecord([READ, MANAGE_PAYROLL], {});
+    expect(screen.queryByRole('button', { name: 'Change payroll identifiers' })).toBeNull();
+    expect(sectionReads(none)).toEqual([]);
+  });
+
+  it.each([
+    [422, { error: 'NO_CHANGE', message: 'x' }, 'Nothing differs from the identifiers on record, so nothing was saved.'],
+    [409, { error: 'STALE_VERSION', message: 'x' }, 'The payroll identifiers changed since you opened this. They have been reloaded; check them and try again. What you typed is still here.'],
+    [422, { error: 'INVALID_IDENTIFIER', message: 'x', details: { field: 'esicIpNumber' } }, 'The ESIC IP number is ten digits. Check it and try again.'],
+  ])('FR-008 a refused identifier change reads in plain words and never repeats the value (%i %#)', async (status, body, words) => {
+    const calls = await openRecord([READ, READ_PAYROLL, MANAGE_PAYROLL], {
+      [SECTIONS]: [200, { employeeId: 'e-1', 'payroll-identifiers': { values: { pan: null, uan: null, esicIpNumber: '1234567890' }, masked: false, version: 1 } }],
+      'PUT /v1/employees/e-1/payroll-identifiers': [status, body],
+    });
+    click(button(SHOW));
+    await screen.findByRole('heading', { name: 'Payroll identifiers' });
+    const form = openForm('Change payroll identifiers');
+    type(within(form).getByLabelText('ESIC IP number'), '98765');
+    click(within(form).getByRole('button', { name: 'Save payroll identifiers' }));
+    const text = await refusal(form);
+    expect(text).toBe(words);
+    expect(text).not.toContain('98765');
+    if (body.error === 'STALE_VERSION') await waitFor(() => expect(sectionReads(calls)).toHaveLength(2));
   });
 });
 
@@ -406,9 +683,34 @@ describe('editing (FR-006, FR-008)', () => {
     expect(writes(calls).at(-1)!.body).toMatchObject({ expectedVersion: 9, displayName: 'Typed Here' });
   });
 
+  // DF16 work phone extension (I-89 item 5): shown with the work email, changed under the same duty, a blank one clears it.
+  it('shows the work phone extension the server sent and sends only a changed one, a blank one as null', async () => {
+    const withExtension = { ...RECORD, workPhoneExtension: '4321' };
+    const calls = await openRecord([READ, UPDATE], { [PATCHED]: [200, withExtension] }, withExtension);
+    expect(factOf('Work phone extension')).toBe('4321');
+    let form = openForm('Edit details');
+    expect(valueOf(within(form).getByLabelText('Work phone extension'))).toBe('4321');
+    type(within(form).getByLabelText('Work phone extension'), ' 87654321 ');
+    click(within(form).getByRole('button', { name: 'Save details' }));
+    await screen.findByText('Details saved.');
+    expect(writes(calls)[0]!.body).toEqual({ expectedVersion: 7, workPhoneExtension: '87654321' });
+    form = openForm('Edit details');
+    type(within(form).getByLabelText('Work phone extension'), ' ');
+    click(within(form).getByRole('button', { name: 'Save details' }));
+    await waitFor(() => expect(writes(calls)).toHaveLength(2));
+    expect(writes(calls)[1]!.body).toEqual({ expectedVersion: 7, workPhoneExtension: null });
+    cleanup();
+
+    // An answer without the field (another server) offers nothing to change, so nothing is sent unseen.
+    await openRecord([READ, UPDATE], {});
+    expect(factOf('Work phone extension')).toBeNull();
+    expect(within(openForm('Edit details')).queryByLabelText('Work phone extension')).toBeNull();
+  });
+
   it.each([
     [409, { error: 'DUPLICATE', message: 'A record with the same unique value already exists' }, 'Another employee already has this employee code or work email.'],
     [400, { error: 'INVALID_REQUEST', message: 'body/workEmail must match format "email"' }, 'The server did not accept the work email. Check and try again.'],
+    [422, { error: 'INVALID_WORK_PHONE_EXTENSION', message: 'A work phone extension is 1 to 8 digits' }, 'A work phone extension is 1 to 8 digits, with nothing else. Check it and try again.'],
   ])('a refusal reads in plain words and keeps what was typed (%i)', async (status, body, words) => {
     await openRecord([READ, UPDATE], { [PATCHED]: [status, body] });
     const form = openForm('Edit details');
@@ -787,11 +1089,12 @@ describe('a new employee (FR-006)', () => {
     type(within(opened.form).getByLabelText('Date of birth'), '1995-01-02');
     type(within(opened.form).getByLabelText('Service anniversary base date'), '2026-04-01');
     type(within(opened.form).getByLabelText('Work email'), ' joiner@synthetic.test ');
+    type(within(opened.form).getByLabelText('Work phone extension'), ' 2468 ');
     await within(opened.form).findByRole('option', { name: 'G1 Grade one' });
     type(within(opened.form).getByLabelText('Grade'), 'gr-1');
     click(within(opened.form).getByRole('button', { name: 'Create employee' }));
     await waitFor(() => expect(writes(opened.calls)).toHaveLength(1));
-    expect(writes(opened.calls)[0]!.body).toMatchObject({ dateOfBirth: '1995-01-02', serviceAnniversaryDate: '2026-04-01', workEmail: 'joiner@synthetic.test', gradeId: 'gr-1' });
+    expect(writes(opened.calls)[0]!.body).toMatchObject({ dateOfBirth: '1995-01-02', serviceAnniversaryDate: '2026-04-01', workEmail: 'joiner@synthetic.test', workPhoneExtension: '2468', gradeId: 'gr-1' });
   });
 
   it('a rehire names the ended employment, found among separated employees', async () => {

@@ -191,7 +191,7 @@ describe.runIf(isModuleActive('timesheet'))('timesheet: revision rules', () => {
 
     it('reclassifying or renaming a master changes no approved figure; a new line takes the new classification', async () => {
       const m = await masters(w.employeeEmp);
-      const shift = await h.call(w.hr, 'POST', '/v1/shifts', { code: uniq('DAY'), name: 'Day shift', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
+      const shift = await h.call(w.hr, 'POST', '/v1/shifts', { code: uniq('DAY'), name: 'Day shift', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
       expect(shift.statusCode, shift.body).toBe(201);
       expect((await h.call(w.hr, 'POST', `/v1/employees/${w.employeeEmp}/shift`, { shiftId: shift.json().id, effectiveFrom: '2026-01-05' })).statusCode).toBe(200);
 

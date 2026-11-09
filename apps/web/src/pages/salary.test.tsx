@@ -97,7 +97,22 @@ describe('salary master screens', () => {
 });
 
 describe('salary master list (FR-029, E08)', () => {
-  it('lists the salaries in force today by default, with the total and the E08 grid values, never an estimated in-hand', async () => {
+  it('shows the server\'s estimated in-hand with its note, and "Not available" where the server makes none (BR-011, I-80)', async () => {
+    session.permissions = [READ];
+    mockApi({
+      'GET /v1/salary-master?': page([row({ estimatedInHand: '39800.00' }), row({ employeeId: 'emp-2', employeeCode: 'SYN-2', estimatedInHand: null })], {
+        estimate: { label: 'Estimated in-hand', message: 'An estimate, not a payslip: before income tax and statutory deductions.' },
+      }),
+    });
+    renderScreen('/salary-master');
+    const table = await screen.findByRole('table', { name: 'Salary master' });
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent).at(-1)).toBe('Estimated in-hand (estimate)');
+    expect(within(within(table).getByText('SYN-1').closest('tr')!).getByText('INR 39,800.00')).toBeTruthy();
+    expect(within(within(table).getByText('SYN-2').closest('tr')!).getByText('Not available')).toBeTruthy();
+    expect(document.body.textContent).toContain('Estimated in-hand: An estimate, not a payslip: before income tax and statutory deductions.');
+  });
+
+  it('lists the salaries in force today by default, with the total and the E08 grid values; no estimate column unless the server sends one', async () => {
     session.permissions = [READ];
     const calls = mockApi({
       'GET /v1/salary-master?': page([row(), row({ employeeId: 'emp-2', employeeCode: 'SYN-2', displayName: 'Synthetic Two', grade: null, effectiveFrom: '2026-02-01', effectiveTo: '2026-07-15', status: 'NOTICE' })]),

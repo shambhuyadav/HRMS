@@ -3,11 +3,14 @@ import type { FastifyInstance } from 'fastify';
 import type { Database } from '../../db/transaction.js';
 import type { FileStore } from '../../storage/files.js';
 import type { ScanProvider } from '../../storage/scan.js';
+import { deliveryRoutes } from './delivery-routes.js';
 import { exitRoutes } from './exit-routes.js';
 import { letterRoutes } from './letter-routes.js';
 import { processRoutes } from './process-routes.js';
+import { settlementCalculationRoutes } from './settlement-calculation-routes.js';
 import { settlementImportRoutes } from './settlement-import.js';
 import { settlementRoutes } from './settlement-routes.js';
+import { statutoryRoutes } from '../statutory/routes.js';
 
 /** `scanner` releases user uploads (task evidence) from quarantine (FR-106, storage/scan.ts). */
 export async function lifecycleRoutes(app: FastifyInstance, opts: { db: Database; files: FileStore; scanner: ScanProvider }): Promise<void> {
@@ -15,5 +18,10 @@ export async function lifecycleRoutes(app: FastifyInstance, opts: { db: Database
   await exitRoutes(app, opts);
   await letterRoutes(app, opts);
   await settlementRoutes(app, opts);
+  // FR-052 (I-88): calculation, notice waiver, settlement policy and the statutory rule pack registry.
+  await settlementCalculationRoutes(app, opts);
+  // I-85: retiring a statutory pack revision, and the PF option and PT state settings the statutory evaluator reads.
+  await statutoryRoutes(app, opts);
   await settlementImportRoutes(app, opts);
+  await deliveryRoutes(app, opts);
 }

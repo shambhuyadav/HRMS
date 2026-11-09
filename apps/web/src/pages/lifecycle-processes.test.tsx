@@ -2401,3 +2401,59 @@ describe('the selected role assignment', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('exit decisions under owner delegation (I-81)', () => {
+  const DOC = { id: 'd0000000-0000-4000-8000-000000000001', documentType: 'GENERAL', fileName: 'letter.pdf', uploadedAt: '2026-11-01T05:00:00.000Z', scanState: 'CLEAN', verificationState: 'VERIFIED' };
+
+  it('FR-051 HR enters a resignation received outside the system with its reference and verified document', async () => {
+    mockApi({
+      [`GET /v1/employees/${E_ASHA}`]: [200, ASHA_HIT],
+      [`GET /v1/employees/${E_ASHA}/processes`]: [200, { items: [] }],
+      [`GET /v1/employees/${E_ASHA}/exit-cases`]: [200, { items: [] }],
+      [`GET /v1/employees/${E_ASHA}/documents`]: [200, { items: [DOC] }],
+      [`POST /v1/employees/${E_ASHA}/resignation`]: [201, { exitCaseId: X_ASHA, state: 'SUBMITTED', origin: 'HR' }],
+    });
+    renderAt(`/lifecycle/employees/${E_ASHA}`, hr([PROCESS_READ, EXIT_READ, EXIT_MANAGE, EMPLOYEE_READ, 'document.read.document']));
+    const form = await screen.findByRole('form', { name: 'Enter a resignation' });
+    // I-92: the other separation types have their own HR form beside it (separation-entry.test.tsx).
+    expect(screen.getByRole('form', { name: 'Enter a separation' })).toBeTruthy();
+    fireEvent.click(within(form).getByRole('button', { name: 'Enter the resignation' }));
+    expect(await within(form.closest('section') as HTMLElement).findByText(/Give the proposed last working date/)).toBeTruthy();
+    fireEvent.change(within(form).getByLabelText('Proposed last working date'), { target: { value: '2026-12-31' } });
+    fireEvent.change(within(form).getByLabelText('Reference of the resignation received'), { target: { value: 'Letter of 5 Nov (synthetic)' } });
+    fireEvent.click(await within(form).findByRole('radio'));
+    fireEvent.click(within(form).getByRole('button', { name: 'Enter the resignation' }));
+    expect(await screen.findByText('The resignation is entered and waits for the manager’s recommendation.')).toBeTruthy();
+    expect(bodiesTo('POST', `/v1/employees/${E_ASHA}/resignation`)).toEqual([{ proposedLastWorkingDate: '2026-12-31', evidenceReference: 'Letter of 5 Nov (synthetic)', evidenceDocumentIds: [DOC.id] }]);
+  });
+
+  it('FR-051 offers no HR entry without the exit management duty', async () => {
+    mockApi({
+      [`GET /v1/employees/${E_ASHA}`]: [200, ASHA_HIT],
+      [`GET /v1/employees/${E_ASHA}/processes`]: [200, { items: [] }],
+      [`GET /v1/employees/${E_ASHA}/exit-cases`]: [200, { items: [] }],
+    });
+    renderAt(`/lifecycle/employees/${E_ASHA}`, hr([PROCESS_READ, EXIT_READ, EMPLOYEE_READ]));
+    expect(await screen.findByText('No processes for this employee yet.')).toBeTruthy();
+    expect(screen.queryByRole('form', { name: 'Enter a resignation' })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Enter a separation' })).toBeNull();
+  });
+
+  it('FR-051 shows who entered the resignation and lists what is kept after the last working date', async () => {
+    mockApi({
+      [`GET /v1/exit-cases/${X_ASHA}`]: [
+        200,
+        {
+          ...approvedDetail({}, { ...approvedExit(), ...({ origin: 'HR', enteredBy: 'u-hr' } as object) } as ExitCase),
+          afterLastWorkingDate: { treatment: 'KEPT', items: [{ kind: 'LEAVE_REQUEST', id: 'lr-1', startDate: '2026-12-22', endDate: '2026-12-23' }] },
+        },
+      ],
+    });
+    renderAt(`/lifecycle/exits/${X_ASHA}`, hr([EXIT_READ, PROCESS_READ]));
+    const facts = await findSection('Exit');
+    expect(valueIn(facts, 'Entered by')).toBe('HR, from a resignation given outside the system (with its evidence)');
+    const kept = await findSection('Approved for days after the last working date');
+    expect(kept.textContent).toContain('These are kept, not cancelled by the exit.');
+    expect(kept.textContent).toContain('Leave: 2026-12-22 to 2026-12-23');
+  });
+});

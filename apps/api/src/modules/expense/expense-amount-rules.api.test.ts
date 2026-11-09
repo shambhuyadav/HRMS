@@ -168,12 +168,14 @@ describe('expense amounts (BR-020)', () => {
 });
 
 describe('expense currency (BR-022)', () => {
-  it('BR-022: a claim uses one currency: a line carries none of its own, and a revision cannot change the claim’s', async () => {
-    // The request schema drops what it does not name, so a currency on a line has nowhere to go.
+  it('BR-022: a claim is reimbursed in one currency: a line in another keeps its own until submission converts it (I-87), and a revision cannot change the claim’s', async () => {
+    // I-87 (decided under owner delegation, 6 Nov 2026): the claim stays in INR; the line holds its USD amount and no INR one until
+    // submission converts it at the rate in force (currencies.api.test.ts proves the conversion).
     const withLineCurrency = await draft([{ ...(await line('100')), currency: 'USD' }]);
     expect(withLineCurrency.statusCode, withLineCurrency.body).toBe(201);
-    expect((await claim(employee, withLineCurrency.json().claimId)).currency).toBe('INR');
-    expect((await h.one<{ n: number }>(`select count(*)::int as n from information_schema.columns where table_name = 'expense_line' and column_name like '%currency%'`)).n).toBe(0);
+    const held = await claim(employee, withLineCurrency.json().claimId);
+    expect(held.currency).toBe('INR');
+    expect(held.lines[0]).toMatchObject({ currency: 'USD', sourceClaimedAmount: '100.0000', claimedAmount: null });
     const id = (await draft([await line('100')])).json().claimId as string;
     const c = await claim(employee, id);
     const changed = await h.call(employee, 'PUT', `/v1/expense/claims/${id}`, { expectedVersion: c.version, purpose: 'Client visit (synthetic)', currency: 'USD', lines: [await line('100')] });
@@ -181,8 +183,10 @@ describe('expense currency (BR-022)', () => {
     expect((await claim(employee, id)).currency).toBe('INR');
   });
 
-  it('BR-022: currency support needs Finance’s approval: only INR is approved (OQ-17), so any other currency stops at submission', async () => {
-    expect((await h.db.query(`select code from currency`)).rows).toEqual([{ code: 'INR' }]);
+  it('BR-022: currency support needs Finance’s approval: a code in the approved reference is not usable until Finance enables it (OQ-17, I-80), so it stops at submission', async () => {
+    // 0208 (I-80): USD is in the reference, and not enabled for this company.
+    expect((await h.db.query(`select code from currency where code = 'USD'`)).rows).toEqual([{ code: 'USD' }]);
+    expect((await h.db.query(`select 1 from company_currency where currency_code = 'USD' and state = 'ACTIVE'`)).rows).toEqual([]);
     const usd = (await draft([await line('100')], 'USD')).json().claimId as string;
     const refused = await submit(usd);
     expect([refused.statusCode, refused.json().error]).toEqual([422, 'UNSUPPORTED_CURRENCY']);

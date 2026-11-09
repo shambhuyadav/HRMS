@@ -4,6 +4,7 @@ import { type Database, withTransaction } from '../../db/transaction.js';
 import { actorOf } from '../../http/context.js';
 import { HttpError } from '../../http/errors.js';
 import { auditDenial, requireAccess } from '../../http/guard.js';
+import { ATTENDANCE_MINUTE_FIELDS } from '../attendance/service.js';
 import { EMPLOYEE_SORTS, EMPLOYEE_STATUS_GROUPS, SORT_DIRECTIONS } from '../employee/service.js';
 import { TEAM_SORTS } from '../team/service.js';
 import { COMPENSATION_BASES, REPORT_FORMATS, REPORTS, type ReportFilters, type ReportFormat } from './catalogue.js';
@@ -70,7 +71,7 @@ export async function reportRoutes(app: FastifyInstance, opts: { db: Database })
                 // FR-021 / E07 attendance control's filters, for the attendance register.
                 locationId: uuid,
                 shiftId: uuid,
-                minuteField: { type: 'string', enum: ['WORKED', 'SCHEDULED', 'SHORTFALL'] },
+                minuteField: { type: 'string', enum: [...ATTENDANCE_MINUTE_FIELDS] },
                 minuteOp: { type: 'string', enum: ['LT', 'LTE', 'EQ', 'GTE', 'GT'] },
                 minuteValue: { type: 'integer', minimum: 0, maximum: 100000 },
                 // FR-024 / E06: one leave type, for the mapped-policy export.

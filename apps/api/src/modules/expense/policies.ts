@@ -18,6 +18,7 @@ import { type Database, withTransaction } from '../../db/transaction.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess, requireAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { expenseCurrencyRoutes } from './currencies.js';
 
 export const NO_RULES_WARNING = 'No category has a rule, so nobody can claim under this revision.';
 export const TIED_RULES_WARNING = 'A grade rule and a location rule of one category tie for an employee with both, which blocks their claims; add a rule naming that grade and location.';
@@ -473,6 +474,8 @@ const values = {
 
 export async function expensePolicyRoutes(app: FastifyInstance, opts: { db: Database }): Promise<void> {
   const { db } = opts;
+  // OQ-17 (I-80): currencies Finance enables for claims (currencies.ts).
+  await expenseCurrencyRoutes(app, { db });
   const manage = (request: Parameters<typeof requireAccess>[1], recordKey?: string) => requireAccess(db, request, 'expense_policy', 'manage', ['operational'], { requireAll: true, ...(recordKey ? { recordKey } : {}) });
   const activate = (request: Parameters<typeof requireAccess>[1], recordKey: string) => requireAccess(db, request, 'expense_policy', 'activate', ['operational'], { requireAll: true, recordKey });
 

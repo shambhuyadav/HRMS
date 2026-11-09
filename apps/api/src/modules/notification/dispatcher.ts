@@ -339,6 +339,19 @@ async function describe(tx: Queryable, o: OutboxRow): Promise<EventSpec | null> 
       if (!a) return null;
       return { eventType: 'FILE_QUARANTINED', subjectEmployeeId: null, transactionId: null, transactionRevision: null, taskId: null, beneficiaryUserId: a.owner_user_id, data: { uploadedDate: a.uploaded } };
     }
+    case 'storage.scan_failed': {
+      // I-84 item 8, H7 "scan": the scanner could not check the file. The upload date only; nothing once the file is requeued or has a verdict.
+      if (!id(p.attachmentId)) return null;
+      const a = (
+        await tx.query<{ owner_user_id: string; uploaded: string }>(
+          `select owner_user_id, to_char(hrms_business_date(company_id, created_at), 'YYYY-MM-DD') as uploaded from attachment
+            where company_id = $1 and id = $2 and scan_state = 'PENDING_SCAN' and scan_failed_at is not null`,
+          [o.company_id, p.attachmentId],
+        )
+      ).rows[0];
+      if (!a) return null;
+      return { eventType: 'FILE_SCAN_FAILED', subjectEmployeeId: null, transactionId: null, transactionRevision: null, taskId: null, beneficiaryUserId: a.owner_user_id, data: { uploadedDate: a.uploaded } };
+    }
     default: {
       // Registered business modules describe their own topics (modules/events-registry.ts).
       const describer = MODULE_EVENT_DESCRIBERS[o.topic];
@@ -550,11 +563,15 @@ async function recipients(tx: Queryable, companyId: string, selector: string, ev
     }
     case 'SUBJECT_EMPLOYEE':
       if (!ev.subjectEmployeeId) return [];
+      // I-89 item 7: a deceased employee's own self-service is never notified, whatever the event, while a death exit stands
+      // (submitted to separated; a death entry rejected in error lets notices reach the employee again).
       return (
         await tx.query<{ u: string }>(
           `select l.user_id as u from user_employee_link l
             where l.company_id = $1 and l.employee_id = $2
-              and l.effective_from <= hrms_business_date($1, now()) and (l.effective_to is null or l.effective_to > hrms_business_date($1, now()))`,
+              and l.effective_from <= hrms_business_date($1, now()) and (l.effective_to is null or l.effective_to > hrms_business_date($1, now()))
+              and not exists (select 1 from exit_case x where x.company_id = l.company_id and x.employee_id = l.employee_id
+                                 and x.separation_type = 'DEATH' and x.state in ('SUBMITTED', 'RECOMMENDED', 'APPROVED', 'SEPARATED'))`,
           [companyId, ev.subjectEmployeeId],
         )
       ).rows.map((x) => x.u);

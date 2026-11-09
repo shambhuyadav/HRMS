@@ -1592,6 +1592,8 @@ interface Policy {
   duration: number;
   durationUnit: DurationUnit;
   startBasis: string;
+  /** I-84 item 12: the joining day counts as day one, so the review falls due one day earlier. */
+  startDayInclusive?: boolean;
   employmentType: string | null;
   gradeName: string | null;
   locationName: string | null;
@@ -1712,7 +1714,10 @@ function PolicyTable({ items, onAction }: { items: Policy[]; onAction: (action: 
               <td>
                 {p.duration} {UNIT_LABEL[p.durationUnit]}
               </td>
-              <td>{p.startBasis === 'JOINING_DATE' ? 'Joining date' : readable(p.startBasis)}</td>
+              <td>
+                {p.startBasis === 'JOINING_DATE' ? 'Joining date' : readable(p.startBasis)}
+                {p.startDayInclusive ? ', counted as day one' : ''}
+              </td>
               <td>{formatDate(p.effectiveFrom)}</td>
               <td>{p.effectiveTo ? formatDate(p.effectiveTo) : 'No end date'}</td>
               <td>
@@ -1802,6 +1807,7 @@ function CreatePolicyForm({ applicability, onSaved }: { applicability: PolicyLis
   const [employmentType, setEmploymentType] = useState('');
   const [gradeId, setGradeId] = useState('');
   const [locationId, setLocationId] = useState('');
+  const [inclusive, setInclusive] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: (body: object) => api<Policy>('/v1/confirmation-policies', { body }),
@@ -1811,6 +1817,7 @@ function CreatePolicyForm({ applicability, onSaved }: { applicability: PolicyLis
       setEmploymentType('');
       setGradeId('');
       setLocationId('');
+      setInclusive(false);
       onSaved(`Policy ${policy.code} created.`);
     },
   });
@@ -1825,6 +1832,7 @@ function CreatePolicyForm({ applicability, onSaved }: { applicability: PolicyLis
       ...(employmentType ? { employmentType } : {}),
       ...(gradeId ? { gradeId } : {}),
       ...(locationId ? { locationId } : {}),
+      ...(inclusive ? { startDayInclusive: true } : {}),
     });
   };
   return (
@@ -1868,6 +1876,10 @@ function CreatePolicyForm({ applicability, onSaved }: { applicability: PolicyLis
           </select>
         </label>
         <TermFields value={terms} onChange={setTerms} />
+        <label className="wide">
+          <input type="checkbox" checked={inclusive} onChange={(e) => setInclusive(e.target.checked)} /> Count the joining day as day one (the review falls due one day earlier; kept by every later
+          revision)
+        </label>
         <FormProblem text={problem} />
         <div className="wide row">
           <button type="submit" disabled={create.isPending}>

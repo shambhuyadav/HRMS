@@ -66,7 +66,8 @@ function teamSelect(grant: AccessGrant, f: TeamFilters, params: SqlParams): stri
   const day = `${params.add(grant.businessDate)}::date`;
   if (f.search) {
     const pattern = params.add(`%${f.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    conditions.push(`(e.employee_code ilike ${pattern} or e.display_name ilike ${pattern} or e.work_email ilike ${pattern})`);
+    // DF16 "Search includes permitted work email/extension" (I-89 item 5).
+    conditions.push(`(e.employee_code ilike ${pattern} or e.display_name ilike ${pattern} or e.work_email ilike ${pattern} or e.work_phone_extension like ${pattern})`);
   }
   if (f.departmentId) conditions.push(`ea.department_id = ${params.add(f.departmentId)}::uuid`);
   if (f.locationId) conditions.push(`ea.location_id = ${params.add(f.locationId)}::uuid`);
@@ -80,7 +81,7 @@ function teamSelect(grant: AccessGrant, f: TeamFilters, params: SqlParams): stri
                                                    and fc.state in ('OPEN', 'REVIEW_PENDING') and fc.current_due_date <= ${params.add(f.confirmationDueTo)}::date)`,
     );
   }
-  return `select e.id, e.employee_code as "employeeCode", e.display_name as "displayName", e.work_email as "workEmail",
+  return `select e.id, e.employee_code as "employeeCode", e.display_name as "displayName", e.work_email as "workEmail", e.work_phone_extension as "workPhoneExtension",
             d.name as department, g.name as designation, l.name as location, mgr.display_name as manager, e.joining_date as "joiningDate",
             st.code as status, ar.status as "todayAttendance", nr.next_review as "nextReviewDate"
        from employee e

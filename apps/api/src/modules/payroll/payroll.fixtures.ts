@@ -123,6 +123,8 @@ export interface HeadSpec {
   base?: string[];
   effectiveFrom?: string;
   sequence?: number;
+  /** A PAYROLL_TAX_TREATMENT code; TAXABLE when not given. */
+  taxTreatment?: string;
 }
 
 /** A pay component (if new) and an active head revision: authored by one configurator, activated by another. */
@@ -137,7 +139,7 @@ export async function head(h: Harness, author: TestActor, activator: TestActor, 
       inUse: true,
       headType: spec.headType,
       calculationBasis: spec.basis,
-      taxTreatment: 'TAXABLE',
+      taxTreatment: spec.taxTreatment ?? 'TAXABLE',
       displaySequence: spec.sequence ?? 10,
       ...(spec.rulePackCode ? { rulePackCode: spec.rulePackCode } : {}),
       ...(spec.base ? { baseComponentCodes: spec.base } : {}),
@@ -146,6 +148,35 @@ export async function head(h: Harness, author: TestActor, activator: TestActor, 
   );
   await ok(await h.call(activator, 'POST', `/v1/payroll/head-revisions/${draft.id}/activate`, { expectedVersion: draft.version }));
   return draft.id;
+}
+
+/**
+ * I-79: INPUT-basis heads for arrears, adjustments and recoveries (if new) and an active valuation policy naming them, written by
+ * one configurator and activated by another.
+ */
+export async function valuationPolicy(
+  h: Harness,
+  author: TestActor,
+  activator: TestActor,
+  spec: { prefix: string; effectiveFrom?: string; recovery?: boolean; timesheetUnit?: 'DAY' | 'HOUR'; hoursPerDay?: string },
+) {
+  const codes = { arrears: `${spec.prefix}_ARREARS`, late: `${spec.prefix}_LATE`, recovery: `${spec.prefix}_RECOVERY` };
+  await head(h, author, activator, { code: codes.arrears, headType: 'EARNING', basis: 'INPUT', sequence: 90 });
+  await head(h, author, activator, { code: codes.late, headType: 'EARNING', basis: 'INPUT', sequence: 91 });
+  if (spec.recovery !== false) await head(h, author, activator, { code: codes.recovery, headType: 'DEDUCTION', basis: 'INPUT', sequence: 92 });
+  const draft = await ok<{ id: string; version: number }>(
+    await h.call(author, 'POST', '/v1/payroll/valuation-policies', {
+      effectiveFrom: spec.effectiveFrom ?? '2026-01-01',
+      arrearsComponentCode: codes.arrears,
+      adjustmentComponentCode: codes.late,
+      ...(spec.recovery !== false ? { recoveryComponentCode: codes.recovery } : {}),
+      timesheetUnit: spec.timesheetUnit ?? 'DAY',
+      ...(spec.hoursPerDay ? { hoursPerDay: spec.hoursPerDay } : {}),
+    }),
+    201,
+  );
+  await ok(await h.call(activator, 'POST', `/v1/payroll/valuation-policies/${draft.id}/activate`, { expectedVersion: draft.version }));
+  return { id: draft.id, codes };
 }
 
 export interface PeriodSpec {
@@ -252,6 +283,40 @@ export async function approvedExit(h: Harness, company: Company, employeeId: str
     await h.db.query(`update business_transaction set state = 'APPROVED' where id = $1`, [bt.id]);
     await h.db.query(`update exit_case set state = 'APPROVED', approved_leaving_date = $2, approved_at = now(), prior_status_code = 'ACTIVE_CONFIRMED' where id = $1`, [x.id, lastWorkingDate]);
     await h.db.query('commit');
+  } catch (e) {
+    await h.db.query('rollback');
+    throw e;
+  }
+}
+
+/**
+ * FR-052 (I-80): the first settlement of the employee's approved exit, written directly and walked to RELEASE_ELIGIBLE (its
+ * transaction alongside), as the lifecycle flow would leave it; `by` prepares and marks it. The settlement flow itself is tested in
+ * lifecycle/.
+ */
+export async function releaseEligibleSettlement(h: Harness, company: Company, employeeId: string, by: TestActor): Promise<string> {
+  await h.db.query('begin');
+  try {
+    const exitCase = (await h.one<{ id: string }>(`select id from exit_case where company_id = $1 and employee_id = $2 and state = 'APPROVED' order by created_at desc limit 1`, [company.id, employeeId]))
+      .id;
+    const bt = await h.one<{ id: string }>(`insert into business_transaction (company_id, kind, owner_employee_id, state) values ($1, 'settlement', $2, 'DRAFT') returning id`, [company.id, employeeId]);
+    const s = await h.one<{ id: string }>(
+      `insert into settlement (company_id, exit_case_id, employee_id, revision, transaction_id, state, currency_code, prepared_by, created_by, updated_by)
+       values ($1, $2, $3, 1, $4, 'DRAFT', 'INR', $5, $5, $5) returning id`,
+      [company.id, exitCase, employeeId, bt.id, by.user],
+    );
+    const steps: [string, string, unknown[]][] = [
+      ['SUBMITTED', 'submitted_at = now(), submitted_by = $3', [by.user]],
+      ['REVIEWED', 'reviewed_at = now()', []],
+      ['APPROVED', 'approved_at = now()', []],
+      ['RELEASE_ELIGIBLE', 'release_eligible_at = now(), release_eligible_by = $3, release_eligible_assignment_id = $4', [by.user, by.assignment]],
+    ];
+    for (const [state, set, extra] of steps) {
+      await h.db.query(`update business_transaction set state = $2 where id = $1`, [bt.id, state]);
+      await h.db.query(`update settlement set state = $2, ${set} where id = $1`, [s.id, state, ...extra]);
+    }
+    await h.db.query('commit');
+    return s.id;
   } catch (e) {
     await h.db.query('rollback');
     throw e;
@@ -391,6 +456,7 @@ export interface RecordView {
   segments: { segmentStart: string; segmentEnd: string; calendarDays: number; leaveLopUnits: string; attendanceLopUnits: string; paidDays: string }[];
   lossOfPay: { day: string; sourceKind: string; units: string }[];
   inputs: { inputId: string; componentCode: string; amount: string; reference: string }[];
+  statutory: { componentCode: string; rulePackCode: string; headType: string; status: string; amount: string | null; workings: Record<string, unknown> }[];
 }
 
 export async function record(h: Harness, a: TestActor, runId: string, employeeId: string): Promise<RecordView> {

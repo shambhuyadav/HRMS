@@ -150,6 +150,18 @@ describe.runIf(isModuleActive('payroll'))('payroll lock, release and values', ()
   });
 
   describe('period and release (BR-012)', () => {
+    // A financial-year filter on the run list (owner, 6 Nov 2026): by the label each calendar gives its periods, not a fixed April-March year.
+    it('BR-012: the run list filters by the financial year the calendar gave the period, in any case, and shows it on each run', async () => {
+      const dept = await department('REL_YEAR');
+      await paid(dept);
+      const run = await createRun(h, preparer, periods['2026-05']!, { departmentIds: [dept] });
+      const list = async (q: string) => (await ok<{ items: { id: string; financialYear: string }[] }>(await h.call(preparer, 'GET', `/v1/payroll/runs?${q}`))).items;
+      expect((await list('financialYear=FY2026')).find((r) => r.id === run.id)).toMatchObject({ financialYear: 'FY2026' });
+      expect((await list('financialYear=fy2026')).map((r) => r.id)).toContain(run.id);
+      expect(await list('financialYear=FY2099')).toEqual([]);
+      expect((await h.call(preparer, 'GET', '/v1/payroll/runs?financialYear=FY%202026')).statusCode).toBe(400);
+    });
+
     it('BR-012: calculation, approval, lock, return and payment are distinct decisions: each needs its own duty and records its own person; locking pays nothing', async () => {
       const dept = await department('REL_DISTINCT');
       const e = await paid(dept, '25000');
@@ -201,16 +213,22 @@ describe.runIf(isModuleActive('payroll'))('payroll lock, release and values', ()
   });
 
   describe('payroll values are not inferred (BR-011, DF05)', () => {
-    it('BR-011: annual cost and monthly gross are kept as declared, with no gross-times-12 and no estimated in-hand figure computed', async () => {
+    it('BR-011: annual cost and monthly gross are kept as declared, with no gross-times-12; the in-hand figure is a labelled estimate before tax (I-80)', async () => {
       const dept = await department('VAL_DECLARED');
       const e = await person(h, A, hr, { departmentId: dept, joiningDate: '2026-01-05' });
       // 50000 x 12 is 600000, so a derived annual cost could not read 777777.
       await salary(h, preparer, e, { effectiveFrom: '2026-01-05', monthlyGross: '50000', annualCtc: '777777', components: [{ code: 'LK_BASIC', amount: '50000' }] });
       const items = (await ok<{ items: Record<string, unknown>[] }>(await h.call(preparer, 'GET', `/v1/employees/${e}/salary`))).items;
       expect(items).toEqual([expect.objectContaining({ monthlyGross: '50000.0000', annualCtc: '777777.0000' })]);
-      const master = (await ok<{ items: Record<string, unknown>[] }>(await h.call(preparer, 'GET', '/v1/salary-master?pageSize=100'))).items.find((r) => r.employeeId === e)!;
+      const page = await ok<{ items: Record<string, unknown>[]; estimate: { label: string; message: string } }>(await h.call(preparer, 'GET', '/v1/salary-master?pageSize=100'));
+      const master = page.items.find((r) => r.employeeId === e)!;
       expect(master).toMatchObject({ monthlyGross: '50000.0000', annualCtc: '777777.0000' });
-      for (const row of [items[0]!, master]) expect(Object.keys(row).filter((k) => /hand|estimat|net|tax/i.test(k))).toEqual([]);
+      // I-80 (decided under owner delegation, 6 Nov 2026): the salary master shows the estimate, labelled, and never a tax figure;
+      // the salary record itself carries no estimate.
+      expect(master.estimatedInHand).toBe('50000.00');
+      expect(page.estimate.message).toContain('before income tax and statutory deductions');
+      expect(Object.keys(master).filter((k) => /hand|estimat|net|tax/i.test(k))).toEqual(['estimatedInHand']);
+      expect(Object.keys(items[0]!).filter((k) => /hand|estimat|net|tax/i.test(k))).toEqual([]);
     });
 
     it('BR-011: tax treatment is not inferred: a taxable head deducts nothing on its own, and a rule-pack head with no pack blocks the employee instead of guessing', async () => {
@@ -238,8 +256,8 @@ describe.runIf(isModuleActive('payroll'))('payroll lock, release and values', ()
       const scope = { periodId: periods['2026-08']!, departmentIds: [dept] };
       const preview = await ok<{ scopeToken: string }>(await h.call(preparer, 'POST', '/v1/payroll/runs/preview', scope));
       const run = await ok<{ id: string }>(await h.call(preparer, 'POST', '/v1/payroll/runs', { ...scope, scopeToken: preview.scopeToken }), 201);
-      // Retrying the creation leaves one run. What it answers is the gap recorded in the it.fails below this describe.
-      expect((await h.call(preparer, 'POST', '/v1/payroll/runs', { ...scope, scopeToken: preview.scopeToken })).statusCode).toBe(409);
+      // Retrying the creation answers with the run it created and leaves one run (the test below).
+      expect((await h.call(preparer, 'POST', '/v1/payroll/runs', { ...scope, scopeToken: preview.scopeToken })).json()).toMatchObject({ id: run.id, replayed: true });
       expect((await h.one<{ n: number }>(`select count(*)::int as n from payroll_run where company_id = $1 and period_id = $2 and scope_department_ids = $3::uuid[]`, [A.id, scope.periodId, scope.departmentIds])).n).toBe(1);
       const calculated = await calculate(h, preparer, run.id);
       const retriedCalculation = await ok<{ replayed: boolean; version: number; state: string }>(await h.call(preparer, 'POST', `/v1/payroll/runs/${run.id}/calculate`, { expectedVersion: calculated.version }));
@@ -266,18 +284,30 @@ describe.runIf(isModuleActive('payroll'))('payroll lock, release and values', ()
       expect(before).toMatchObject({ lock_version: 1, audits: 1, records: 1 });
       expect((await record(h, processor, run.id, e)).net).toBe('20000.0000');
     });
-  });
 
-  // A known gap. A passing it.fails counts as passed in the register, so this sits outside the describe above and its name states no
-  // identifier: it must not add to that row's evidence. No idempotency key exists on this route, and adding one is a change of contract.
-  it.fails('a retried run creation answers with the run it already created (it answers 409 SCOPE_CHANGED: one run, but not the recorded result)', async () => {
-    const dept = await department('RETRY_CREATE');
-    await paid(dept);
-    const scope = { periodId: periods['2026-09']!, departmentIds: [dept] };
-    const preview = await ok<{ scopeToken: string }>(await h.call(preparer, 'POST', '/v1/payroll/runs/preview', scope));
-    const first = await ok<{ id: string }>(await h.call(preparer, 'POST', '/v1/payroll/runs', { ...scope, scopeToken: preview.scopeToken }), 201);
-    const retry = await h.call(preparer, 'POST', '/v1/payroll/runs', { ...scope, scopeToken: preview.scopeToken });
-    expect(retry.statusCode).toBeLessThan(300);
-    expect(retry.json().id).toBe(first.id);
+    // The scope token is the request's key (owner, 6 Nov 2026): the same preparer sending it again while the run lives is a retry.
+    it('FR-063: a retried run creation answers with the run it created and creates nothing; another preparer, or a run since cancelled, is not a retry', async () => {
+      const dept = await department('RETRY_CREATE');
+      await paid(dept);
+      const scope = { periodId: periods['2026-09']!, departmentIds: [dept] };
+      const preview = await ok<{ scopeToken: string }>(await h.call(preparer, 'POST', '/v1/payroll/runs/preview', scope));
+      const create = (a: TestActor) => h.call(a, 'POST', '/v1/payroll/runs', { ...scope, scopeToken: preview.scopeToken });
+      const runs = async () => (await h.one<{ n: number }>(`select count(*)::int as n from payroll_run where company_id = $1 and period_id = $2 and scope_department_ids = $3::uuid[]`, [A.id, scope.periodId, scope.departmentIds])).n;
+      const first = await ok<{ id: string; replayed: boolean }>(await create(preparer), 201);
+      expect(first.replayed).toBe(false);
+      const retry = await ok<{ id: string; replayed: boolean; version: number }>(await create(preparer), 200);
+      expect(retry).toMatchObject({ id: first.id, replayed: true });
+      expect(await runs()).toBe(1);
+      // Another preparer confirming the same scope is not retrying anything: its members are already in a run.
+      const other = await h.actor(A, 'HR_ADMINISTRATOR', { extra: grants(PREPARE, SALARY) });
+      expect((await create(other)).json()).toMatchObject({ error: 'SCOPE_CHANGED' });
+      expect(await runs()).toBe(1);
+      // A cancelled run releases its members, so the same token then starts a new run.
+      await ok(await h.call(canceller, 'POST', `/v1/payroll/runs/${first.id}/cancel`, { reason: 'Synthetic', expectedVersion: retry.version }));
+      const again = await ok<{ id: string; replayed: boolean }>(await create(preparer), 201);
+      expect(again.replayed).toBe(false);
+      expect(again.id).not.toBe(first.id);
+      expect(await runs()).toBe(2);
+    });
   });
 });

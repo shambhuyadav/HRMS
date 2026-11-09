@@ -5,6 +5,10 @@
 // are the only place that knows it: attendance evaluation and amendment, leave and work-request day counts, payroll unpaid
 // leave and timesheet utilisation all use them, so they cannot disagree.
 //
+// I-78 item 4 (0182): a pattern may also make the nth occurrence of a weekday in the month off (the 2nd and 4th Saturdays),
+// which every count treats as any other weekly off, and may mark occurrences as half weekly-offs: a working day for every
+// count, which only attendance evaluation measures against the first half of the shift (halfWeeklyOffSql).
+//
 // Workflow waits (notification/reminders.ts, payroll/holds.ts) count "business days" on "the company calendar" (DF03), and
 // no company calendar exists, so they keep Monday to Friday until the owner says which calendar that is.
 //
@@ -14,6 +18,22 @@ import type { Queryable } from '../../db/queryable.js';
 
 /** ISO weekdays off without a pattern in force: DF05 "Monday-Friday workdays". */
 export const DEFAULT_OFF_DAYS: readonly number[] = [6, 7];
+
+/** Occurrences of a weekday in the month (1st .. 5th), as a pattern names them (I-78 item 4). */
+export interface WeekdayOccurrences {
+  weekday: number;
+  weeks: number[];
+}
+
+/** The stored codes (weekday x 10 + n, ascending; 0182) of a list of weekday occurrences. */
+export const occurrenceCodes = (list: readonly WeekdayOccurrences[]): number[] => list.flatMap((o) => o.weeks.map((n) => o.weekday * 10 + n)).sort((a, b) => a - b);
+
+/** The weekday occurrences of stored codes, one entry per weekday. */
+export function occurrencesOf(codes: readonly number[]): WeekdayOccurrences[] {
+  const byDay = new Map<number, number[]>();
+  for (const c of codes) byDay.set(Math.floor(c / 10), [...(byDay.get(Math.floor(c / 10)) ?? []), c % 10]);
+  return [...byDay.entries()].sort(([a], [b]) => a - b).map(([weekday, weeks]) => ({ weekday, weeks: weeks.sort((a, b) => a - b) }));
+}
 
 /**
  * Orders calendar changes against the start of a payroll calculation, which reads the calendar known at one instant
@@ -28,14 +48,21 @@ export async function lockCalendar(tx: Queryable, companyId: string): Promise<vo
 const assignedOn = (day: string, employee: string, company: string) =>
   `ea.company_id = ${company} and ea.employee_id = ${employee} and ea.effective_from <= ${day}::date and (ea.effective_to is null or ea.effective_to > ${day}::date)`;
 
+/** 'OFF', 'HALF' or null for `day` under the location pattern in force (0182 hrms_weekly_off_kind); always one row. */
+const weeklyOffKindSql = (day: string, employee: string, company: string, asOf?: string) => `(select hrms_weekly_off_kind(${day}::date, w.off_days, w.off_occurrences, w.half_off, '{${DEFAULT_OFF_DAYS.join(',')}}'::smallint[])
+     from (select 1) as one
+     left join lateral (
+       select p.off_days, p.off_occurrences, p.half_off from employment_assignment ea
+         join weekly_off_pattern p on p.company_id = ea.company_id and p.location_id = ea.location_id and p.effective_from <= ${day}::date
+                                  ${asOf ? `and p.created_at <= coalesce(${asOf}, 'infinity'::timestamptz)` : ''}
+        where ${assignedOn(day, employee, company)}
+        order by p.effective_from desc, p.revision desc limit 1) w on true)`;
+
 /** SQL truth of "`day` is a weekly off of the employee's location". `asOf`: read the patterns known at that instant. */
-export const weeklyOffSql = (day: string, employee: string, company: string, asOf?: string) => `(extract(isodow from ${day}::date)::smallint = any(coalesce(
-    (select p.off_days from employment_assignment ea
-       join weekly_off_pattern p on p.company_id = ea.company_id and p.location_id = ea.location_id and p.effective_from <= ${day}::date
-                                ${asOf ? `and p.created_at <= coalesce(${asOf}, 'infinity'::timestamptz)` : ''}
-      where ${assignedOn(day, employee, company)}
-      order by p.effective_from desc, p.revision desc limit 1),
-    '{${DEFAULT_OFF_DAYS.join(',')}}'::smallint[])))`;
+export const weeklyOffSql = (day: string, employee: string, company: string, asOf?: string) => `coalesce(${weeklyOffKindSql(day, employee, company, asOf)} = 'OFF', false)`;
+
+/** SQL truth of "`day` is a half weekly-off of the employee's location": still a working day for every count (I-78 item 4). */
+export const halfWeeklyOffSql = (day: string, employee: string, company: string) => `coalesce(${weeklyOffKindSql(day, employee, company)} = 'HALF', false)`;
 
 /** SQL truth of "`day` is a holiday of the employee's location". `asOf`: read the holidays in force at that instant. */
 export const holidaySql = (day: string, employee: string, company: string, asOf?: string) => `exists (

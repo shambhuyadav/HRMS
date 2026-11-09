@@ -47,7 +47,20 @@ import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { cancelActiveApproval, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
 import { bankChecks } from './bank.js';
-import { CHUNK, calculateChunk, loanRecoveryBreaches, type PolicySnapshot, type RunContext, startCalculation, verifyMembers } from './calculate.js';
+import {
+  ADJUSTMENTS_FOR,
+  ARREARS_FOR,
+  SETTLED_FINALLY,
+  CHUNK,
+  calculateChunk,
+  loanRecoveryBreaches,
+  mastersChanged,
+  type PolicySnapshot,
+  type RunContext,
+  startCalculation,
+  valuationPolicyOn,
+  verifyMembers,
+} from './calculate.js';
 import {
   type Actor,
   actorOf,
@@ -73,6 +86,7 @@ import {
 } from './common.js';
 import { activePeriod } from './config.js';
 import { createAutomaticHolds } from './holds.js';
+import { statutoryChanged } from '../statutory/evaluate.js';
 
 export const RUN_KIND = 'payroll_run';
 export const APPROVAL_KIND = 'payroll_run_approval';
@@ -302,6 +316,19 @@ export async function createRun(tx: Queryable, grant: AccessGrant, input: ScopeI
   // Membership of a service month is decided one run at a time.
   await advisoryLock(tx, `payroll_month:${grant.companyId}:${p.service_start}`);
   await reassertRun(tx, grant, 'prepare');
+  // FR-063, BRD line 107 "Make request retries ... idempotent" (owner, 6 Nov 2026): the token names the period, the filters and the members
+  // the caller confirmed, so the same caller sending it again while that run lives is a retry, answered with the run, not a second one.
+  // Another preparer, or a run since cancelled or superseded, is not a retry and goes through the checks below.
+  const earlier = (
+    await tx.query<{ id: string }>(
+      `select id from payroll_run
+        where company_id = $1 and period_id = $2 and scope_token = $3 and created_by = $4
+          and state in ('DRAFT', 'CALCULATED', 'IN_REVIEW', 'APPROVED', 'PROCESSED_LOCKED')
+        order by revision desc limit 1`,
+      [grant.companyId, p.id, input.scopeToken, grant.userId],
+    )
+  ).rows[0];
+  if (earlier) return { ...(await runDetail(tx, grant, earlier.id)), replayed: true };
   const id = randomUUID();
   const transactionId = await newTransaction(tx, grant.companyId, RUN_KIND, null, 'DRAFT', grant.userId);
   await tx.query(
@@ -363,7 +390,7 @@ export async function createRun(tx: Queryable, grant: AccessGrant, input: ScopeI
       scopeToken: input.scopeToken,
     },
   });
-  return runDetail(tx, grant, id);
+  return { ...(await runDetail(tx, grant, id)), replayed: false };
 }
 
 /** DRAFT, before its calculation starts: narrows the confirmed scope; an excluded employee may then be paid through another run of the month. */
@@ -920,6 +947,49 @@ async function processChunk(tx: Queryable, actor: Actor, businessDate: string, r
         [actor.companyId, runId, actor.userId, ids],
       )
     ).rowCount ?? 0;
+  // FR-035 (I-79): the approved arrears cases the records carry are paid by them, once (their transactions first, as for stops).
+  const carried = `from payroll_record_input ri
+       join payroll_record rec on rec.company_id = ri.company_id and rec.id = ri.record_id
+       join payroll_arrears_case c on c.company_id = ri.company_id and c.id = ri.arrears_case_id
+      where rec.company_id = $1 and rec.run_id = $2 and rec.id = any($3::uuid[]) and rec.calculation_status = 'CALCULATED'`;
+  const carriedCount = (await tx.query<{ n: number }>(`select count(*)::int as n ${carried}`, [actor.companyId, runId, ids])).rows[0]!.n;
+  if (carriedCount > 0) {
+    await tx.query(
+      `update business_transaction bt set state = 'APPLIED', updated_by = $4 ${carried} and c.state = 'APPROVED' and bt.company_id = c.company_id and bt.id = c.transaction_id`,
+      [actor.companyId, runId, ids, actor.userId],
+    );
+    const applied =
+      (
+        await tx.query(
+          `update payroll_arrears_case pac set state = 'APPLIED', applied_record_id = rec.id, updated_by = $4 ${carried} and c.state = 'APPROVED' and pac.company_id = c.company_id and pac.id = c.id`,
+          [actor.companyId, runId, ids, actor.userId],
+        )
+      ).rowCount ?? 0;
+    // Another run paid one of them first: nothing in this chunk is frozen.
+    if (applied !== carriedCount) throw new HttpError(409, 'ARREARS_ALREADY_APPLIED', 'An arrears case this run carries was paid by another run; return the run to calculate a new revision');
+  }
+  // FR-100 (I-79): the approved late-timesheet adjustments likewise, each naming this run and the record's line it was paid on (DB111).
+  const adjusted = `from payroll_record_input ri
+       join payroll_record rec on rec.company_id = ri.company_id and rec.id = ri.record_id
+       join payroll_adjustment adj on adj.company_id = ri.company_id and adj.id = ri.adjustment_id
+       join payroll_line pl on pl.company_id = rec.company_id and pl.record_id = rec.id and pl.component_id = ri.component_id
+      where rec.company_id = $1 and rec.run_id = $2 and rec.id = any($3::uuid[]) and rec.calculation_status = 'CALCULATED'`;
+  const adjustedCount = (await tx.query<{ n: number }>(`select count(*)::int as n ${adjusted}`, [actor.companyId, runId, ids])).rows[0]!.n;
+  if (adjustedCount > 0) {
+    await tx.query(
+      `update business_transaction bt set state = 'APPLIED', updated_by = $4 ${adjusted} and adj.state = 'APPROVED' and bt.company_id = adj.company_id and bt.id = adj.transaction_id`,
+      [actor.companyId, runId, ids, actor.userId],
+    );
+    const applied =
+      (
+        await tx.query(
+          `update payroll_adjustment pa set state = 'APPLIED', target_run_id = rec.run_id, applied_payroll_line_id = pl.id, updated_by = $4
+           ${adjusted} and adj.state = 'APPROVED' and pa.company_id = adj.company_id and pa.id = adj.id`,
+          [actor.companyId, runId, ids, actor.userId],
+        )
+      ).rowCount ?? 0;
+    if (applied !== adjustedCount) throw new HttpError(409, 'ADJUSTMENT_ALREADY_APPLIED', 'A timesheet adjustment this run carries was paid by another run; return the run to calculate a new revision');
+  }
   const created = await createAutomaticHolds(tx, actor, businessDate, runId, ids);
   const bank = { VERIFIED: 0, MISSING: 0, INVALID: 0, UNVERIFIED: 0, NOT_REQUIRED: 0 };
   for (const r of records) bank[status(r)]++;
@@ -991,6 +1061,58 @@ export async function processRun(db: Database, grant: AccessGrant, runId: string
       )
     ).rows[0]!.n;
     if (breaches > 0) throw new HttpError(409, 'LOAN_BALANCE_CHANGED', 'A loan changed after the calculation, so a recovery line is no longer covered; return the run to calculate a new revision', { records: breaches });
+    // docs/10 A2 (I-28): a salary arrangement, unpaid leave, reviewed attendance or a leaving date approved after the calculation means the
+    // records no longer say what the masters say. Refused here, before anything is frozen; a change approved once processing has started
+    // is frozen with the run and follows as a later adjustment, as before.
+    const masters = await mastersChanged(tx, grant.companyId, runId);
+    if (masters.leaving_date + masters.arrangements + masters.unpaid_leave + masters.attendance > 0) {
+      throw new HttpError(409, 'MASTERS_CHANGED', 'Employee records changed after the calculation; return the run to calculate a new revision', {
+        records: { leavingDate: masters.leaving_date, salaryArrangements: masters.arrangements, unpaidLeave: masters.unpaid_leave, attendance: masters.attendance },
+      });
+    }
+    // P8a gap 2 (I-85, I-90): likewise the statutory facts the evaluation read — the pack revision in effect, a PF option, a professional
+    // tax state, an accepted tax declaration.
+    const statutory = await statutoryChanged(tx, grant.companyId, runId);
+    if (statutory.packs + statutory.pfOptions + statutory.ptStates + statutory.lwfStates + statutory.taxDeclarations > 0) {
+      throw new HttpError(409, 'STATUTORY_CHANGED', 'A statutory rule pack, PF option, work location state or accepted tax declaration changed after the calculation; return the run to calculate a new revision', {
+        records: statutory,
+      });
+    }
+    // FR-035, FR-100 (I-79): an arrears case or a timesheet adjustment approved after the calculation, which a record of this run would
+    // have taken, is not left behind.
+    if (await valuationPolicyOn(tx, grant.companyId, r.service_end)) {
+      const waiting = (
+        await tx.query<{ cases: number; adjustments: number }>(
+          `select (select count(*)::int from payroll_record rec
+                    cross join lateral (select c.id ${ARREARS_FOR('rec', '$3::text', '$4::date')}) c
+                    where rec.company_id = $1 and rec.run_id = $2 and rec.calculation_status = 'CALCULATED'
+                      and not exists (select 1 from payroll_record_input ri where ri.company_id = rec.company_id and ri.record_id = rec.id and ri.arrears_case_id = c.id)) as cases,
+                  (select count(*)::int from payroll_record rec
+                    cross join lateral (select a.id ${ADJUSTMENTS_FOR('rec', '$3::text', '$4::date')}) a
+                    where rec.company_id = $1 and rec.run_id = $2 and rec.calculation_status = 'CALCULATED'
+                      and not exists (select 1 from payroll_record_input ri where ri.company_id = rec.company_id and ri.record_id = rec.id and ri.adjustment_id = a.id)) as adjustments`,
+          [grant.companyId, runId, r.currency_code, r.service_start],
+        )
+      ).rows[0]!;
+      if (waiting.cases + waiting.adjustments > 0) {
+        throw new HttpError(409, 'ADJUSTMENTS_CHANGED', 'Arrears or timesheet adjustments were approved after the calculation; return the run to calculate a new revision', waiting);
+      }
+    }
+    // FR-052 (I-80): a final settlement that became release-eligible or paid after the calculation pays these employees from their last
+    // working date; this run would pay them again, so it returns for a new revision, which holds them out (SETTLED_IN_FINAL_SETTLEMENT).
+    const settled = (
+      await tx.query<{ n: number }>(
+        `select count(*)::int as n from payroll_record rec
+          where rec.company_id = $1 and rec.run_id = $2 and rec.calculation_status = 'CALCULATED'
+            and ${SETTLED_FINALLY('rec.company_id', 'rec.employee_id', 'hrms_exit_last_working_date(rec.company_id, rec.employee_id)', '$3::date')}`,
+        [grant.companyId, runId, r.service_end],
+      )
+    ).rows[0]!.n;
+    if (settled > 0) {
+      throw new HttpError(409, 'SETTLEMENT_CHANGED', 'A final settlement became payable after the calculation for employees this run pays; return the run to calculate a new revision', {
+        records: settled,
+      });
+    }
     // The actual time, not the transaction's start: this transaction may have waited on the locks above, and a loan
     // disbursed meanwhile, which the check above saw as disbursed, must count this run's line (LOAN_LINE_COUNTS).
     await tx.query(
@@ -1369,13 +1491,14 @@ export const RUN_LIST_CAP = 200;
 export async function listRuns(
   db: Queryable,
   grant: AccessGrant,
-  q: { periodId?: string | undefined; state?: string | undefined; states?: string | undefined; coversDate?: string | undefined } & Paging,
+  q: { periodId?: string | undefined; state?: string | undefined; states?: string | undefined; coversDate?: string | undefined; financialYear?: string | undefined } & Paging,
 ) {
   // `states` (comma separated) and `coversDate` (runs of an active calendar's period that covers the date) are the
-  // dashboard widgets' filters (payroll/metrics.ts): the same state sets and "current period".
+  // dashboard widgets' filters (payroll/metrics.ts): the same state sets and "current period". `financialYear` (BR-012, owner, 6 Nov 2026)
+  // is the label the calendar gave the run's period, which every row also shows.
   return pageOf(
     db,
-    `select r.id, r.lineage_id as "lineageId", r.revision, r.state, p.period_code as "periodCode", r.period_id as "periodId", k.code as "calendarCode",
+    `select r.id, r.lineage_id as "lineageId", r.revision, r.state, p.period_code as "periodCode", p.financial_year as "financialYear", r.period_id as "periodId", k.code as "calendarCode",
             r.member_count as "memberCount",
             (select count(*)::int from payroll_exception x where x.company_id = r.company_id and x.run_id = r.id and x.severity = 'BLOCKING' and x.resolved_at is null) as "unresolvedExceptions",
             r.created_at as "createdAt", r.processed_at as "processedAt", r.version, p.service_start as hrms_service_start
@@ -1384,8 +1507,9 @@ export async function listRuns(
        join payroll_calendar k on k.company_id = r.company_id and k.id = r.calendar_id
       where r.company_id = $1 and ($2::uuid is null or r.period_id = $2) and ($3::text is null or r.state = $3)
         and ($4::text[] is null or r.state = any($4))
-        and ($5::date is null or (k.state = 'ACTIVE' and p.service_start <= $5 and p.service_end >= $5))`,
-    [grant.companyId, q.periodId ?? null, q.state ?? null, q.states ? q.states.split(',') : null, q.coversDate ?? null],
+        and ($5::date is null or (k.state = 'ACTIVE' and p.service_start <= $5 and p.service_end >= $5))
+        and ($6::text is null or p.financial_year = upper($6))`,
+    [grant.companyId, q.periodId ?? null, q.state ?? null, q.states ? q.states.split(',') : null, q.coversDate ?? null, q.financialYear ?? null],
     'hrms_service_start desc, "lineageId", revision desc, id',
     q,
     RUN_LIST_CAP,
@@ -1510,7 +1634,17 @@ export async function recordDetail(db: Queryable, grant: AccessGrant, runId: str
       [grant.companyId, rec.id],
     )
   ).rows;
-  return { ...head, segments, lossOfPay, inputs, lines };
+  // P8a gap 4 (I-85, I-90): how each rule-pack head was valued — the pack revision, the wages, rates, ceilings, coverage, state or tax
+  // projection — as the calculation wrote it (payroll_record_statutory); confidential as the lines are.
+  const statutory = (
+    await db.query(
+      `select pc.code as "componentCode", s.rule_pack_code as "rulePackCode", s.head_type as "headType", s.status, s.amount, s.workings
+         from payroll_record_statutory s join pay_component pc on pc.company_id = s.company_id and pc.id = s.component_id
+        where s.company_id = $1 and s.record_id = $2 order by pc.code`,
+      [grant.companyId, rec.id],
+    )
+  ).rows;
+  return { ...head, segments, lossOfPay, inputs, lines, statutory };
 }
 
 /** The caller's open run tasks (review, approval, covering approval) with operational run facts. */

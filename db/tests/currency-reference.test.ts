@@ -78,8 +78,12 @@ describe('the approved currency codes', () => {
     await testDb?.stop();
   });
 
-  it('holds INR with two decimals, and nothing else (DF06; adding one is Finance’s decision)', async () => {
-    expect((await db.query(`select code, minor_unit from currency`)).rows).toEqual([{ code: 'INR', minor_unit: 2 }]);
+  // 0208 (I-80, A6; decided under owner delegation, 6 Nov 2026): the ISO codes Finance would use join INR at their ISO minor unit. Being
+  // in the reference makes a code nameable, not usable: a claim needs it enabled by a second person, a payroll a calendar activated in it.
+  it('holds INR and the approved ISO codes, each at two decimals (DF06; OQ-17)', async () => {
+    expect((await db.query(`select code, minor_unit from currency order by code`)).rows).toEqual(
+      ['AED', 'EUR', 'GBP', 'INR', 'SGD', 'USD'].map((code) => ({ code, minor_unit: 2 })),
+    );
   });
 
   it('keeps a code’s minor unit and never loses a code', async () => {
@@ -110,11 +114,14 @@ describe('the approved currency codes', () => {
     }
   });
 
-  it('is on these five tables only, each validated: the rest stay an open question under OQ-17', async () => {
+  // 0208 (I-80, A6): the payroll calendar's currency and minor unit (payroll currencies are those of active calendars) and the
+  // currencies Finance enables for claims join the five; 0212 (I-87): exchange rates and a claim line's own currency too. Every other
+  // money column follows its calendar or its claim.
+  it('is on these five tables, the payroll calendar, enabled currencies, exchange rates and claim lines, each validated', async () => {
     const rows = (
       await db.query<{ t: string; convalidated: boolean }>(`select conrelid::regclass::text as t, convalidated from pg_constraint where contype = 'f' and confrelid = 'currency'::regclass order by 1`)
     ).rows;
-    expect(rows).toEqual(GUARDED.map((t) => ({ t, convalidated: true })));
+    expect(rows).toEqual([...GUARDED, 'company_currency', 'expense_exchange_rate', 'expense_line', 'payroll_calendar'].sort().map((t) => ({ t, convalidated: true })));
   });
 
   it('leaves a claim’s currency to the submit gate: a draft in another currency is still accepted here', async () => {

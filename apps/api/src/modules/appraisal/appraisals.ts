@@ -1,6 +1,12 @@
 // Appraisals (DB064/DB065; FR-040 to FR-044; F1 "Appraisal"; DF02; DF08): enrolment of an employee in a cycle, goal
 // setting, window exceptions, cancellation and the visibility-aware read model.
 //
+// KRA review (FR-041; decided under owner delegation, 6 Nov 2026, owner chose process rules only; I-77 item 3): where the
+// cycle requires it, the person who set the goal set (enrolment with goals, a goal change or the KRA upload) is recorded,
+// and someone else with the goal-setting duty reviews the complete set before the employee can enter the self-entry. A
+// changed goal set starts unreviewed. The rating group also carries the manager's manual overall rating (FR-042) and the
+// reviewer scores per revision and level (FR-043).
+//
 // Visibility (DF02, FR-044, H3 TN18). Operational to every reader in row scope: cycle, employee identity, state, task
 // status, goals (name, target, weight) and their completion flags, windows, decision history (decision, step, time).
 // In the Employee OWN context the employee also sees their own self-entry and the messages addressed to them when the
@@ -19,6 +25,7 @@ import {
   ACTIVE_EMPLOYEE_STATUSES,
   activeGoals,
   APPRAISAL_KIND,
+  appraisalCompetencies,
   type AppraisalRow,
   audit,
   checkVersion,
@@ -44,7 +51,9 @@ import {
   windowStatus,
   workingRevision,
 } from './common.js';
+import { copyCompetencies } from './competencies.js';
 import { WINDOW_KEYS } from './cycles.js';
+import { orderedSections, partyFills } from './sections.js';
 
 // ---------------------------------------------------------------------------------------------------------
 // Goals
@@ -137,10 +146,11 @@ export async function createAppraisal(tx: Queryable, grant: AccessGrant, input: 
     )
   ).rows[0]!.id;
   const id = randomUUID();
+  // The enroller who gives goals sets the goal set (FR-041 KRA review: someone else reviews it where the cycle requires).
   await tx.query(
-    `insert into appraisal (id, company_id, cycle_id, period_start, period_end, employee_id, transaction_id, state, revision, source, created_by, updated_by)
-     values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', 1, $8, $9, $9)`,
-    [id, grant.companyId, cycle.id, cycle.start_date, cycle.end_date, input.employeeId, transactionId, source, grant.userId],
+    `insert into appraisal (id, company_id, cycle_id, period_start, period_end, employee_id, transaction_id, state, revision, source, goals_set_by, goals_set_at, created_by, updated_by)
+     values ($1, $2, $3, $4, $5, $6, $7, 'DRAFT', 1, $8, $10, case when $10::uuid is null then null else now() end, $9, $9)`,
+    [id, grant.companyId, cycle.id, cycle.start_date, cycle.end_date, input.employeeId, transactionId, source, grant.userId, goals.length > 0 ? grant.userId : null],
   );
   await tx.query(`insert into appraisal_revision (company_id, appraisal_id, revision, state, created_by, updated_by) values ($1, $2, 1, 'DRAFT', $3, $3)`, [
     grant.companyId,
@@ -148,6 +158,9 @@ export async function createAppraisal(tx: Queryable, grant: AccessGrant, input: 
     grant.userId,
   ]);
   await insertGoals(tx, grant.companyId, id, goals, grant.userId);
+  // FR-041 / I-86: where the cycle assesses competencies, the set mapped to the employee's grade (and designation) today is copied,
+  // then fixed. Without a mapped set the appraisal has none and its result is the goal result alone.
+  const competencies = cycle.competency_weight_percent > 0 ? await copyCompetencies(tx, grant.companyId, id, input.employeeId, grant.businessDate, grant.userId) : { setId: null, count: 0 };
   await audit(tx, grant, 'appraisal', id, 'CREATE', null, {
     cycleId: cycle.id,
     employeeId: input.employeeId,
@@ -155,6 +168,8 @@ export async function createAppraisal(tx: Queryable, grant: AccessGrant, input: 
     state: 'DRAFT',
     goals: goalSummary(goals),
     goalWeightTotal: goals.reduce((s, g) => s + g.weight, 0),
+    competencySetId: competencies.setId,
+    competencies: competencies.count,
   });
   return id;
 }
@@ -172,25 +187,34 @@ export async function replaceGoals(tx: Queryable, grant: AccessGrant, id: string
   const goals = cleanGoals(input.goals);
   const before = await activeGoals(tx, grant.companyId, a.id);
   const bySequence = new Map(before.map((g) => [g.sequence, g]));
-  for (const old of before) {
-    if (!goals.some((g) => g.sequence === old.sequence)) {
-      await tx.query(`update appraisal_item set active = false, updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, old.id, grant.userId]);
-    }
-  }
-  for (const g of goals) {
+  const removed = before.filter((old) => !goals.some((g) => g.sequence === old.sequence));
+  const added = goals.filter((g) => !bySequence.has(g.sequence));
+  const edited = goals.filter((g) => {
     const old = bySequence.get(g.sequence);
-    if (!old) {
-      await insertGoals(tx, grant.companyId, a.id, [g], grant.userId);
-    } else if (old.description !== g.description || old.target !== g.target || old.weight !== g.weight) {
-      await tx.query(`update appraisal_item set description = $3, target = $4, weight = $5, updated_by = $6 where company_id = $1 and id = $2`, [
-        grant.companyId,
-        old.id,
-        g.description,
-        g.target,
-        g.weight,
-        grant.userId,
-      ]);
-    }
+    return old !== undefined && (old.description !== g.description || old.target !== g.target || old.weight !== g.weight);
+  });
+  const setter = (await tx.query<{ goals_set_by: string | null }>(`select goals_set_by from appraisal where company_id = $1 and id = $2`, [grant.companyId, a.id])).rows[0]!.goals_set_by;
+  if (removed.length + added.length + edited.length > 0 || (setter === null && goals.length > 0)) {
+    // FR-041 KRA review: a changed goal set is the caller's and starts unreviewed (any earlier review no longer applies); goals
+    // entered before 0176 name their setter when they are next saved.
+    await tx.query(
+      `update appraisal set goals_set_by = $3, goals_set_at = now(), goals_reviewed_by = null, goals_reviewed_at = null, updated_by = $3 where company_id = $1 and id = $2`,
+      [grant.companyId, a.id, grant.userId],
+    );
+  }
+  for (const old of removed) {
+    await tx.query(`update appraisal_item set active = false, updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, old.id, grant.userId]);
+  }
+  await insertGoals(tx, grant.companyId, a.id, added, grant.userId);
+  for (const g of edited) {
+    await tx.query(`update appraisal_item set description = $3, target = $4, weight = $5, updated_by = $6 where company_id = $1 and id = $2`, [
+      grant.companyId,
+      bySequence.get(g.sequence)!.id,
+      g.description,
+      g.target,
+      g.weight,
+      grant.userId,
+    ]);
   }
   await touchAppraisal(tx, grant.companyId, a.id, grant.userId);
   await audit(
@@ -202,6 +226,37 @@ export async function replaceGoals(tx: Queryable, grant: AccessGrant, id: string
     { goals: goalSummary(before), goalWeightTotal: before.reduce((s, g) => s + g.weight, 0) },
     { goals: goalSummary(goals), goalWeightTotal: goals.reduce((s, g) => s + g.weight, 0) },
   );
+}
+
+/**
+ * FR-041 KRA review (I-77 item 3): where the cycle requires it, an eligible person who did not set the goals reviews the
+ * complete goal set (weights totalling exactly 100) before the first submission; the goals then take effect and the employee
+ * can enter the self-entry. Goal setting and review are the same duty (HR, or the direct manager within row scope), held
+ * apart by person: the setter never reviews their own goal set, nor does the appraised employee (database rule too). A
+ * review is a decision, not a windowed entry, so the goal-setting window does not bound it.
+ */
+export async function reviewGoals(tx: Queryable, grant: AccessGrant, id: string, input: { expectedVersion: number }): Promise<void> {
+  const a = await lockAppraisal(tx, grant.companyId, id);
+  if (!a || !(await canAccessEmployee(tx, grant, a.employee_id))) throw notFound();
+  refuseOwnRecord(grant, a.employee_id);
+  checkVersion(a.version, input.expectedVersion);
+  const cycle = (await loadCycle(tx, grant.companyId, a.cycle_id))!;
+  if (!cycle.goal_review_required) throw new HttpError(409, 'GOAL_REVIEW_NOT_REQUIRED', 'This cycle does not review goals: they take effect when set');
+  const rev = await workingRevision(tx, grant.companyId, a);
+  if (a.state !== 'DRAFT' || a.revision !== 1 || rev.state !== 'DRAFT') throw new HttpError(409, 'GOALS_FIXED', 'Goals are fixed once the appraisal has been submitted');
+  const set = (
+    await tx.query<{ goals_set_by: string | null; goals_reviewed_at: Date | null }>(`select goals_set_by, goals_reviewed_at from appraisal where company_id = $1 and id = $2`, [grant.companyId, a.id])
+  ).rows[0]!;
+  if (set.goals_reviewed_at) throw new HttpError(409, 'GOALS_ALREADY_REVIEWED', 'These goals have already been reviewed');
+  const goals = await activeGoals(tx, grant.companyId, a.id);
+  if (goals.length === 0) throw new HttpError(422, 'GOALS_REQUIRED', 'The appraisal has no goals yet');
+  const total = goals.reduce((s, g) => s + g.weight, 0);
+  if (total !== 100) throw new HttpError(422, 'WEIGHT_TOTAL_NOT_100', 'Goal weights must total exactly 100', { total });
+  // Goals entered before 0176 name no setter: they are set again first, so the review can be told apart from the setting.
+  if (!set.goals_set_by) throw new HttpError(409, 'GOALS_SETTER_UNKNOWN', 'Set these goals again before they are reviewed');
+  if (set.goals_set_by === grant.userId) throw new HttpError(403, 'GOAL_REVIEW_NOT_INDEPENDENT', 'Someone other than the person who set the goals reviews them');
+  await tx.query(`update appraisal set goals_reviewed_by = $3, goals_reviewed_at = now(), updated_by = $3 where company_id = $1 and id = $2`, [grant.companyId, a.id, grant.userId]);
+  await audit(tx, grant, 'appraisal', a.id, 'REVIEW_GOALS', { goalsReviewed: false }, { goalsReviewed: true, goals: goalSummary(goals), goalWeightTotal: total });
 }
 
 /**
@@ -293,12 +348,13 @@ export function staffScope(grant: AccessGrant, employeeId: string): ViewScope {
   return { own: false, showSelf: false, showRating: grant.allowedFieldGroups.includes('rating'), showReason: grant.allowedFieldGroups.includes('reason') };
 }
 
-export type TaskStatus = 'AWAITING_GOALS' | 'AWAITING_SELF_ENTRY' | 'AWAITING_MANAGER_RATING' | 'AWAITING_REVIEW' | 'COMPLETED' | 'CANCELLED';
+export type TaskStatus = 'AWAITING_GOALS' | 'AWAITING_GOAL_REVIEW' | 'AWAITING_SELF_ENTRY' | 'AWAITING_MANAGER_RATING' | 'AWAITING_REVIEW' | 'COMPLETED' | 'CANCELLED';
 
-export function taskStatusOf(state: AppraisalRow['state'], goalsReady: boolean): TaskStatus {
+/** `goalReviewPending`: the cycle requires a goal review (FR-041 KRA review) and the goal set has not had one. */
+export function taskStatusOf(state: AppraisalRow['state'], goalsReady: boolean, goalReviewPending = false): TaskStatus {
   switch (state) {
     case 'DRAFT':
-      return goalsReady ? 'AWAITING_SELF_ENTRY' : 'AWAITING_GOALS';
+      return !goalsReady ? 'AWAITING_GOALS' : goalReviewPending ? 'AWAITING_GOAL_REVIEW' : 'AWAITING_SELF_ENTRY';
     case 'RETURNED':
       return 'AWAITING_SELF_ENTRY';
     case 'SUBMITTED':
@@ -344,6 +400,10 @@ interface BaseRow {
   display_name: string;
   department_id: string | null;
   department_name: string | null;
+  goals_set_at: Date | null;
+  goals_set_by: Person | null;
+  goals_reviewed_at: Date | null;
+  goals_reviewed_by: Person | null;
 }
 
 const CURRENT_DEPARTMENT = (day: string) => `left join lateral (
@@ -363,9 +423,23 @@ interface RevisionDetail {
   manager_comment: string | null;
   rated_at: Date | null;
   weighted_result: string | null;
+  manager_overall_rating: number | null;
+  goal_result: string | null;
+  competency_result: string | null;
+  goal_weight_percent: number | null;
+  competency_weight_percent: number | null;
   returned_at: Date | null;
   employee_message: string | null;
   confirmed_at: Date | null;
+}
+
+interface SectionEntryRow {
+  revision_id: string;
+  section: string;
+  party: 'EMPLOYEE' | 'MANAGER';
+  /** Completion flag (operational). */
+  done: boolean;
+  body: string | null;
 }
 
 interface EntryRow {
@@ -392,9 +466,16 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
     await db.query<BaseRow>(
       `select a.id, a.cycle_id, a.employee_id, a.transaction_id, a.state, a.revision, a.source, ${col(scope.showRating, 'a.final_rating', 'final_rating')},
               a.completed_at, a.cancelled_at, ${col(scope.showReason, 'a.cancel_reason', 'cancel_reason')},
-              a.created_at, a.version, e.employee_code, e.display_name, dep.department_id, dep.department_name
+              a.created_at, a.version, e.employee_code, e.display_name, dep.department_id, dep.department_name,
+              a.goals_set_at, a.goals_reviewed_at,
+              case when a.goals_set_by is null then null
+                   else json_build_object('userId', a.goals_set_by, 'employeeCode', se.employee_code, 'displayName', se.display_name) end as goals_set_by,
+              case when a.goals_reviewed_by is null then null
+                   else json_build_object('userId', a.goals_reviewed_by, 'employeeCode', ge.employee_code, 'displayName', ge.display_name) end as goals_reviewed_by
          from appraisal a join employee e on e.company_id = a.company_id and e.id = a.employee_id
          ${CURRENT_DEPARTMENT('$3::date')}
+         ${identity('s', 'a.goals_set_by', 'a.company_id')}
+         ${identity('g', 'a.goals_reviewed_by', 'a.company_id')}
         where a.company_id = $1 and a.id = $2`,
       [grant.companyId, id, today],
     )
@@ -405,12 +486,44 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
   const revisions = (
     await db.query<RevisionDetail>(
       `select id, revision, state, ${col(selfCols, 'self_comment', 'self_comment')}, submitted_at, approval_levels,
-              ${col(scope.showRating, 'manager_comment', 'manager_comment')}, rated_at, ${col(scope.showRating, 'weighted_result', 'weighted_result')}, returned_at,
+              ${col(scope.showRating, 'manager_comment', 'manager_comment')}, rated_at, ${col(scope.showRating, 'weighted_result', 'weighted_result')},
+              ${col(scope.showRating, 'manager_overall_rating', 'manager_overall_rating')}, returned_at,
+              ${col(scope.showRating, 'goal_result', 'goal_result')}, ${col(scope.showRating, 'competency_result', 'competency_result')},
+              ${col(scope.showRating, 'goal_weight_percent', 'goal_weight_percent')}, ${col(scope.showRating, 'competency_weight_percent', 'competency_weight_percent')},
               ${col(scope.own || scope.showRating, 'employee_message', 'employee_message')}, confirmed_at
          from appraisal_revision where company_id = $1 and appraisal_id = $2 order by revision`,
       [grant.companyId, a.id],
     )
   ).rows;
+  // FR-041 competencies (operational: code, name, indicators, weight) and their entries (scores and comments confidential, as goals).
+  const competencies = await appraisalCompetencies(db, grant.companyId, a.id);
+  const competencyEntries = (
+    await db.query<EntryRow>(
+      `select revision_id, item_id, self_score is not null as self_done, manager_score is not null as manager_done,
+              ${col(selfCols, 'self_score', 'self_score')}, ${col(selfCols, 'self_comment', 'self_comment')},
+              ${col(scope.showRating, 'manager_score', 'manager_score')}, ${col(scope.showRating, 'manager_comment', 'manager_comment')}
+         from appraisal_competency_entry where company_id = $1 and appraisal_id = $2`,
+      [grant.companyId, a.id],
+    )
+  ).rows;
+  // FR-042 section texts: the employee's is the own self-entry (self group), the manager's the confidential rating group.
+  const sectionEntries = (
+    await db.query<SectionEntryRow>(
+      `select revision_id, section, party, body is not null as done,
+              case when party = 'EMPLOYEE' then ${selfCols ? 'body' : 'null'} else ${scope.showRating ? 'body' : 'null'} end as body
+         from appraisal_section_entry where company_id = $1 and appraisal_id = $2`,
+      [grant.companyId, a.id],
+    )
+  ).rows;
+  // FR-043 reviewer scores (rating group only): one overall score per revision and reviewer level, never read otherwise.
+  const reviewerScores = scope.showRating
+    ? (
+        await db.query<{ revision_id: string; level: number; score: number; scored_at: Date }>(
+          `select revision_id, level, score, created_at as scored_at from appraisal_review_score where company_id = $1 and appraisal_id = $2 order by level`,
+          [grant.companyId, a.id],
+        )
+      ).rows
+    : [];
   const entries = (
     await db.query<EntryRow>(
       `select revision_id, item_id, self_score is not null as self_done, manager_score is not null as manager_done,
@@ -473,6 +586,7 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
   const workingEntries = working ? entriesOf(working.id) : [];
   const goalWeightTotal = goals.reduce((s, g) => s + g.weight, 0);
   const goalsReady = goals.length > 0 && goalWeightTotal === 100;
+  const goalReviewPending = cycle.goal_review_required && a.goals_reviewed_at === null;
   const sequenceOf = new Map(goals.map((g) => [g.id, g.sequence]));
   const goalEntries = (list: EntryRow[], part: 'self' | 'manager') =>
     list
@@ -484,15 +598,53 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
         score: part === 'self' ? e.self_score : e.manager_score,
         comment: part === 'self' ? e.self_comment : e.manager_comment,
       }));
+  const competencySequence = new Map(competencies.map((k) => [k.id, k.sequence]));
+  const competencyEntriesOf = (revisionId: string, part: 'self' | 'manager') =>
+    competencyEntries
+      .filter((e) => e.revision_id === revisionId && competencySequence.has(e.item_id))
+      .sort((x, y) => competencySequence.get(x.item_id)! - competencySequence.get(y.item_id)!)
+      .map((e) => ({
+        competencyId: e.item_id,
+        sequence: competencySequence.get(e.item_id)!,
+        score: part === 'self' ? e.self_score : e.manager_score,
+        comment: part === 'self' ? e.self_comment : e.manager_comment,
+      }));
+  const includedSections = orderedSections(cycle.sections);
+  const sectionTexts = (revisionId: string, party: 'EMPLOYEE' | 'MANAGER') =>
+    includedSections
+      .filter((s) => partyFills(s.code, party))
+      .map((s) => ({ section: s.code, text: sectionEntries.find((x) => x.revision_id === revisionId && x.section === s.code && x.party === party)?.body ?? null }));
+  const sectionDone = (section: string, party: 'EMPLOYEE' | 'MANAGER') =>
+    working ? sectionEntries.some((x) => x.revision_id === working.id && x.section === section && x.party === party && x.done) : false;
 
   return {
     id: a.id,
-    cycle: { id: cycle.id, code: cycle.code, name: cycle.name, startDate: cycle.start_date, endDate: cycle.end_date, approvalLevels: cycle.approval_levels, state: cycle.state },
+    cycle: {
+      id: cycle.id,
+      code: cycle.code,
+      name: cycle.name,
+      startDate: cycle.start_date,
+      endDate: cycle.end_date,
+      approvalLevels: cycle.approval_levels,
+      goalReviewRequired: cycle.goal_review_required,
+      ratingMode: cycle.rating_mode,
+      reviewDueOn: cycle.review_due_on,
+      // I-86: how the weighted result combines goals and competencies (operational configuration).
+      scoring: { goalWeightPercent: cycle.goal_weight_percent, competencyWeightPercent: cycle.competency_weight_percent, competenciesAssessed: cycle.competency_weight_percent > 0 },
+      state: cycle.state,
+    },
     employee: { id: a.employee_id, employeeCode: a.employee_code, displayName: a.display_name, department: a.department_id ? { id: a.department_id, name: a.department_name } : null },
     state: a.state,
     revision: a.revision,
     source: a.source,
-    taskStatus: taskStatusOf(a.state, goalsReady),
+    taskStatus: taskStatusOf(a.state, goalsReady, goalReviewPending),
+    // FR-041 KRA review: whether the goals took effect; who set and reviewed them is not shown on one's own appraisal.
+    goalReview: {
+      required: cycle.goal_review_required,
+      reviewed: a.goals_reviewed_at !== null,
+      reviewedAt: a.goals_reviewed_at,
+      ...(scope.own ? {} : { setBy: a.goals_set_by, setAt: a.goals_set_at, reviewedBy: a.goals_reviewed_by }),
+    },
     pending: pending
       ? {
           ...(scope.own ? {} : { taskId: pending.task_id }),
@@ -517,6 +669,29 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
       };
     }),
     goalWeightTotal,
+    // FR-041 grade-mapped competencies, copied at enrolment and fixed (I-86). Operational like goals; the values are not.
+    competencies: competencies.map((k) => {
+      const e = competencyEntries.find((x) => working && x.revision_id === working.id && x.item_id === k.id);
+      return {
+        id: k.id,
+        competencyId: k.competency_id,
+        sequence: k.sequence,
+        code: k.code,
+        name: k.name,
+        description: k.description,
+        indicators: k.indicators.map((text, i) => ({ level: i + 1, text })),
+        weight: k.weight,
+        selfEntryComplete: e?.self_done === true,
+        ...(scope.own ? {} : { managerRatingComplete: e?.manager_done === true }),
+      };
+    }),
+    competencyWeightTotal: competencies.reduce((s, k) => s + k.weight, 0),
+    // FR-042 sections the cycle includes, with their meaning and completion flags (never the texts).
+    sections: includedSections.map((s) => ({
+      ...s,
+      ...(partyFills(s.code, 'EMPLOYEE') ? { selfEntryComplete: sectionDone(s.code, 'EMPLOYEE') } : {}),
+      ...(!scope.own && partyFills(s.code, 'MANAGER') ? { managerEntryComplete: sectionDone(s.code, 'MANAGER') } : {}),
+    })),
     windows: Object.fromEntries(
       STAGES.map((s) => {
         const st = windowStatus(cycle, s, today, valid);
@@ -533,20 +708,33 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
         ...(scope.own ? {} : { ratedAt: r.rated_at, approvalLevels: r.approval_levels }),
       };
       const list = entriesOf(r.id);
+      const selfEntry = () => ({ comment: r.self_comment, entries: goalEntries(list, 'self'), competencies: competencyEntriesOf(r.id, 'self'), sections: sectionTexts(r.id, 'EMPLOYEE') });
       if (scope.own) {
         return {
           ...base,
           // The explanation of a return is addressed to the employee; reviewer remarks are not.
           employeeMessage: r.employee_message,
-          ...(scope.showSelf ? { selfEntry: { comment: r.self_comment, entries: goalEntries(list, 'self') } } : {}),
+          ...(scope.showSelf ? { selfEntry: selfEntry() } : {}),
         };
       }
       if (!scope.showRating) return base;
       return {
         ...base,
         employeeMessage: r.employee_message,
-        selfEntry: { comment: r.self_comment, entries: goalEntries(list, 'self') },
-        managerRating: { comment: r.manager_comment, entries: goalEntries(list, 'manager'), weightedResult: r.weighted_result },
+        selfEntry: selfEntry(),
+        managerRating: {
+          comment: r.manager_comment,
+          entries: goalEntries(list, 'manager'),
+          competencies: competencyEntriesOf(r.id, 'manager'),
+          sections: sectionTexts(r.id, 'MANAGER'),
+          // I-86: the weighted result (FORMULA: the final rating) and the parts it combines; split null = the goal result alone.
+          weightedResult: r.weighted_result,
+          goalResult: r.goal_result,
+          competencyResult: r.competency_result,
+          split: r.competency_weight_percent === null ? null : { goalWeightPercent: r.goal_weight_percent, competencyWeightPercent: r.competency_weight_percent },
+          overallRating: r.manager_overall_rating,
+        },
+        reviewerScores: reviewerScores.filter((s) => s.revision_id === r.id).map((s) => ({ level: s.level, score: s.score, scoredAt: s.scored_at })),
       };
     }),
     decisions: decisions.map((d) => ({
@@ -608,6 +796,7 @@ interface ListRow {
   department_name: string | null;
   goal_count: number;
   goal_weight_total: number;
+  goal_review_pending: boolean;
   total: number;
 }
 
@@ -619,6 +808,7 @@ const listColumns = (withRating: boolean, ownEmployee: string | null) => {
   const unlessOwn = (expr: string) => (ownEmployee ? `case when a.employee_id = ${ownEmployee}::uuid then null else ${expr} end` : expr);
   return `a.id, a.state, a.revision, a.source, a.completed_at, a.created_at,
        c.id as cycle_id, c.code as cycle_code, c.name as cycle_name, e.id as employee_id, e.employee_code, e.display_name, dep.department_id, dep.department_name,
+       (c.goal_review_required and a.goals_reviewed_at is null) as goal_review_pending,
        ${withRating ? unlessOwn('a.final_rating') : 'null'} as final_rating,
        ${withRating ? unlessOwn('(select r.weighted_result from appraisal_revision r where r.company_id = a.company_id and r.appraisal_id = a.id and r.revision = a.revision)') : 'null'} as weighted_result,
        (select count(*)::int from appraisal_item i where i.company_id = a.company_id and i.appraisal_id = a.id and i.active) as goal_count,
@@ -634,7 +824,7 @@ function listItem(grant: AccessGrant, r: ListRow, own: boolean) {
     state: r.state,
     revision: r.revision,
     source: r.source,
-    taskStatus: taskStatusOf(r.state, r.goal_count > 0 && r.goal_weight_total === 100),
+    taskStatus: taskStatusOf(r.state, r.goal_count > 0 && r.goal_weight_total === 100, r.goal_review_pending),
     goalCount: r.goal_count,
     goalWeightTotal: r.goal_weight_total,
     completedAt: r.completed_at,
@@ -649,7 +839,7 @@ export const AWAITING_DECISION_STATES = ['SUBMITTED', 'IN_REVIEW'];
 export interface ListQuery {
   cycleId?: string | undefined;
   state?: AppraisalRow['state'] | undefined;
-  stateGroup?: 'AWAITING_DECISION' | undefined;
+  stateGroup?: 'AWAITING_DECISION' | 'AWAITING_GOAL_REVIEW' | undefined;
   employeeId?: string | undefined;
   departmentId?: string | undefined;
   page: number;
@@ -665,6 +855,11 @@ export async function listAppraisals(db: Queryable, grant: AccessGrant, q: ListQ
   if (q.cycleId) where.push(`a.cycle_id = ${p.add(q.cycleId)}::uuid`);
   if (q.state) where.push(`a.state = ${p.add(q.state)}`);
   if (q.stateGroup === 'AWAITING_DECISION') where.push(`a.state = any(${p.add(AWAITING_DECISION_STATES)}::text[])`);
+  // FR-041 KRA review: complete goal sets waiting for their review (the register's "Waiting for the goal review").
+  if (q.stateGroup === 'AWAITING_GOAL_REVIEW') {
+    where.push(`a.state = 'DRAFT' and c.goal_review_required and a.goals_reviewed_at is null
+      and (select count(*) > 0 and sum(i.weight) = 100 from appraisal_item i where i.company_id = a.company_id and i.appraisal_id = a.id and i.active)`);
+  }
   if (q.employeeId) where.push(`a.employee_id = ${p.add(q.employeeId)}::uuid`);
   if (q.departmentId) where.push(`dep.department_id = ${p.add(q.departmentId)}::uuid`);
   // Added only when the rating columns use it: an unreferenced parameter has no inferable type.

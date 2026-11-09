@@ -1,6 +1,7 @@
 // Holiday, shift and weekly-off maintenance (jsdom; FR-005; DF05; DF08; I-04; I-54): corrections and withdrawals keep the
 // earlier entry and need a reason, every change shows the dates HR must reprocess and which are final, shift times change by
-// a dated revision, patterns are whole days per location. Duties decide what is offered. Synthetic data only.
+// a dated revision with its buffer, patterns are whole days per location with some weeks of the month off or half off (I-78
+// items 1 and 4). Duties decide what is offered. Synthetic data only.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
@@ -214,14 +215,15 @@ const SHIFT: Shift = {
   outTime: '06:00',
   spansMidnight: true,
   netScheduledMinutes: 450,
+  bufferMinutes: 60,
   active: true,
   version: 2,
   revision: 2,
   effectiveFrom: '2026-03-01',
   breaks: [{ startOffsetMinutes: 180, endOffsetMinutes: 210 }],
   revisions: [
-    { revision: 1, effectiveFrom: null, inTime: '21:00', outTime: '05:00', spansMidnight: true, netScheduledMinutes: 480, breaks: [], reason: null },
-    { revision: 2, effectiveFrom: '2026-03-01', inTime: '22:00', outTime: '06:00', spansMidnight: true, netScheduledMinutes: 450, breaks: [{ startOffsetMinutes: 180, endOffsetMinutes: 210 }], reason: 'Later start' },
+    { revision: 1, effectiveFrom: null, inTime: '21:00', outTime: '05:00', spansMidnight: true, netScheduledMinutes: 480, bufferMinutes: 240, breaks: [], reason: null },
+    { revision: 2, effectiveFrom: '2026-03-01', inTime: '22:00', outTime: '06:00', spansMidnight: true, netScheduledMinutes: 450, bufferMinutes: 60, breaks: [{ startOffsetMinutes: 180, endOffsetMinutes: 210 }], reason: 'Later start' },
   ],
 };
 
@@ -232,7 +234,8 @@ describe('shift master (FR-005, DF05)', () => {
     open('/calendars/shifts');
     const table = await screen.findByRole('table', { name: 'Shifts' });
     // Break offsets are shown as clock times, past midnight on a night shift.
-    expect(within(table).getAllByText(/22:00-06:00 \(next day\), break 01:00-01:30, 450 net minutes/)).toHaveLength(2);
+    // BR-008 (I-78 item 1): crossing midnight is the 24-hour cycle; the buffer is the capture window each side.
+    expect(within(table).getAllByText(/22:00-06:00 \(next day: 24-hour cycle\), break 01:00-01:30, 450 net minutes, punches from 60 minutes before to 60 after/)).toHaveLength(2);
     expect(within(table).getByText('Revision 2, from 2026-03-01')).toBeTruthy();
     expect(within(table).getByText(/Revision 1, from the start: 21:00-05:00/)).toBeTruthy();
     expect(within(table).getByText(/Later start/)).toBeTruthy();
@@ -321,9 +324,32 @@ describe('shift master (FR-005, DF05)', () => {
     click(within(form).getByRole('button', { name: 'Add a break' }));
     type(within(form).getByLabelText('Break 1 from'), '13:00');
     type(within(form).getByLabelText('Break 1 to'), '14:00');
+    // FR-005 BR-008 (I-78 item 1): the buffer is required and proposed by nobody.
+    const buffer = within(form).getByLabelText('Buffer before and after (minutes)') as HTMLInputElement;
+    expect([buffer.value, buffer.required]).toEqual(['', true]);
+    type(buffer, '90');
     click(within(form).getByRole('button', { name: 'Create shift' }));
     await waitFor(() => expect(posts(calls, '/v1/shifts')).toHaveLength(1));
-    expect(posts(calls, '/v1/shifts')[0]!.body).toEqual({ code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
+    expect(posts(calls, '/v1/shifts')[0]!.body).toEqual({ code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }], bufferMinutes: 90 });
+  });
+
+  it('FR-005 BR-008 a revision may name a new buffer; one too long for the shift is refused in words', async () => {
+    session.permissions = ['shift.read.operational', 'shift.update.operational'];
+    const calls = mockApi({
+      'GET /v1/shifts': [200, { items: [SHIFT] }],
+      'POST /v1/shifts/s-1/revisions': [422, { error: 'BUFFER_OUT_OF_RANGE', message: 'Too long', details: { maxBufferMinutes: 480 } }],
+    });
+    open('/calendars/shifts');
+    click(await screen.findByRole('button', { name: 'Change times of NIGHT' }));
+    const form = screen.getByRole('form', { name: 'Change times of NIGHT' });
+    const buffer = within(form).getByLabelText('Buffer before and after (minutes; blank keeps the one in force)') as HTMLInputElement;
+    expect([buffer.value, buffer.required]).toEqual(['', false]);
+    type(within(form).getByLabelText('Applies from'), '2026-04-01');
+    type(within(form).getByLabelText('Reason'), 'Wider window');
+    type(buffer, '500');
+    click(within(form).getByRole('button', { name: 'Save revision' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('at most 480 minutes');
+    expect(posts(calls, '/v1/shifts/s-1/revisions')[0]!.body).toMatchObject({ bufferMinutes: 500 });
   });
 });
 
@@ -355,7 +381,7 @@ describe('weekly-off patterns (FR-005, DF05)', () => {
     expect(screen.queryByRole('button', { name: 'Change pattern of HQ' })).toBeNull();
   });
 
-  it('saves whole days from a date with the latest entry seen; no half day is offered', async () => {
+  it('saves whole days from a date with the latest entry seen', async () => {
     session.permissions = ['shift.read.operational', 'shift.update.operational', 'attendance.process.operational'];
     const calls = mockApi({ 'GET /v1/weekly-off-patterns': [200, { defaultOffDays: [6, 7], items: [DEFAULT_CALENDAR, SIX_DAY] }], 'POST /v1/weekly-off-patterns': [201, { id: 'p-3', reprocess: REACHED }] });
     open('/calendars/weekly-off');
@@ -363,14 +389,38 @@ describe('weekly-off patterns (FR-005, DF05)', () => {
     const form = screen.getByRole('form', { name: 'Change pattern of PLANT' });
     expect((within(form).getByLabelText('Sunday') as HTMLInputElement).checked).toBe(true);
     expect((within(form).getByLabelText('Saturday') as HTMLInputElement).checked).toBe(false);
-    expect(within(form).queryByLabelText(/half/i)).toBeNull();
-    expect(within(form).getAllByRole('checkbox')).toHaveLength(7);
     click(within(form).getByLabelText('Friday'));
     type(within(form).getByLabelText('Applies from'), '2026-05-01');
     type(within(form).getByLabelText('Reason'), ' Friday prayers roster ');
     click(within(form).getByRole('button', { name: 'Save pattern' }));
     await screen.findByRole('table', { name: 'Dates to reprocess' });
-    expect(posts(calls, '/v1/weekly-off-patterns')[0]!.body).toEqual({ locationId: 'l-2', effectiveFrom: '2026-05-01', offDays: [5, 7], reason: 'Friday prayers roster', expectedRevision: 2 });
+    expect(posts(calls, '/v1/weekly-off-patterns')[0]!.body).toEqual({ locationId: 'l-2', effectiveFrom: '2026-05-01', offDays: [5, 7], offOccurrences: [], halfOff: [], reason: 'Friday prayers roster', expectedRevision: 2 });
+  });
+
+  it('FR-005 I-48 item 6: the 2nd and 4th Saturdays off and the others half off; a day is one or the other (I-78 item 4)', async () => {
+    session.permissions = ['shift.read.operational', 'shift.update.operational'];
+    const ALTERNATE: WeeklyOffCalendar = {
+      ...SIX_DAY,
+      inForce: { offDays: [7], offOccurrences: [{ weekday: 6, weeks: [2, 4] }], halfOff: [{ weekday: 6, weeks: [1, 3, 5] }], isDefault: false, revision: 2, effectiveFrom: '2026-03-01' },
+      entries: [{ id: 'p-2', revision: 2, effectiveFrom: '2026-03-01', offDays: [7], offOccurrences: [{ weekday: 6, weeks: [2, 4] }], halfOff: [{ weekday: 6, weeks: [1, 3, 5] }], reason: 'Alternate Saturdays' }],
+    };
+    const calls = mockApi({ 'GET /v1/weekly-off-patterns': [200, { defaultOffDays: [6, 7], items: [ALTERNATE] }], 'POST /v1/weekly-off-patterns': [201, { id: 'p-3', reprocess: { days: [], truncated: false } }] });
+    open('/calendars/weekly-off');
+    const table = await screen.findByRole('table', { name: 'Weekly-off patterns' });
+    expect(within(table).getAllByRole('row')[1]!.textContent).toContain('Sunday off; 2nd and 4th Saturday off; 1st and 3rd and 5th Saturday half off');
+    click(screen.getByRole('button', { name: 'Change pattern of PLANT' }));
+    const form = screen.getByRole('form', { name: 'Change pattern of PLANT' });
+    expect((within(form).getByLabelText('2nd Saturday off') as HTMLInputElement).checked).toBe(true);
+    expect((within(form).getByLabelText('1st Saturday half off') as HTMLInputElement).checked).toBe(true);
+    // The 2nd Saturday is whole: it cannot also be half; Sunday, off every week, offers no weeks.
+    expect((within(form).getByLabelText('2nd Saturday half off') as HTMLInputElement).disabled).toBe(true);
+    expect(within(form).queryByLabelText('1st Sunday off')).toBeNull();
+    click(within(form).getByLabelText('5th Saturday half off'));
+    type(within(form).getByLabelText('Applies from'), '2026-06-01');
+    type(within(form).getByLabelText('Reason'), 'No 5th Saturday work');
+    click(within(form).getByRole('button', { name: 'Save pattern' }));
+    await waitFor(() => expect(posts(calls, '/v1/weekly-off-patterns')).toHaveLength(1));
+    expect(posts(calls, '/v1/weekly-off-patterns')[0]!.body).toMatchObject({ offDays: [7], offOccurrences: [{ weekday: 6, weeks: [2, 4] }], halfOff: [{ weekday: 6, weeks: [1, 3] }] });
   });
 
   it('a week with no working day is refused in words', async () => {

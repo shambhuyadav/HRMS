@@ -31,8 +31,8 @@ beforeAll(async () => {
   A = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   hr2 = await h.actor(A, 'HR_ADMINISTRATOR');
-  day = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [] })).json().id;
-  await h.call(hr, 'POST', '/v1/shifts', { code: 'NIGHT', name: 'Night', inTime: '22:00', outTime: '06:00', breaks: [] });
+  day = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [] })).json().id;
+  await h.call(hr, 'POST', '/v1/shifts', { code: 'NIGHT', name: 'Night', inTime: '22:00', outTime: '06:00', bufferMinutes: 240, breaks: [] });
   for (const key of ['one', 'two', 'gone', 'fin']) {
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A, key === 'fin' ? { departmentId: A.financeDept } : {}))).json();
     await h.call(hr, 'POST', `/v1/employees/${e.id}/shift`, { shiftId: day, effectiveFrom: '2026-01-05' });

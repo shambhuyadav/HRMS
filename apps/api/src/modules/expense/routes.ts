@@ -53,6 +53,8 @@ const line = {
     invoiceReference: { type: 'string', maxLength: 100 },
     grossAmount: money2,
     claimedAmount: money2,
+    // I-87: the line's own currency when it differs from the claim's; its amounts are then in that currency.
+    currency: { type: 'string', pattern: '^[A-Z]{3}$' },
     description: { type: 'string', minLength: 1, maxLength: 1000 },
     exceptionReason: { type: 'string', minLength: 1, maxLength: 1000 },
     receipt: { type: 'object', additionalProperties: false, required: ['receiptId'], properties: { receiptId: uuid } },
@@ -254,10 +256,16 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
     },
   );
 
-  app.get('/expense/payables', async (request) => {
-    const grant = await requireAccess(db, request, 'payment', 'read', ['operational']);
-    return listPayables(db, grant);
-  });
+  // I-89 item 2: `awaitingPreparation` keeps the claims awaiting payment preparation (expense/service.ts AWAITING_PREPARATION), the
+  // list behind the Treasury Operator's figure.
+  app.get(
+    '/expense/payables',
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { awaitingPreparation: { type: 'boolean' } } } } },
+    async (request) => {
+      const grant = await requireAccess(db, request, 'payment', 'read', ['operational']);
+      return listPayables(db, grant, request.query as { awaitingPreparation?: boolean });
+    },
+  );
 
   // F2 treasury widgets: the instructions behind each count, with the same filters (state and date, no amounts).
   app.get(
@@ -269,6 +277,8 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
           additionalProperties: false,
           properties: {
             state: { type: 'string', enum: ['PREPARED', 'RELEASED', 'CONFIRMED', 'FAILED', 'CANCELLED'] },
+            // C5 "payment batch DRAFT then READY": DRAFT keeps the payments their preparer has not marked ready (I-89 item 2).
+            batchState: { type: 'string', enum: ['DRAFT', 'READY', 'RELEASED', 'CLOSED'] },
             releasableByMe: { type: 'boolean' },
             paymentDateBefore: date,
             eventKind: { type: 'string', enum: ['CONFIRMED', 'REVERSED'] },
@@ -298,14 +308,24 @@ export async function expenseRoutes(app: FastifyInstance, opts: { db: Database; 
           type: 'object',
           additionalProperties: false,
           required: ['claimId', 'amount', 'paymentDate', 'idempotencyKey'],
-          // CI06: a replacement names the failed or cancelled instruction it replaces.
-          properties: { claimId: uuid, amount: money2, paymentDate: date, idempotencyKey: key, retryOfInstructionId: uuid },
+          // CI06: a replacement names the failed or cancelled instruction it replaces. BR-024 (I-81 item 8): the preparer's recorded
+          // review of payroll reimbursements entered for the employee since the claim was submitted.
+          properties: {
+            claimId: uuid,
+            amount: money2,
+            paymentDate: date,
+            idempotencyKey: key,
+            retryOfInstructionId: uuid,
+            payrollReimbursementReview: { type: 'string', minLength: 1, maxLength: 1000 },
+          },
         },
       },
     },
     async (request, reply) => {
       const grant = await requireAccess(db, request, 'payment', 'prepare', ['operational'], { requireAll: true });
-      const result = await withTransaction(db, (tx) => preparePayment(tx, grant, request.body as { claimId: string; amount: string; paymentDate: string; idempotencyKey: string; retryOfInstructionId?: string }));
+      const result = await withTransaction(db, (tx) =>
+        preparePayment(tx, grant, request.body as { claimId: string; amount: string; paymentDate: string; idempotencyKey: string; retryOfInstructionId?: string; payrollReimbursementReview?: string }),
+      );
       reply.status(result.replayed ? 200 : 201);
       return result;
     },

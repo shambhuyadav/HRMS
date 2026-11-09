@@ -149,21 +149,21 @@ export function itListsOnlyOwnRecords(ctx: () => IsolationContext, lists: ListPr
 }
 
 /**
- * The company header names A while the assignment is B's: refused before any record is looked at. Only the denial's own evidence may
- * be added to A's audit trail, with no payload.
+ * The company header names A while the assignment is B's: refused before any record is looked at. Nothing at all is added to A,
+ * not even a denial in its audit trail: the user has no tie to A, so the refusal goes to the security log (I-84 item 16; I-74 item 11).
  */
 export function itRefusesAnotherCompanyInTheHeader(ctx: () => IsolationContext, probes: Probe[]) {
-  it('the company header cannot move a company B assignment into company A (BR-046)', async () => {
+  it('the company header cannot move a company B assignment into company A, nor add a row to A’s audit trail (BR-046)', async () => {
     const { h, foreign, home } = ctx();
     const before = await companyState(h, foreign.company.id);
-    const denials = async () => (await h.one<{ n: number }>(`select count(*)::int as n from audit_event where company_id = $1 and action <> 'ACCESS_DENIED'`, [foreign.company.id])).n;
-    const others = await denials();
+    const auditRows = async () => (await h.one<{ n: number }>(`select count(*)::int as n from audit_event where company_id = $1`, [foreign.company.id])).n;
+    const rowsBefore = await auditRows();
     for (const p of probes) {
       const replayed: TestActor = { ...home.actors[p.as]!, company: foreign.company };
       const res = await send(h, replayed, p.method, p.path(foreign), p.body?.(foreign));
       expect([res.statusCode, errorOf(res)], `${p.name}: ${res.body.slice(0, 300)}`).toEqual(p.headerRefusal ?? [403, 'FORBIDDEN']);
     }
-    expect(changedTables(before, await companyState(h, foreign.company.id)).filter((t) => t !== 'audit_event')).toEqual([]);
-    expect(await denials()).toBe(others);
+    expect(changedTables(before, await companyState(h, foreign.company.id))).toEqual([]);
+    expect(await auditRows()).toBe(rowsBefore);
   });
 }

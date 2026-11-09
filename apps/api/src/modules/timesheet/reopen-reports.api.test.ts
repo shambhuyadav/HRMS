@@ -40,7 +40,7 @@ describe.runIf(isModuleActive('timesheet'))('timesheet: reopen and reports', () 
     expect((await allocate(h, w.hr, { employeeId: w.employeeEmp, jobId: w.jobId })).statusCode).toBe(201);
     expect((await allocate(h, w.hr, { employeeId: w.peerEmp, jobId: w.jobId })).statusCode).toBe(201);
     // DF05 default shift: 09:00-18:00 with a 60-minute unpaid break (480 net minutes); the peer has no shift.
-    const shift = await h.call(w.hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day shift', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
+    const shift = await h.call(w.hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day shift', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] });
     expect(shift.statusCode, shift.body).toBe(201);
     expect((await h.call(w.hr, 'POST', `/v1/employees/${w.employeeEmp}/shift`, { shiftId: shift.json().id, effectiveFrom: '2026-01-05' })).statusCode).toBe(200);
     expect((await h.call(w.hr, 'POST', '/v1/holidays', { locationId: A.loc, holidayDate: '2026-03-04', name: 'Synthetic holiday' })).statusCode).toBe(201);

@@ -40,7 +40,7 @@ const placeOf = new WeakMap<Record<Column, string>, { group: Group; index: numbe
 
 function parse(bytes: Buffer): TemplateRow<Column>[] {
   const rows = parseTemplate(bytes, SETTLEMENT_LINES_TEMPLATE);
-  const caches: UploadRowCaches = { components: new Map(), employees: new Map() };
+  const caches: UploadRowCaches = { components: new Map(), employees: new Map(), paidInPayroll: new Map() };
   const groups = new Map<string, Group>();
   for (const r of rows) {
     // A settlement is named by the employee and the approved last working date (cells are trimmed by parseTemplate).

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildAccessMatrix, type TraceLine } from '../registers/access.js';
 import { BLOCKED, checkBlockedSources } from '../registers/blocked.js';
 import { EXPECTED_COUNTS, idsNamedIn, parseRequirements } from '../registers/requirements.js';
-import { parseRun, type RunEvidence } from '../registers/runs.js';
+import { declaredToFail, markExpectedFailures, parseRun, type RunEvidence } from '../registers/runs.js';
 import { buildSchemaRegister, type ColumnRow, parseEnforcementRecord, type SchemaRegister } from '../registers/schema.js';
 import { buildVerification, decide } from '../registers/verification.js';
 import { startTestDatabase, type TestDatabase } from './test-database.js';
@@ -121,6 +121,14 @@ describe('a disposition', () => {
     expect(decide([], [], [])).toEqual({ disposition: 'Not evidenced', reason: 'No test names or mentions it' });
   });
 
+  it('is Fail when a named test passed only because it is declared it.fails, whatever else passed or blocks it (I-84)', () => {
+    const declared = { status: 'passed' as const, expectedFailure: true };
+    expect(decide([passed, declared], [], [])).toEqual({ disposition: 'Fail', reason: 'Named tests: 1 passed, 1 declared it.fails (passing only while the behaviour is wrong)' });
+    expect(decide([declared], [block], []).disposition).toBe('Fail');
+    // A declared test that did not run is skipped, like any other.
+    expect(decide([{ status: 'skipped' as const, expectedFailure: true }], [], []).disposition).toBe('Not evidenced');
+  });
+
   it('takes only what the cited run shows for that identifier', () => {
     const requirement = { id: 'FR-001', family: 'FR' as const, title: 't', line: 1, classification: 'c', expected: 'e' };
     const rows = buildVerification(
@@ -133,6 +141,20 @@ describe('a disposition', () => {
     expect(rows[0]!.named).toEqual([{ file: 'a.test.ts', name: 'first (FR-001) works', status: 'passed', run: 'Run T' }]);
     expect(rows[0]!.mentionedIn).toEqual([]);
     expect(rows[1]!.mentionedIn).toEqual(['a.test.ts', 'b.test.ts']);
+  });
+
+  it('does not count its own tests: a parser test naming an identifier is neither evidence nor a place to look', () => {
+    const requirement = { id: 'FR-001', family: 'FR' as const, title: 't', line: 1, classification: 'c', expected: 'e' };
+    const own = 'db/tests/registers.test.ts';
+    const rows = buildVerification(
+      [requirement, { ...requirement, id: 'FR-002' }],
+      [run([{ name: 'reads FR-001 from its definition', status: 'passed', file: own }, { name: 'reads FR-002 too', status: 'passed', file: own }, { name: 'second (FR-002) works', status: 'passed' }])],
+      [],
+      new Map([[own, '// FR-001 and FR-002']]),
+    );
+    expect(rows.map((r) => r.disposition)).toEqual(['Not evidenced', 'Pass']);
+    expect(rows[0]!.reason).toBe('No test names or mentions it');
+    expect(rows[1]!.named.map((t) => t.file)).toEqual(['a.test.ts']);
   });
 });
 
@@ -162,6 +184,45 @@ describe('a run read as evidence', () => {
 
   it('keeps a hash that tells two runs apart', () => {
     expect(parseRun('Run T', json, ROOT).sha256).not.toBe(parseRun('Run T', `${json} `, ROOT).sha256);
+  });
+});
+
+describe('a test declared to fail (it.fails; I-84)', () => {
+  // Assembled, so this file itself declares no it.fails.
+  const fails = ['it', 'fails'].join('.');
+  const testFails = ['test', 'fails'].join('.');
+
+  it('is found by its title, in quotes or a template, and nowhere else', () => {
+    const source = [
+      `describe('outer', () => {`,
+      `  ${fails}('widget shows the queue', async () => {});`,
+      `  ${testFails}("it's \\"quoted\\"", () => {});`,
+      `  ${fails}(\`row \${n} holds\`, () => {});`,
+      `  it('widget shows the queue too', () => {});`,
+      `});`,
+    ].join('\n');
+    const patterns = declaredToFail(source);
+    const declared = (name: string) => patterns.some((p) => p.test(name));
+    expect(declared('outer > widget shows the queue')).toBe(true);
+    expect(declared('widget shows the queue')).toBe(true);
+    expect(declared(`outer > it's "quoted"`)).toBe(true);
+    expect(declared('outer > row 7 holds')).toBe(true);
+    expect(declared('outer > widget shows the queue too')).toBe(false);
+    expect(declared('outer > another widget shows the queue')).toBe(false);
+  });
+
+  it('marks the whole file when a declaration’s title cannot be read', () => {
+    expect(declaredToFail(`${fails}.each([1])('case %s', () => {});`)[0]!.test('anything at all')).toBe(true);
+    expect(declaredToFail(`${fails}(TITLE, () => {});`)[0]!.test('anything at all')).toBe(true);
+    expect(declaredToFail(`it('plain', () => {}); // no failing declaration`)).toEqual([]);
+  });
+
+  it('is marked in the run from its file, and only there', () => {
+    const marked = markExpectedFailures(
+      [run([{ name: 'outer > shows it', status: 'passed', file: 'x.test.ts' }, { name: 'outer > shows it', status: 'passed', file: 'y.test.ts' }])],
+      new Map([['x.test.ts', `${fails}('shows it', () => {});`]]),
+    );
+    expect(marked[0]!.tests.map((t) => t.expectedFailure ?? false)).toEqual([true, false]);
   });
 });
 

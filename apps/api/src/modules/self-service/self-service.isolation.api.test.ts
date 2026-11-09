@@ -16,7 +16,7 @@ async function world(): Promise<World> {
   const hr = await h.actor(company, 'HR_ADMINISTRATOR');
   const reviewer = await h.actor(company, 'HR_ADMINISTRATOR');
   expect((await h.call(hr, 'PUT', '/v1/workflows/profile_change/fallback-reviewers', { reviewers: [{ userId: reviewer.user, priority: 1 }] })).statusCode).toBe(200);
-  const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [] })).json().id as string;
+  const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [] })).json().id as string;
   const person = async (managerId?: string) => {
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(company))).json() as { id: string; employeeCode: string };
     await h.setStatus(company, e.id, 'ACTIVE_CONFIRMED');

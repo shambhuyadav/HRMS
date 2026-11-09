@@ -244,13 +244,25 @@ describe.runIf(isModuleActive('lifecycle'))('letters (FR-017, FR-018, FR-055)', 
     expect(trail).not.toContain('Eli Employee');
   });
 
-  it('never sends: sending is a separate action that is not available', async () => {
+  it('FR-018 sends only in-app, as its own right: the reviewed recipient, delivery status and no e-mail (I-81 item 9)', async () => {
     const output = (await h.call(hrLetters, 'GET', `/v1/employees/${employeeEmp}/letter-outputs`)).json().items[0];
-    const notifications = (await h.one<{ n: number }>(`select count(*)::int as n from notification where company_id = $1`, [A.id])).n;
-    expect((await h.call(hrLetters, 'POST', `/v1/letter-outputs/${output.id}/send`)).json().error).toBe('SENDING_NOT_AVAILABLE');
-    expect((await h.call(hr, 'POST', `/v1/letter-outputs/${output.id}/send`)).statusCode).toBe(403);
-    expect((await h.one<{ n: number }>(`select count(*)::int as n from notification where company_id = $1`, [A.id])).n).toBe(notifications);
+    const send = (a: TestActor, recipientEmployeeId = employeeEmp) => h.call(a, 'POST', `/v1/letter-outputs/${output.id}/send`, { recipientEmployeeId });
+    // Generating and reading do not include sending (FR-002, FR-018).
+    expect((await send(hrLetters)).statusCode).toBe(403);
+    expect((await send(hr)).statusCode).toBe(403);
+    const sender = await h.actor(A, 'HR_ADMINISTRATOR', { extra: [...HR_LETTERS, 'letter.send.letter'] });
+    expect((await send(sender, financeEmp)).json().error).toBe('RECIPIENT_MISMATCH');
+    const sent = await send(sender);
+    expect(sent.statusCode, sent.body).toBe(201);
+    expect(sent.json()).toMatchObject({ kind: 'LETTER', format: 'TEXT', channel: 'IN_APP', status: 'DELIVERED' });
+    // The output itself is unchanged (append-only); its list shows the in-app delivery.
     expect(await h.one<{ s: string }>(`select delivery_state as s from letter_output where id = $1`, [output.id])).toEqual({ s: 'NOT_SENT' });
+    expect(((await h.call(hrLetters, 'GET', `/v1/employees/${employeeEmp}/letter-outputs`)).json().items as { id: string; deliveryState: string }[]).find((o) => o.id === output.id)!.deliveryState).toBe('DELIVERED_IN_APP');
+    // The employee opens the exact stored letter in their own self-service.
+    const mine = (await h.call(employee, 'GET', '/v1/me/deliveries')).json().items as { id: string; kind: string }[];
+    expect(mine.map((d) => [d.id, d.kind])).toEqual([[sent.json().id, 'LETTER']]);
+    const opened = await h.call(employee, 'GET', `/v1/me/deliveries/${sent.json().id}/file`);
+    expect(opened.body).toBe((await h.call(hrLetters, 'GET', `/v1/letter-outputs/${output.id}/content`)).body);
     // A letter of a colleague's process in another department is out of this assignment's scope only.
     expect((await generate(hrLettersEng, financeProcess, 'RELIEVING')).json().error).toBe('EXIT_NOT_APPROVED');
   });

@@ -8,8 +8,8 @@
 // company's business date) or at any time in one calendar month (`month`: an employee whose salary changed in that
 // month has one row per arrangement), with E08's employee search and status filters; paged 25/50/100 with the total
 // (FR-056). E08's company filter is the selected assignment's company. Columns follow the E08 grid: annual CTC, monthly
-// gross, grade and effective date. Not built: estimated in-hand (BR-011 leaves its calculation open, so it is never
-// computed) and the CTC category filter (E08 names it, the BRD defines no category).
+// gross, grade, effective date and the estimated in-hand (BR-011; I-80, decided under owner delegation, 6 Nov 2026:
+// ESTIMATED_IN_HAND, labelled as an estimate with ESTIMATE_NOTE). Not built yet: the CTC category filter (I-80 A4).
 //
 // Upload (template SALARY_MASTER_V1: employeeCode,effectiveFrom,annualCtc,monthlyGross,currency): each row records an
 // employee's initial salary arrangement through the service function of POST /employees/:id/salary, under the same
@@ -43,6 +43,8 @@ export interface SalaryMasterFilters {
   to: string;
   search?: string | undefined;
   status?: string | undefined;
+  /** E08's CTC category filter (I-80): the code of a company CTC category recorded on the arrangement. */
+  ctcCategory?: string | undefined;
 }
 
 /** One calendar month (YYYY-MM) as its first and last day. */
@@ -60,6 +62,33 @@ export function requireDayOrMonth(f: { from?: string | undefined; to?: string | 
   throw new HttpError(422, 'DAY_OR_MONTH_REQUIRED', 'This export covers one day or one calendar month (its first to its last day)');
 }
 
+/** BR-011 estimated in-hand (I-80, decided under owner delegation, 6 Nov 2026): how the figure is made, said wherever it is shown. */
+export const ESTIMATE_NOTE = {
+  label: 'Estimated in-hand',
+  message:
+    'An estimate, not a payslip: the monthly earnings and reimbursements of the salary arrangement less its fixed employee deductions, as payroll pays a full month. It is before income tax and statutory deductions (PF, ESIC, PT), which are not calculated while their rule packs are inactive, and it leaves out unpaid leave, inputs, loans, arrears and holds. It is not shown when payroll could not pay a component of the arrangement as it stands.',
+} as const;
+
+/**
+ * BR-011 estimated in-hand of arrangement `sa` with the pay heads in effect on `day` (alias est, column amount): DF05's
+ * net = earnings + reimbursements - employee deductions over the arrangement's components on FIXED monthly heads; employer
+ * contributions are a cost, not pay, and RULE_PACK heads (tax and statutory) are not calculated. Null when the arrangement
+ * has no component, or one payroll would refuse (no head in use, an INPUT head, or a FIXED head on an annual amount), so
+ * a figure is never shown that payroll could not pay. Rounded half-up to the currency's minor unit.
+ */
+export const ESTIMATED_IN_HAND = (day: string) => `
+            left join lateral (
+              select case when count(*) = 0 or bool_or(h.head_type is null or h.calculation_basis = 'INPUT' or (h.calculation_basis = 'FIXED' and sc.basis <> 'MONTHLY')) then null
+                          else round(coalesce(sum(case when h.calculation_basis = 'FIXED' and h.head_type in ('EARNING', 'REIMBURSEMENT') then sc.amount
+                                                       when h.calculation_basis = 'FIXED' and h.head_type = 'DEDUCTION' then -sc.amount
+                                                       else 0 end), 0),
+                                     coalesce((select cu.minor_unit from currency cu where cu.code = sa.currency_code), 2)) end as amount
+                from salary_component sc
+                left join lateral (select hr.head_type, hr.calculation_basis from payroll_head_revision hr
+                                    where hr.company_id = sc.company_id and hr.component_id = sc.component_id and hr.state = 'ACTIVE' and hr.effective_from <= ${day}
+                                    order by hr.effective_from desc limit 1) h on true
+               where sc.company_id = sa.company_id and sc.salary_arrangement_id = sa.id) est on true`;
+
 /**
  * The salary master rows: every salary arrangement in force at any time from `from` to `to` of an employee in the
  * caller's row scope, narrowed by the employee list's own search and status predicates (FR-007). An arrangement is in
@@ -76,14 +105,18 @@ export function salaryMasterSelect(grant: AccessGrant, f: SalaryMasterFilters, p
   const lastDay = `least(${to}, coalesce(sa.effective_to - 1, ${to}))`;
   return `select e.id as employee_id, e.employee_code, e.display_name, st.code as status, gr.name as grade,
                  to_char(sa.effective_from, 'YYYY-MM-DD') as effective_from, to_char(sa.effective_to, 'YYYY-MM-DD') as effective_to,
-                 sa.currency_code as currency, sa.annual_ctc, sa.monthly_gross
+                 sa.currency_code as currency, sa.annual_ctc, sa.monthly_gross, est.amount::text as estimated_in_hand, cc.code as ctc_category
             from salary_arrangement sa
             join employee e on e.company_id = sa.company_id and e.id = sa.employee_id
             join reference_value st on st.company_id = e.company_id and st.id = e.status_id
+            left join ctc_category cc on cc.company_id = sa.company_id and cc.id = sa.ctc_category_id
             left join lateral (select g.name from employment_assignment ea join grade g on g.company_id = ea.company_id and g.id = ea.grade_id
                                 where ea.company_id = e.company_id and ea.employee_id = e.id
                                   and ea.effective_from <= ${lastDay} and (ea.effective_to is null or ea.effective_to > ${lastDay})) gr on true
-           where ${scope} and sa.superseded_at is null and sa.effective_from <= ${to} and (sa.effective_to is null or sa.effective_to > ${from})${filters}`;
+            ${ESTIMATED_IN_HAND(lastDay)}
+           where ${scope} and sa.superseded_at is null and sa.effective_from <= ${to} and (sa.effective_to is null or sa.effective_to > ${from})${filters}${
+             f.ctcCategory ? ` and cc.code = ${p.add(f.ctcCategory)}` : ''
+           }`;
 }
 
 /** The order of salary master rows, in the list and the exports alike. */
@@ -94,6 +127,7 @@ export interface SalaryMasterQuery {
   month?: string | undefined;
   search?: string | undefined;
   status?: string | undefined;
+  ctcCategory?: string | undefined;
   page: number;
   pageSize: number;
 }
@@ -109,6 +143,8 @@ interface SalaryMasterRow {
   currency: string;
   annual_ctc: string;
   monthly_gross: string;
+  estimated_in_hand: string | null;
+  ctc_category: string | null;
 }
 
 /** GET /salary-master: one page of the salary master on a day or in a month, with the total of the same filtered rows. */
@@ -119,7 +155,7 @@ export async function listSalaryMaster(db: Queryable, grant: AccessGrant, q: Sal
     throw new HttpError(403, 'HISTORY_GRANT_REQUIRED', 'Earlier salaries need the salary history grant; today and later dates do not');
   }
   const p = new SqlParams();
-  const select = salaryMasterSelect(grant, { ...period, search: q.search, status: q.status }, p);
+  const select = salaryMasterSelect(grant, { ...period, search: q.search, status: q.status, ctcCategory: q.ctcCategory }, p);
   const total = Number((await db.query<{ n: string }>(`select count(*) as n from (${select}) x`, p.values)).rows[0]?.n ?? 0);
   const limit = p.add(q.pageSize);
   const offset = p.add((q.page - 1) * q.pageSize);
@@ -137,10 +173,13 @@ export async function listSalaryMaster(db: Queryable, grant: AccessGrant, q: Sal
       currency: r.currency,
       annualCtc: r.annual_ctc,
       monthlyGross: r.monthly_gross,
+      estimatedInHand: r.estimated_in_hand,
+      ctcCategory: r.ctc_category,
     })),
     total,
     page: q.page,
     pageSize: q.pageSize,
+    estimate: ESTIMATE_NOTE,
   };
 }
 
@@ -207,6 +246,7 @@ export async function salaryMasterRoutes(app: FastifyInstance, opts: { db: Datab
             month: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$' },
             search: { type: 'string', maxLength: 100 },
             status: { type: 'string', pattern: '^[A-Z_]{1,40}$' },
+            ctcCategory: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,39}$' },
             page: { type: 'integer', minimum: 1, default: 1 },
             pageSize: { type: 'integer', enum: [25, 50, 100], default: 25 },
           },

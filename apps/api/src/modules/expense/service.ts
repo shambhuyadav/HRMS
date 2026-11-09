@@ -7,6 +7,7 @@ import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, canAccessEmployee, eligibleTasksOf, employeeScopePredicate, resolveAccess, SqlParams, taskDelegationLive } from '../access/authorize.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, scopeCovers, startApproval } from '../workflow/engine.js';
+import { isModuleActive } from '../registry.js';
 import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
 import { expensePolicyLockKey } from './policies.js';
 
@@ -18,6 +19,11 @@ export interface LineInput {
   invoiceReference?: string | undefined;
   grossAmount: string;
   claimedAmount: string;
+  /**
+   * I-87: the currency the expense was paid in, when it is not the claim's. Its amounts are then in that currency; submission converts
+   * them once at the rate in force on the expense date (convertForeignLines).
+   */
+  currency?: string | undefined;
   description: string;
   exceptionReason?: string | undefined;
   /** A receipt uploaded first through POST /expense/receipts by the claimant. */
@@ -34,9 +40,14 @@ const OWNER_EDITABLE = ['DRAFT', 'RETURNED'];
 /** FR-074, DF03 "Withdraw only before a final decision": every state from which a final approval has not committed. */
 const WITHDRAWABLE = [...OWNER_EDITABLE, 'MANAGER_PENDING', 'FINANCE_PENDING', 'HIGH_VALUE_PENDING'];
 
-async function insertLines(tx: Queryable, grant: AccessGrant, employeeId: string, revisionId: string, lines: LineInput[]) {
+async function insertLines(tx: Queryable, grant: AccessGrant, employeeId: string, revisionId: string, lines: LineInput[], claimCurrency: string) {
   let sequence = 0;
   for (const l of lines) {
+    // I-87: a line in another currency keeps its own amounts until submission converts them; the code must be an approved one.
+    const foreign = l.currency !== undefined && l.currency !== claimCurrency ? l.currency : null;
+    if (foreign && !(await tx.query(`select 1 from currency where code = $1`, [foreign])).rowCount) {
+      throw new HttpError(422, 'UNSUPPORTED_CURRENCY', `${foreign} is not one of the approved currencies`, { line: sequence + 1 });
+    }
     const category = (
       await tx.query<{ id: string }>(`select id from expense_category where company_id = $1 and code = $2 and active`, [grant.companyId, l.category])
     ).rows[0];
@@ -55,15 +66,34 @@ async function insertLines(tx: Queryable, grant: AccessGrant, employeeId: string
     if (l.receipt && !receipt) throw new HttpError(422, 'INVALID_RECEIPT', 'The receipt was not uploaded by you');
     // FR-106: a receipt the scanner quarantined is not evidence (a pending scan may still be released).
     if (receipt?.scan_state === 'QUARANTINED') throw new HttpError(422, 'RECEIPT_QUARANTINED', 'The receipt failed the malware scan; upload another file');
+    // A foreign line's fingerprint names its currency and own amount, so it matches the same spend however it is later converted.
     const fingerprint = createHash('sha256')
-      .update([employeeId, l.expenseDate, l.category, Number(l.claimedAmount).toFixed(2), receipt?.checksum ?? ''].join('|'))
+      .update([employeeId, l.expenseDate, l.category, `${foreign ? `${foreign}:` : ''}${Number(l.claimedAmount).toFixed(2)}`, receipt?.checksum ?? ''].join('|'))
       .digest('hex');
     const lineId = (
       await tx.query<{ id: string }>(
         `insert into expense_line (company_id, revision_id, sequence, category_id, expense_date, nights, merchant, invoice_reference, gross_amount,
-                                   claimed_amount, description, exception_reason, fingerprint, created_by, updated_by)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10::numeric, $11, $12, $13, $14, $14) returning id`,
-        [grant.companyId, revisionId, ++sequence, category.id, l.expenseDate, l.nights ?? null, l.merchant.trim(), l.invoiceReference?.trim() || null, l.grossAmount, l.claimedAmount, l.description.trim(), l.exceptionReason?.trim() || null, fingerprint, grant.userId],
+                                   claimed_amount, source_currency_code, source_gross_amount, source_claimed_amount, description, exception_reason, fingerprint, created_by, updated_by)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10::numeric, $11, $12::numeric, $13::numeric, $14, $15, $16, $17, $17) returning id`,
+        [
+          grant.companyId,
+          revisionId,
+          ++sequence,
+          category.id,
+          l.expenseDate,
+          l.nights ?? null,
+          l.merchant.trim(),
+          l.invoiceReference?.trim() || null,
+          foreign ? null : l.grossAmount,
+          foreign ? null : l.claimedAmount,
+          foreign,
+          foreign ? l.grossAmount : null,
+          foreign ? l.claimedAmount : null,
+          l.description.trim(),
+          l.exceptionReason?.trim() || null,
+          fingerprint,
+          grant.userId,
+        ],
       )
     ).rows[0]!.id;
     if (receipt) {
@@ -103,7 +133,7 @@ export async function createDraft(tx: Queryable, grant: AccessGrant, input: Draf
       [grant.companyId, claimId, input.currency, input.purpose.trim(), grant.userId],
     )
   ).rows[0]!.id;
-  await insertLines(tx, grant, employeeId, revisionId, input.lines);
+  await insertLines(tx, grant, employeeId, revisionId, input.lines, input.currency);
   return { claimId, revision: 1, state: 'DRAFT' };
 }
 
@@ -188,7 +218,7 @@ export async function reviseDraft(tx: Queryable, grant: AccessGrant, claimId: st
     await tx.query(`delete from expense_line where company_id = $1 and revision_id = $2`, [grant.companyId, revisionId]);
     await tx.query(`update expense_revision set purpose = $3, updated_by = $4 where company_id = $1 and id = $2`, [grant.companyId, revisionId, purpose, grant.userId]);
   }
-  await insertLines(tx, grant, claim.employee_id, revisionId, input.lines);
+  await insertLines(tx, grant, claim.employee_id, revisionId, input.lines, claim.currency_code);
   // The claim keeps a copy of its current revision's purpose; the revision's own, frozen at submission, is the record (line 103).
   await tx.query(`update expense_claim set purpose = $3, current_revision = $4, updated_by = $5 where company_id = $1 and id = $2`, [grant.companyId, claim.id, purpose, revision, grant.userId]);
   return { claimId: claim.id, revision, state: claim.state };
@@ -209,6 +239,56 @@ interface LineCheck {
   nights_missing: boolean;
   receipt_missing: boolean;
   duplicate: boolean;
+}
+
+/**
+ * I-87 (decided under owner delegation, 6 Nov 2026): every line in another currency is converted once, now, at the exchange rate in force
+ * on its expense date (the active rate with the latest start on or before it), foreign amount x rate rounded half-up to the claim
+ * currency's minor unit; the rate and the amounts freeze with the revision (0212, BR-017). A currency Finance has not enabled is refused
+ * (UNSUPPORTED_CURRENCY), and one without a rate for the date too (EXCHANGE_RATE_NOT_CONFIGURED), naming the lines. A refused
+ * submission rolls back, so nothing is converted until one succeeds.
+ */
+async function convertForeignLines(tx: Queryable, grant: AccessGrant, revisionId: string, claimCurrency: string) {
+  const lines = (
+    await tx.query<{ id: string; sequence: number; currency: string; enabled: boolean; rate_id: string | null; rate: string | null; gross: string | null; claimed: string | null }>(
+      `select l.id, l.sequence, l.source_currency_code as currency,
+              exists (select 1 from company_currency cc where cc.company_id = l.company_id and cc.currency_code = l.source_currency_code
+                         and cc.purpose = 'EXPENSE' and cc.state = 'ACTIVE') as enabled,
+              r.id as rate_id, r.rate::text as rate,
+              hrms_payroll_round_half_up(l.source_gross_amount * r.rate, 1, $3::smallint)::text as gross,
+              hrms_payroll_round_half_up(l.source_claimed_amount * r.rate, 1, $3::smallint)::text as claimed
+         from expense_line l
+         left join lateral (select x.id, x.rate from expense_exchange_rate x
+                             where x.company_id = l.company_id and x.currency_code = l.source_currency_code and x.state = 'ACTIVE' and x.effective_from <= l.expense_date
+                             order by x.effective_from desc limit 1) r on true
+        where l.company_id = $1 and l.revision_id = $2 and l.source_currency_code is not null
+        order by l.sequence`,
+      [grant.companyId, revisionId, (await tx.query<{ minor_unit: number }>(`select minor_unit from currency where code = $1`, [claimCurrency])).rows[0]?.minor_unit ?? 2],
+    )
+  ).rows;
+  if (lines.length === 0) return;
+  const disabled = lines.filter((l) => !l.enabled);
+  if (disabled.length > 0) {
+    throw new HttpError(422, 'UNSUPPORTED_CURRENCY', 'These lines are in a currency Finance has not enabled for claims', {
+      lines: disabled.map((l) => l.sequence),
+      currencies: [...new Set(disabled.map((l) => l.currency))],
+    });
+  }
+  const unrated = lines.filter((l) => !l.rate_id);
+  if (unrated.length > 0) {
+    throw new HttpError(422, 'EXCHANGE_RATE_NOT_CONFIGURED', `No exchange rate to ${claimCurrency} is in force on these lines' expense dates`, {
+      lines: unrated.map((l) => l.sequence),
+      currencies: [...new Set(unrated.map((l) => l.currency))],
+    });
+  }
+  const tiny = lines.filter((l) => Number(l.claimed) <= 0);
+  if (tiny.length > 0) throw new HttpError(422, 'LINE_AMOUNT_TOO_SMALL', `These lines convert to nothing in ${claimCurrency}`, { lines: tiny.map((l) => l.sequence) });
+  for (const l of lines) {
+    await tx.query(
+      `update expense_line set exchange_rate = $3::numeric, exchange_rate_id = $4, gross_amount = $5::numeric, claimed_amount = $6::numeric, updated_by = $7 where company_id = $1 and id = $2`,
+      [grant.companyId, l.id, l.rate, l.rate_id, l.gross, l.claimed, grant.userId],
+    );
+  }
 }
 
 /** FR-071 / DF06 submission validation; flags need a claimant reason; hard errors block. */
@@ -242,7 +322,11 @@ export async function submitClaim(tx: Queryable, grant: AccessGrant, claimId: st
   const policy = (
     await tx.query<{ id: string; currency_code: string; submission_window_days: number }>(`select id, currency_code, submission_window_days from expense_policy where company_id = $1 and id = $2`, [grant.companyId, policyIds[0]])
   ).rows[0]!;
-  if (policy.currency_code !== claim.currency_code) throw new HttpError(422, 'UNSUPPORTED_CURRENCY', `Claims must be in ${policy.currency_code}`);
+  if (policy.currency_code !== claim.currency_code) {
+    // OQ-17 (I-87): a claim is reimbursed in the policy currency (DF07); spending in another currency is entered as lines in it.
+    throw new HttpError(422, 'UNSUPPORTED_CURRENCY', `Claims are in ${policy.currency_code}; enter spending in another currency as lines in that currency`);
+  }
+  await convertForeignLines(tx, grant, revision.id, claim.currency_code);
 
   // Duplicate checks compare only submitted revisions, so concurrent submissions that could match each other are
   // serialised: the later one's comparison (a new READ COMMITTED snapshot) then sees the earlier one's submission. A
@@ -622,9 +706,18 @@ async function paymentStatusEvent(tx: Queryable, companyId: string, claimId: str
 }
 
 /** Approved claims with an outstanding entitlement, in the payment operator's scope (DF07). */
-export async function listPayables(db: Queryable, grant: AccessGrant) {
+/**
+ * I-84 item 5 "payment preparation task" (I-89 item 2): an approved, unpaid obligation awaiting preparation, i.e. a FINAL_APPROVED
+ * claim (state APPROVED) with an outstanding amount (approved - net paid > 0) and no live reservation (nothing pending: no
+ * prepared or released instruction still waiting for its outcome). Ledger alias l. A failed payment ends its reservation, and a
+ * reversal reopens what it reversed, so both bring the claim back here. The Treasury Operator's figure counts the same rows.
+ */
+export const AWAITING_PREPARATION = `(l.approved_amount - l.net_paid > 0 and l.pending = 0)`;
+
+export async function listPayables(db: Queryable, grant: AccessGrant, q: { awaitingPreparation?: boolean | undefined } = {}) {
   const params = new SqlParams();
   const scope = employeeScopePredicate(grant, { company: 'c.company_id', employee: 'c.employee_id' }, params);
+  const awaiting = q.awaitingPreparation ? `and ${AWAITING_PREPARATION}` : '';
   const rows = await db.query(
     `select c.id as "claimId", e.employee_code as "employeeCode", e.display_name as "employeeName", ar.purpose, c.payment_state as "paymentState",
             l.approved_amount::numeric(19,2)::text as "approvedAmount", l.net_paid::numeric(19,2)::text as "netPaid",
@@ -635,7 +728,7 @@ export async function listPayables(db: Queryable, grant: AccessGrant) {
        join expense_obligation_ledger l on l.company_id = c.company_id and l.claim_id = c.id
        join expense_obligation o on o.company_id = c.company_id and o.id = l.obligation_id
        join expense_revision ar on ar.company_id = o.company_id and ar.id = o.revision_id
-      where ${scope} and c.state = 'APPROVED' and c.payment_state <> 'PAID'
+      where ${scope} and c.state = 'APPROVED' and c.payment_state <> 'PAID' ${awaiting}
       order by e.employee_code, c.created_at`,
     params.values,
   );
@@ -742,6 +835,9 @@ export async function getClaim(db: Queryable, grant: AccessGrant, claimId: strin
   const lines = await db.query(
     `select l.id, l.sequence, c.code as category, l.expense_date as "expenseDate", l.nights, l.merchant, l.invoice_reference as "invoiceReference", l.claimed_amount::text as "claimedAmount",
             l.gross_amount::text as "grossAmount", l.description, l.exception_flags as "exceptionFlags",
+            -- I-87: a line in another currency, its own amounts and, once submitted, the frozen rate.
+            l.source_currency_code as "currency", l.source_gross_amount::text as "sourceGrossAmount", l.source_claimed_amount::text as "sourceClaimedAmount",
+            l.exchange_rate::text as "exchangeRate",
             exists (select 1 from expense_receipt r where r.company_id = l.company_id and r.line_id = l.id) as "receiptPresent",
             -- FR-106: attached is not usable; the receipt route serves only a CLEAN file.
             (select a.scan_state from expense_receipt er join attachment a on a.company_id = er.company_id and a.id = er.attachment_id
@@ -837,7 +933,35 @@ async function assertReplaceable(tx: Queryable, companyId: string, instructionId
   if (replaced.retried) throw new HttpError(409, 'ALREADY_RETRIED', 'The earlier payment has already been replaced');
 }
 
-export async function preparePayment(tx: Queryable, grant: AccessGrant, input: { claimId: string; amount: string; paymentDate: string; idempotencyKey: string; retryOfInstructionId?: string | undefined }) {
+/**
+ * BR-024, FR-076, DF07 (docs/03 I-81 item 8; decided under owner delegation, 6 Nov 2026): an approved claim has one obligation and
+ * one route, the direct payment; payroll does not pay expense claims (DF07 Wave 1). A payroll REIMBURSEMENT input of the employee in
+ * the claim's currency, entered since the claim was first submitted and still live (draft, submitted or approved, not reversed),
+ * could be the same money paid through payroll, which the claim's ledger would never see. Those inputs are listed (identifiers,
+ * period, reference, state, and whether the amount equals this payment; never the payroll amount itself, DF02) and the payment is
+ * refused until the preparer records why they do not pay this claim. Nothing is listed while the payroll module is not active.
+ */
+async function payrollReimbursementsSince(tx: Queryable, companyId: string, claimId: string, employeeId: string, currency: string, amount: string) {
+  if (!isModuleActive('payroll')) return [];
+  return (
+    await tx.query<{ inputId: string; periodCode: string; reference: string; state: string; effectiveDate: string; matchesAmount: boolean }>(
+      `select i.id as "inputId", p.period_code as "periodCode", i.reference, i.state, to_char(i.effective_date, 'YYYY-MM-DD') as "effectiveDate", i.amount = $5::numeric as "matchesAmount"
+         from payroll_input i
+         join payroll_period p on p.company_id = i.company_id and p.id = i.period_id
+        where i.company_id = $1 and i.employee_id = $3 and i.currency_code = $4 and i.state in ('DRAFT', 'SUBMITTED', 'APPROVED')
+          and i.created_at >= (select min(r.submitted_at) from expense_revision r where r.company_id = $1 and r.claim_id = $2)
+          and exists (select 1 from payroll_head_revision h where h.company_id = i.company_id and h.component_id = i.component_id and h.in_use and h.head_type = 'REIMBURSEMENT')
+        order by i.created_at, i.id`,
+      [companyId, claimId, employeeId, currency, amount],
+    )
+  ).rows;
+}
+
+export async function preparePayment(
+  tx: Queryable,
+  grant: AccessGrant,
+  input: { claimId: string; amount: string; paymentDate: string; idempotencyKey: string; retryOfInstructionId?: string | undefined; payrollReimbursementReview?: string | undefined },
+) {
   const o = (
     await tx.query<{ id: string; employee_id: string; currency_code: string }>(
       `select id, employee_id, currency_code from expense_obligation where company_id = $1 and claim_id = $2 for update`,
@@ -875,6 +999,13 @@ export async function preparePayment(tx: Queryable, grant: AccessGrant, input: {
     )
   ).rows[0]!.ok;
   if (!enough) throw new HttpError(422, 'EXCEEDS_OUTSTANDING', 'The amount exceeds the unreserved outstanding entitlement');
+  const payrollReimbursements = await payrollReimbursementsSince(tx, grant.companyId, input.claimId, o.employee_id, o.currency_code, input.amount);
+  const review = input.payrollReimbursementReview?.trim() ?? '';
+  if (payrollReimbursements.length > 0 && review === '') {
+    throw new HttpError(409, 'PAYROLL_REIMBURSEMENT_REVIEW_REQUIRED', 'Payroll reimbursements were entered for this employee since the claim was submitted; record why they do not pay this claim', {
+      payrollInputs: payrollReimbursements,
+    });
+  }
 
   const transactionId = (
     await tx.query<{ id: string }>(
@@ -908,7 +1039,17 @@ export async function preparePayment(tx: Queryable, grant: AccessGrant, input: {
     actingAssignmentId: grant.assignmentId,
     action: 'PREPARE',
     newVersion: 1,
-    after: { operational: { claimId: input.claimId, amount: input.amount, paymentDate: input.paymentDate, batchState: 'DRAFT', ...(input.retryOfInstructionId ? { retryOfInstructionId: input.retryOfInstructionId } : {}) } },
+    after: {
+      operational: {
+        claimId: input.claimId,
+        amount: input.amount,
+        paymentDate: input.paymentDate,
+        batchState: 'DRAFT',
+        ...(input.retryOfInstructionId ? { retryOfInstructionId: input.retryOfInstructionId } : {}),
+        ...(payrollReimbursements.length > 0 ? { payrollReimbursementsReviewed: payrollReimbursements.map((p) => p.inputId) } : {}),
+      },
+    },
+    reason: payrollReimbursements.length > 0 ? review : null,
   });
   return { instructionId, state: 'PREPARED', batchState: 'DRAFT', replayed: false };
 }

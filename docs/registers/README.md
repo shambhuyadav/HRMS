@@ -4,7 +4,7 @@ Acceptance-gate records generated from the code, the catalogue and a cited test 
 
 | File | What it is | Now |
 |---|---|---|
-| [verification-register.md](verification-register.md) | One row per FR, BR, DQ, CI and ZT with its disposition | 190 of 250 Pass; the rest say why not |
+| [verification-register.md](verification-register.md) | One row per FR, BR, DQ, CI and ZT with its disposition | 187 of 250 Pass; the rest say why not |
 | [access-matrix.md](access-matrix.md) | Each permission's positive and negative test | 299 of 299 have both |
 | [schema-constraint-register.md](schema-constraint-register.md) | Every column's constraints and the mechanism behind them | 3521 columns |
 | `evidence/` | The tests these files cite, with the hash of the run they came from | |

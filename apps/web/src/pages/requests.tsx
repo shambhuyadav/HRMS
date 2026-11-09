@@ -62,6 +62,7 @@ const MAX_EVIDENCE = 10;
 interface WorkRequest {
   kind: Kind;
   id: string;
+  employeeId?: string;
   employeeCode: string;
   employeeName: string;
   startDate: string;
@@ -417,6 +418,54 @@ function ResubmitWorkRequest({ request: r, onChanged }: { request: WorkRequest; 
 }
 
 /**
+ * I-84 item 15: an approved request is cancelled by its employee before its first day, with a reason and the version. The server
+ * decides by the company's business date; this offers it while the first day is still ahead on this device's calendar.
+ */
+function CancelApprovedRequest({ request: r, onChanged }: { request: WorkRequest; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const cancel = useMutation({
+    mutationFn: () => api(`/v1/work-requests/${r.kind}/${r.id}/cancel`, { body: { reason: reason.trim(), expectedVersion: r.version } }),
+    onSuccess: () => {
+      setOpen(false);
+      setReason('');
+      onChanged();
+    },
+  });
+  if (!open) {
+    return (
+      <button type="button" className="link" aria-label={`Cancel the approved ${KIND_LABEL[r.kind]} request`} onClick={() => setOpen(true)}>
+        Cancel
+      </button>
+    );
+  }
+  return (
+    <form
+      className="grid-form"
+      aria-label="Cancel an approved request"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (reason.trim()) cancel.mutate();
+      }}
+    >
+      <label className="wide">
+        Reason for cancelling
+        <input required maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      <div className="row">
+        <button type="submit" disabled={!reason.trim() || cancel.isPending}>
+          Cancel request
+        </button>
+        <button type="button" className="secondary" onClick={() => setOpen(false)}>
+          Close
+        </button>
+      </div>
+      <ErrorNote error={cancel.error} />
+    </form>
+  );
+}
+
+/**
  * Own records are reachable only where the selected role's scope can include the caller's own record: a team scope
  * covers direct reports only and an assigned scope only the requesters of open tasks (employeeScopePredicate).
  */
@@ -542,6 +591,9 @@ export function WorkRequestsPage() {
                         </button>
                       )}{' '}
                       {r.state === 'RETURNED' && can('work_request.submit.operational') && <ResubmitWorkRequest key={`${r.id}:${r.version}`} request={r} onChanged={refresh} />}
+                      {r.state === 'APPROVED' && r.startDate.slice(0, 10) > localDate() && can('work_request.withdraw.operational') && (
+                        <CancelApprovedRequest key={`${r.id}:${r.version}:cancel`} request={r} onChanged={refresh} />
+                      )}
                       {canRaiseAgain(r, followedRequests(mine.data?.items ?? [])) && can('work_request.submit.operational') && (
                         <button
                           type="button"
@@ -580,8 +632,63 @@ export function WorkRequestsPage() {
   );
 }
 
+/**
+ * I-84 item 15, I-89 item 3: HR cancels an employee's approved request (work_request.cancel, within row scope, never on their own
+ * record), with a reason and the version it read. The server decides whether it may: before the first day, or when every day
+ * falls after the approved last working date; a request already under way inside employment is corrected through attendance.
+ */
+function CancelForEmployee({ request: r, onChanged }: { request: WorkRequest; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const cancel = useMutation({
+    mutationFn: () => api(`/v1/work-requests/${r.kind}/${r.id}/cancel-for-employee`, { body: { reason: reason.trim(), expectedVersion: r.version } }),
+    onSuccess: () => {
+      setOpen(false);
+      setReason('');
+      onChanged();
+    },
+  });
+  if (!open) {
+    return (
+      <button type="button" className="link" aria-label={`Cancel ${r.employeeName}'s approved ${KIND_LABEL[r.kind]} request`} onClick={() => setOpen(true)}>
+        Cancel for employee
+      </button>
+    );
+  }
+  return (
+    <form
+      className="grid-form"
+      aria-label={`Cancel ${r.employeeName}'s approved request`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (reason.trim()) cancel.mutate();
+      }}
+    >
+      <label className="wide">
+        Reason for cancelling
+        <input required maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      <p className="hint wide">
+        An approved request can be cancelled before its first day, or when every day of it falls after the employee&apos;s approved last working date. Once it has started, its days
+        are corrected through an attendance amendment. The employee is told.
+      </p>
+      <div className="row">
+        <button type="submit" disabled={!reason.trim() || cancel.isPending}>
+          Cancel the request
+        </button>
+        <button type="button" className="secondary" onClick={() => setOpen(false)}>
+          Close
+        </button>
+      </div>
+      <ErrorNote error={cancel.error} />
+    </form>
+  );
+}
+
 /** HR views "Leaves & Outdoor" and "Work On Holiday": rows limited by the selected assignment's scope. */
 function WorkRequestRegister() {
+  const { me, can } = useSession();
+  const qc = useQueryClient();
   // The browser's calendar day, not the UTC one (which is still yesterday for the first hours of an Indian day).
   const today = localDate();
   const [kind, setKind] = useState<Kind>('outdoor_duty');
@@ -593,6 +700,12 @@ function WorkRequestRegister() {
     enabled: !!from && !!to,
     queryFn: () => api<{ items: WorkRequest[] }>(`/v1/work-requests/${kind}?from=${from}&to=${to}`),
   });
+  // Never on one's own record: the server refuses it, so it is not offered (I-84 item 15).
+  const mayCancel = (r: WorkRequest) => can('work_request.cancel.operational') && r.state === 'APPROVED' && !!r.employeeId && r.employeeId !== me?.employeeId;
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['work-request-register'] });
+    void qc.invalidateQueries({ queryKey: ['work-requests'] });
+  };
   return (
     <Section title="Requests in my scope">
       <div className="row">
@@ -619,6 +732,7 @@ function WorkRequestRegister() {
               <th>When</th>
               <th>Purpose</th>
               <th>State</th>
+              {can('work_request.cancel.operational') && <th />}
             </tr>
           </thead>
           <tbody>
@@ -632,6 +746,7 @@ function WorkRequestRegister() {
                 <td>
                   <StateBadge state={r.state} />
                 </td>
+                {can('work_request.cancel.operational') && <td>{mayCancel(r) && <CancelForEmployee key={`${r.id}:${r.version}:hr-cancel`} request={r} onChanged={refresh} />}</td>}
               </tr>
             ))}
           </tbody>

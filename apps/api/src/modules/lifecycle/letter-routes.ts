@@ -16,6 +16,7 @@ import {
   letterTemplateDetail,
   listLetterOutputs,
   listLetterTemplates,
+  placeholdersFor,
   previewLetter,
   publishLetterTemplate,
   saveLetterDraft,
@@ -33,10 +34,16 @@ const generation = { type: 'object', additionalProperties: false, required: ['te
 export async function letterRoutes(app: FastifyInstance, opts: { db: Database; files: FileStore }): Promise<void> {
   const { db, files } = opts;
 
-  app.get('/letter-placeholders', async (request) => {
-    await requireAccess(db, request, 'letter_template', 'read', ['operational']);
-    return { items: Object.entries(LETTER_PLACEHOLDERS).map(([key, p]) => ({ key, source: p.source, label: p.label })) };
-  });
+  // The approved placeholders of a letter type (an OFFER template has its own, I-82 item 1); without a type, the employee letters'.
+  app.get(
+    '/letter-placeholders',
+    { schema: { querystring: { type: 'object', additionalProperties: false, properties: { letterType: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,59}$' } } } } },
+    async (request) => {
+      await requireAccess(db, request, 'letter_template', 'read', ['operational']);
+      const { letterType } = request.query as { letterType?: string };
+      return { items: Object.entries(letterType ? placeholdersFor(letterType) : LETTER_PLACEHOLDERS).map(([key, p]) => ({ key, source: p.source, label: p.label })) };
+    },
+  );
 
   app.get('/letter-templates', async (request) => listLetterTemplates(db, await requireAccess(db, request, 'letter_template', 'read', ['operational'])));
 
@@ -137,12 +144,5 @@ export async function letterRoutes(app: FastifyInstance, opts: { db: Database; f
     reply.headers(downloadHeaders({ mediaType: file.mediaType, fileName: file.fileName }, 'letter.txt'));
     return bytes;
   });
-
-  // FR-018: sending is a separate explicit action with recipient review and delivery status. It is not built:
-  // DF12 enables in-app notifications only and DF09 disables e-mail attachments of confidential records.
-  app.post('/letter-outputs/:id/send', { schema: { params: idParams } }, async (request) => {
-    const { id } = request.params as { id: string };
-    await requireAccess(db, request, 'letter', 'read', ['letter'], { requireAll: true, recordKey: id });
-    throw new HttpError(422, 'SENDING_NOT_AVAILABLE', 'Sending letters is not available; download the output for manual delivery');
-  });
+  // FR-018 sending (POST /letter-outputs/:id/send) is in-app delivery to the employee's own self-service: delivery-routes.ts.
 }

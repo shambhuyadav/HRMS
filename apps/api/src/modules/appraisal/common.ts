@@ -25,12 +25,23 @@ export type Stage = (typeof STAGES)[number];
 
 export type Actor = Pick<AccessGrant, 'companyId' | 'userId' | 'assignmentId'>;
 
+/**
+ * FR-042 / BR-014 rating mode (I-77 item 4): FORMULA makes the F1 weighted manager result the final rating; MANUAL has the
+ * manager enter an overall rating (integer 1..5, the F1 scale) that becomes the final rating, the weighted result kept beside it.
+ */
+export const RATING_MODES = ['FORMULA', 'MANUAL'] as const;
+export type RatingMode = (typeof RATING_MODES)[number];
+
+/** Workflow condition of the appraisal route's reviewer step (0177): it applies when the revision pinned a reviewer level. */
+export const REVIEWER_LEVEL_CONDITION = 'APPRAISAL_REVIEWER_LEVEL';
+
 export interface CycleRow {
   id: string;
   code: string;
   name: string;
   start_date: string;
   end_date: string;
+  /** Reviewer levels after the manager's rating: 0 (the manager's approval completes it, BR-013), 1 (F1 default) or 2. */
   approval_levels: number;
   goal_opens_on: string | null;
   goal_closes_on: string | null;
@@ -38,12 +49,23 @@ export interface CycleRow {
   self_closes_on: string | null;
   rating_opens_on: string | null;
   rating_closes_on: string | null;
+  /** FR-041 KRA review: the goal set is reviewed by someone other than its setter before it takes effect. */
+  goal_review_required: boolean;
+  rating_mode: RatingMode;
+  /** The date reviewer confirmations are due (I-77 item 5); null when not scheduled. */
+  review_due_on: string | null;
+  /** I-86 scoring split of the weighted result (whole percentages adding to 100); competencies 0 = not assessed. */
+  goal_weight_percent: number;
+  competency_weight_percent: number;
+  /** FR-042 sections the cycle includes (I-86; sections.ts). */
+  sections: string[];
   state: 'OPEN' | 'CLOSED';
   version: number;
 }
 
 export const CYCLE_COLUMNS = `c.id, c.code, c.name, c.start_date, c.end_date, c.approval_levels, c.goal_opens_on, c.goal_closes_on,
-  c.self_opens_on, c.self_closes_on, c.rating_opens_on, c.rating_closes_on, c.state, c.version`;
+  c.self_opens_on, c.self_closes_on, c.rating_opens_on, c.rating_closes_on, c.goal_review_required, c.rating_mode, c.review_due_on,
+  c.goal_weight_percent, c.competency_weight_percent, c.sections, c.state, c.version`;
 
 export async function loadCycle(db: Queryable, companyId: string, cycleId: string, lock: '' | 'for share' | 'for update' = ''): Promise<CycleRow | undefined> {
   return (await db.query<CycleRow>(`select ${CYCLE_COLUMNS} from appraisal_cycle c where c.company_id = $1 and c.id = $2 ${lock}`, [companyId, cycleId])).rows[0];
@@ -86,13 +108,15 @@ export interface RevisionRow {
   self_comment: string | null;
   approval_levels: number | null;
   weighted_result: string | null;
+  /** The manager's overall rating of a MANUAL cycle (integer 1..5). */
+  manager_overall_rating: number | null;
 }
 
 /** The appraisal's working revision (the one its `revision` points at), row-locked when asked. */
 export async function workingRevision(db: Queryable, companyId: string, a: Pick<AppraisalRow, 'id' | 'revision'>, lock = false): Promise<RevisionRow> {
   const row = (
     await db.query<RevisionRow>(
-      `select id, revision, state, self_comment, approval_levels, weighted_result from appraisal_revision
+      `select id, revision, state, self_comment, approval_levels, weighted_result, manager_overall_rating from appraisal_revision
         where company_id = $1 and appraisal_id = $2 and revision = $3 ${lock ? 'for update' : ''}`,
       [companyId, a.id, a.revision],
     )
@@ -113,6 +137,28 @@ export async function activeGoals(db: Queryable, companyId: string, appraisalId:
   return (
     await db.query<GoalRow>(
       `select id, sequence, description, target, weight from appraisal_item where company_id = $1 and appraisal_id = $2 and active order by sequence`,
+      [companyId, appraisalId],
+    )
+  ).rows;
+}
+
+/** FR-041 competencies copied into the appraisal at enrolment (I-86; fixed; operational like goal names and weights). */
+export interface CompetencyItemRow {
+  id: string;
+  competency_id: string;
+  sequence: number;
+  code: string;
+  name: string;
+  description: string | null;
+  indicators: string[];
+  weight: number;
+}
+
+export async function appraisalCompetencies(db: Queryable, companyId: string, appraisalId: string): Promise<CompetencyItemRow[]> {
+  return (
+    await db.query<CompetencyItemRow>(
+      `select id, competency_id, sequence, code, name, description, indicators, weight from appraisal_competency_item
+        where company_id = $1 and appraisal_id = $2 order by sequence`,
       [companyId, appraisalId],
     )
   ).rows;
@@ -170,6 +216,16 @@ export async function requireEntryWindow(db: Queryable, companyId: string, appra
       closesOn: status.closesOn,
     });
   }
+}
+
+/**
+ * FR-041 KRA review (I-77 item 3): where the cycle requires it, the goals take effect, and the employee enters and submits
+ * the self-entry against them, only once someone other than the person who set them has reviewed them.
+ */
+export async function requireGoalsInEffect(db: Queryable, companyId: string, appraisalId: string, c: CycleRow): Promise<void> {
+  if (!c.goal_review_required) return;
+  const reviewed = (await db.query<{ ok: boolean }>(`select goals_reviewed_at is not null as ok from appraisal where company_id = $1 and id = $2`, [companyId, appraisalId])).rows[0]?.ok;
+  if (reviewed !== true) throw new HttpError(409, 'GOALS_NOT_REVIEWED', 'The goals have not been reviewed yet, so they have not taken effect');
 }
 
 /** Audit with operational values only: scores, comments, results and reasons never enter the before/after values. */

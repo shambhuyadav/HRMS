@@ -68,7 +68,7 @@ describe.runIf(isModuleActive('payroll'))('attendance a processed payroll used (
     await head(h, configA, configB, { code: 'LK_BASIC', headType: 'EARNING', basis: 'FIXED', sequence: 1 });
     // A month far ahead too: a run can be processed before its month ends, and it cannot have used a later day.
     periods = (await calendar(h, configA, configB, [...months(2026), { code: '2090-03', start: '2090-03-01', end: '2090-03-31' }])).periods;
-    shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
+    shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
     const policy = (await h.call(hr, 'GET', '/v1/attendance/policies')).json().items[0];
     await ok(await h.call(hr, 'POST', `/v1/attendance/policies/${policy.id}/activate`, { expectedVersion: policy.version }));
     const m = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json();

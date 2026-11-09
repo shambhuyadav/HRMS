@@ -27,7 +27,8 @@ export type BadRows = Record<
   | 'policyCompany'
   | 'manifest'
   | 'event'
-  | 'segmentCurrency',
+  | 'segmentCurrency'
+  | 'valuationDate',
   string
 >;
 
@@ -123,9 +124,10 @@ export async function plantStoredRows(db: pg.ClientBase): Promise<Planted> {
     await insertRow(db, shapes, 'payroll_run', {
       company_id: company, id: draftRun, lineage_id: draftRun, revision: '1', supersedes_run_id: null, period_id: randomUUID(), calendar_id: randomUUID(), transaction_id: randomUUID(), state: 'DRAFT', scope_token: HASH, service_start: '2026-04-01', service_end: '2026-04-30', input_cutoff: '2026-04-30', payment_date: '2026-04-30', days_in_month: '30', currency_code: 'INR', currency_minor_unit: '2', member_count: '0', calculation_started_at: '2026-05-01T00:00:00Z', calculated_by: actor, attendance_basis: 'NOT_CONFIGURED', head_count: '0',
     });
-    const recordWith = async (status: 'CALCULATED' | 'FAILED', segmentCurrency: string) => {
+    // 0173: a calculated record whose segment's arrangement starts after the segment (`salaryFrom`).
+    const recordWith = async (status: 'CALCULATED' | 'FAILED', segmentCurrency: string, salaryFrom = '2026-01-01') => {
       const employee = newEmployee();
-      const salary = await arrangement(employee, '2026-01-01', null);
+      const salary = await arrangement(employee, salaryFrom, null);
       const figures = status === 'CALCULATED' ? { salary_arrangement_id: salary, paid_units: '30', earnings: '0', reimbursements: '0', gross: '0', deductions: '0', net: '0', employer_contributions: '0' } : {};
       const id = await row('payroll_record', { run_id: draftRun, employee_id: employee, employee_code: 'GL-PAY', joining_date: '2026-01-01', status_code: 'ACTIVE_CONFIRMED', calculation_status: status, currency_code: 'INR', days_in_month: '30', created_by: actor, ...figures });
       await row('payroll_record_segment', { record_id: id, employee_id: employee, salary_arrangement_id: salary, segment_start: '2026-04-01', segment_end: '2026-04-30', calendar_days: '30', leave_lop_units: '0', attendance_lop_units: '0', paid_days: '30', currency_code: segmentCurrency, created_by: actor });
@@ -134,6 +136,7 @@ export async function plantStoredRows(db: pg.ClientBase): Promise<Planted> {
     const segmentCurrency = (await recordWith('CALCULATED', 'USD')).id;
     const keptRecord = await recordWith('CALCULATED', 'INR');
     await recordWith('FAILED', 'USD');
+    const valuationDate = (await recordWith('CALCULATED', 'INR', '2026-11-01')).id;
 
     const lineOf = async (employee: string) => {
       const revision = await row('expense_revision', { claim_id: await claim(employee), revision: '1', currency_code: 'INR', purpose: 'Synthetic' });
@@ -154,7 +157,8 @@ export async function plantStoredRows(db: pg.ClientBase): Promise<Planted> {
 
     // 0145: a payment in a currency outside the approved codes.
     const payment = (currency: string) => row('payment_batch', { transaction_id: randomUUID(), state: 'DRAFT', prepared_by: actor, currency_code: currency });
-    const currency = await payment('USD');
+    // XTS is ISO 4217's code for testing: never in the approved reference (0208 added USD, EUR, GBP, AED and SGD).
+    const currency = await payment('XTS');
     await payment('INR');
 
     // 0146: a table it backfills and a table it does not; a record with personal values, to prove they are not printed.
@@ -199,7 +203,7 @@ export async function plantStoredRows(db: pg.ClientBase): Promise<Planted> {
     return {
       company,
       foreignCompany,
-      bad: { ownerApart, stateApart, rootless, headBinding, lineage, confirmationAction, historyDecision, historyBasis, receipt, subject, currency, creatorNotRecorded, creatorMissing, account, policyCompany, manifest, event: event2, segmentCurrency },
+      bad: { ownerApart, stateApart, rootless, headBinding, lineage, confirmationAction, historyDecision, historyBasis, receipt, subject, currency, creatorNotRecorded, creatorMissing, account, policyCompany, manifest, event: event2, segmentCurrency, valuationDate },
       keptRecord,
     };
   } finally {

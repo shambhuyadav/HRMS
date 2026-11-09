@@ -13,6 +13,8 @@ describe('0155 on a database that already holds a tie', () => {
   let second: string;
   let before: unknown[];
   const rows = async () => (await db.query(`select * from leave_policy order by id`)).rows;
+  /** The stored values of the columns that existed before the upgrade: a later migration's new column (0183) is not a change. */
+  const asBefore = (now: Record<string, unknown>[]) => now.map((r, i) => Object.fromEntries(Object.keys((before[i] as Record<string, unknown> | undefined) ?? {}).map((k) => [k, r[k]])));
 
   beforeAll(async () => {
     const empty = await startEmptyTestDatabase();
@@ -49,7 +51,7 @@ describe('0155 on a database that already holds a tie', () => {
 
   it('migrates, and every stored policy row is as it was', async () => {
     expect((await db.query(`select 1 from schema_migration where filename like '0155%'`)).rowCount).toBe(1);
-    expect(await rows()).toEqual(before);
+    expect(asBefore(await rows())).toEqual(before);
     expect((await db.query(`select policy_id from hrms_leave_policy_conflicts((select company_id from leave_policy where id = $1), $1)`, [first])).rows).toEqual([expect.objectContaining({ policy_id: second })]);
   });
 

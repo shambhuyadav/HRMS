@@ -26,7 +26,7 @@ beforeAll(async () => {
   A = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   hr2 = await h.actor(A, 'HR_ADMINISTRATOR');
-  const shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
+  const shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
   const person = async (managerId?: string) => {
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json();
     await h.setStatus(A, e.id, 'ACTIVE_CONFIRMED');

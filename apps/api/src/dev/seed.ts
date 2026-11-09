@@ -287,7 +287,7 @@ async function seed(db: Queryable, code: string): Promise<{ companyId: string; a
   const mgr = await master('designation', 'MGR', 'Manager');
   const shift = (
     await db.query<{ id: string }>(
-      `insert into shift (company_id, code, name, in_time, out_time, spans_midnight, active, created_by) values ($1, 'DAY', 'Day shift', '09:00', '18:00', false, true, $2) returning id`,
+      `insert into shift (company_id, code, name, in_time, out_time, spans_midnight, buffer_minutes, active, created_by) values ($1, 'DAY', 'Day shift', '09:00', '18:00', false, 240, true, $2) returning id`,
       [companyId, approver],
     )
   ).rows[0]!.id;

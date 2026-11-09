@@ -82,7 +82,7 @@ beforeAll(async () => {
     [A.id, hr.user],
   );
   const shiftId = (
-    await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })
+    await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })
   ).json().id;
   person = async (status: string, managerId?: string) => {
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json();
@@ -248,10 +248,11 @@ describe('My pending requests (F2 Employee dashboard)', () => {
       expect(await queues()).toBe(start + 2);
     });
 
-    it('shows a treasury operator no count that reconciles with nothing: payment preparation has no task', async () => {
+    // I-84 item 5, I-89 item 2 (0241): payment preparation runs no workflow, so the figure is the scope's claims awaiting preparation
+    // and draft payments, never this person's tasks of another assignment (the manager's pending leave and expense tasks above).
+    it("shows a treasury operator the payment preparation count, never the same person's other tasks", async () => {
       const shown = await widget(await h.actor(A, 'TREASURY_OPERATOR', { user: manager.user }));
-      expect(shown).toMatchObject({ status: 'NOT_AVAILABLE', title: 'Assigned payment preparation tasks' });
-      expect(shown).not.toHaveProperty('value');
+      expect(shown).toMatchObject({ status: 'OK', value: 0, title: 'Claims awaiting payment preparation and draft payments not yet ready' });
     });
 
     it('moves the widgets of an existing company (0120); one pointed elsewhere is left alone', async () => {

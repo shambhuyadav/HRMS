@@ -23,9 +23,11 @@ interface Widget {
   code: string;
   title: string;
   kind: string;
-  status: 'OK' | 'NOT_CONFIGURED' | 'NOT_AVAILABLE';
+  status: 'OK' | 'NOT_CONFIGURED' | 'NOT_AVAILABLE' | 'SUPPRESSED';
   value?: number | string;
   message?: string;
+  /** SUPPRESSED (BR-045, I-83): a people-count between 1 and threshold - 1 with no list behind it; the number is never sent. */
+  threshold?: number;
   source?: WidgetSource;
 }
 
@@ -116,6 +118,51 @@ function PendingTasks() {
   );
 }
 
+interface Activity {
+  status: 'OK' | 'NOT_CONFIGURED';
+  message?: string;
+  days?: number;
+  items: { action: string; resource: string; occurredAt: string }[];
+  total: number;
+}
+
+/**
+ * DF17 "recent operational activity" (I-83): what the selected assignment itself did in the company's dated window, as the
+ * audit trail recorded it. What and when only; nobody else's work.
+ */
+function RecentActivity() {
+  const { stored } = useSession();
+  const activity = useQuery({ queryKey: ['dashboard-activity', stored?.assignmentId ?? '-'], queryFn: () => api<Activity>('/v1/dashboard/activity') });
+  const a = activity.data;
+  return (
+    <Section title={`Recent activity${a?.days ? ` (last ${a.days} days)` : ''}`}>
+      {a?.status === 'NOT_CONFIGURED' && <Empty>{a.message}</Empty>}
+      {a?.status === 'OK' && a.items.length === 0 && <Empty>Nothing recorded for this role in that time.</Empty>}
+      {a?.status === 'OK' && a.items.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>What</th>
+              <th>Record kind</th>
+            </tr>
+          </thead>
+          <tbody>
+            {a.items.map((item, i) => (
+              <tr key={`${item.occurredAt}-${i}`}>
+                <td>{new Date(item.occurredAt).toLocaleString()}</td>
+                <td>{words(item.action)}</td>
+                <td>{words(item.resource)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <ErrorNote error={activity.error} />
+    </Section>
+  );
+}
+
 /** DF17: role-labelled dashboard; refresh at most every 60 s with jitter, paused while the tab is hidden. */
 export function DashboardPage() {
   const [jitter] = useState(() => 60_000 + Math.floor(Math.random() * 15_000));
@@ -137,10 +184,17 @@ export function DashboardPage() {
             {w.status === 'OK' && <div className="widget-value">{w.source ? <Link to={w.source.href}>{widgetText(w.value)}</Link> : widgetText(w.value)}</div>}
             {w.status === 'NOT_CONFIGURED' && <div className="widget-note">{w.message}</div>}
             {w.status === 'NOT_AVAILABLE' && <div className="widget-note">Not available yet</div>}
+            {w.status === 'SUPPRESSED' && (
+              <>
+                <div className="widget-value">Fewer than {w.threshold}</div>
+                <div className="widget-note">Small counts are not shown where the records cannot be opened here.</div>
+              </>
+            )}
           </div>
         ))}
       </div>
       {d?.state === 'OK' && <PendingTasks />}
+      {d?.state === 'OK' && <RecentActivity />}
       {!!d?.shortcuts?.length && (
         <Section title="Shortcuts">
           <ul>
@@ -282,7 +336,7 @@ export function MyTeamPage() {
     <Section title={`My team${team.data ? ` (${team.data.total})` : ''}`}>
       <div className="grid-form">
         <label className="inline">
-          Search <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code or email" />
+          Search <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code, email or extension" />
         </label>
         <label className="inline">
           Department{' '}
@@ -489,6 +543,8 @@ interface AppraisalGoals {
   state: string;
   taskStatus: string;
   goals: Record<string, unknown>[];
+  /** I-89 item 4: the competencies copied into the appraisal (name, weight, completion flags); none when the cycle does not assess them. */
+  competencies?: Record<string, unknown>[];
 }
 
 function GoalRows({ rows }: { rows: AppraisalGoals[] }) {
@@ -500,6 +556,12 @@ function GoalRows({ rows }: { rows: AppraisalGoals[] }) {
             {a.cycleName} ({a.cycleCode}) <StateBadge state={a.taskStatus} />
           </p>
           {a.goals.length === 0 ? <Empty>No goals set yet.</Empty> : <SimpleTable rows={a.goals} />}
+          {!!a.competencies?.length && (
+            <div aria-label={`Competencies of ${a.cycleCode}`}>
+              <h4>Competencies</h4>
+              <SimpleTable rows={a.competencies} />
+            </div>
+          )}
         </div>
       ))}
     </>
@@ -600,9 +662,34 @@ const EMPLOYEE_STATUSES = [
   { code: 'INACTIVE_SEPARATED', label: 'Separated' },
   { code: 'ARCHIVED', label: 'Archived' },
 ] as const;
-/** The choice that stands for `statusGroup=ACTIVE`, the set a dashboard's "Active employees" figure counts (DF17). */
-const ACTIVE_GROUP_CHOICE = 'statusGroup:ACTIVE';
+/** A choice that stands for a `statusGroup`, a named set of statuses, rather than one status. */
+const GROUP_CHOICE = 'statusGroup:';
+/** `statusGroup=ACTIVE`, the set a dashboard's "Active employees" figure counts (DF17). */
+const ACTIVE_GROUP = { code: 'ACTIVE', label: 'Active (probation, confirmed or notice)' } as const;
+/**
+ * BR-003 / FR-006's reference views (I-82 item 3), which the list also takes as `statusGroup`. They are views over DF04's states,
+ * not stored statuses, and may overlap: an employee on notice is both Current and On notice. The server decides who is in each.
+ */
+const EMPLOYEE_VIEWS = [
+  { code: 'CURRENT', label: 'Current (probation, confirmed or notice)' },
+  { code: 'OFFERED', label: 'Offered (pre-joining, not yet activated)' },
+  { code: 'OFFERED_REJECTED', label: 'Offered, rejected (closed before joining)' },
+  { code: 'ON_PROBATION', label: 'On probation' },
+  { code: 'ON_NOTICE', label: 'On notice' },
+  { code: 'LEFT', label: 'Left' },
+] as const;
+const STATUS_GROUPS: readonly { code: string; label: string }[] = [ACTIVE_GROUP, ...EMPLOYEE_VIEWS];
+/** The views beside which offers still with the candidate, or declined, are found in Hiring rather than here. */
+const OFFER_VIEWS: readonly string[] = ['OFFERED', 'OFFERED_REJECTED'];
+/** Hiring's offer list (hiring-pipeline.tsx), under its own read duty. */
+const HIRING_OFFERS = '/hiring/offers';
+const OFFER_READ = 'offer.read.operational';
+/** FR-007 exports of the record sections (I-82 item 2): confidential, under their own duty, with the list's own filters. */
+const SECTION_EXPORT = 'employee.export.private';
 const ORG_MASTER_READ = 'org_master.read.operational';
+
+/** A report of this list (FR-007): asked for with exactly the filters and order the list was asked for. */
+const useListReport = (reportCode: string, filters: Record<string, string>) => useMutation({ mutationFn: () => api<{ id: string }>('/v1/reports', { body: { reportCode, filters } }) });
 
 export function EmployeesPage() {
   const { can } = useSession();
@@ -627,11 +714,20 @@ export function EmployeesPage() {
     enabled: departmentChoices,
     queryFn: () => api<{ items: { id: string; code: string; name: string; active: boolean }[] }>('/v1/org/departments?includeInactive=true'),
   });
-  const exportList = useMutation({ mutationFn: () => api<{ id: string }>('/v1/reports', { body: { reportCode: 'EMPLOYEE_REGISTER', filters: listFilters } }) });
+  const exportList = useListReport('EMPLOYEE_REGISTER', listFilters);
+  const exportFamily = useListReport('EMPLOYEE_FAMILY', listFilters);
+  const exportQualifications = useListReport('EMPLOYEE_QUALIFICATIONS', listFilters);
+  const exportPriorEmployment = useListReport('EMPLOYEE_PRIOR_EMPLOYMENT', listFilters);
+  const sectionExports = [
+    { label: 'Export family details', request: exportFamily },
+    { label: 'Export qualifications', request: exportQualifications },
+    { label: 'Export prior employment', request: exportPriorEmployment },
+  ];
+  const exports = [exportList, exportFamily, exportQualifications, exportPriorEmployment];
   // A changed list starts again at its first page, and "Requested" no longer describes it.
   const listChanged = () => {
     setPage(1);
-    exportList.reset();
+    for (const request of exports) request.reset();
   };
   const setFilters = (changes: Partial<Record<(typeof EMPLOYEE_FILTERS)[number], string>>) => {
     const next = new URLSearchParams(params);
@@ -649,7 +745,20 @@ export function EmployeesPage() {
   const pages = Math.max(1, Math.ceil((list.data?.total ?? 0) / 25));
   // Either document grant reaches the documents page: reading lists them, uploading adds one (FR-010).
   const documents = can('document.read.document') || can('document.upload.document');
-  const statusChoice = filters.status ?? (filters.statusGroup === 'ACTIVE' ? ACTIVE_GROUP_CHOICE : '');
+  const statusChoice = filters.status ?? (filters.statusGroup ? `${GROUP_CHOICE}${filters.statusGroup}` : '');
+  const groupLabel = (code: string) => STATUS_GROUPS.find((g) => g.code === code)?.label ?? words(code);
+  const exportButton = (label: string, request: typeof exportList) => (
+    <span key={label}>
+      <button className="secondary" disabled={request.isPending} onClick={() => request.mutate()}>
+        {label}
+      </button>{' '}
+      {request.isSuccess && (
+        <span className="hint">
+          Requested. Download it from <Link to="/reports">Reports</Link>.
+        </span>
+      )}{' '}
+    </span>
+  );
   return (
     <Section title={`Employees${list.data ? ` (${list.data.total})` : ''}`}>
       <div className="grid-form">
@@ -658,7 +767,7 @@ export function EmployeesPage() {
           <input
             maxLength={100}
             value={search}
-            placeholder="Name, code or email"
+            placeholder="Name, code, email or extension"
             onChange={(e) => {
               setSearch(e.target.value);
               listChanged();
@@ -669,16 +778,30 @@ export function EmployeesPage() {
           Status{' '}
           <select
             value={statusChoice}
-            onChange={(e) => setFilters(e.target.value === ACTIVE_GROUP_CHOICE ? { status: '', statusGroup: 'ACTIVE' } : { status: e.target.value, statusGroup: '' })}
+            onChange={(e) =>
+              setFilters(e.target.value.startsWith(GROUP_CHOICE) ? { status: '', statusGroup: e.target.value.slice(GROUP_CHOICE.length) } : { status: e.target.value, statusGroup: '' })
+            }
           >
             <option value="">All</option>
-            <option value={ACTIVE_GROUP_CHOICE}>Active (probation, confirmed or notice)</option>
-            {EMPLOYEE_STATUSES.map((s) => (
-              <option key={s.code} value={s.code}>
-                {s.label}
-              </option>
-            ))}
-            {filters.status && !EMPLOYEE_STATUSES.some((s) => s.code === filters.status) && <option value={filters.status}>{words(filters.status)}</option>}
+            <option value={`${GROUP_CHOICE}${ACTIVE_GROUP.code}`}>{ACTIVE_GROUP.label}</option>
+            <optgroup label="Views">
+              {EMPLOYEE_VIEWS.map((v) => (
+                <option key={v.code} value={`${GROUP_CHOICE}${v.code}`}>
+                  {v.label}
+                </option>
+              ))}
+              {filters.statusGroup && !filters.status && !STATUS_GROUPS.some((g) => g.code === filters.statusGroup) && (
+                <option value={`${GROUP_CHOICE}${filters.statusGroup}`}>{words(filters.statusGroup)}</option>
+              )}
+            </optgroup>
+            <optgroup label="Statuses">
+              {EMPLOYEE_STATUSES.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.label}
+                </option>
+              ))}
+              {filters.status && !EMPLOYEE_STATUSES.some((s) => s.code === filters.status) && <option value={filters.status}>{words(filters.status)}</option>}
+            </optgroup>
           </select>
         </label>
         {departmentChoices && (
@@ -704,7 +827,7 @@ export function EmployeesPage() {
       </div>
       {filters.statusGroup && (
         <p className="hint">
-          Status: {words(filters.statusGroup)}{' '}
+          Status: {groupLabel(filters.statusGroup)}{' '}
           <button className="secondary" onClick={() => setFilters({ status: '', statusGroup: '' })}>
             Clear
           </button>
@@ -766,19 +889,19 @@ export function EmployeesPage() {
           Next
         </button>
       </div>
-      {can('employee.export.operational') && (
-        <p>
-          <button className="secondary" disabled={exportList.isPending} onClick={() => exportList.mutate()}>
-            Export this list
-          </button>{' '}
-          {exportList.isSuccess && (
-            <span className="hint">
-              Requested. Download it from <Link to="/reports">Reports</Link>.
-            </span>
-          )}
+      {filters.statusGroup && !filters.status && OFFER_VIEWS.includes(filters.statusGroup) && can(OFFER_READ) && (
+        <p className="hint">
+          Offers still awaiting the candidate’s answer, and offers the candidate declined, are candidates rather than employee records: they stay in Hiring’s{' '}
+          <Link to={HIRING_OFFERS}>offer list</Link>.
         </p>
       )}
-      <ErrorNote error={list.error ?? exportList.error} />
+      {(can('employee.export.operational') || can(SECTION_EXPORT)) && (
+        <p>
+          {can('employee.export.operational') && exportButton('Export this list', exportList)}
+          {can(SECTION_EXPORT) && sectionExports.map((s) => exportButton(s.label, s.request))}
+        </p>
+      )}
+      <ErrorNote error={list.error ?? exports.find((request) => request.error)?.error} />
     </Section>
   );
 }

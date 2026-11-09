@@ -62,7 +62,7 @@ beforeAll(async () => {
   B = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   await h.db.query(`insert into workflow_fallback_reviewer (company_id, kind, user_id, priority, active) values ($1, 'leave_request', $2, 1, true)`, [A.id, hr.user]);
-  shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
+  shiftId = (await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
   const policy = (await h.call(hr, 'GET', '/v1/attendance/policies')).json().items[0];
   expect((await h.call(hr, 'POST', `/v1/attendance/policies/${policy.id}/activate`, { expectedVersion: policy.version })).statusCode).toBe(200);
   for (const p of (await h.call(hr, 'GET', '/v1/leave/policies')).json().items as { id: string; version: number }[]) {
@@ -110,7 +110,7 @@ describe('maintaining a pattern (FR-005, DF05, DF08)', () => {
     expect(audit).toMatchObject({ action: 'CREATE', reason: 'Six-day week at this site (synthetic)', after_values: { operational: { offDays: [7] } } });
   });
 
-  it('whole days only: a half weekly-off cannot be expressed (I-48 item 6); a week needs a working day', async () => {
+  it('offDays holds whole weekdays only (half weekly-offs have their own list, I-78 item 4); a week needs a working day', async () => {
     const site = await location();
     expect((await post(site, { offDays: [6.5] })).statusCode).toBe(400);
     expect((await post(site, { offDays: [{ day: 6, half: true }] })).statusCode).toBe(400);
@@ -421,7 +421,7 @@ describe.runIf(isModuleActive('timesheet'))('timesheet utilisation counts on the
     await h.call(hr, 'POST', `/v1/holidays/${holiday.id}/withdraw`, { expectedVersion: 1, reason: 'Withdrawn (synthetic)' });
     expect(await scheduled(onSix.id, '2026-03-02', SUN)).toBe(6 * 480);
 
-    const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: uniq('S').toUpperCase(), name: 'Revised', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json();
+    const shift = (await h.call(hr, 'POST', '/v1/shifts', { code: uniq('S').toUpperCase(), name: 'Revised', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json();
     const e = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json();
     await h.setStatus(A, e.id, 'ACTIVE_CONFIRMED');
     await h.call(hr, 'POST', `/v1/employees/${e.id}/shift`, { shiftId: shift.id, effectiveFrom: '2026-01-05' });

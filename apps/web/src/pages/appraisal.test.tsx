@@ -89,6 +89,9 @@ const cycle = (id: string, code: string, state: string, patch: Obj = {}): Obj =>
   startDate: '2026-04-01',
   endDate: '2027-03-31',
   approvalLevels: 1,
+  goalReviewRequired: false,
+  ratingMode: 'FORMULA',
+  reviewDueOn: '2027-02-28',
   state,
   windows: cycleWindows,
   version: 3,
@@ -271,7 +274,16 @@ function fakeApi(call: Call): Reply {
   if (path === '/v1/appraisal-cycles') {
     if (method === 'GET') return [200, { items: db.cycles.filter((c) => !call.params.get('state') || c.state === call.params.get('state')) }];
     if (!String(body.startDate).endsWith('-04-01')) return [422, { error: 'CYCLE_START_NOT_ALIGNED', message: 'x', details: { cycleStartMonth: 4 } }];
-    const c = cycle(C_NEW, String(body.code).toUpperCase(), 'OPEN', { name: body.name, approvalLevels: body.approvalLevels, startDate: body.startDate, endDate: '2028-03-31', version: 1 });
+    const c = cycle(C_NEW, String(body.code).toUpperCase(), 'OPEN', {
+      name: body.name,
+      approvalLevels: body.approvalLevels,
+      goalReviewRequired: body.goalReviewRequired,
+      ratingMode: body.ratingMode,
+      reviewDueOn: body.reviewDueOn,
+      startDate: body.startDate,
+      endDate: '2028-03-31',
+      version: 1,
+    });
     db.cycles.unshift(c);
     return [201, c];
   }
@@ -280,7 +292,14 @@ function fakeApi(call: Call): Reply {
     if (!c) return [404, NOT_FOUND];
     if (method === 'GET') return [200, c];
     if (body.expectedVersion !== c.version) return [409, { error: 'STALE_VERSION', message: 'x' }];
-    Object.assign(c, { name: body.name, approvalLevels: body.approvalLevels, version: c.version + 1 });
+    Object.assign(c, {
+      name: body.name,
+      approvalLevels: body.approvalLevels,
+      goalReviewRequired: body.goalReviewRequired,
+      ratingMode: body.ratingMode,
+      reviewDueOn: body.reviewDueOn,
+      version: c.version + 1,
+    });
     return [200, c];
   }
   if ((m = /^\/v1\/appraisal-cycles\/([0-9a-f-]{36})\/close$/.exec(path))) return [409, { error: 'OPEN_APPRAISALS', message: 'x', details: { open: 2 } }];
@@ -558,6 +577,8 @@ describe('exports for the navigation step', () => {
       ['/appraisal/reviews', 'Appraisal reviews', CONFIRM, true],
       ['/appraisal/reports', 'Appraisal reports', REPORT, true],
       ['/appraisal/goal-upload', 'KRA upload', IMPORT, true],
+      // I-86: the result split, competency master and grade mapping (Appraisal Config).
+      ['/appraisal/competencies', 'Appraisal competencies', CYCLE_READ, true],
     ]);
     expect(APPRAISAL_ESS_PANELS.map((p) => p.tabId)).toEqual(['TN18']);
     expect(APPRAISAL_TASK_QUEUES.map((q) => [q.permission, q.title])).toEqual([
@@ -619,6 +640,11 @@ describe('cycles (FR-040)', () => {
     change(f, 'Goal setting closes', '2027-05-31');
     change(f, 'Manager rating opens', '2028-01-01');
     change(f, 'Manager rating closes', '2028-02-15');
+    // With reviewer levels the review due date is required (I-77 item 5).
+    fireEvent.click(button(f, 'Create the cycle'));
+    expect(alertText(f)).toContain('Enter the review due date');
+    expect(callsTo('POST', '/v1/appraisal-cycles')).toHaveLength(0);
+    change(f, 'Review due date', '2028-02-28');
     fireEvent.click(button(f, 'Create the cycle'));
     await waitFor(() => expect(alertText(f)).toContain('A cycle starts on the 1st of April, the configured cycle start month.'));
     expect((within(f).getByLabelText('Code') as HTMLInputElement).value).toBe('fy2027');
@@ -631,6 +657,10 @@ describe('cycles (FR-040)', () => {
       name: 'Synthetic FY2027',
       approvalLevels: 2,
       windows: { goalSetting: { opensOn: '2027-04-01', closesOn: '2027-05-31' }, selfEntry: null, managerRating: { opensOn: '2028-01-01', closesOn: '2028-02-15' } },
+      // I-77 defaults: goal review on, formula rating.
+      goalReviewRequired: true,
+      ratingMode: 'FORMULA',
+      reviewDueOn: '2028-02-28',
     });
     expect(screen.getByRole('link', { name: 'FY2027' }).getAttribute('href')).toBe(`/appraisal/cycles/${C_NEW}`);
     // The form is reset after success.
@@ -652,6 +682,9 @@ describe('cycles (FR-040)', () => {
         name: 'Synthetic renamed',
         approvalLevels: 1,
         windows: { goalSetting: { opensOn: '2026-04-01', closesOn: '2026-12-31' }, selfEntry: { opensOn: '2026-05-01', closesOn: '2027-01-31' }, managerRating: null },
+        goalReviewRequired: false,
+        ratingMode: 'FORMULA',
+        reviewDueOn: '2027-02-28',
         expectedVersion: 3,
       },
     ]);
@@ -906,9 +939,14 @@ describe('the review queue (FR-043 step 2, C4)', () => {
     expect(item.textContent).toContain('Reviewer confirmation (level 1)');
     expect(within(item).getByText(/Weighted manager result/).textContent).toBe('Weighted manager result: 4.40');
     expect(within(item).queryByRole('form')).toBeNull();
+    // FR-043 / DF04 (I-77 item 1): a confirmation carries the reviewer's overall score.
+    fireEvent.click(button(item, 'Confirm the rating'));
+    expect(alertText(item)).toContain('Choose your overall score (1 to 5) to confirm the rating.');
+    expect(callsTo('POST', `/v1/appraisal-tasks/${T_REVIEW}/decision`)).toHaveLength(0);
+    change(item, /Your overall score/, '4');
     fireEvent.click(button(item, 'Confirm the rating'));
     await screen.findByText('Confirmed the rating of Meera Synthetic (SYN-003): the appraisal is complete.');
-    expect(bodiesTo('POST', `/v1/appraisal-tasks/${T_REVIEW}/decision`)).toEqual([{ decision: 'APPROVE', idempotencyKey: KEY }]);
+    expect(bodiesTo('POST', `/v1/appraisal-tasks/${T_REVIEW}/decision`)).toEqual([{ decision: 'APPROVE', idempotencyKey: KEY, reviewerScore: 4 }]);
   });
 
   it('shows no rating content the API left out', async () => {
@@ -1177,5 +1215,175 @@ describe('My ESS TN18 (Employee OWN context)', () => {
     await screen.findByRole('table', { name: 'My goals' });
     expect(screen.queryByRole('form', { name: 'My self-assessment' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Submit my self-assessment' })).toBeNull();
+  });
+});
+
+// Process rules decided under owner delegation, 6 Nov 2026 (owner chose process rules only; I-77).
+describe('process rules decided under owner delegation (I-77)', () => {
+  const GOAL_REVIEW_LABEL = /Goals are reviewed before they take effect/;
+
+  it('BR-013 / FR-042 / FR-041: a new cycle reviews goals by formula by default, and may instead have no reviewer level, manual rating and no goal review', async () => {
+    serve();
+    renderAt('/appraisal/cycles', [CYCLE_READ, CYCLE_MANAGE]);
+    await screen.findByRole('table', { name: 'Appraisal cycles' });
+    const f = form('New cycle');
+    expect((within(f).getByLabelText(GOAL_REVIEW_LABEL) as HTMLInputElement).checked).toBe(true);
+    expect((within(f).getByLabelText('Rating mode') as HTMLSelectElement).value).toBe('FORMULA');
+    change(f, 'Code', 'fy2027');
+    change(f, 'Name', 'Synthetic one level');
+    change(f, 'Start date', '2027-04-01');
+    // BR-013 one-level manager review: no reviewer, so no review due date is asked for or sent.
+    change(f, 'Reviewer levels', '0');
+    expect(within(f).queryByLabelText('Review due date')).toBeNull();
+    change(f, 'Rating mode', 'MANUAL');
+    fireEvent.click(within(f).getByLabelText(GOAL_REVIEW_LABEL));
+    fireEvent.click(button(f, 'Create the cycle'));
+    await screen.findByText(/Created cycle/);
+    expect(bodiesTo('POST', '/v1/appraisal-cycles')).toEqual([
+      {
+        code: 'fy2027',
+        startDate: '2027-04-01',
+        name: 'Synthetic one level',
+        approvalLevels: 0,
+        windows: { goalSetting: null, selfEntry: null, managerRating: null },
+        goalReviewRequired: false,
+        ratingMode: 'MANUAL',
+        reviewDueOn: null,
+      },
+    ]);
+  });
+
+  it('a cycle shows its review due date, goal review and rating mode; a refused rule change is said in words', async () => {
+    serve({ [`PUT /v1/appraisal-cycles/${C_OPEN}`]: [409, { error: 'RULES_FIXED', message: 'x' }] });
+    renderAt(`/appraisal/cycles/${C_OPEN}`, [CYCLE_READ, CYCLE_MANAGE]);
+    await screen.findByRole('heading', { name: 'Cycle FY2026' });
+    const text = document.body.textContent!;
+    expect(text).toContain('Review due date2027-02-28');
+    expect(text).toContain('Goal reviewNone: goals take effect when set');
+    expect(text).toContain('Rating modeFormula (the weighted manager result is the final rating)');
+    const f = form('Change the cycle');
+    change(f, 'Rating mode', 'MANUAL');
+    fireEvent.click(button(f, 'Save the cycle'));
+    await waitFor(() => expect(alertText(f)).toContain('The goal review and the rating mode cannot change once an appraisal of this cycle has been submitted.'));
+    expect(bodiesTo('PUT', `/v1/appraisal-cycles/${C_OPEN}`)[0]).toMatchObject({ ratingMode: 'MANUAL', goalReviewRequired: false, reviewDueOn: '2027-02-28' });
+  });
+
+  it('FR-041 KRA review: another user reviews the goals against the version; the setter is told someone else does; refusals in words', async () => {
+    let reviewed = false;
+    const view = (setBy: string) =>
+      appraisal(A_DRAFT, RAVI, {
+        cycle: { ...appraisal(A_DRAFT, RAVI).cycle, goalReviewRequired: true },
+        goals: [goal(1, 60), goal(2, 40)],
+        goalWeightTotal: 100,
+        taskStatus: reviewed ? 'AWAITING_SELF_ENTRY' : 'AWAITING_GOAL_REVIEW',
+        goalReview: {
+          required: true,
+          reviewed,
+          reviewedAt: reviewed ? AT : null,
+          setBy: { userId: setBy, employeeCode: 'SYN-009', displayName: 'Mira Manager' },
+          setAt: AT,
+          reviewedBy: reviewed ? { userId: session.userId, employeeCode: 'SYN-001', displayName: 'Asha Synthetic' } : null,
+        },
+      });
+    let attempts = 0;
+    serve({
+      [`GET /v1/appraisals/${A_DRAFT}`]: () => [200, view(U_RAVI_MANAGER)],
+      [`POST /v1/appraisals/${A_DRAFT}/goal-review`]: () => {
+        attempts += 1;
+        if (attempts === 1) return [409, { error: 'GOALS_ALREADY_REVIEWED', message: 'x' }];
+        reviewed = true;
+        return [200, view(U_RAVI_MANAGER)];
+      },
+    });
+    renderAt(`/appraisal/appraisals/${A_DRAFT}`, [READ, MANAGE]);
+    const block = await screen.findByRole('group', { name: 'Goal review' });
+    expect(block.textContent).toContain('Waiting: the goals take effect once someone other than their setter reviews them');
+    expect(block.textContent).toContain('Goals set byMira Manager (SYN-009)');
+    expect(document.body.textContent).toContain('Waiting for the goal review');
+    fireEvent.click(button(block, 'Review the goals'));
+    await waitFor(() => expect(alertText(block)).toContain('These goals have already been reviewed.'));
+    fireEvent.click(button(block, 'Review the goals'));
+    await screen.findByText('Reviewed the goals: they have taken effect, and the employee can enter the self-entry.');
+    expect(bodiesTo('POST', `/v1/appraisals/${A_DRAFT}/goal-review`)).toEqual([{ expectedVersion: 4 }, { expectedVersion: 4 }]);
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Goal review' }).textContent).toContain('Goals reviewed byYou'));
+    cleanup();
+    // The setter is not offered the review.
+    reviewed = false;
+    serve({ [`GET /v1/appraisals/${A_DRAFT}`]: () => [200, view(session.userId)] });
+    renderAt(`/appraisal/appraisals/${A_DRAFT}`, [READ, MANAGE]);
+    const mine = await screen.findByRole('group', { name: 'Goal review' });
+    expect(mine.textContent).toContain('You set these goals, so someone else reviews them.');
+    expect(within(mine).queryByRole('button', { name: 'Review the goals' })).toBeNull();
+  });
+
+  it('FR-041: the register filters complete goal sets waiting for their review', async () => {
+    serve();
+    renderAt('/appraisal/appraisals', [CYCLE_READ, READ]);
+    await screen.findByRole('table', { name: 'Appraisal register' });
+    fireEvent.change(screen.getByLabelText('State'), { target: { value: 'AWAITING_GOAL_REVIEW' } });
+    await waitFor(() => expect(Object.fromEntries(callsTo('GET', '/v1/appraisals').at(-1)!.params)).toEqual({ stateGroup: 'AWAITING_GOAL_REVIEW', page: '1', pageSize: '25' }));
+  });
+
+  it('FR-042 manual mode and I-40 item 6: the rater saves an overall rating; each task shows its due date and whether it is overdue', async () => {
+    serve();
+    const manual = rateTaskView();
+    manual.cycle = { ...manual.cycle, ratingMode: 'MANUAL' };
+    manual.revisions[0].managerRating.overallRating = null;
+    Object.assign(db.tasks[0]!, { appraisal: manual, dueOn: '2026-10-01', overdue: true });
+    renderQueue('Appraisal ratings', [READ, RATE]);
+    const item = await screen.findByRole('listitem', { name: 'Ravi Synthetic (SYN-002) · FY2026' });
+    expect(item.textContent).toContain('due 2026-10-01');
+    expect(within(item).getByText('overdue')).toBeTruthy();
+    const f = within(item).getByRole('form', { name: 'Rating of Ravi Synthetic (SYN-002)' });
+    change(f, 'Overall rating (1 to 5)', '5');
+    fireEvent.click(button(f, 'Save the scores'));
+    await within(item).findByText('Scores saved.');
+    expect(bodiesTo('PUT', `/v1/appraisal-tasks/${T_RATE}/rating`)).toEqual([{ entries: [], overallRating: 5, expectedVersion: 5 }]);
+    cleanup();
+    // A formula cycle offers no overall rating; a task with no scheduled date says so and is not overdue.
+    serve();
+    renderQueue('Appraisal reviews', [READ, CONFIRM]);
+    const review = await screen.findByRole('listitem', { name: 'Meera Synthetic (SYN-003) · FY2026' });
+    expect(review.textContent).toContain('no due date');
+    expect(within(review).queryByText('overdue')).toBeNull();
+    expect(review.textContent).not.toContain('Overall rating of the manager');
+  });
+
+  it('BR-013: a rating in a cycle without reviewer levels completes the appraisal, and the rater is told so', async () => {
+    serve({ [`POST /v1/appraisal-tasks/${T_RATE}/decision`]: [200, { appraisalId: A_RATE, state: 'APPROVED', revision: 1, replayed: false }] });
+    renderQueue('Appraisal ratings', [READ, RATE]);
+    const item = await screen.findByRole('listitem', { name: 'Ravi Synthetic (SYN-002) · FY2026' });
+    fireEvent.click(button(item, 'Submit the rating'));
+    await screen.findByText('Submitted the rating of Ravi Synthetic (SYN-002): this cycle has no reviewer level, so the appraisal is complete.');
+  });
+
+  it('FR-043 / FR-042: reviewer scores and the manual overall rating show only as the API returned them', async () => {
+    const manual = fullView();
+    manual.cycle = { ...manual.cycle, ratingMode: 'MANUAL' };
+    manual.revisions[0].managerRating.overallRating = 5;
+    manual.revisions[0].reviewerScores = [{ level: 1, score: 3, scoredAt: AT }];
+    manual.finalRating = '5.00';
+    serve({ [`GET /v1/appraisals/${A_REVIEW}`]: () => [200, manual] });
+    renderAt(`/appraisal/appraisals/${A_REVIEW}`, [CYCLE_READ, READ]);
+    await screen.findByRole('heading', { name: 'Appraisal of Meera Synthetic (SYN-003)' });
+    expect(document.body.textContent).toContain('Final rating (confirmed overall rating of the manager)5.00');
+    const revision = screen.getByRole('group', { name: 'Revision 1' });
+    expect(revision.textContent).toContain('Overall rating of the manager (the final rating in this cycle): 5');
+    expect(screen.getByRole('list', { name: 'Reviewer scores of revision 1' }).textContent).toContain('Level 1: 3');
+    cleanup();
+    serve({ [`GET /v1/appraisals/${A_REVIEW}`]: () => [200, plainView()] });
+    renderAt(`/appraisal/appraisals/${A_REVIEW}`, [CYCLE_READ, READ]);
+    await screen.findByRole('heading', { name: 'Appraisal of Meera Synthetic (SYN-003)' });
+    expect(document.body.textContent).not.toMatch(/Reviewer scores|Overall rating of the manager/);
+  });
+
+  it('My ESS: goals waiting for their review take no self-entry yet', async () => {
+    serve();
+    db.own.set(A_OWN, ownView({ taskStatus: 'AWAITING_GOAL_REVIEW', goalReview: { required: true, reviewed: false, reviewedAt: null } }));
+    renderPanel(EMPLOYEE);
+    await screen.findByText(/Your goals are waiting for their review/);
+    expect(screen.queryByRole('form', { name: 'My self-assessment' })).toBeNull();
+    expect(document.body.textContent).toContain('Waiting for the goal review');
+    expect(document.body.textContent).not.toContain('Goals set by');
   });
 });

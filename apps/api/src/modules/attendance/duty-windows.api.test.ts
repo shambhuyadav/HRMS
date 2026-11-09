@@ -1,6 +1,6 @@
 // Approved outdoor duty in daily attendance over HTTP (FR-020, FR-021, FR-027; DF05; DF09; I-05; migration 0025).
 // A timed duty window is requested on its start date and ends on the next calendar day when its end time is not
-// after its start time. Like punches, a window belongs to the shift whose capture window (shift -4 h .. +4 h) it
+// after its start time. Like punches, a window belongs to the shift whose capture window (its buffer each side; 4 h here) it
 // overlaps, so an overnight shift gets its after-midnight duty time (DF05: the shift belongs to its start date).
 // Synthetic data; fixed past dates (2026-03-02 is a Monday; Asia/Kolkata is UTC+05:30).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -58,11 +58,11 @@ beforeAll(async () => {
   A = await h.makeCompany();
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   dayShift = (
-    await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })
+    await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })
   ).json().id;
   // 22:00-06:00 with a 30-minute break at 02:00: 450 net minutes.
   nightShift = (
-    await h.call(hr, 'POST', '/v1/shifts', { code: 'NIGHT', name: 'Night', inTime: '22:00', outTime: '06:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 270 }] })
+    await h.call(hr, 'POST', '/v1/shifts', { code: 'NIGHT', name: 'Night', inTime: '22:00', outTime: '06:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 270 }] })
   ).json().id;
   const policy = (await h.call(hr, 'GET', '/v1/attendance/policies')).json().items[0];
   expect((await h.call(hr, 'POST', `/v1/attendance/policies/${policy.id}/activate`, { expectedVersion: policy.version })).statusCode).toBe(200);

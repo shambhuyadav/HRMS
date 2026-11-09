@@ -1,8 +1,10 @@
 // Attendance control (FR-021; E07): attendance across the role's scope, filtered by department, location, status, shift,
 // date, employee and minutes, in pages with the total and a matching export. One day opens with its untouched source
 // punches beside the derived result, the policy revision and why the status changed (amendments and earlier values).
-// An amendment of a day needs the fact behind it on the server, and a day a processed payroll used is final. The working
-// organisation and entity filters have no master yet and wait for the owner's definition. The server re-checks everything.
+// An amendment of a day needs the fact behind it on the server, and a day a processed payroll used is final. E07, decided
+// under owner delegation, 6 Nov 2026 (I-78 item 6): the organisation and the working organisation are the company the role
+// acts for, so they are shown, not chosen; the entity is what the minute comparison measures (worked, scheduled, shortfall,
+// late or overtime-candidate minutes). The server re-checks everything.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { api, formatDate } from '../api';
@@ -23,7 +25,9 @@ interface ControlRow {
   workedMinutes: number;
   scheduledNetMinutes: number;
   late: boolean;
+  lateMinutes?: number | null;
   earlyDeparture: boolean;
+  overtimeCandidateMinutes?: number | null;
   exceptionCode: string | null;
   amended: boolean;
   version: number;
@@ -275,12 +279,14 @@ function AttendanceControlPage() {
             </label>
           )}
           <label>
-            Minutes
+            Entity (minutes of)
             <select value={filters.minuteField} onChange={(e) => set('minuteField', e.target.value)}>
               <option value="">Any</option>
               <option value="WORKED">Worked</option>
               <option value="SCHEDULED">Scheduled</option>
               <option value="SHORTFALL">Short of scheduled</option>
+              <option value="LATE">Late</option>
+              <option value="OVERTIME_CANDIDATE">Overtime candidate</option>
             </select>
           </label>
           <label>
@@ -299,6 +305,9 @@ function AttendanceControlPage() {
             <input inputMode="numeric" pattern="\d{1,6}" value={filters.minuteValue} onChange={(e) => set('minuteValue', e.target.value)} />
           </label>
         </form>
+        <p className="hint">
+          Organisation and working organisation: the company you are acting for. Late minutes count from the shift start on a late day; overtime candidates are proposals for a manager’s decision, never pay.
+        </p>
         {!ready && <p className="hint">Choose a period to list attendance.</p>}
         <ErrorNote error={list.error} />
         {list.isSuccess && list.data.total === 0 && <Empty>No attendance matches these filters.</Empty>}
@@ -328,7 +337,8 @@ function AttendanceControlPage() {
                     <td>{r.locationCode ?? '—'}</td>
                     <td>{r.shiftCode ?? '—'}</td>
                     <td>
-                      {statusText(r.status)} {r.late && <Badge tone="warn">late</Badge>} {r.earlyDeparture && <Badge tone="warn">left early</Badge>} {r.amended && <Badge>amended</Badge>} {r.payrollLocked && <Badge tone="warn">payroll locked</Badge>}
+                      {statusText(r.status)} {r.late && <Badge tone="warn">{r.lateMinutes ? `late ${r.lateMinutes} min` : 'late'}</Badge>} {r.earlyDeparture && <Badge tone="warn">left early</Badge>}{' '}
+                      {!!r.overtimeCandidateMinutes && <Badge>{`overtime candidate ${r.overtimeCandidateMinutes} min`}</Badge>} {r.amended && <Badge>amended</Badge>} {r.payrollLocked && <Badge tone="warn">payroll locked</Badge>}
                       {r.exceptionCode && <span className="hint"> {r.exceptionCode}</span>}
                     </td>
                     <td>{`${r.workedMinutes} of ${r.scheduledNetMinutes}`}</td>

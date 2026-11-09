@@ -248,8 +248,19 @@ describe('F3 row 3: confirmation dates (FR-080, FR-082, DF11, DF12, ZT22)', () =
     expect(await extend(e, caseId)).toMatchObject({ action: 'EXTENDED', dueDate: '2026-04-17' });
   });
 
-  // BRD line 3926 and 2065 name start_day_inclusive with no worked value, and no route can set it: an expected date here could only be copied from the code.
-  it.skip('a policy counting its start day as the first day gives the owner-approved date', () => undefined);
+  // BRD lines 2065 and 3926 name start_day_inclusive with no worked value; I-84 item 12 (decided under owner delegation) gives it one.
+  it('a policy counting its start day as the first day ends one day earlier: six months from 1 January fall due on 30 June, not 1 July (FR-080, BR-029)', async () => {
+    await addPolicy({ duration: 6, durationUnit: 'CALENDAR_MONTHS', employmentType: 'CONTRACTOR', startDayInclusive: true });
+    const e = await probationer({ joiningDate: '2026-01-01', employmentType: 'CONTRACTOR' });
+    const { caseId, dueDate } = await open(e);
+    expect(dueDate).toBe('2026-06-30');
+    // The DF11 count of the same terms, for comparison: the default stays non-inclusive.
+    const listed = (await h.call(hr, 'GET', POLICIES)).json().items as { employmentType: string | null; startDayInclusive: boolean }[];
+    expect(listed.filter((p) => p.employmentType === 'CONTRACTOR').map((p) => p.startDayInclusive)).toEqual([true]);
+    expect(listed.filter((p) => p.employmentType === 'INTERN').map((p) => p.startDayInclusive)).toEqual([false]);
+    // An extension is a calendar month from the current due date, as for any policy.
+    expect(await extend(e, caseId)).toMatchObject({ action: 'EXTENDED', dueDate: '2026-07-30' });
+  });
 
   it('confirmed, the case gets no further reminder in any later occurrence (DF12, BR-031, ZT22); the actual date is the one decided', async () => {
     const e = await probationer({ joiningDate: '2026-03-02' });

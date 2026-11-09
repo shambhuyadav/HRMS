@@ -7,7 +7,7 @@ import { uniq } from '../../../../../db/tests/fixtures.js';
 import { withTransaction } from '../../db/transaction.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
 import { type AccessGrant, resolveAccess } from '../access/authorize.js';
-import type { PermissionKey } from '../access/baseline.js';
+import { BASELINE_ROLES, type PermissionKey } from '../access/baseline.js';
 import { dispatchOutbox } from '../notification/dispatcher.js';
 import { runReminders } from '../notification/reminders.js';
 import { rerouteOpenTask } from './admin.js';
@@ -58,16 +58,9 @@ async function pendingWithFirstManager() {
 beforeAll(async () => {
   h = await startHarness();
   A = await h.makeCompany();
-  hr = await h.actor(A, 'HR_ADMINISTRATOR');
-  // The owner has not named who approves a reroute, so no baseline ceiling holds the permission. This test company's role
-  // is widened directly to exercise the mechanism.
-  await h.db.query(
-    `insert into role_permission (company_id, role_id, permission_id, effect)
-     select $1, r.id, p.id, 'ALLOW' from role r, permission p
-      where r.company_id = $1 and r.code = 'HR_ADMINISTRATOR' and p.resource = 'workflow' and p.action = 'reroute_task' and p.field_group = 'operational'`,
-    [A.id],
-  );
-  rerouter = await h.actor(A, 'HR_ADMINISTRATOR', { extra: [REROUTE] });
+  // I-84 item 1: rerouting a stranded task is a default duty of the HR Administrator.
+  hr = await h.actor(A, 'HR_ADMINISTRATOR', { duties: BASELINE_ROLES.find((r) => r.code === 'HR_ADMINISTRATOR')!.defaultDuties.filter((k) => k !== REROUTE) });
+  rerouter = await h.actor(A, 'HR_ADMINISTRATOR');
   world = leaveTasks(h, A, hr);
   await world.activatePolicies();
   m1Emp = await world.employee();
@@ -170,19 +163,30 @@ describe('after a manager change (ZT02, C4)', () => {
 });
 
 describe('reroute (C4 "owner-approved rerouting creates new task with history")', () => {
-  it('no baseline role can hold the permission until the owner decides: a default HR Administrator is refused and nothing changes', async () => {
+  it('I-84 item 1: a default duty of the HR Administrator and of no other role; an assignment without it is refused and nothing changes', async () => {
+    expect(BASELINE_ROLES.filter((r) => r.ceiling.includes(REROUTE)).map((r) => r.code)).toEqual(['HR_ADMINISTRATOR']);
+    expect(BASELINE_ROLES.filter((r) => r.defaultDuties.includes(REROUTE)).map((r) => r.code)).toEqual(['HR_ADMINISTRATOR']);
     const { x, taskId } = await pendingWithFirstManager();
     await world.setManager(x, m2Emp, today);
     const res = await reroute(hr, taskId);
     expect(res.statusCode).toBe(403);
     expect(await taskState(taskId)).toBe('PENDING');
-    // A fresh company's ceilings do not hold it, so it cannot even be proposed.
+    expect((await reroute(m2, taskId)).statusCode).toBe(403);
+    // Another role cannot even be proposed it; a fresh HR Administrator grant carries it by default.
     const B = await h.makeCompany();
     const bAdmin = await h.actor(B, 'SYSTEM_ADMINISTRATOR');
     const bUser = await h.actor(B, 'EMPLOYEE');
-    const proposed = await h.call(bAdmin, 'POST', '/v1/access/assignments', { userId: bUser.user, roleCode: 'HR_ADMINISTRATOR', effectiveFrom: '2026-01-01T00:00:00Z', permissions: [REROUTE] });
+    const proposed = await h.call(bAdmin, 'POST', '/v1/access/assignments', { userId: bUser.user, roleCode: 'REPORTING_MANAGER', effectiveFrom: '2026-01-01T00:00:00Z', permissions: [REROUTE] });
     expect(proposed.statusCode).toBe(422);
     expect(proposed.json().error).toBe('OUTSIDE_ROLE_CEILING');
+    const hrGrant = await h.call(bAdmin, 'POST', '/v1/access/assignments', { userId: bUser.user, roleCode: 'HR_ADMINISTRATOR', effectiveFrom: '2026-01-01T00:00:00Z' });
+    expect(hrGrant.statusCode, hrGrant.body).toBe(201);
+    const held = await h.one<{ n: number }>(
+      `select count(*)::int as n from role_assignment_permission rap join permission p on p.id = rap.permission_id
+        where rap.company_id = $1 and rap.role_assignment_id = $2 and p.resource = 'workflow' and p.action = 'reroute_task'`,
+      [B.id, hrGrant.json().id],
+    );
+    expect(held.n).toBe(1);
   });
 
   it('routing administration sees the stranded task, within its row scope', async () => {

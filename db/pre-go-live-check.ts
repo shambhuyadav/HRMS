@@ -118,6 +118,19 @@ const INSERT_ONLY_GUARDS: { table: string; rule: string; from: string; refused: 
     refused: `c.calculation_status = 'CALCULATED' and exists (
       select 1 from payroll_record_segment s where s.company_id = c.company_id and s.record_id = c.id and s.currency_code <> c.currency_code)`,
   },
+  {
+    // 0173 reads an arrangement's end and its supersession as they stand at completion; both may change later for good reason (a later
+    // arrangement closes this one, a correction supersedes it), so a stored record is read only for what never changes: an arrangement
+    // starting after its segment, and the record naming another arrangement than its last segment's.
+    table: 'payroll_record',
+    rule: 'payroll_record_valuation_date',
+    from: 'payroll_record c',
+    refused: `c.calculation_status = 'CALCULATED' and (exists (
+      select 1 from payroll_record_segment s join salary_arrangement a on a.company_id = s.company_id and a.id = s.salary_arrangement_id
+       where s.company_id = c.company_id and s.record_id = c.id and a.effective_from > s.segment_start)
+      or c.salary_arrangement_id is distinct from (
+        select s.salary_arrangement_id from payroll_record_segment s where s.company_id = c.company_id and s.record_id = c.id order by s.segment_end desc limit 1))`,
+  },
 ];
 
 /**

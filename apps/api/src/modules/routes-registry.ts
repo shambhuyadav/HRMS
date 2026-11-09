@@ -13,6 +13,7 @@ import { payrollRoutes } from './payroll/routes.js';
 import { payrollAdjustmentRoutes } from './payroll-adjustments/routes.js';
 import { payrollOutputsRoutes } from './payroll-outputs/routes.js';
 import { isModuleActive } from './registry.js';
+import { reportingRoutes } from './reporting/routes.js';
 import { sensitiveChangeRoutes } from './sensitive-change/routes.js';
 import { taxDeclarationRoutes } from './tax-declarations/routes.js';
 import { timesheetRoutes } from './timesheet/routes.js';
@@ -34,6 +35,7 @@ const ALL_ROUTES: readonly { key: string; routes: ModuleRoutes }[] = [
   { key: 'tax-declarations', routes: taxDeclarationRoutes },
   { key: 'assets', routes: assetsRoutes },
   { key: 'documents', routes: documentsRoutes },
+  { key: 'reporting', routes: reportingRoutes },
 ];
 
 export const MODULE_ROUTES: readonly { key: string; routes: ModuleRoutes }[] = ALL_ROUTES.filter((r) => isModuleActive(r.key));

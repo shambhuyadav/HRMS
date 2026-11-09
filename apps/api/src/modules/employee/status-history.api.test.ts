@@ -51,7 +51,7 @@ beforeAll(async () => {
   hr = await h.actor(A, 'HR_ADMINISTRATOR');
   hr2 = await h.actor(A, 'HR_ADMINISTRATOR');
   today = await businessDate(h, A);
-  const shift = await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '17:00', breaks: [] });
+  const shift = await h.call(hr, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '17:00', bufferMinutes: 240, breaks: [] });
   expect(shift.statusCode, shift.body).toBe(201);
   shiftId = shift.json().id;
 });

@@ -7,6 +7,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, assertNotOwnRecord, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams } from '../access/authorize.js';
+import { requireStructureMatch } from '../payroll/grade-structures.js';
 import { type Decision, decideTask, lockTransaction, startApproval } from '../workflow/engine.js';
 
 type Basis = 'MONTHLY_GROSS' | 'ANNUAL_CTC';
@@ -26,6 +27,8 @@ export interface InitialSalary {
   annualCtc: string;
   monthlyGross: string;
   currency: string;
+  /** E08's CTC category (I-80; 0207): a company list entry, recorded on the arrangement; it changes no amount. */
+  ctcCategoryCode?: string | null | undefined;
 }
 
 /** Serialises every salary change of an employee (the key payroll's salary component path uses too). */
@@ -74,11 +77,17 @@ export async function createInitialSalary(tx: Queryable, grant: AccessGrant, emp
   await reassertAccess(tx, grant, 'salary', 'manage', ['salary']);
   const existing = await tx.query(`select 1 from salary_arrangement where company_id = $1 and employee_id = $2`, [grant.companyId, employeeId]);
   if (existing.rowCount) throw new HttpError(409, 'SALARY_EXISTS', 'Salary changes go through an increment case');
+  let category: string | null = null;
+  if (input.ctcCategoryCode) {
+    category =
+      (await tx.query<{ id: string }>(`select id from ctc_category where company_id = $1 and code = $2 and active`, [grant.companyId, input.ctcCategoryCode.trim().toUpperCase()])).rows[0]?.id ?? null;
+    if (!category) throw new HttpError(422, 'UNKNOWN_CTC_CATEGORY', 'The CTC category does not exist or is not active', { field: 'ctcCategoryCode' });
+  }
   const id = (
     await tx.query<{ id: string }>(
-      `insert into salary_arrangement (company_id, employee_id, effective_from, annual_ctc, monthly_gross, currency_code, created_by, updated_by)
-       values ($1, $2, $3, $4::numeric, $5::numeric, $6, $7, $7) returning id`,
-      [grant.companyId, employeeId, input.effectiveFrom, input.annualCtc, input.monthlyGross, input.currency, grant.userId],
+      `insert into salary_arrangement (company_id, employee_id, effective_from, annual_ctc, monthly_gross, currency_code, ctc_category_id, created_by, updated_by)
+       values ($1, $2, $3, $4::numeric, $5::numeric, $6, $7, $8, $8) returning id`,
+      [grant.companyId, employeeId, input.effectiveFrom, input.annualCtc, input.monthlyGross, input.currency, category, grant.userId],
     )
   ).rows[0]!.id;
   await writeAudit(tx, {
@@ -596,6 +605,23 @@ async function apply(tx: Queryable, grant: AccessGrant, c: CaseRow, idempotencyK
         [grant.companyId, c.id, newSalaryId, grant.userId, c.transaction_id],
       )
     ).rowCount ?? 0;
+  // FR-028/029 (I-80): an approved breakdown for an employee whose grade has a structure in force is that structure's derivation.
+  if (componentsApplied > 0 && annual !== null && monthly !== null) {
+    const applied = (
+      await tx.query<{ componentId: string; code: string; amount: string; basis: string }>(
+        `select sc.component_id as "componentId", pc.code, sc.amount::text as amount, sc.basis from salary_component sc
+           join pay_component pc on pc.company_id = sc.company_id and pc.id = sc.component_id
+          where sc.company_id = $1 and sc.salary_arrangement_id = $2`,
+        [grant.companyId, newSalaryId],
+      )
+    ).rows;
+    await requireStructureMatch(
+      tx,
+      grant.companyId,
+      { employee_id: c.employee_id, effective_from: c.proposed_effective_date, currency_code: baseline.currency_code, annual_ctc: annual, monthly_gross: monthly },
+      applied,
+    );
+  }
 
   const decisionId = (await tx.query<{ id: string }>(`select id from approval_decision where company_id = $1 and idempotency_key = $2`, [grant.companyId, idempotencyKey])).rows[0]!.id;
   // DF14: (after - before) / before x 100 for a positive comparable baseline, 2 decimals; otherwise N/A with reason.

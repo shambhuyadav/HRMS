@@ -198,6 +198,9 @@ describe('batch imports', () => {
       [['leave.import.operational'], []],
       [['leave.adjust.operational'], []],
       [['leave.import.operational', 'leave.adjust.operational'], ['LEAVE_OPENING_V1']],
+      // FR-031, FR-028 (I-91): payroll inputs need input preparation with the amount group, read and prepare.
+      [['payroll_input.prepare.amount'], []],
+      [['payroll_input.read.amount', 'payroll_input.prepare.amount'], ['PAYROLL_INPUTS_V2']],
     ] as const) {
       session.permissions = [...permissions];
       mockApi({});

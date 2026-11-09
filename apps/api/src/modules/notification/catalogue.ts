@@ -151,6 +151,17 @@ export const EVENT_NOTICE_CATALOGUE: readonly {
     body: 'A file you uploaded on {{uploadedDate}} failed the malware scan and cannot be used; please upload a replacement.',
     placeholders: ['uploadedDate'],
   },
+  {
+    // H7 "scan"; I-84 item 8: the scanner could not check a file after every attempt. Not a finding: the file waits unusable until it
+    // is requeued and released, or replaced. Existing companies get it from migration 0201.
+    code: 'FILE_SCAN_FAILED',
+    eventType: 'FILE_SCAN_FAILED',
+    selector: 'BENEFICIARY_USER',
+    optional: false,
+    subject: 'Uploaded file could not be checked',
+    body: 'A file you uploaded on {{uploadedDate}} could not be checked for malware yet, so it cannot be used. You may upload it again; it stays blocked until the check completes.',
+    placeholders: ['uploadedDate'],
+  },
 ];
 
 /**

@@ -1,5 +1,6 @@
 // Employee records (FR-006/007/008, BR-001/002, DF04). Field groups:
-//   operational – code, name, work email, dates, type, status, current assignment and manager (DF02 operational)
+//   operational – code, name, work email and work phone extension, dates, type, status, current assignment and manager
+//                 (DF02 operational; the extension is DF16's, I-89 item 5)
 //   personal    – birth date, service anniversary base date (confidential by default, BR-043/044)
 // Lists only ever return operational fields. Every read and write applies the same row-scope predicate.
 import { enqueueEvent, writeAudit } from '../../audit/audit.js';
@@ -16,6 +17,8 @@ export interface EmployeeOperational {
   employeeCode: string;
   displayName: string;
   workEmail: string | null;
+  /** DF16 "work email/extension": an optional desk-phone extension, digits only (I-89 item 5; 0240). */
+  workPhoneExtension: string | null;
   joiningDate: string;
   confirmationDate: string | null;
   employmentType: string;
@@ -54,6 +57,7 @@ interface EmployeeRow {
   employee_code: string;
   display_name: string;
   work_email: string | null;
+  work_phone_extension: string | null;
   joining_date: string;
   confirmation_date: string | null;
   employment_type: string;
@@ -78,7 +82,7 @@ interface EmployeeRow {
 function selectEmployees(params: SqlParams, grant: AccessGrant, withPersonal: boolean): string {
   const day = `${params.add(grant.businessDate)}::date`;
   return `
-    select e.id, e.employee_code, e.display_name, e.work_email, e.joining_date, e.confirmation_date,
+    select e.id, e.employee_code, e.display_name, e.work_email, e.work_phone_extension, e.joining_date, e.confirmation_date,
            et.code as employment_type, st.code as status,
            ea.department_id, d.name as department_name, ea.location_id, l.name as location_name,
            ea.designation_id, g.name as designation_name, ea.grade_id,
@@ -106,6 +110,7 @@ function toView(row: EmployeeRow, withPersonal: boolean): EmployeeView {
     employeeCode: row.employee_code,
     displayName: row.display_name,
     workEmail: row.work_email,
+    workPhoneExtension: row.work_phone_extension,
     joiningDate: row.joining_date,
     confirmationDate: row.confirmation_date,
     employmentType: row.employment_type,
@@ -134,9 +139,44 @@ function toView(row: EmployeeRow, withPersonal: boolean): EmployeeView {
 }
 
 /** FR-007 list filters, shared by the employee list and the employee register export (identical filters and scope). */
-/** Named sets of employee statuses a list can filter by. ACTIVE: DF17 "Employee count excludes draft/separated/archived records". */
-export const EMPLOYEE_STATUS_GROUPS = { ACTIVE: ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'] } as const;
+/**
+ * Named sets of employee statuses a list can filter by. ACTIVE: DF17 "Employee count excludes draft/separated/archived records".
+ *
+ * The others are BR-003 / FR-006's reference views (Current, Offered, Offered Rejected, On Probation, On Notice, Left), decided
+ * under owner delegation, 6 Nov 2026 (docs/03 I-82 item 3). They are views over DF04's lifecycle states, not stored statuses, and
+ * may overlap (BR-003 "not assumed to be one exclusive stored status"): an employee on notice is both Current and On Notice.
+ *   CURRENT           employed today: probation, confirmed or notice. On Notice stays Current: the person is employed and paid
+ *                     until the approved last working date (DF04), and DF17's active count already includes them.
+ *   OFFERED           a pre-joining record (DRAFT): an accepted offer handed over to onboarding (FR-014) or a joiner HR entered,
+ *                     not yet activated. A candidate whose offer is still awaiting an answer is not an employee record and stays
+ *                     in hiring's offer list (state APPROVED), under the hiring grants.
+ *   OFFERED_REJECTED  a pre-joining record closed because the person never joined (close-draft, DRAFT_CLOSED in the status
+ *                     history). An offer the candidate declined stays in hiring's offer list (state DECLINED).
+ *   ON_PROBATION, ON_NOTICE  the one lifecycle state each.
+ *   LEFT              separated, or archived after leaving (never a record closed before joining).
+ */
+export const EMPLOYEE_STATUS_GROUPS = {
+  ACTIVE: ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'],
+  CURRENT: ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'],
+  OFFERED: ['DRAFT'],
+  OFFERED_REJECTED: ['ARCHIVED'],
+  ON_PROBATION: ['ACTIVE_PROBATION'],
+  ON_NOTICE: ['NOTICE'],
+  LEFT: ['INACTIVE_SEPARATED', 'ARCHIVED'],
+} as const;
 export type EmployeeStatusGroup = keyof typeof EMPLOYEE_STATUS_GROUPS;
+
+/** Whether the employee `e` was closed before joining (the close-draft status change, employee/changes.ts closeDraftEmployee). */
+const CLOSED_BEFORE_JOINING = `exists (select 1 from employee_status_history sh where sh.company_id = e.company_id and sh.employee_id = e.id and sh.source_kind = 'DRAFT_CLOSED')`;
+
+/** The predicate of one status group over `e` and its status `st`. */
+function statusGroupCondition(params: SqlParams, group: EmployeeStatusGroup): string {
+  const statuses = `st.code = any(${params.add(EMPLOYEE_STATUS_GROUPS[group])}::text[])`;
+  // An archived record is Offered Rejected when it was closed before joining, and Left otherwise.
+  if (group === 'OFFERED_REJECTED') return `(${statuses} and ${CLOSED_BEFORE_JOINING})`;
+  if (group === 'LEFT') return `(${statuses} and (st.code <> 'ARCHIVED' or not ${CLOSED_BEFORE_JOINING}))`;
+  return statuses;
+}
 
 export interface EmployeeFilters {
   search?: string | undefined;
@@ -190,10 +230,11 @@ export function employeeFilterConditions(params: SqlParams, f: EmployeeFilters):
   const conditions: string[] = [];
   if (f.search) {
     const pattern = params.add(`%${f.search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
-    conditions.push(`(e.employee_code ilike ${pattern} or e.display_name ilike ${pattern} or e.work_email ilike ${pattern})`);
+    // DF16 "Search includes permitted work email/extension": both are operational (I-89 item 5).
+    conditions.push(`(e.employee_code ilike ${pattern} or e.display_name ilike ${pattern} or e.work_email ilike ${pattern} or e.work_phone_extension like ${pattern})`);
   }
   if (f.status) conditions.push(`st.code = ${params.add(f.status)}`);
-  if (f.statusGroup) conditions.push(`st.code = any(${params.add(EMPLOYEE_STATUS_GROUPS[f.statusGroup])}::text[])`);
+  if (f.statusGroup) conditions.push(statusGroupCondition(params, f.statusGroup));
   if (f.departmentId) conditions.push(`ea.department_id = ${params.add(f.departmentId)}::uuid`);
   if (f.joinedFrom) conditions.push(`e.joining_date >= ${params.add(f.joinedFrom)}::date`);
   if (f.joinedTo) conditions.push(`e.joining_date <= ${params.add(f.joinedTo)}::date`);
@@ -277,6 +318,7 @@ export interface CreateEmployeeInput {
   employeeCode: string;
   displayName: string;
   workEmail?: string | undefined;
+  workPhoneExtension?: string | undefined;
   joiningDate: string;
   employmentType: string;
   departmentId: string;
@@ -352,11 +394,12 @@ export async function createEmployee(tx: Queryable, grant: AccessGrant, input: C
 
   const employeeCode = input.employeeCode.trim().toUpperCase();
   const workEmail = input.workEmail?.trim().toLowerCase() ?? null;
+  const workPhoneExtension = workExtension(input.workPhoneExtension);
   const created = (
     await tx.query<{ id: string; version: number }>(
       `insert into employee (company_id, employee_code, display_name, work_email, joining_date, employment_type_id, status_id,
-                             date_of_birth, service_anniversary_date, prior_employee_id, created_by, updated_by)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11) returning id, version`,
+                             date_of_birth, service_anniversary_date, prior_employee_id, created_by, updated_by, work_phone_extension)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12) returning id, version`,
       [
         companyId,
         employeeCode,
@@ -369,6 +412,7 @@ export async function createEmployee(tx: Queryable, grant: AccessGrant, input: C
         input.serviceAnniversaryDate ?? null,
         input.priorEmployeeId ?? null,
         grant.userId,
+        workPhoneExtension,
       ],
     )
   ).rows[0]!;
@@ -384,6 +428,7 @@ export async function createEmployee(tx: Queryable, grant: AccessGrant, input: C
     employeeCode,
     displayName: input.displayName.trim(),
     workEmail,
+    ...(workPhoneExtension !== null ? { workPhoneExtension } : {}),
     joiningDate: input.joiningDate,
     employmentType: input.employmentType,
     status: 'DRAFT',
@@ -419,13 +464,27 @@ export interface UpdateEmployeeInput {
   expectedVersion: number;
   displayName?: string | undefined;
   workEmail?: string | null | undefined;
+  workPhoneExtension?: string | null | undefined;
   dateOfBirth?: string | null | undefined;
   serviceAnniversaryDate?: string | null | undefined;
+}
+
+/**
+ * DF16 work phone extension (I-89 item 5; 0240): optional, digits only, at most 8, spaces around it ignored; an empty value
+ * clears it. The route schema already refuses anything else; the database check holds the same rule for every writer.
+ */
+export const WORK_PHONE_EXTENSION_PATTERN = '^\\s*[0-9]{1,8}\\s*$';
+function workExtension(value: string | null | undefined): string | null {
+  const v = value?.trim() ?? '';
+  if (v === '') return null;
+  if (!/^[0-9]{1,8}$/.test(v)) throw new HttpError(422, 'INVALID_WORK_PHONE_EXTENSION', 'A work phone extension is 1 to 8 digits', { field: 'workPhoneExtension' });
+  return v;
 }
 
 const COLUMN: Record<string, { column: string; group: 'operational' | 'personal' }> = {
   displayName: { column: 'display_name', group: 'operational' },
   workEmail: { column: 'work_email', group: 'operational' },
+  workPhoneExtension: { column: 'work_phone_extension', group: 'operational' },
   dateOfBirth: { column: 'date_of_birth', group: 'personal' },
   serviceAnniversaryDate: { column: 'service_anniversary_date', group: 'personal' },
 };
@@ -444,7 +503,7 @@ export async function updateEmployee(tx: Queryable, grant: AccessGrant, id: stri
 
   const current = (
     await tx.query<Record<string, unknown> & { version: number }>(
-      `select display_name, work_email, date_of_birth, service_anniversary_date, version
+      `select display_name, work_email, work_phone_extension, date_of_birth, service_anniversary_date, version
          from employee where company_id = $1 and id = $2 for update`,
       [grant.companyId, id],
     )
@@ -455,7 +514,13 @@ export async function updateEmployee(tx: Queryable, grant: AccessGrant, id: stri
   if (current.version !== input.expectedVersion) throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
 
   const normalise = (key: string, value: unknown) =>
-    key === 'workEmail' && typeof value === 'string' ? value.trim().toLowerCase() : key === 'displayName' && typeof value === 'string' ? value.trim() : value;
+    key === 'workEmail' && typeof value === 'string'
+      ? value.trim().toLowerCase()
+      : key === 'displayName' && typeof value === 'string'
+        ? value.trim()
+        : key === 'workPhoneExtension'
+          ? workExtension(value as string | null)
+          : value;
 
   const sets: string[] = [];
   const values: unknown[] = [grant.companyId, id, grant.userId];

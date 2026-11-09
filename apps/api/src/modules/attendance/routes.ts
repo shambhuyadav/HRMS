@@ -7,6 +7,7 @@ import { enqueueBulkJob } from '../bulk/service.js';
 import {
   amendmentLog,
   amendRecord,
+  ATTENDANCE_MINUTE_FIELDS,
   type AttendanceControlFilters,
   attendanceControl,
   attendanceDay,
@@ -56,7 +57,8 @@ const controlQuery = {
     shiftId: uuid,
     employeeId: uuid,
     search: { type: 'string', maxLength: 100 },
-    minuteField: { type: 'string', enum: ['WORKED', 'SCHEDULED', 'SHORTFALL'] },
+    // E07 "entity" (I-78 item 6): the measured quantity the comparison applies to.
+    minuteField: { type: 'string', enum: [...ATTENDANCE_MINUTE_FIELDS] },
     minuteOp: { type: 'string', enum: ['LT', 'LTE', 'EQ', 'GTE', 'GT'] },
     minuteValue: { type: 'integer', minimum: 0, maximum: 100000 },
     page: { type: 'integer', minimum: 1, default: 1 },

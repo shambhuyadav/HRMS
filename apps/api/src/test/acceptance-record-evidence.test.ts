@@ -1,13 +1,15 @@
-// What a test can show of three whole-system rules, and only that: BR-028 zero tolerance business gates (BRD line 1803), ZT20 requirements
-// and coverage completeness (line 4787) and ZT21 open questions and privacy (line 4788). Each test's name says what it does not cover.
-// A release decision, the passing-test clause of ZT20 and the open-questions clause of ZT21 are not tested here: see each name.
-// Reads the repository's own text and the generator's own rules. Synthetic data only.
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, extname, join, relative } from 'node:path';
+// What the registers and the repository show of three whole-system rules: BR-028 zero tolerance business gates (BRD line 1803), ZT20
+// requirements and coverage completeness (line 4787) and ZT21 open questions and privacy (line 4788). The release gate that decides on
+// them (db/registers/release-gate.ts, I-84) is tested in db/tests/release-gate.test.ts; here are the register's side and the scans of
+// what is shared. Each test's name says what it does not cover. Reads the repository's own text and the generator's own rules.
+// Synthetic data only.
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
+import { PRIVACY_RULES, privacyHitsIn, sharedFiles } from '../../../../db/registers/privacy.js';
 import { parseRequirements } from '../../../../db/registers/requirements.js';
 import type { RunEvidence } from '../../../../db/registers/runs.js';
 import { buildVerification } from '../../../../db/registers/verification.js';
@@ -51,13 +53,13 @@ describe('zero tolerance business gates', () => {
     return new Map(buildVerification(requirements, [run], [], new Map()).map((r) => [r.id, r.disposition]));
   };
 
-  it.each(GATES)('BR-028 (the record only: who blocks a release is a person, and no release pipeline exists here to test): a failed %s gate shows Fail in the register, even beside passing tests', (_kind, title) => {
+  it.each(GATES)('BR-028 (the register the release gate reads): a failed %s gate shows Fail in the register, even beside passing tests', (_kind, title) => {
     const id = gateId(title);
     expect(verdicts([{ name: `${id} one`, status: 'passed' }, { name: `${id} two`, status: 'failed' }]).get(id)).toBe('Fail');
     expect(verdicts([{ name: `${id} one`, status: 'passed' }]).get(id)).toBe('Pass');
   });
 
-  it.each(GATES)('BR-028 (the record only): a required %s gate with no run behind it is specified, not reported as passed', (_kind, title) => {
+  it.each(GATES)('BR-028 (the register the release gate reads): a required %s gate with no run behind it is specified, not reported as passed', (_kind, title) => {
     const id = gateId(title);
     expect(requirements.find((r) => r.id === id)!.expected.length).toBeGreaterThan(20);
     expect(verdicts([]).get(id)).toBe('Not evidenced');
@@ -68,7 +70,7 @@ describe('zero tolerance business gates', () => {
 describe('requirements and coverage completeness', () => {
   const trace = read('docs/06_traceability_register.md');
 
-  it('ZT20 (mapping only; the passing-test clause is the verification register itself and does not hold yet): every FR has a row with its source, decision and table or stated no-storage reason', () => {
+  it('ZT20 (mapping of every FR, delivered or not; the passing-test clause is the release gate’s): every FR has a row with its source, decision and table or stated no-storage reason', () => {
     const rows = new Map(tableRows(trace, 'FR').map((r) => [r.FR!, r]));
     const frs = requirements.filter((r) => r.family === 'FR');
     expect(frs).toHaveLength(110);
@@ -88,7 +90,7 @@ describe('requirements and coverage completeness', () => {
     expect(unmapped).toEqual([]);
   });
 
-  it('ZT20 (mapping only, as above): every BR has a row with its module, mechanism and the requirement it serves', () => {
+  it('ZT20 (mapping of every BR, as above): every BR has a row with its module, mechanism and the requirement it serves', () => {
     const rows = new Map(tableRows(trace, 'BR').map((r) => [r.BR!, r]));
     const brs = requirements.filter((r) => r.family === 'BR');
     expect(brs).toHaveLength(55);
@@ -121,41 +123,24 @@ describe('requirements and coverage completeness', () => {
 });
 
 describe('privacy of what is shared', () => {
-  const SCANNED = ['docs', 'db', 'apps', 'load', 'README.md', '.env.example', 'docker-compose.yml'];
-  const TEXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.md', '.sql', '.json', '.yml', '.yaml', '.css', '.html', '.csv', '.txt', '.example', '']);
-  const SKIPPED_DIRS = new Set(['node_modules', 'dist', 'coverage', '.dev-pg', '.dev-files']);
-  const filesUnder = (path: string): string[] => {
-    const full = join(ROOT, path);
-    if (!statSync(full).isDirectory()) return [path];
-    return readdirSync(full).flatMap((name) => (SKIPPED_DIRS.has(name) ? [] : filesUnder(join(path, name))));
-  };
-  const files = SCANNED.flatMap(filesUnder).filter((f) => TEXT.has(extname(f)) && !f.endsWith('package-lock.json'));
-  const hits = (pattern: RegExp, allowed: (match: string) => boolean = () => false) => {
-    const found: string[] = [];
-    for (const file of files) {
-      for (const m of readFileSync(join(ROOT, file), 'utf8').matchAll(pattern)) {
-        if (!allowed(m[0])) found.push(`${relative(ROOT, join(ROOT, file)).replace(/\\/g, '/')}: ${m[0].slice(0, 60)}`);
-      }
-    }
-    return found;
-  };
+  // The release gate's own scan (db/registers/privacy.ts), over the same files.
+  const files = sharedFiles(ROOT);
+  const texts = () => files.map((f) => [f, read(f)] as [string, string]);
+  const hits = (...codes: string[]) =>
+    privacyHitsIn(
+      texts(),
+      PRIVACY_RULES.filter((r) => codes.includes(r.code)),
+    ).map((h) => `${h.file}:${h.line} ${h.code} ${h.masked}`);
 
-  it('ZT21 (a pattern scan of shared files only: it cannot prove data is synthetic, and the open-questions clause is not tested and does not hold yet): no private key, cloud access key, or identity, tax or mobile number', () => {
+  it('ZT21 (a pattern scan of shared files only: it cannot prove data is synthetic; the open-questions clause is the release gate’s): no private key, cloud access key, or identity, tax or mobile number', () => {
     expect(files.length).toBeGreaterThan(500);
-    expect(hits(/-----BEGIN [A-Z ]*PRIVATE KEY-----/g)).toEqual([]);
-    expect(hits(/\bAKIA[0-9A-Z]{16}\b/g)).toEqual([]);
+    expect(hits('PRIVATE_KEY', 'CLOUD_ACCESS_KEY')).toEqual([]);
     // India's tax (PAN) and identity (Aadhaar) number shapes, and a mobile number.
-    expect(hits(/\b[A-Z]{5}[0-9]{4}[A-Z]\b/g)).toEqual([]);
-    expect(hits(/(?<![\w-])[2-9]\d{3} \d{4} \d{4}(?![\w-])/g)).toEqual([]);
-    expect(hits(/(?<![\w.-])(?:\+91[ -]?)?[6-9]\d{9}(?![\w.-])/g)).toEqual([]);
+    expect(hits('PAN', 'AADHAAR', 'MOBILE')).toEqual([]);
   });
 
   it('ZT21 (pattern scan only, as above): every email address is on a domain reserved for examples, every address is loopback, and any connection string with a credential points at this machine', () => {
-    const reserved = (email: string) => /@([a-z0-9-]+\.)*(test|example|invalid)$|@example\.(com|org|net)$/i.test(email);
-    expect(hits(/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, reserved)).toEqual([]);
-    // Loopback, the wildcard listen address, and the ranges reserved for documentation (RFC 5737).
-    expect(hits(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, (ip) => /^(127\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)/.test(ip) || ip === '0.0.0.0')).toEqual([]);
-    expect(hits(/\b(?:postgres(?:ql)?|mysql|mongodb|redis|amqp):\/\/[^\s'"`$@]+:[^\s'"`$@]+@[^\s'"`/:]+/g, (url) => /@(127\.0\.0\.1|localhost)$/.test(url))).toEqual([]);
+    expect(hits('EMAIL', 'ADDRESS', 'CONNECTION_CREDENTIAL')).toEqual([]);
   });
 
   it('ZT21 (logs only, not the open-questions clause): a request log holds no token, cookie, search term, raw identifier or client address', async () => {

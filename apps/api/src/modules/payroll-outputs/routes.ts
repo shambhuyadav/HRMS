@@ -36,21 +36,25 @@ import {
 import { loanImportRoutes } from './loan-import.js';
 import {
   cancelLoan,
+  decideEarlySettlement,
   decideLoan,
   type DecisionInput,
   type DisbursementInput,
   disburseLoan,
+  type EarlySettlementInput,
   type LoanRequestInput,
   listLoans,
   loanDetail,
   ownLoans,
+  pendingEarlySettlements,
   recognizeRecoveries,
+  recordEarlySettlement,
   requestLoanFor,
   requestOwnLoan,
   withdrawOwnLoan,
 } from './loans.js';
 import { listRunOutputs, outputFile, ownHoldStatus, ownHoldStatusDetail, ownPayslipFile, ownPayslips, previewPayslip, publishRunPayslips, reissuePayslip } from './payslips.js';
-import { comparisonReport, disbursementReport, journalVoucher, payrollRegister, statutoryOutput, statutoryOutputs } from './reports.js';
+import { comparisonReport, disbursementReport, journalVoucher, payrollRegister, statutoryOutput, statutoryOutputs, statutoryRegister, tdsRegister } from './reports.js';
 
 const uuid = { type: 'string', format: 'uuid' } as const;
 const idParams = { type: 'object', required: ['id'], properties: { id: uuid } } as const;
@@ -483,6 +487,64 @@ export async function payrollOutputsRoutes(app: FastifyInstance, opts: { db: Dat
     },
   );
 
+  // FR-034 early settlement (I-81 item 1): recorded from evidence under the disbursement duty, decided under the decision duty;
+  // a waiver or write-off also needs payroll_loan.waive.loan (checked inside the decision).
+  app.post(
+    '/payroll-outputs/loans/:id/early-settlement',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['repaidAmount', 'reason', 'expectedVersion'],
+          properties: {
+            repaidAmount: { type: 'string', minLength: 1, maxLength: 24 },
+            repaymentRoute: { type: 'string', enum: ['DIRECT_REPAYMENT', 'FINAL_SETTLEMENT'] },
+            repaymentDate: { type: 'string', format: 'date' },
+            evidenceKey: eventKey,
+            evidenceReference: reference,
+            evidenceDocumentIds: { type: 'array', minItems: 1, maxItems: 1, items: uuid },
+            settlementId: uuid,
+            waivedAmount: { type: 'string', minLength: 1, maxLength: 24 },
+            waiverKind: { type: 'string', enum: ['WAIVER', 'WRITE_OFF'] },
+            reason: { type: 'string', minLength: 1, maxLength: 1000 },
+            expectedVersion,
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const grant = await loan(request, 'disburse', id);
+      const result = await withTransaction(db, (tx) => recordEarlySettlement(tx, grant, id, request.body as EarlySettlementInput));
+      reply.status(201);
+      return result;
+    },
+  );
+
+  app.get('/payroll-outputs/loan-settlements', async (request) => pendingEarlySettlements(db, await loan(request, 'decide')));
+
+  app.post(
+    '/payroll-outputs/loan-settlements/:id/decision',
+    {
+      schema: {
+        params: idParams,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['decision', 'expectedVersion'],
+          properties: { decision: { type: 'string', enum: ['APPROVE', 'REJECT'] }, reason: { type: 'string', minLength: 1, maxLength: 1000 }, expectedVersion },
+        },
+      },
+    },
+    async (request) => {
+      const { id } = request.params as { id: string };
+      const grant = await loan(request, 'decide', id);
+      return withTransaction(db, (tx) => decideEarlySettlement(tx, grant, id, request.body as { decision: 'APPROVE' | 'REJECT'; reason?: string; expectedVersion: number }));
+    },
+  );
+
   // A bounded share of a run-wide operation, like the payslip publication (runWide: docs/09 §8.2).
   app.post('/payroll-outputs/runs/:id/loan-recoveries', { config: runWide, schema: { params: idParams } }, async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -521,8 +583,8 @@ export async function payrollOutputsRoutes(app: FastifyInstance, opts: { db: Dat
   });
 
   app.get('/payroll-outputs/statutory-outputs', async (request) => {
-    await requireAccess(db, request, 'payroll_statutory', 'read', ['operational'], { requireAll: true });
-    return statutoryOutputs();
+    const grant = await requireAccess(db, request, 'payroll_statutory', 'read', ['operational'], { requireAll: true });
+    return statutoryOutputs(db, grant.companyId);
   });
 
   app.get(
@@ -531,8 +593,42 @@ export async function payrollOutputsRoutes(app: FastifyInstance, opts: { db: Dat
     async (request) => {
       const { code } = request.params as { code: string };
       // No recordKey: a denial's record key is a uuid (audit_event.record_key), so a code there turned the refusal into a 400 and lost the audit row.
-      await requireAccess(db, request, 'payroll_statutory', 'read', ['operational'], { requireAll: true });
-      return statutoryOutput(code);
+      const grant = await requireAccess(db, request, 'payroll_statutory', 'read', ['operational'], { requireAll: true });
+      return statutoryOutput(db, grant.companyId, code);
+    },
+  );
+
+  // FR-039 Form 24Q working data: TDS on salary by quarter, under the report grant and the register's row scope.
+  app.get(
+    '/payroll-outputs/tds-register',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['fiscalYear', 'quarter'],
+          properties: { fiscalYear: { type: 'string', pattern: '^\\d{4}-\\d{2}$' }, quarter: { type: 'integer', minimum: 1, maximum: 4 } },
+        },
+      },
+    },
+    async (request) => {
+      const grant = await requireAccess(db, request, 'payroll_report', 'read', ['amount'], { requireAll: true });
+      return tdsRegister(db, grant, request.query as { fiscalYear: string; quarter: number });
+    },
+  );
+
+  // FR-039 working registers of a run (PF, ESIC, professional tax, labour welfare fund): amounts, so under the report grant and the register's row scope.
+  app.get(
+    '/payroll-outputs/runs/:id/statutory-registers/:code',
+    {
+      schema: {
+        params: { type: 'object', required: ['id', 'code'], properties: { id: uuid, code: { type: 'string', pattern: '^[A-Z0-9_]{2,40}$' } } },
+        querystring: { type: 'object', additionalProperties: false, properties: { after: { type: 'string', maxLength: 100 } } },
+      },
+    },
+    async (request) => {
+      const { id, code } = request.params as { id: string; code: string };
+      return statutoryRegister(db, await report(request, id), id, code, request.query as { after?: string });
     },
   );
 }

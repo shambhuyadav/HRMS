@@ -236,6 +236,14 @@ describe.runIf(isModuleActive('payroll'))('salary holds (FR-101, DB110, H2)', ()
     ).rejects.toThrow(/cannot move from REJECTED to APPROVED_ACTIVE/);
     const full =await ok<{ id: string; holdAmount: string }>(await propose(maker, recordId, { criterionId: crit, scope: 'FULL', evidenceDocumentIds: [doc] }), 201);
     expect(full.holdAmount).toBe('30000.0000');
+    // H7 outstanding (I-80): the released bank block (30,000 not yet paid) and the full proposal (30,000) hold the same salary of a
+    // 30,000 record: 30,000 is owed once, never 60,000; the rejected proposal held nothing.
+    const owed = await ok<{ totals: { currencyCode: string; reserved: string; confirmed: string; outstanding: string }[] }>(await h.call(releaser, 'GET', `/v1/payroll/holds?employeeId=${e}`));
+    expect(owed.totals).toEqual([{ currencyCode: 'INR', reserved: '0.0000', confirmed: '0.0000', outstanding: '30000.0000' }]);
+    // The released block alone: still owed until its payment is confirmed.
+    expect((await ok<typeof owed>(await h.call(releaser, 'GET', `/v1/payroll/holds?employeeId=${e}&state=RELEASED`))).totals).toEqual([
+      { currencyCode: 'INR', reserved: '0.0000', confirmed: '0.0000', outstanding: '30000.0000' },
+    ]);
     // Nothing is left to hold beside a full proposal.
     expect((await propose(maker, recordId, { criterionId: crit, scope: 'PARTIAL', amount: '1.00', evidenceDocumentIds: [doc] })).json().error).toBe('HOLD_EXCEEDS_UNRESERVED');
     // The database refuses the beneficiary as the decider whatever the path, not only through the approval engine.
@@ -583,7 +591,7 @@ describe.runIf(isModuleActive('payroll'))('salary holds (FR-101, DB110, H2)', ()
     expect(first.items.map((x) => x.id)).toEqual(all.items.slice(0, 25).map((x) => x.id));
     const past = Math.ceil(all.total / 25) + 1;
     // H7 totals cover every matching hold, past the last page too (no manifest exists here: nothing reserved or paid).
-    const none = [{ currencyCode: 'INR', reserved: '0.0000', confirmed: '0.0000' }];
+    const none = [{ currencyCode: 'INR', reserved: '0.0000', confirmed: '0.0000', outstanding: expect.stringMatching(/^\d+\.\d{4}$/) }];
     expect(await ok<Holds>(await h.call(releaser, 'GET', `/v1/payroll/holds?page=${past}&pageSize=25`))).toEqual({ items: [], total: all.total, page: past, pageSize: 25, totals: none });
     expect(all.totals).toEqual(none);
     // Filters and row scope apply to the total: one employee's holds; HR limited to another department sees none.

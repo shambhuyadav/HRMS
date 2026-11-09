@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
-import { api, download, fileToBase64, formatAmount, formatDate, formatUnits, idempotencyKey, localDate, pinSession } from '../api';
+import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatUnits, idempotencyKey, localDate, pinSession } from '../api';
 import { isReportRefusal, reportProblem } from '../report-failures';
 import { MODULE_TASK_QUEUES } from '../screens-registry';
 import { useSession } from '../session';
@@ -319,6 +319,8 @@ interface DraftLine {
   receipt: File | null;
   /** Correcting a line: its receipt, kept unless another file is chosen. */
   keptReceiptId: string | null;
+  /** I-87: the currency paid in, when not INR ('' is INR); submission converts it at the rate in force on the expense date. */
+  currency?: string;
 }
 const emptyLine = (): DraftLine => ({ category: 'OTHER', expenseDate: '', nights: '', merchant: '', invoiceReference: '', amount: '', gross: null, description: '', exceptionReason: '', receipt: null, keptReceiptId: null });
 
@@ -339,12 +341,24 @@ interface OwnClaimLine {
   nights: number | null;
   merchant: string;
   invoiceReference: string | null;
-  claimedAmount: string;
-  grossAmount: string;
+  claimedAmount: string | null;
+  grossAmount: string | null;
   description: string;
   receiptId?: string | null;
   receiptScanState?: string | null;
+  /** I-87: a line paid in another currency, its own amounts, and the rate it was converted at once submitted. */
+  currency?: string | null;
+  sourceClaimedAmount?: string | null;
+  sourceGrossAmount?: string | null;
+  exchangeRate?: string | null;
 }
+
+/** The form's amounts of a stored line: in its own currency when it has one (I-87). */
+const lineAmounts = (l: OwnClaimLine) => ({
+  amount: Number(l.currency ? l.sourceClaimedAmount : l.claimedAmount).toFixed(2),
+  gross: Number(l.currency ? l.sourceGrossAmount : l.grossAmount).toFixed(2),
+  currency: l.currency ?? '',
+});
 
 export function ExpensesPage() {
   const { me, can } = useSession();
@@ -403,6 +417,7 @@ export function ExpensesPage() {
           ...(l.invoiceReference.trim() ? { invoiceReference: l.invoiceReference.trim() } : {}),
           grossAmount: l.gross && Number(l.gross) >= Number(l.amount) ? l.gross : l.amount,
           claimedAmount: l.amount,
+          ...(l.currency && l.currency !== 'INR' ? { currency: l.currency } : {}),
           description: l.description,
           ...(l.exceptionReason ? { exceptionReason: l.exceptionReason } : {}),
           ...(receiptIds[i] ? { receipt: { receiptId: receiptIds[i] } } : {}),
@@ -461,8 +476,7 @@ export function ExpensesPage() {
           nights: l.nights === null ? '' : String(l.nights),
           merchant: l.merchant,
           invoiceReference: l.invoiceReference ?? '',
-          amount: Number(l.claimedAmount).toFixed(2),
-          gross: Number(l.grossAmount).toFixed(2),
+          ...lineAmounts(l),
           description: l.description,
           exceptionReason: '',
           receipt: null,
@@ -492,8 +506,7 @@ export function ExpensesPage() {
           nights: l.nights === null ? '' : String(l.nights),
           merchant: l.merchant,
           invoiceReference: l.invoiceReference ?? '',
-          amount: Number(l.claimedAmount).toFixed(2),
-          gross: Number(l.grossAmount).toFixed(2),
+          ...lineAmounts(l),
           description: l.description,
           exceptionReason: '',
           receipt: null,
@@ -568,8 +581,12 @@ export function ExpensesPage() {
                   <input maxLength={100} value={l.invoiceReference} onChange={(e) => update(i, { invoiceReference: e.target.value })} />
                 </label>
                 <label>
-                  Amount (INR)
+                  {`Amount (${l.currency || 'INR'})`}
                   <input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={l.amount} onChange={(e) => update(i, { amount: e.target.value })} />
+                </label>
+                <label>
+                  Paid in another currency (code, if not INR)
+                  <input maxLength={3} pattern="[A-Za-z]{3}" value={l.currency ?? ''} onChange={(e) => update(i, { currency: e.target.value.toUpperCase() })} />
                 </label>
                 <label className="wide">
                   Description
@@ -957,6 +974,10 @@ interface ClaimLine {
   /** Only with the expense reason grant (DF02). */
   exceptionReason?: string | null;
   decisionReason?: string | null;
+  /** I-87: paid in another currency, converted at submission at this frozen rate. */
+  currency?: string | null;
+  sourceClaimedAmount?: string | null;
+  exchangeRate?: string | null;
 }
 
 /**
@@ -1050,6 +1071,9 @@ function ExpenseTask({ task }: { task: Task }) {
                   </td>
                   <td>
                     {formatAmount(l.claimedAmount, claim.currency)}
+                    {l.currency && l.sourceClaimedAmount && (
+                      <div className="hint">{`Paid ${formatAmount(l.sourceClaimedAmount, l.currency)} at ${Number(l.exchangeRate)} ${claim.currency} each`}</div>
+                    )}
                     {l.appliedLimit && <div className="hint">Limit {formatAmount(l.appliedLimit, claim.currency)}</div>}
                   </td>
                   <td>
@@ -1243,15 +1267,28 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
   // server answers from the first attempt instead of preparing a second one. A success, or a changed amount or
   // date, starts a new payment with a new key.
   const prepareKey = useRef<string | null>(null);
+  // BR-024 (I-81 item 8): payroll reimbursements entered for this employee since the claim was submitted could be the same money; the
+  // server lists them and waits for the preparer's recorded review of why they do not pay this claim.
+  const [payrollReview, setPayrollReview] = useState('');
   const prepare = useMutation({
     mutationFn: () => {
       prepareKey.current ??= idempotencyKey('pay');
-      return api('/v1/expense/payments', { body: { claimId, amount: amount || payable?.allocatable, paymentDate, idempotencyKey: prepareKey.current, ...(chosenRetry ? { retryOfInstructionId: chosenRetry } : {}) } });
+      return api('/v1/expense/payments', {
+        body: {
+          claimId,
+          amount: amount || payable?.allocatable,
+          paymentDate,
+          idempotencyKey: prepareKey.current,
+          ...(chosenRetry ? { retryOfInstructionId: chosenRetry } : {}),
+          ...(payrollReview.trim() ? { payrollReimbursementReview: payrollReview.trim() } : {}),
+        },
+      });
     },
     onSuccess: () => {
       prepareKey.current = null;
       setAmount('');
       setRetryOf('');
+      setPayrollReview('');
     },
     // After an error too: an attempt whose answer was lost may have been prepared all the same.
     onSettled: refresh,
@@ -1323,11 +1360,31 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
             </select>
           </label>
         )}
+        {payrollInputsToReview(prepare.error).length > 0 && (
+          <fieldset>
+            <legend>Payroll reimbursements to review</legend>
+            <p className="hint">
+              Payroll does not pay expense claims, but these payroll reimbursements were entered for this employee since the claim was submitted. Check that none of
+              them pays this claim, then say why before preparing the payment.
+            </p>
+            <ul>
+              {payrollInputsToReview(prepare.error).map((p) => (
+                <li key={p.inputId}>
+                  {`Period ${p.periodCode}, reference ${p.reference}, ${p.state.toLowerCase()}, dated ${formatDate(p.effectiveDate)}${p.matchesAmount ? ', for the same amount as this payment' : ''}`}
+                </li>
+              ))}
+            </ul>
+            <label>
+              Why these do not pay this claim
+              <textarea value={payrollReview} maxLength={1000} required onChange={(e) => setPayrollReview(e.target.value)} />
+            </label>
+          </fieldset>
+        )}
         <button type="submit" disabled={prepare.isPending}>
           Prepare payment
         </button>
       </form>
-      <ErrorNote error={prepare.error} />
+      {payrollInputsToReview(prepare.error).length === 0 && <ErrorNote error={prepare.error} />}
       <table>
         <thead>
           <tr>
@@ -1457,6 +1514,21 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
 }
 
 /** A copy of the map without one key. */
+/** BR-024 (I-81 item 8): the payroll reimbursements a refused payment listed for review; none for any other answer. */
+interface PayrollInputToReview {
+  inputId: string;
+  periodCode: string;
+  reference: string;
+  state: string;
+  effectiveDate: string;
+  matchesAmount: boolean;
+}
+function payrollInputsToReview(error: unknown): PayrollInputToReview[] {
+  if (!(error instanceof ApiError) || error.code !== 'PAYROLL_REIMBURSEMENT_REVIEW_REQUIRED') return [];
+  const listed = (error.details as { payrollInputs?: PayrollInputToReview[] } | undefined)?.payrollInputs;
+  return Array.isArray(listed) ? listed : [];
+}
+
 function omit<T>(map: Record<string, T>, key: string): Record<string, T> {
   const next = { ...map };
   delete next[key];

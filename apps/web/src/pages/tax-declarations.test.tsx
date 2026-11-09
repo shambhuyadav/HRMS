@@ -342,6 +342,88 @@ describe('review', () => {
   });
 });
 
+describe('Form 16 Part B working data (FR-107, I-90)', () => {
+  const READ = ['tax_declaration.read.tax'];
+  const lists = {
+    'GET /v1/tax-declarations': [200, { items: [declaration({ state: 'ACCEPTED', employeeId: 'e0000000-0000-4000-8000-000000000009', fiscalPeriodCode: '2026-27' })], total: 1 }] as Reply,
+    'GET /v1/tax-proofs': [200, { items: [], total: 0 }] as Reply,
+  };
+  const SALARY = { processedMonths: 2, grossSalary: '2000000.00', exemptAllowances: '40000.00', tdsDeducted: '48750.00' };
+  const PART_A = { status: 'NOT_AVAILABLE', reason: 'Part A comes from TRACES, an outside input; no Form 16 is issued here.' };
+
+  it('is not offered without the read key', () => {
+    serve(lists);
+    screenOf('/payroll/tax-review', []);
+    expect(screen.queryByRole('form', { name: 'Form 16 Part B' })).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it('asks for the employee and year, and shows the figures exactly as the server returns them', async () => {
+    serve({
+      ...lists,
+      'GET /v1/payroll/form16/part-b': [
+        200,
+        {
+          status: 'CALCULATED',
+          regime: 'OLD',
+          regimeSource: 'DECLARATION',
+          salary: { ...SALARY, finalSettlement: { taxableSalary: '2200000.00', exemptAllowances: '0.00', tdsDeducted: '268125.00' } },
+          standardDeduction: '50000.00',
+          hraExemption: { exemption: '50000.00', hraReceived: '50000.00', salaryForHra: '100000.00', rentPaid: '600000.00', metro: true },
+          previousEmployment: { salary: '900000.00', tds: '50000.00' },
+          deductions: [{ categoryCode: 'SEC_80C', amount: '200000.00', limit: '150000.00', allowed: '150000.00' }],
+          taxableIncome: '1800000.00',
+          tax: { slabTax: '352500.00', rebate: '0.00', surcharge: '0.00', cess: '14100.00', total: '366600.00' },
+          balance: '317850.00',
+          partA: PART_A,
+        },
+      ],
+    });
+    screenOf('/payroll/tax-review', READ);
+    const form = await screen.findByRole('form', { name: 'Form 16 Part B' });
+    fireEvent.change(within(form).getByLabelText('Employee ID'), { target: { value: 'e0000000-0000-4000-8000-000000000009' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Show Part B' }));
+    const dl = await screen.findByLabelText('Part B figures');
+    expect(dl.textContent).toContain('Calculated (OLD regime, as declared)');
+    expect(dl.textContent).toContain('SEC_80C');
+    expect(dl.textContent).toContain('Part A comes from TRACES');
+    expect(dl.textContent).toContain('Final settlement (included)');
+    expect(dl.textContent).toContain('House rent allowance exempt');
+    expect(dl.textContent).toContain('Earlier employer this year (Form 12B)');
+    expect(dl.textContent).toContain('metro city');
+    const urls = vi.mocked(fetch).mock.calls.map((c) => String(c[0]));
+    expect(urls.filter((u) => u.includes('/form16/'))).toEqual(['/v1/payroll/form16/part-b?employeeId=e0000000-0000-4000-8000-000000000009&fiscalYear=2026-27']);
+    expect(calls.filter((c) => c.method !== 'GET')).toEqual([]);
+  });
+
+  it('says plainly when no income tax pack is active, and opens a declaration’s year from the list', async () => {
+    serve({
+      ...lists,
+      'GET /v1/payroll/form16/part-b': [
+        200,
+        { status: 'NOT_CONFIGURED', code: 'INCOME_TAX_PACK_NOT_ACTIVE', message: 'No INCOME_TAX rule pack for 2026-27 has been validated and activated; nothing is valued.', salary: SALARY, partA: PART_A },
+      ],
+    });
+    screenOf('/payroll/tax-review', READ);
+    fireEvent.click(await screen.findByRole('button', { name: 'Part B: SYN-001 2026-27' }));
+    const dl = await screen.findByLabelText('Part B figures');
+    expect(dl.textContent).toContain('nothing is valued');
+    expect(dl.textContent).not.toContain('Calculated');
+    // Without a final settlement paid this year, no settlement row.
+    expect(dl.textContent).not.toContain('Final settlement');
+  });
+
+  it('shows the server refusal', async () => {
+    serve({ ...lists, 'GET /v1/payroll/form16/part-b': [422, { error: 'INVALID_FISCAL_YEAR', message: 'A financial year looks like 2026-27' }] });
+    screenOf('/payroll/tax-review', READ);
+    const form = await screen.findByRole('form', { name: 'Form 16 Part B' });
+    fireEvent.change(within(form).getByLabelText('Employee ID'), { target: { value: 'e1' } });
+    fireEvent.change(within(form).getByLabelText('Financial year'), { target: { value: '2026-28' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Show Part B' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('A financial year looks like 2026-27');
+  });
+});
+
 describe('rule packs', () => {
   const PACK = { id: 'p1', code: 'SYNTH_PACK', revision: 1, fiscalPeriodCode: 'FY-SYNTH', cutoffDate: '2099-12-31', state: 'DRAFT', version: 1, createdBy: 'someone-else', regimes: PERIOD.regimes };
 

@@ -92,7 +92,7 @@ beforeAll(async () => {
   B = await h.makeCompany();
   author = await h.actor(A, 'HR_ADMINISTRATOR');
   activator = await h.actor(A, 'HR_ADMINISTRATOR');
-  shiftId = (await h.call(author, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
+  shiftId = (await h.call(author, 'POST', '/v1/shifts', { code: 'DAY', name: 'Day', inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [{ startOffsetMinutes: 240, endOffsetMinutes: 300 }] })).json().id;
   const seeded = (await list()).find((p) => p.code === 'DEFAULT')!;
   defaultPolicyId = seeded.id;
   expect(seeded).toMatchObject({ state: 'DRAFT', graceMinutes: 10, presentPercent: '75.00', halfDayPercent: '50.00', overtimeEnabled: false, mappings: [{ gradeId: null, locationId: null, priority: 0 }] });
@@ -105,11 +105,13 @@ afterAll(async () => {
 
 describe('drafts (FR-020, DF05)', () => {
   it('shows thresholds, mappings and period, and takes every value from the person maintaining it', async () => {
-    const created = await h.call(author, 'POST', POLICIES, { code: newCode(), ...values({ effectiveTo: '2026-12-01', overtimeEnabled: true }) });
+    // I-78 item 5: overtime on states its rules (synthetic values).
+    const overtime = { overtimeEnabled: true, overtimeBasis: 'AFTER_SHIFT_END', overtimeMinimumMinutes: 30, overtimeRoundingMinutes: 15 };
+    const created = await h.call(author, 'POST', POLICIES, { code: newCode(), ...values({ effectiveTo: '2026-12-01', ...overtime }) });
     expect(created.statusCode, created.body).toBe(201);
     expect(created.json()).toMatchObject({ revision: 1, state: 'DRAFT' });
     const shown = await policy(created.json().id);
-    expect(shown).toMatchObject({ effectiveFrom: '2026-03-16', effectiveTo: '2026-12-01', graceMinutes: 5, presentPercent: '60.00', halfDayPercent: '40.00', overtimeEnabled: true, mappings: [] });
+    expect(shown).toMatchObject({ effectiveFrom: '2026-03-16', effectiveTo: '2026-12-01', graceMinutes: 5, presentPercent: '60.00', halfDayPercent: '40.00', ...overtime, mappings: [] });
     expect(shown.warnings.map((w) => w.code)).toEqual(['UNMAPPED']);
 
     expect((await h.call(author, 'POST', POLICIES, values())).statusCode).toBe(400);

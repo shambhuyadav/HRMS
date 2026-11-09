@@ -41,6 +41,7 @@ const KIND_LABEL: Record<string, string> = {
   ATTENDANCE_PROCESSING: 'Attendance processing',
   LEAVE_ACCRUAL: 'Monthly leave accrual',
   INCREMENT_REVIEW_OPENING: 'Increment review opening',
+  LEAVE_YEAR_END: 'Leave year-end expiry',
 };
 
 const STATE_LABEL: Record<string, string> = { QUEUED: 'Queued', RUNNING: 'Running', COMPLETED: 'Completed', FAILED: 'Failed' };
@@ -58,6 +59,13 @@ const COUNT_LABELS: Record<string, readonly [field: string, label: string][]> = 
     ['NO_POLICY', 'Employees without an attendance policy'],
   ],
   LEAVE_ACCRUAL: [['credited', 'Leave accruals credited']],
+  LEAVE_YEAR_END: [
+    ['employees', 'Employees looked at'],
+    ['expired', 'Balances expired above the carry cap'],
+    ['withinCap', 'Balances within the carry cap'],
+    ['pendingRequests', 'Held back by a pending request'],
+    ['notConfigured', 'Policies without a leave year'],
+  ],
   INCREMENT_REVIEW_OPENING: [
     ['created', 'Draft cases created'],
     ['excluded', 'Employees excluded'],
@@ -156,6 +164,7 @@ function subject(job: BulkJob): string | null {
   const r = job.result;
   if (job.kind === 'ATTENDANCE_PROCESSING' && typeof p.workDate === 'string') return `Work date ${p.workDate}`;
   if (job.kind === 'LEAVE_ACCRUAL' && typeof p.month === 'string') return `Month ${p.month}`;
+  if (job.kind === 'LEAVE_YEAR_END' && typeof p.yearEnd === 'string') return `Leave year ending ${p.yearEnd}`;
   if (job.kind === 'INCREMENT_REVIEW_OPENING') {
     const period = typeof r.period === 'string' ? r.period : typeof p.year === 'number' ? String(p.year) : null;
     const cycle = typeof r.cycleCode === 'string' ? `cycle ${r.cycleCode}, ` : '';

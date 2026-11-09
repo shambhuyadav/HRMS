@@ -1,8 +1,9 @@
 // FR-029 employee salary master (E08; CL-075, CL-204-CL-210): the salary master list with E08's filters (a day or a
 // month, employee search, status), the salary and annual salary exports, and the salary master upload. Amounts are
 // confidential (DF02): the list needs the salary read grant, the upload the salary manage grant, the exports the salary
-// export grant; the server checks each again. Amounts are shown exactly as the server returns them and never computed:
-// estimated in-hand is not shown because its calculation is not defined (BR-011).
+// export grant; the server checks each again. Amounts are shown exactly as the server returns them and never computed here:
+// the estimated in-hand is the server's (BR-011; I-80, decided under owner delegation, 6 Nov 2026), shown with the server's
+// own note on how it is made, and "Not available" where the server makes none.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { api, ApiError, download, fileToBase64, formatAmount, formatDate, idempotencyKey, localDate, pinSession } from '../api';
@@ -77,6 +78,7 @@ interface SalaryRow {
   currency: string;
   annualCtc: string;
   monthlyGross: string;
+  estimatedInHand?: string | null;
 }
 
 interface SalaryPage {
@@ -85,6 +87,7 @@ interface SalaryPage {
   total: number;
   page: number;
   pageSize: number;
+  estimate?: { label: string; message: string };
 }
 
 interface Filters {
@@ -222,6 +225,7 @@ function SalaryList({ filters, page, onPage }: { filters: Filters; page: number;
                   <th scope="col">Effective to</th>
                   <th scope="col">Annual CTC</th>
                   <th scope="col">Monthly gross</th>
+                  {data.estimate && <th scope="col">{`${data.estimate.label} (estimate)`}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -236,12 +240,14 @@ function SalaryList({ filters, page, onPage }: { filters: Filters; page: number;
                     <td>{r.effectiveTo ? formatDate(r.effectiveTo) : 'No end date'}</td>
                     <td>{money(r.annualCtc, r.currency)}</td>
                     <td>{money(r.monthlyGross, r.currency)}</td>
+                    {data.estimate && <td>{r.estimatedInHand ? money(r.estimatedInHand, r.currency) : 'Not available'}</td>}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="hint">An arrangement stays in force until the day the next one starts. Estimated in-hand is not shown: its calculation is not defined yet.</p>
+          <p className="hint">An arrangement stays in force until the day the next one starts.</p>
+          {data.estimate && <p className="hint">{`${data.estimate.label}: ${data.estimate.message}`}</p>}
         </>
       )}
       {pages > 1 && (

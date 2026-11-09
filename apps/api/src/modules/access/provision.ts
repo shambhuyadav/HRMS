@@ -13,7 +13,10 @@ import type { Queryable } from '../../db/queryable.js';
 import { dashboardFor, widgetPermission } from '../dashboard/service.js';
 import { INCREMENT_REVIEW_NOTIFICATIONS } from '../increment/notifications.js';
 import { EVENT_NOTICE_CATALOGUE } from '../notification/catalogue.js';
-import { MODULE_REGISTRATIONS } from '../registry.js';
+import { isModuleActive, MODULE_REGISTRATIONS } from '../registry.js';
+import { ensureDefaultScoringSetting } from '../appraisal/scoring-default.js';
+import { ensureDefaultSetting } from '../reporting/settings.js';
+import { ensureStatutoryPacks } from '../statutory/rule-packs.js';
 import {
   BASELINE_ATTENDANCE_POLICY,
   BASELINE_EXPENSE_CATEGORIES,
@@ -223,6 +226,8 @@ export async function provisionCompany(db: Queryable, opts: ProvisionOptions): P
       [opts.companyId, categoryId, c.limit, opts.approvedBy],
     );
   }
+  // I-90 (0225): the FY 2026-27 income tax declaration pack, a DRAFT by the system actor until it is validated and activated.
+  await db.query(`select hrms_seed_tax_declaration_pack($1)`, [opts.companyId]);
   // DF03/DF06 expense route: direct manager -> independent financial Admin -> high-value Admin above the threshold.
   await ensureRoute(db, opts, permissionId, 'expense_claim', [
     { sequence: 1, permission: 'expense.manager_decide.operational', rule: 'DIRECT_MANAGER' },
@@ -313,4 +318,12 @@ export async function provisionCompany(db: Queryable, opts: ProvisionOptions): P
       [opts.companyId, resource, fieldGroup, opts.effectiveFrom, opts.approvedBy],
     );
   }
+
+  // I-83: the company's first dated reporting settings (small-count threshold, recent activity window, progression span).
+  if (isModuleActive('reporting')) await ensureDefaultSetting(db, opts.companyId, opts.approvedBy);
+  // I-86: the company's first dated appraisal scoring split (goals / competencies), as 0230 gives an existing company.
+  if (isModuleActive('appraisal')) await ensureDefaultScoringSetting(db, opts.companyId, opts.approvedBy);
+  // I-85 (I-88 asked for it): the statutory rule packs (gratuity, PF, ESIC, the seeded professional tax states) as inactive DRAFTs by
+  // the system actor, valued nothing until two authorised people validate and activate them.
+  await ensureStatutoryPacks(db, opts.companyId);
 }

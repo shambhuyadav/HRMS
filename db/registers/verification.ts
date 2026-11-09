@@ -16,15 +16,25 @@ export interface VerificationRow extends Requirement {
   mentionedIn: string[];
 }
 
+/**
+ * Tests of this register's own machinery name identifiers as data (a parser reading FR-110 from its definition). They test the register,
+ * not the requirement, so they are neither evidence nor a place to look.
+ */
+export const REGISTER_SELF_TESTS: readonly string[] = ['db/tests/registers.test.ts'];
+
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-/** A failure outranks all. A block outranks passing tests: they cover what is built, not the rule that is still unsettled. */
-export function decide(named: readonly Pick<TestOutcome, 'status'>[], blocks: readonly Pick<BlockedEntry, 'reason' | 'source'>[], mentionedIn: readonly string[]): { disposition: Disposition; reason: string } {
-  const passed = named.filter((t) => t.status === 'passed').length;
+/**
+ * A failure outranks all. A block outranks passing tests: they cover what is built, not the rule that is still unsettled. A test declared
+ * with `it.fails` that passed records a behaviour known to be wrong (I-84), so it counts as a failure, never as a pass.
+ */
+export function decide(named: readonly Pick<TestOutcome, 'status' | 'expectedFailure'>[], blocks: readonly Pick<BlockedEntry, 'reason' | 'source'>[], mentionedIn: readonly string[]): { disposition: Disposition; reason: string } {
+  const declared = named.filter((t) => t.status === 'passed' && t.expectedFailure).length;
+  const passed = named.filter((t) => t.status === 'passed').length - declared;
   const failed = named.filter((t) => t.status === 'failed').length;
-  const skipped = named.length - passed - failed;
-  const tally = [passed && `${passed} passed`, failed && `${failed} failed`, skipped && `${skipped} skipped`].filter(Boolean).join(', ');
-  if (failed) return { disposition: 'Fail', reason: `Named tests: ${tally}` };
+  const skipped = named.length - passed - declared - failed;
+  const tally = [passed && `${passed} passed`, failed && `${failed} failed`, declared && `${declared} declared it.fails (passing only while the behaviour is wrong)`, skipped && `${skipped} skipped`].filter(Boolean).join(', ');
+  if (failed || declared) return { disposition: 'Fail', reason: `Named tests: ${tally}` };
   if (blocks.length) {
     const why = blocks.map((b) => `${b.reason} (${b.source})`).join('; ');
     return { disposition: 'Blocked', reason: named.length ? `${why}. Named tests: ${tally}, which does not clear it` : why };
@@ -39,6 +49,7 @@ export function buildVerification(requirements: readonly Requirement[], runs: re
   const named = new Map<string, (TestOutcome & { run: string })[]>();
   for (const run of runs) {
     for (const test of run.tests) {
+      if (REGISTER_SELF_TESTS.includes(test.file)) continue;
       for (const id of idsNamedIn(test.name)) {
         if (!named.has(id)) named.set(id, []);
         named.get(id)!.push({ ...test, run: run.label });
@@ -47,6 +58,7 @@ export function buildVerification(requirements: readonly Requirement[], runs: re
   }
   const mentions = new Map<string, string[]>();
   for (const [file, source] of testSources) {
+    if (REGISTER_SELF_TESTS.includes(file)) continue;
     for (const id of idsNamedIn(source)) {
       if (!mentions.has(id)) mentions.set(id, []);
       mentions.get(id)!.push(file);

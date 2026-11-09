@@ -272,7 +272,7 @@ describe.runIf(isModuleActive('payroll-outputs'))('loans and advances (FR-034, T
     expect(mine).toMatchObject({ state: 'CLOSED', recovered: '6000.0000', outstanding: '0.0000', installments: [{ dueMonth: '2026-11' }, { dueMonth: '2026-12' }] });
     expect(mine.recoveries.map((r) => r.periodCode)).toEqual(['2026-11', '2026-12']);
     expect(Object.keys(mine)).not.toContain('decidedBy');
-    expect(own).toMatchObject({ interest: { status: 'NOT_CONFIGURED' }, earlySettlement: { status: 'NOT_CONFIGURED' } });
+    expect(own).toMatchObject({ interest: { status: 'NOT_CONFIGURED' }, earlySettlement: { status: 'RECORDED_BY_HR' } });
     expect(own.items.find((i) => i.id === adv.id)).toMatchObject({ state: 'REJECTED', decisionReason: 'Synthetic: one loan at a time' });
     // The employee withdraws an undecided request of their own only.
     const w = await ok<{ id: string; version: number }>(await h.call(me, 'POST', '/v1/me/loans', { ...body, principal: '500.00' }), 201);

@@ -26,6 +26,7 @@ import {
 } from './policies.js';
 import {
   adjustBalance,
+  assertYearEndDate,
   balances,
   type BalanceAdjustment,
   decideLeave,
@@ -37,6 +38,7 @@ import {
   submitLeave,
   withdrawLeave,
   withLeaveTaskSummaries,
+  yearEndPendingRequests,
 } from './service.js';
 
 const uuid = { type: 'string', format: 'uuid' } as const;
@@ -102,6 +104,9 @@ const policyValues = {
   annualEntitlement: quantity,
   minServiceDays: { type: 'integer', minimum: 0, maximum: 100000 },
   carryCap: quantity,
+  // I-78 item 3: the month the leave year starts; no default.
+  // A type list, not anyOf: anyOf would let type coercion turn a refused 0 into null (not set).
+  leaveYearStartMonth: { type: ['integer', 'null'], minimum: 1, maximum: 12 },
 } as const;
 
 export async function leaveRoutes(app: FastifyInstance, opts: { db: Database; files: FileStore }): Promise<void> {
@@ -247,6 +252,33 @@ export async function leaveRoutes(app: FastifyInstance, opts: { db: Database; fi
       const job = await withTransaction(db, (tx) => enqueueBulkJob(tx, grant, 'LEAVE_ACCRUAL', { month }, key));
       reply.status(202);
       return job;
+    },
+  );
+
+  // FR-024 / FR-025 year-end expiry above the carry cap (I-78 item 3, decided under owner delegation, 6 Nov 2026): under the
+  // accrual duty and company scope, queued as a bulk job like the accrual; only a leave year that has ended (422 otherwise).
+  app.post(
+    '/leave/year-end-runs',
+    { schema: { body: { type: 'object', additionalProperties: false, required: ['yearEnd'], properties: { yearEnd: date, idempotencyKey } } } },
+    async (request, reply) => {
+      const { resource, action, fieldGroups } = BULK_KINDS.LEAVE_YEAR_END.permission; // leave.accrue.operational
+      const grant = await requireAccess(db, request, resource, action, fieldGroups, { requireAll: true });
+      const { yearEnd, idempotencyKey: key } = request.body as { yearEnd: string; idempotencyKey?: string };
+      await assertYearEndDate(db, grant.companyId, yearEnd);
+      const job = await withTransaction(db, (tx) => enqueueBulkJob(tx, grant, 'LEAVE_YEAR_END', { yearEnd }, key));
+      reply.status(202);
+      return job;
+    },
+  );
+
+  // The pending requests a year-end run skips until they are decided, in the caller's row scope.
+  app.get(
+    '/leave/year-end-runs/pending-requests',
+    { schema: { querystring: { type: 'object', additionalProperties: false, required: ['yearEnd'], properties: { yearEnd: date, ...pageProps } } } },
+    async (request) => {
+      const { resource, action, fieldGroups } = BULK_KINDS.LEAVE_YEAR_END.permission;
+      const grant = await requireAccess(db, request, resource, action, fieldGroups, { requireAll: true });
+      return yearEndPendingRequests(db, grant, request.query as { yearEnd: string; page: number; pageSize: number });
     },
   );
 

@@ -2,9 +2,15 @@
 // (imports/jobs.ts), so each submission has its stored file, a dry-run preview, row results and the follow-up routes:
 //   ATTENDANCE_PUNCH_V1    one event per row: employee, instant with offset, direction, event key and, optionally, the
 //                          device or source the key belongs to, so equal device-local keys of two devices do not collide.
-//   ATTENDANCE_IN_OUT_V1   a day's in and out times in company local time, turned into an IN and an OUT punch. An out
-//                          time not after the in time belongs to the next calendar day (DF05: a shift belongs to its start
-//                          date); a row with one time is one event, which evaluation later shows as a missing punch.
+//   ATTENDANCE_IN_OUT_V1   a day's in and out times in company local time, turned into an IN and an OUT punch; a row
+//                          with one time is one event, which evaluation later shows as a missing punch. The next-day rule
+//                          (FR-020; decided under owner delegation, 6 Nov 2026, I-78 item 2): the work date names the
+//                          shift (DF05: a shift belongs to its start date), so an in time, or a time given alone, is the
+//                          instant at that clock time on the day before, the work date or the day after that lies in the
+//                          capture window of the employee's shift in force on the work date (its start less its buffer to
+//                          its end plus its buffer, end excluded; at most one can). Without a shift, or when none lies in
+//                          it, the work date. An out time beside an in time is the first instant at that clock time after
+//                          the in: the next day when it is earlier than the in time; an equal time is refused.
 // Valid independent events are accepted and invalid ones quarantined; a single row is never partly accepted (DF09). Each
 // stored punch points at its job row (0114). POST /attendance/punches keeps its JSON form: it becomes the same tracked
 // submission with its rows written as the punch template, previewed and committed in one request.
@@ -61,11 +67,33 @@ function parseInstant(value: string): Date | null {
   return Number.isNaN(at.getTime()) ? null : at;
 }
 
-async function employeeInScope(client: Queryable, grant: AccessGrant, code: string): Promise<string> {
+/** The employee of a code in the caller's row scope, or null: outside it reads exactly like a code that does not exist. */
+async function findInScope(client: Queryable, grant: AccessGrant, code: string): Promise<string | null> {
   const employee = (await client.query<{ id: string }>(`select id from employee where company_id = $1 and employee_code = $2`, [grant.companyId, code.toUpperCase()])).rows[0];
-  // Outside the caller's row scope reads exactly like a code that does not exist.
-  if (!employee || !(await canAccessEmployee(client, grant, employee.id))) throw new RowError('UNKNOWN_EMPLOYEE');
-  return employee.id;
+  return employee && (await canAccessEmployee(client, grant, employee.id)) ? employee.id : null;
+}
+
+async function employeeInScope(client: Queryable, grant: AccessGrant, code: string): Promise<string> {
+  const id = await findInScope(client, grant, code);
+  if (!id) throw new RowError('UNKNOWN_EMPLOYEE');
+  return id;
+}
+
+/** I-78 items 1, 2: the capture window of the employee's shift in force on `day`, as epoch milliseconds [from, to). */
+async function captureWindow(client: Queryable, companyId: string, employeeId: string, day: string): Promise<{ from: number; to: number } | null> {
+  const row = (
+    await client.query<{ from_ms: string; to_ms: string }>(
+      `select (extract(epoch from w.s - make_interval(mins => w.b)) * 1000)::bigint::text as from_ms,
+              (extract(epoch from w.s + make_interval(mins => f.minutes + w.b)) * 1000)::bigint::text as to_ms
+         from shift_assignment a
+         join company c on c.id = a.company_id
+         cross join lateral hrms_shift_in_force(a.company_id, a.shift_id, $3::date) f
+         cross join lateral (select ($3::date + f.in_time) at time zone c.business_timezone as s, hrms_shift_buffer(a.company_id, a.shift_id, f.revision_id) as b) w
+        where a.company_id = $1 and a.employee_id = $2 and a.effective_from <= $3::date and (a.effective_to is null or a.effective_to > $3::date)`,
+      [companyId, employeeId, day],
+    )
+  ).rows[0];
+  return row ? { from: Number(row.from_ms), to: Number(row.to_ms) } : null;
 }
 
 interface PunchEvent {
@@ -148,7 +176,8 @@ export const PUNCH_IMPORT_SPEC: BatchSpec<PunchColumn> = {
   },
 };
 
-const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+const dayAfter = (day: string, days: number) => new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+const nextDay = (day: string) => dayAfter(day, 1);
 
 export const IN_OUT_IMPORT_SPEC: BatchSpec<InOutColumn> = {
   kind: 'attendance_in_out',
@@ -164,16 +193,34 @@ export const IN_OUT_IMPORT_SPEC: BatchSpec<InOutColumn> = {
     // DF05: a zero-duration pair is rejected.
     if (row.inTime && row.inTime === row.outTime) throw new RowError('ZERO_DURATION');
     const tz = (await client.query<{ tz: string }>(`select business_timezone as tz from company where id = $1`, [grant.companyId])).rows[0]!.tz;
-    const local = async (day: string, time: string) => {
-      const instant = await resolveInstant(client, { kind: 'LOCAL', value: `${day}T${time}:00` }, tz);
+    // Only an employee in the caller's scope lends a shift to place the times; anyone else is refused below, as before.
+    const inScope = await findInScope(client, grant, row.employeeCode);
+    const window = inScope ? await captureWindow(client, grant.companyId, inScope, row.workDate) : null;
+    const resolve = (day: string, time: string) => resolveInstant(client, { kind: 'LOCAL', value: `${day}T${time}:00` }, tz);
+    const usable = (instant: string | null) => {
       // DF09: a time inside a daylight-saving gap or overlap names no single instant.
       if (!instant) throw new RowError('AMBIGUOUS_LOCAL_TIME');
       if (Date.parse(instant) > Date.now()) throw new RowError('FUTURE_TIMESTAMP');
       return instant;
     };
+    // FR-020 next-day rule (I-78 item 2): a time without an in time before it lies in the shift's capture window if it can.
+    const placed = async (time: string): Promise<{ day: string; at: string }> => {
+      if (window) {
+        for (const day of [dayAfter(row.workDate, -1), row.workDate, nextDay(row.workDate)]) {
+          const at = await resolve(day, time);
+          if (at && Date.parse(at) >= window.from && Date.parse(at) < window.to) return { day, at: usable(at) };
+        }
+      }
+      return { day: row.workDate, at: usable(await resolve(row.workDate, time)) };
+    };
     const events: { direction: 'IN' | 'OUT'; at: string }[] = [];
-    if (row.inTime) events.push({ direction: 'IN', at: await local(row.workDate, row.inTime) });
-    if (row.outTime) events.push({ direction: 'OUT', at: await local(row.inTime && row.outTime < row.inTime ? nextDay(row.workDate) : row.workDate, row.outTime) });
+    const inAt = row.inTime ? await placed(row.inTime) : null;
+    if (inAt) events.push({ direction: 'IN', at: inAt.at });
+    if (row.outTime) {
+      // Beside an in time, the first instant at the out time after it: the next day when earlier than the in time.
+      const out = inAt ? { at: usable(await resolve(row.outTime < row.inTime ? nextDay(inAt.day) : inAt.day, row.outTime)) } : await placed(row.outTime);
+      events.push({ direction: 'OUT', at: out.at });
+    }
     const employeeId = await employeeInScope(client, grant, row.employeeCode);
     const code = row.employeeCode.toUpperCase();
     const results: Stored[] = [];

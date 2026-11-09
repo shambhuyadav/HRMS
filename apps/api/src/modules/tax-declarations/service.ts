@@ -6,8 +6,10 @@
 // deduction allowance"; "post-lock acceptance cannot rewrite processed payroll"). What accepted inputs do in a payroll valuation
 // waits for the owner and a real rule pack.
 //
-// A rule pack lists a fiscal period's dates, cutoff, currency, regimes and categories; it holds no rate and none is seeded. Until
-// one is activated the feature answers NOT_CONFIGURED. Amounts and the chosen regime are sealed (security/field-crypto.ts) and
+// A rule pack lists a fiscal period's dates, cutoff, currency, regimes and categories (with each category's limit and section
+// reference, I-90); it holds no rate: the computation is the INCOME_TAX statutory pack (statutory/income-tax.ts). Every company is
+// seeded the FY 2026-27 pack as a DRAFT (0225, to be validated against the law in force). Until one is activated the feature answers
+// NOT_CONFIGURED. Amounts and the chosen regime are sealed (security/field-crypto.ts) and
 // never reach audit records, events or notices. The employee works in the Employee OWN context only (BR-055); a reviewer from the
 // explicit list decides, never about their own record, with an employee-visible explanation kept apart from the private reason.
 import { randomUUID } from 'node:crypto';
@@ -67,14 +69,14 @@ export interface PackInput {
   currencyMinorUnit: number;
   sourceReference: string;
   validationReference: string;
-  regimes: { code: string; name: string; categories: { code: string; name: string }[] }[];
+  regimes: { code: string; name: string; categories: { code: string; name: string; limitAmount?: string | null; sectionReference?: string | null }[] }[];
 }
 
 const PACK_VIEW = `select p.id, p.code, p.revision, p.fiscal_period_code as "fiscalPeriodCode", to_char(p.period_start, 'YYYY-MM-DD') as "periodStart", to_char(p.period_end, 'YYYY-MM-DD') as "periodEnd",
     to_char(p.cutoff_date, 'YYYY-MM-DD') as "cutoffDate", p.currency_code as "currencyCode", p.currency_minor_unit as "currencyMinorUnit", p.source_reference as "sourceReference",
     p.validation_reference as "validationReference", p.state, p.created_by as "createdBy", p.activated_by as "activatedBy", p.activated_at as "activatedAt", p.version,
     coalesce((select json_agg(json_build_object('code', r.code, 'name', r.name,
-                'categories', coalesce((select json_agg(json_build_object('code', c.code, 'name', c.name) order by c.code)
+                'categories', coalesce((select json_agg(json_build_object('code', c.code, 'name', c.name, 'limitAmount', c.limit_amount::text, 'sectionReference', c.section_reference) order by c.code)
                                           from tax_rule_pack_category c where c.company_id = r.company_id and c.pack_id = r.pack_id and c.regime_code = r.code), '[]'::json)) order by r.code)
                 from tax_rule_pack_regime r where r.company_id = p.company_id and r.pack_id = p.id), '[]'::json) as regimes
   from tax_rule_pack p`;
@@ -137,7 +139,13 @@ export async function createPack(tx: Queryable, grant: AccessGrant, input: PackI
   for (const r of input.regimes) {
     await tx.query(`insert into tax_rule_pack_regime (company_id, pack_id, code, name, created_by) values ($1, $2, $3, $4, $5)`, [grant.companyId, id, r.code, r.name, grant.userId]);
     for (const c of r.categories) {
-      await tx.query(`insert into tax_rule_pack_category (company_id, pack_id, regime_code, code, name, created_by) values ($1, $2, $3, $4, $5, $6)`, [grant.companyId, id, r.code, c.code, c.name, grant.userId]);
+      // I-90 (0225): a category may carry its limit (what a claim under it counts for at most) and the section it comes from.
+      const limit = c.limitAmount ?? null;
+      if (limit !== null && (!/^\d{1,15}(\.\d{1,2})?$/.test(limit) || Number(limit) <= 0)) throw new HttpError(422, 'INVALID_LIMIT', 'A category limit is a positive amount', { category: c.code });
+      await tx.query(
+        `insert into tax_rule_pack_category (company_id, pack_id, regime_code, code, name, limit_amount, section_reference, created_by) values ($1, $2, $3, $4, $5, $6::numeric, $7, $8)`,
+        [grant.companyId, id, r.code, c.code, c.name, limit, c.sectionReference?.trim() || null, grant.userId],
+      );
     }
   }
   await audit(tx, actorOf(grant), 'tax_rule_pack', id, 'CREATE', null, { operational: { code, fiscalPeriodCode: input.fiscalPeriodCode, regimes: regimeCodes.length, categories: categories.length, state: 'DRAFT' } });
@@ -198,6 +206,50 @@ interface SealedProofDecision {
 }
 
 const binding = (purpose: string, companyId: string, employeeId: string, id: string) => ({ purpose, companyId, ownerId: employeeId, recordId: id });
+/**
+ * I-90: what tax may count for one employee and year, opened from the sealed rows (only here, where they are sealed): the regime and
+ * lines of the employee's ACCEPTED declaration (none: null and []), the amounts accepted on proof per category, and each category's
+ * limit in the declaration pack of that declaration. Read by the Form 16 Part B computation and, once wired, by TDS; never logged.
+ */
+export async function acceptedTaxFacts(db: Queryable, companyId: string, employeeId: string, fiscalPeriodCode: string) {
+  const d = (
+    await db.query<{ id: string; rule_pack_id: string; sealed_values: string }>(
+      `select id, rule_pack_id, sealed_values from tax_declaration where company_id = $1 and employee_id = $2 and fiscal_period_code = $3 and state = 'ACCEPTED'
+        order by decided_at desc limit 1`,
+      [companyId, employeeId, fiscalPeriodCode],
+    )
+  ).rows[0];
+  if (!d) return { regimeCode: null, declared: [] as { categoryCode: string; amount: string }[], proved: [] as { categoryCode: string; amount: string }[], limits: new Map<string, string | null>() };
+  const values = openJson<SealedDeclaration>(d.sealed_values, declarationBinding(companyId, employeeId, d.id));
+  const proofs = (
+    await db.query<{ id: string; category_code: string; sealed_decision: string }>(
+      `select id, category_code, sealed_decision from tax_proof where company_id = $1 and employee_id = $2 and declaration_id = $3 and state = 'ACCEPTED'`,
+      [companyId, employeeId, d.id],
+    )
+  ).rows;
+  const provedBy = new Map<string, string[]>();
+  for (const p of proofs) {
+    const accepted = openJson<SealedProofDecision>(p.sealed_decision, decisionBinding(companyId, employeeId, p.id)).acceptedAmount;
+    provedBy.set(p.category_code, [...(provedBy.get(p.category_code) ?? []), accepted]);
+  }
+  const limits = new Map(
+    (
+      await db.query<{ code: string; limit_amount: string | null }>(`select code, limit_amount::text from tax_rule_pack_category where company_id = $1 and pack_id = $2 and regime_code = $3`, [
+        companyId,
+        d.rule_pack_id,
+        values.regimeCode,
+      ])
+    ).rows.map((r) => [r.code, r.limit_amount] as [string, string | null]),
+  );
+  return {
+    regimeCode: values.regimeCode,
+    declared: values.lines,
+    // Amounts in text with up to the pack's decimals; summed per category by the caller's exact arithmetic.
+    proved: [...provedBy.entries()].flatMap(([categoryCode, amounts]) => amounts.map((amount) => ({ categoryCode, amount }))),
+    limits,
+  };
+}
+
 const declarationBinding = (c: string, e: string, id: string) => binding('tax_declaration.values', c, e, id);
 const proofBinding = (c: string, e: string, id: string) => binding('tax_proof.values', c, e, id);
 const decisionBinding = (c: string, e: string, id: string) => binding('tax_proof.decision', c, e, id);

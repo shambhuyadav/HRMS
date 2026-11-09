@@ -83,6 +83,16 @@ async function payslipContent(db: Queryable, companyId: string, f: RecordFacts, 
       [companyId, f.id],
     )
   ).rows;
+  // P8a gap 4 (I-85, I-90): how each statutory deduction and employer contribution was worked out (the pack revision, wages, rates,
+  // ceilings, coverage, state, or the TDS projection), exactly as the calculation recorded it; NOT_APPLICABLE ones say why.
+  const statutory = (
+    await db.query<{ componentCode: string; componentName: string; status: string; amount: string | null; workings: Record<string, unknown> }>(
+      `select pc.code as "componentCode", pc.name as "componentName", s.status, s.amount::text as amount, s.workings
+         from payroll_record_statutory s join pay_component pc on pc.company_id = s.company_id and pc.id = s.component_id
+        where s.company_id = $1 and s.record_id = $2 order by pc.code`,
+      [companyId, f.id],
+    )
+  ).rows;
   const position = await paymentPosition(db, companyId, f.id);
   const doc = {
     document: 'PAYSLIP',
@@ -96,6 +106,7 @@ async function payslipContent(db: Queryable, companyId: string, f: RecordFacts, 
     paidDays: f.paid_units,
     daysInMonth: f.days_in_month,
     lines,
+    statutory,
     totals: { earnings: f.earnings, reimbursements: f.reimbursements, gross: f.gross, deductions: f.deductions, net: f.net, employerContributions: f.employer_contributions },
     // FR-107 / TN06: earned is the frozen liability; held, reserved and paid come from the hold and payment ledgers.
     paymentAtPublication: { earned: position.earned, held: position.held, reserved: position.reserved, paid: position.paid },

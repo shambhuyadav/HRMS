@@ -46,12 +46,13 @@ export const appraisalRegistration: ModuleRegistration = {
   workflows: [
     // F1/DF03: the current direct manager rates (HR fallback list when the manager is ineligible), then an independent
     // eligible reviewer from the explicit list confirms. C4: a later step never goes to an earlier decider; the
-    // employee never decides.
+    // employee never decides. The reviewer step applies when the revision pinned a reviewer level (0177; I-77 item 2): a
+    // cycle with 0 levels is BR-013's one-level manager review, completed at the manager's approval (FR-043).
     {
       kind: 'appraisal',
       steps: [
         { sequence: 1, permission: 'appraisal.rate.rating', selectionRule: 'DIRECT_MANAGER' },
-        { sequence: 2, permission: 'appraisal.confirm.rating', selectionRule: 'HR_FALLBACK_LIST' },
+        { sequence: 2, permission: 'appraisal.confirm.rating', selectionRule: 'HR_FALLBACK_LIST', conditionCode: 'APPRAISAL_REVIEWER_LEVEL' },
       ],
     },
     // F1: the second reviewer level, only where the cycle sets it explicitly. It uses the appraisal list (routing kind)

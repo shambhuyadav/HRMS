@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { uniq } from '../../../../../db/tests/fixtures.js';
 import type { PermissionKey } from '../access/baseline.js';
 import { type Company, type Harness, startHarness, type TestActor } from '../../test/harness.js';
+import { CONFIG, head } from '../payroll/payroll.fixtures.js';
 
 let h: Harness;
 let A: Company;
@@ -332,6 +333,57 @@ describe('approved component breakdown becomes the components of the new arrange
     // The baseline keeps its own components; the proposal record is final.
     expect((await h.one<{ n: number }>(`select count(*)::int as n from salary_component where salary_arrangement_id = $1`, [base])).n).toBe(2);
     await expect(h.db.query(`update increment_component set proposed_amount = 1 where case_id = $1`, [caseId])).rejects.toMatchObject({ code: '23514' });
+  });
+
+  // I-80 (decided under owner delegation, 6 Nov 2026): for an employee whose grade has a salary structure in force, the approved
+  // breakdown is the structure's derivation of the new annual CTC, or approval is refused (STRUCTURE_MISMATCH) and nothing applies.
+  it('FR-028/029: a graded employee’s approved breakdown must be the grade structure’s derivation of the new CTC', async () => {
+    const configA = await h.actor(A, 'HR_ADMINISTRATOR', { extra: CONFIG });
+    const configB = await h.actor(A, 'HR_ADMINISTRATOR', { extra: CONFIG });
+    await head(h, configA, configB, { code: 'BASIC', headType: 'EARNING', basis: 'FIXED', sequence: 1 });
+    await head(h, configA, configB, { code: 'HRA', headType: 'EARNING', basis: 'FIXED', sequence: 2 });
+    const grade = (await h.one<{ id: string }>(`insert into grade (company_id, code, name, active) values ($1, 'INC_GS', 'Structured (synthetic)', true) returning id`, [A.id])).id;
+    // BASIC 50% of the monthly CTC, HRA the balance: 6,60,000 a year is 55,000 a month, 27,500 each.
+    const structure = (
+      await h.one<{ id: string }>(
+        `insert into grade_salary_structure (company_id, grade_id, revision, effective_from, currency_code, created_by, updated_by) values ($1, $2, 1, '2020-01-01', 'INR', $3, $3) returning id`,
+        [A.id, grade, hr1.user],
+      )
+    ).id;
+    await h.db.query(
+      `insert into grade_salary_structure_line (company_id, structure_id, sequence, component_id, method, percent, created_by)
+       values ($1, $2, 1, $3, 'PERCENT_OF_CTC', 50, $5), ($1, $2, 2, $4, 'BALANCE', null, $5)`,
+      [A.id, structure, comp.BASIC, comp.HRA, hr1.user],
+    );
+    await h.db.query(`update grade_salary_structure set state = 'ACTIVE', activated_by = $2, activated_at = now() where id = $1`, [structure, hr2.user]);
+    const graded = async () => {
+      const e = (await h.call(hrPlain, 'POST', '/v1/employees', h.newEmployeeBody(A, { gradeId: grade }))).json();
+      await h.setStatus(A, e.id, 'ACTIVE_CONFIRMED');
+      await h.call(hrPlain, 'POST', `/v1/employees/${e.id}/manager`, { managerEmployeeId: managerEmp, effectiveFrom: e.joiningDate });
+      expect((await h.call(hr1, 'POST', `/v1/employees/${e.id}/salary`, { effectiveFrom: e.joiningDate, monthlyGross: '50000', annualCtc: '600000', currency: 'INR' })).statusCode).toBe(201);
+      return e.id as string;
+    };
+    const off = await graded();
+    expect((await offCycleWith(hr2, off, '2027-07-01', '55000', '660000', [line('BASIC', '30000'), line('HRA', '25000')])).statusCode).toBe(201);
+    const refused = await decide(hr1, (await taskFor(hr1, off))!.taskId, 'APPROVE');
+    expect([refused.statusCode, refused.json().error, refused.json().details?.components]).toEqual([
+      422,
+      'STRUCTURE_MISMATCH',
+      [
+        { componentCode: 'BASIC', amount: '27500.0000', basis: 'MONTHLY' },
+        { componentCode: 'HRA', amount: '27500.0000', basis: 'MONTHLY' },
+      ],
+    ]);
+    // Nothing applied: the case still waits, and no new arrangement exists.
+    expect(await taskFor(hr1, off)).toBeDefined();
+    expect((await h.one<{ n: number }>(`select count(*)::int as n from salary_arrangement where employee_id = $1`, [off])).n).toBe(1);
+    const on = await graded();
+    expect((await offCycleWith(hr2, on, '2027-07-01', '55000', '660000', [line('BASIC', '27500'), line('HRA', '27500')])).statusCode).toBe(201);
+    expect((await decide(hr1, (await taskFor(hr1, on))!.taskId, 'APPROVE')).json()).toMatchObject({ state: 'APPLIED', componentsApplied: 2 });
+    expect(await componentsOf(on)).toEqual([
+      { code: 'BASIC', amount: '27500.0000', basis: 'MONTHLY' },
+      { code: 'HRA', amount: '27500.0000', basis: 'MONTHLY' },
+    ]);
   });
 
   it('a returned proposal is proposed again with its own breakdown: only the approved proposal applies', async () => {

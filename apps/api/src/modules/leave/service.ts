@@ -4,7 +4,7 @@ import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
-import { type AccessGrant, assertNotOwnRecord, canAccessEmployee } from '../access/authorize.js';
+import { type AccessGrant, assertNotOwnRecord, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { assertUsableEvidence, EVIDENCE_JSON, linkEvidence, revisionEvidence } from '../employee/evidence.js';
 import { workingDaySql } from '../shift/calendar.js';
 import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predecessor.js';
@@ -931,5 +931,171 @@ export async function auditAccrual(tx: Queryable, grant: AccessGrant, totals: Ac
     action: 'ACCRUE',
     after: { operational: { month: totals.month, credited: totals.credited } },
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Leave year end (FR-024, FR-025; DF05). Decided under owner delegation, 6 Nov 2026 (owner chose process rules only):
+// I-78 item 3; 0183.
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Counts of a year-end run: no list that grows per employee (bulk/kinds.ts). Units are never added up in JavaScript. */
+export interface YearEndTotals {
+  yearEnd: string;
+  /** Employees in service on the year's last day that the run looked at. */
+  employees: number;
+  /** EXPIRY movements written (one per employee and leave type at most). */
+  expired: number;
+  /** Employee and leave type pairs whose leave year ends that day, at or below the carry cap: nothing expires. */
+  withinCap: number;
+  /** Pairs skipped while a request of the type dated in the closing year waits for a decision; a later run takes them. */
+  pendingRequests: number;
+  /** Pairs whose policy names no leave year (0183: never expired until it does). */
+  notConfigured: number;
+}
+
+export const emptyYearEndTotals = (yearEnd: string): YearEndTotals => ({ yearEnd, employees: 0, expired: 0, withinCap: 0, pendingRequests: 0, notConfigured: 0 });
+
+/** A leave year end is the last day of a month that has passed (business date after it): the run never looks ahead. */
+export async function assertYearEndDate(db: Queryable, companyId: string, yearEnd: string): Promise<void> {
+  const row = (
+    await db.query<{ month_end: boolean; ended: boolean }>(
+      `select extract(day from ($2::date + 1)) = 1 as month_end, hrms_business_date($1, now()) > $2::date as ended`,
+      [companyId, yearEnd],
+    )
+  ).rows[0]!;
+  if (!row.month_end) throw new HttpError(422, 'INVALID_YEAR_END', 'A leave year ends on the last day of a month');
+  if (!row.ended) throw new HttpError(422, 'LEAVE_YEAR_NOT_ENDED', 'This leave year has not ended yet');
+}
+
+/**
+ * One bounded chunk of a year-end run (the bulk-job worker runs it, NFR-S09): the next `size` employees in service on
+ * `yearEnd` in id order after `afterEmployeeId` (joined by then, active or with an approved last working date on or after
+ * it), each with every active paid leave type. For each, the policy selected on `yearEnd` decides (a tie fails the run, as
+ * for accrual; no policy is not eligible): only a policy whose leave year starts the day after `yearEnd` expires anything.
+ * Units held at the end of the day (every movement dated on or before it) above the carry cap expire as one EXPIRY dated
+ * `yearEnd`, never more than the balance over all dates holds (units already promised to later leave stay), so an expiry
+ * never takes a balance below zero. A request of the type still pending (SUBMITTED) that starts on or before `yearEnd`
+ * skips the pair: its outcome changes what is held. The movement key is unique per employee, type and year end, so a
+ * chunk run again, or a later run for the same year, expires nothing twice. Company scope only (accrualAuthorised).
+ */
+export async function yearEndChunk(tx: Queryable, grant: AccessGrant, yearEnd: string, totals: YearEndTotals, afterEmployeeId: string | null, size: number) {
+  if (!accrualAuthorised(grant)) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
+  await assertYearEndDate(tx, grant.companyId, yearEnd);
+  const rows = (
+    await tx.query<{ employee_id: string }>(
+      `select e.id as employee_id
+         from employee e
+         join reference_value st on st.company_id = e.company_id and st.id = e.status_id
+         cross join lateral (select hrms_exit_last_working_date(e.company_id, e.id) as last_working_date) x
+        where e.company_id = $1 and e.joining_date <= $2::date and ($3::uuid is null or e.id > $3::uuid)
+          and (st.code = any($5::text[]) or (st.code = any($6::text[]) and x.last_working_date is not null))
+          and (x.last_working_date is null or x.last_working_date >= $2::date)
+        order by e.id limit $4::int`,
+      [grant.companyId, yearEnd, afterEmployeeId, size + 1, ACTIVE_STATUSES, ENDED_STATUSES],
+    )
+  ).rows;
+  const employees = rows.slice(0, size);
+  const types = employees.length === 0 ? [] : (await tx.query<{ code: string }>(`select code from leave_type where company_id = $1 and active and paid order by code`, [grant.companyId])).rows;
+  const next: YearEndTotals = { ...emptyYearEndTotals(yearEnd), ...totals, yearEnd };
+  for (const e of employees) {
+    next.employees++;
+    for (const t of types) {
+      let policy: PolicyMatch;
+      try {
+        policy = await selectPolicy(tx, grant.companyId, e.employee_id, t.code, yearEnd);
+      } catch (err) {
+        if (err instanceof HttpError && err.code === 'POLICY_NOT_FOUND') continue; // not eligible for this type
+        throw err;
+      }
+      const p = (
+        await tx.query<{ start_month: number | null; year_end: boolean; carry_cap: string }>(
+          `select leave_year_start_month as start_month, carry_cap::text as carry_cap,
+                  coalesce(extract(month from ($3::date + 1)) = leave_year_start_month, false) as year_end
+             from leave_policy where company_id = $1 and id = $2`,
+          [grant.companyId, policy.policy_id, yearEnd],
+        )
+      ).rows[0]!;
+      if (p.start_month === null) {
+        next.notConfigured++;
+        continue;
+      }
+      if (!p.year_end) continue; // this type's leave year ends on another date
+      await lockBalance(tx, e.employee_id, policy.leave_type_id);
+      const pending = await tx.query(
+        `select 1 from leave_request where company_id = $1 and employee_id = $2 and leave_type_id = $3 and state = 'SUBMITTED' and start_date <= $4::date limit 1`,
+        [grant.companyId, e.employee_id, policy.leave_type_id, yearEnd],
+      );
+      if (pending.rowCount) {
+        next.pendingRequests++;
+        continue;
+      }
+      const key = `leave:expiry:${e.employee_id}:${policy.leave_type_id}:${yearEnd}`;
+      const expiry = (
+        await tx.query<{ units: string }>(
+          `select greatest(0, least(coalesce(sum(units) filter (where effective_date <= $4::date), 0) - $5::numeric, coalesce(sum(units), 0)))::numeric(12,4)::text as units
+             from leave_movement where company_id = $1 and employee_id = $2 and leave_type_id = $3`,
+          [grant.companyId, e.employee_id, policy.leave_type_id, yearEnd, p.carry_cap],
+        )
+      ).rows[0]!.units;
+      const done = await tx.query(`select 1 from leave_movement where company_id = $1 and idempotency_key = $2`, [grant.companyId, key]);
+      if (done.rowCount) continue; // expired by an earlier run of this year end
+      if (Number(expiry) === 0) {
+        next.withinCap++;
+        continue;
+      }
+      await movement(tx, {
+        companyId: grant.companyId,
+        employeeId: e.employee_id,
+        leaveTypeId: policy.leave_type_id,
+        requestId: null,
+        kind: 'EXPIRY',
+        units: `-${expiry}`,
+        date: yearEnd,
+        key,
+        actor: grant.userId,
+      });
+      next.expired++;
+    }
+  }
+  return { totals: next, processed: employees.length, cursor: employees.at(-1)?.employee_id ?? afterEmployeeId, done: rows.length <= size };
+}
+
+/** The audit record of a finished year-end run (written once, when its last chunk commits). */
+export async function auditYearEnd(tx: Queryable, grant: AccessGrant, totals: YearEndTotals) {
+  const { yearEnd, employees, expired, withinCap, pendingRequests, notConfigured } = totals;
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'leave_year_end',
+    recordKey: grant.companyId,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'EXPIRE',
+    after: { operational: { yearEnd, employees, expired, withinCap, pendingRequests, notConfigured } },
+  });
+}
+
+/**
+ * The requests a year-end run skips: pending (SUBMITTED) requests of paid types starting on or before `yearEnd`, in the
+ * caller's row scope, whose policy on `yearEnd` ends its leave year that day. Operational fields only, paged.
+ */
+export async function yearEndPendingRequests(db: Queryable, grant: AccessGrant, q: { yearEnd: string; page: number; pageSize: number }) {
+  const params = new SqlParams([grant.companyId, q.yearEnd]);
+  const scope = employeeScopePredicate(grant, { company: 'e.company_id', employee: 'e.id' }, params);
+  const from = `from leave_request lr
+       join employee e on e.company_id = lr.company_id and e.id = lr.employee_id
+       join leave_type t on t.company_id = lr.company_id and t.id = lr.leave_type_id and t.paid
+      where lr.company_id = $1 and lr.state = 'SUBMITTED' and lr.start_date <= $2::date and ${scope}
+        and exists (select 1 from leave_policy p where p.company_id = lr.company_id and p.leave_type_id = lr.leave_type_id and ${POLICY_IN_FORCE('p', '$2::date')}
+                      and extract(month from ($2::date + 1)) = p.leave_year_start_month)`;
+  const total = Number((await db.query<{ n: string }>(`select count(*) as n ${from}`, params.values)).rows[0]?.n ?? 0);
+  const rows = await db.query(
+    `select lr.id as "requestId", e.id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName", t.code as "leaveType",
+            to_char(lr.start_date, 'YYYY-MM-DD') as "startDate", to_char(lr.end_date, 'YYYY-MM-DD') as "endDate"
+       ${from}
+      order by e.employee_code, lr.start_date, lr.id
+      limit ${params.add(q.pageSize)}::int offset ${params.add((q.page - 1) * q.pageSize)}::int`,
+    params.values,
+  );
+  return { yearEnd: q.yearEnd, items: rows.rows, total, page: q.page, pageSize: q.pageSize };
 }
 

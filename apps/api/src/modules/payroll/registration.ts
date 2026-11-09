@@ -79,6 +79,9 @@ export const payrollRegistration: ModuleRegistration = {
       TAXABLE: 'Taxable (as declared by the company)',
       NON_TAXABLE: 'Not taxable (as declared by the company)',
       PER_TAX_RULE_PACK: 'Treatment set by the tax rule pack',
+      // I-90 follow-up: the HRA exemption (s.10(13A), rule 2A) computed by the INCOME_TAX pack, in the old regime, from these two.
+      HRA_RULE_2A: 'House rent allowance: taxable, less the exemption the income tax pack computes (s.10(13A))',
+      SALARY_FOR_HRA: 'Taxable, and salary (Basic and DA) for the house rent allowance exemption and the employer NPS limit',
     },
     PAYROLL_INPUT_KIND: {
       VARIABLE_PAYMENT: 'Variable payment',

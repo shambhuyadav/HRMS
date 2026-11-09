@@ -77,16 +77,52 @@ export const openWindows = (day: string) => ({
   managerRating: { opensOn: addDays(day, -5), closesOn: addDays(day, 20) },
 });
 
-export async function openCycle(h: Harness, w: World, opts: { approvalLevels?: 1 | 2; windows?: Record<string, unknown>; offsetYears?: number } = {}) {
+export interface CycleOptions {
+  approvalLevels?: 0 | 1 | 2;
+  windows?: Record<string, unknown>;
+  offsetYears?: number;
+  /**
+   * FR-041 KRA review (I-77 item 3). The API requires it by default; these fixtures pass false unless asked, so the flows of
+   * other modules' tests go from enrolment straight to the self-entry as before.
+   */
+  goalReviewRequired?: boolean;
+  ratingMode?: 'FORMULA' | 'MANUAL';
+  /** Defaults to the close of the manager-rating window (or 25 days ahead) whenever the cycle has reviewer levels. */
+  reviewDueOn?: string | null;
+  /** I-86: the cycle's own goals / competencies split (omitted: the dated company split in force on the start date). */
+  split?: { goalWeightPercent: number; competencyWeightPercent: number };
+  /** FR-042 sections the cycle includes (omitted: none). */
+  sections?: string[];
+}
+
+export async function openCycle(h: Harness, w: World, opts: CycleOptions = {}) {
+  const windows = (opts.windows ?? openWindows(w.today)) as { managerRating?: { closesOn: string } | null };
+  const levels = opts.approvalLevels ?? 1;
+  const reviewDueOn = opts.reviewDueOn !== undefined ? opts.reviewDueOn : levels === 0 ? null : (windows.managerRating?.closesOn ?? addDays(w.today, 25));
   const res = await h.call(w.hr, 'POST', '/v1/appraisal-cycles', {
     code: uniq('FY-'),
     name: 'Synthetic annual cycle',
     startDate: fyStart(w.today, opts.offsetYears ?? 0),
-    ...(opts.approvalLevels ? { approvalLevels: opts.approvalLevels } : {}),
-    windows: opts.windows ?? openWindows(w.today),
+    ...(opts.approvalLevels !== undefined ? { approvalLevels: opts.approvalLevels } : {}),
+    windows,
+    goalReviewRequired: opts.goalReviewRequired ?? false,
+    ...(opts.ratingMode ? { ratingMode: opts.ratingMode } : {}),
+    reviewDueOn,
+    ...(opts.split ?? {}),
+    ...(opts.sections ? { sections: opts.sections } : {}),
   });
   expect(res.statusCode, res.body).toBe(201);
-  return res.json() as { id: string; code: string; startDate: string; endDate: string; version: number; approvalLevels: number };
+  return res.json() as {
+    id: string;
+    code: string;
+    startDate: string;
+    endDate: string;
+    version: number;
+    approvalLevels: number;
+    goalReviewRequired: boolean;
+    ratingMode: string;
+    reviewDueOn: string | null;
+  };
 }
 
 export type View = Record<string, unknown> & {
@@ -124,7 +160,7 @@ export async function selfAssess(h: Harness, e: TestActor, id: string, scores: n
   return submitted.json() as View;
 }
 
-export type Task = { taskId: string; step: number; stage: string; level: number | null; appraisal: View | null };
+export type Task = { taskId: string; step: number; stage: string; level: number | null; dueOn: string | null; overdue: boolean; appraisal: View | null };
 
 export async function taskOf(h: Harness, a: TestActor, appraisalId: string): Promise<Task | undefined> {
   const res = await h.call(a, 'GET', '/v1/appraisal-tasks/mine');
@@ -150,10 +186,11 @@ export async function rate(h: Harness, rater: TestActor, id: string, scores: num
   return decided.json() as { state: string; pendingStep?: number };
 }
 
-export async function confirm(h: Harness, reviewer: TestActor, id: string) {
+/** The reviewer confirms with their overall score (FR-043 / DF04: required with a confirmation; I-77 item 1). */
+export async function confirm(h: Harness, reviewer: TestActor, id: string, reviewerScore = 4) {
   const t = (await taskOf(h, reviewer, id))!;
   expect(t, 'review task').toBeDefined();
-  const decided = await decide(h, reviewer, t.taskId, { decision: 'APPROVE', reason: 'Synthetic private reviewer remark' });
+  const decided = await decide(h, reviewer, t.taskId, { decision: 'APPROVE', reason: 'Synthetic private reviewer remark', reviewerScore });
   expect(decided.statusCode, decided.body).toBe(200);
   return decided.json() as { state: string; pendingStep?: number };
 }

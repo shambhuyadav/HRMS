@@ -16,7 +16,7 @@ async function world(): Promise<World> {
   const hr = await h.actor(company, 'HR_ADMINISTRATOR');
   const shiftCode = uniq('ISO').toUpperCase().replace(/[^A-Z0-9_]/g, '');
   const newShift = async (code: string) => {
-    const res = await h.call(hr, 'POST', '/v1/shifts', { code, name: code, inTime: '09:00', outTime: '18:00', breaks: [] });
+    const res = await h.call(hr, 'POST', '/v1/shifts', { code, name: code, inTime: '09:00', outTime: '18:00', bufferMinutes: 240, breaks: [] });
     expect(res.statusCode, res.body).toBe(201);
     return res.json() as { id: string; version: number };
   };

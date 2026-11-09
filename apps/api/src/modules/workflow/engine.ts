@@ -80,6 +80,26 @@ export const scopeCovers = (company: string, emp: string, assigned = 'true') => 
        or exists (select 1 from role_scope_filter f where f.company_id = ${company} and f.role_assignment_id = ra.id and f.dimension = 'EMPLOYEE' and f.employee_id = ${emp})))`;
 
 /**
+ * FR-055 offboarding (docs/03 I-81 item 4; decided under owner delegation, 6 Nov 2026): a user whose every current employee link is to
+ * a separated or archived employee is no longer a reviewer, even while an assignment the separation could not end is still on record.
+ * A user linked to no employee (a system administrator account) is unaffected; someone on notice stays eligible through the last
+ * working date (DF04). SQL over the company and user parameters; uses the business day `d.day` of the surrounding query.
+ */
+const departedOnly = (company: string, user: string) => `(
+  exists (select 1 from user_employee_link dl_l
+            join employee dl_e on dl_e.company_id = dl_l.company_id and dl_e.id = dl_l.employee_id
+            join reference_value dl_s on dl_s.company_id = dl_e.company_id and dl_s.id = dl_e.status_id
+           where dl_l.company_id = ${company} and dl_l.user_id = ${user}
+             and dl_l.effective_from <= hrms_business_date(${company}, now()) and (dl_l.effective_to is null or dl_l.effective_to > hrms_business_date(${company}, now()))
+             and dl_s.code in ('INACTIVE_SEPARATED', 'ARCHIVED'))
+  and not exists (select 1 from user_employee_link dl_l
+            join employee dl_e on dl_e.company_id = dl_l.company_id and dl_e.id = dl_l.employee_id
+            join reference_value dl_s on dl_s.company_id = dl_e.company_id and dl_s.id = dl_e.status_id
+           where dl_l.company_id = ${company} and dl_l.user_id = ${user}
+             and dl_l.effective_from <= hrms_business_date(${company}, now()) and (dl_l.effective_to is null or dl_l.effective_to > hrms_business_date(${company}, now()))
+             and dl_s.code not in ('INACTIVE_SEPARATED', 'ARCHIVED')))`;
+
+/**
  * User may decide a step: active user, ACTIVE effective assignment whose role ALLOWs and DB109 grants the permission,
  * not the owner, and (for an owned transaction) an assignment whose row scope covers the owner, as the assignee will
  * need to open the task (DF03 "a scoped HR Administrator"; scopeCovers). `accessClasses` limits the assignment that counts
@@ -105,7 +125,7 @@ export async function isEligibleReviewer(tx: Queryable, companyId: string, userI
             and ($5::text[] is null or r.access_class = any($5::text[]))
        ) and not exists (
          select 1 from user_employee_link l where l.company_id = $1 and l.user_id = $2 and l.employee_id = $4
-       ) as ok`,
+       ) and not ${departedOnly('$1', '$2')} as ok`,
       [companyId, userId, permissionId, ownerEmployeeId, accessClasses ? [...accessClasses] : null],
     )
   ).rows[0];
@@ -758,5 +778,47 @@ export async function rerouteTask(tx: Queryable, grant: AccessGrant, taskId: str
     transactionId: ctx.transaction_id,
     kind: ctx.kind,
     ownerEmployeeId: owner,
+  };
+}
+
+/**
+ * FR-055 offboarding (docs/03 I-81 item 4): at separation, each open task assigned to someone who has left goes where rerouteTask
+ * would send it, the leaver excluded with the instance's own exclusions and earlier deciders. Run by the separation job as the
+ * system, inside the leaver's separation transaction (the caller has ended their assignments). When no eligible reviewer exists
+ * the task stays as it is (null), so routing administration finds it in strandedTasks; nothing is decided for anyone.
+ */
+export async function rerouteFromDeparted(tx: Queryable, companyId: string, taskId: string, departedUserIds: readonly string[], actorUserId: string): Promise<RerouteResult | null> {
+  const located = (
+    await tx.query<{ transaction_id: string }>(
+      `select i.transaction_id from approval_task t join approval_instance i on i.company_id = t.company_id and i.id = t.instance_id where t.company_id = $1 and t.id = $2`,
+      [companyId, taskId],
+    )
+  ).rows[0];
+  if (!located) return null;
+  await lockTransaction(tx, located.transaction_id);
+  const ctx = await taskContext(tx, companyId, taskId, true);
+  if (!ctx || ctx.task_state !== 'PENDING' || ctx.instance_state !== 'ACTIVE' || !departedUserIds.includes(ctx.assignee_user_id)) return null;
+  const steps = (await tx.query<StepRow>(`select ${STEP_COLUMNS} from workflow_step where company_id = $1 and workflow_id = $2 and condition_code is null order by sequence`, [companyId, ctx.workflow_id])).rows;
+  const step = (await tx.query<StepRow>(`select ${STEP_COLUMNS} from workflow_step where company_id = $1 and id = $2`, [companyId, ctx.step_id])).rows[0]!;
+  const override = steps[0]?.id === step.id ? (ctx.selection_override ?? undefined) : undefined;
+  const notReviewer = [...departedUserIds, ...(await priorDecidersOf(tx, companyId, ctx.instance_id)), ...ctx.excluded_user_ids];
+  let reviewer: string;
+  try {
+    reviewer = await selectReviewer(tx, companyId, ctx.kind, step, ctx.owner_employee_id, override, notReviewer);
+  } catch (err) {
+    if (err instanceof HttpError && err.code === 'NO_ELIGIBLE_REVIEWER') return null;
+    throw err;
+  }
+  const route = await routeStep(tx, companyId, step, reviewer, ctx.owner_employee_id, requesterAnd(ctx, notReviewer));
+  await tx.query(`update approval_task set state = 'SUPERSEDED', updated_by = $3 where company_id = $1 and id = $2`, [companyId, taskId, actorUserId]);
+  const newTaskId = await createTask(tx, companyId, ctx.instance_id, step, route, actorUserId);
+  return {
+    taskId: newTaskId,
+    supersededTaskId: taskId,
+    supersededAssigneeUserId: ctx.assignee_user_id,
+    assigneeUserId: route.assignee,
+    transactionId: ctx.transaction_id,
+    kind: ctx.kind,
+    ownerEmployeeId: ctx.owner_employee_id,
   };
 }

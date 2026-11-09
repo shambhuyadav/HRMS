@@ -106,7 +106,7 @@ describe.runIf(isModuleActive('appraisal'))('appraisal: access, windows, cancell
     // The owner is never a reviewer of their own appraisal, even when eligible and listed.
     expect(await taskOf(h, hrSelf, id)).toBeUndefined();
     const t2 = (await taskOf(h, w.rev1, id))!;
-    expect((await decide(h, w.rev1, t2.taskId, { decision: 'APPROVE' })).json().state).toBe('APPROVED');
+    expect((await decide(h, w.rev1, t2.taskId, { decision: 'APPROVE', reviewerScore: 4 })).json().state).toBe('APPROVED');
     const fromHrContext = await staffView(h, hrSelf, id);
     expect(fromHrContext).toMatchObject({ state: 'APPROVED' });
     expect(fromHrContext).not.toHaveProperty('finalRating');

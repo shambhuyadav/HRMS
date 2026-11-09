@@ -1,8 +1,10 @@
 // Attendance policy revisions and their mappings (FR-020 "the policy screen exposes thresholds"; BR-009; DF05; E05). HR
 // maintains a DRAFT revision of a policy code (effective period, grace, present and half-day percentages, the overtime
 // setting, grade and location mappings); an activated revision is frozen (0008, 0115), so a change is a new revision.
-// Every value comes from the person maintaining it; nothing is defaulted. The overtime setting is recorded only: no
-// overtime candidate is derived until the owner decides its basis (I-48 item 1).
+// Every value comes from the person maintaining it; nothing is defaulted. Overtime (decided under owner delegation, 6 Nov
+// 2026, I-78 item 5; 0181): a revision whose overtime setting is on states its basis, minimum and rounding unit (the BRD
+// gives none, so all three are required and none is defaulted); evaluation then derives overtime CANDIDATES only, which
+// nothing values or pays. With the setting off a revision has no rules and no candidates.
 //
 // Activation is independent of whoever wrote the draft (C4; DF05) and ends the earlier revisions of the same code on the
 // new revision's first day, so two revisions never tie (POLICY_AMBIGUOUS). A tie with any other revision in force is
@@ -39,14 +41,23 @@ export interface PolicyThresholds {
   presentPercent: string;
   halfDayPercent: string;
   overtimeEnabled: boolean;
+  /** I-78 item 5: required together when overtime is on, absent when it is off. */
+  overtimeBasis?: 'AFTER_SHIFT_END' | 'BEYOND_SCHEDULED_NET' | null | undefined;
+  overtimeMinimumMinutes?: number | null | undefined;
+  overtimeRoundingMinutes?: number | null | undefined;
 }
 
-function checkThresholds(v: Pick<PolicyThresholds, 'effectiveFrom' | 'effectiveTo' | 'presentPercent' | 'halfDayPercent'>): void {
+type OvertimeRules = Pick<PolicyThresholds, 'overtimeEnabled' | 'overtimeBasis' | 'overtimeMinimumMinutes' | 'overtimeRoundingMinutes'>;
+
+function checkThresholds(v: Pick<PolicyThresholds, 'effectiveFrom' | 'effectiveTo' | 'presentPercent' | 'halfDayPercent'> & OvertimeRules): void {
   if (v.effectiveTo && v.effectiveTo <= v.effectiveFrom) throw new HttpError(422, 'INVALID_PERIOD', 'The effective end must be after the effective start');
   const [present, half] = [Number(v.presentPercent), Number(v.halfDayPercent)];
   if (!(present > 0 && present <= 100) || !(half > 0 && half < present)) {
     throw new HttpError(422, 'INVALID_THRESHOLDS', 'The present percentage is at most 100, and the half-day percentage is above 0 and below the present percentage');
   }
+  const given = [v.overtimeBasis, v.overtimeMinimumMinutes, v.overtimeRoundingMinutes].filter((x) => x !== undefined && x !== null).length;
+  if (v.overtimeEnabled && given !== 3) throw new HttpError(422, 'OVERTIME_RULES_REQUIRED', 'With overtime on, state its basis, its minimum and its rounding unit');
+  if (!v.overtimeEnabled && given !== 0) throw new HttpError(422, 'OVERTIME_RULES_NOT_ALLOWED', 'Overtime rules apply only with the overtime setting on');
 }
 
 interface ListRow {
@@ -59,7 +70,8 @@ interface ListRow {
 export async function listAttendancePolicies(db: Queryable, grant: AccessGrant) {
   const rows = await db.query<ListRow>(
     `select p.id, p.code, p.revision, p.effective_from as "effectiveFrom", p.effective_to as "effectiveTo", p.grace_minutes as "graceMinutes",
-            p.present_percent::text as "presentPercent", p.half_day_percent::text as "halfDayPercent", p.overtime_enabled as "overtimeEnabled", p.state, p.version,
+            p.present_percent::text as "presentPercent", p.half_day_percent::text as "halfDayPercent", p.overtime_enabled as "overtimeEnabled",
+            p.overtime_basis as "overtimeBasis", p.overtime_minimum_minutes as "overtimeMinimumMinutes", p.overtime_rounding_minutes as "overtimeRoundingMinutes", p.state, p.version,
             p.activated_at as "activatedAt", p.activated_by as "activatedBy", p.created_by as "createdBy",
             coalesce((select json_agg(json_build_object('id', m.id, 'gradeId', m.grade_id, 'grade', g.code, 'locationId', m.location_id, 'location', l.code, 'priority', num_nonnulls(m.grade_id, m.location_id))
                                       order by num_nonnulls(m.grade_id, m.location_id) desc, g.code, l.code)
@@ -99,10 +111,24 @@ export async function createAttendancePolicy(tx: Queryable, grant: AccessGrant, 
   await reassertAccess(tx, grant, 'attendance_policy', 'manage', ['operational']);
   const row = (
     await tx.query<{ id: string; revision: number; version: number }>(
-      `insert into attendance_policy (company_id, code, revision, effective_from, effective_to, grace_minutes, present_percent, half_day_percent, overtime_enabled, state, created_by, updated_by)
-       select $1, $2, coalesce(max(revision), 0) + 1, $3, $4, $5, $6::numeric, $7::numeric, $8, 'DRAFT', $9, $9 from attendance_policy where company_id = $1 and code = $2
+      `insert into attendance_policy (company_id, code, revision, effective_from, effective_to, grace_minutes, present_percent, half_day_percent, overtime_enabled,
+                                      overtime_basis, overtime_minimum_minutes, overtime_rounding_minutes, state, created_by, updated_by)
+       select $1, $2, coalesce(max(revision), 0) + 1, $3, $4, $5, $6::numeric, $7::numeric, $8, $10, $11, $12, 'DRAFT', $9, $9 from attendance_policy where company_id = $1 and code = $2
        returning id, revision, version`,
-      [grant.companyId, input.code, input.effectiveFrom, input.effectiveTo ?? null, input.graceMinutes, input.presentPercent, input.halfDayPercent, input.overtimeEnabled, grant.userId],
+      [
+        grant.companyId,
+        input.code,
+        input.effectiveFrom,
+        input.effectiveTo ?? null,
+        input.graceMinutes,
+        input.presentPercent,
+        input.halfDayPercent,
+        input.overtimeEnabled,
+        grant.userId,
+        input.overtimeBasis ?? null,
+        input.overtimeMinimumMinutes ?? null,
+        input.overtimeRoundingMinutes ?? null,
+      ],
     )
   ).rows[0]!;
   await writeAudit(tx, {
@@ -127,6 +153,9 @@ interface PolicyRow {
   present_percent: string;
   half_day_percent: string;
   overtime_enabled: boolean;
+  overtime_basis: PolicyThresholds['overtimeBasis'];
+  overtime_minimum_minutes: number | null;
+  overtime_rounding_minutes: number | null;
   state: string;
   version: number;
   created_by: string | null;
@@ -138,7 +167,7 @@ async function lockPolicy(tx: Queryable, grant: AccessGrant, id: string): Promis
   const p = (
     await tx.query<PolicyRow>(
       `select code, revision, effective_from, effective_to, grace_minutes, present_percent::text as present_percent, half_day_percent::text as half_day_percent,
-              overtime_enabled, state, version, created_by, updated_by
+              overtime_enabled, overtime_basis, overtime_minimum_minutes, overtime_rounding_minutes, state, version, created_by, updated_by
          from attendance_policy where company_id = $1 and id = $2 for update`,
       [grant.companyId, id],
     )
@@ -158,19 +187,39 @@ async function lockDraft(tx: Queryable, grant: AccessGrant, id: string, expected
 
 export async function updateAttendancePolicy(tx: Queryable, grant: AccessGrant, id: string, input: Partial<PolicyThresholds> & { expectedVersion: number }) {
   const p = await lockDraft(tx, grant, id, input.expectedVersion);
+  const overtimeEnabled = input.overtimeEnabled ?? p.overtime_enabled;
+  // Turning overtime off clears its rules; otherwise a rule not given keeps its value.
+  const rule = <T>(given: T | undefined, current: T) => (given !== undefined ? given : overtimeEnabled ? current : null);
   const next = {
     effectiveFrom: input.effectiveFrom ?? p.effective_from,
     effectiveTo: input.effectiveTo === undefined ? p.effective_to : input.effectiveTo,
     graceMinutes: input.graceMinutes ?? p.grace_minutes,
     presentPercent: input.presentPercent ?? p.present_percent,
     halfDayPercent: input.halfDayPercent ?? p.half_day_percent,
-    overtimeEnabled: input.overtimeEnabled ?? p.overtime_enabled,
+    overtimeEnabled,
+    overtimeBasis: rule(input.overtimeBasis, p.overtime_basis) ?? null,
+    overtimeMinimumMinutes: rule(input.overtimeMinimumMinutes, p.overtime_minimum_minutes) ?? null,
+    overtimeRoundingMinutes: rule(input.overtimeRoundingMinutes, p.overtime_rounding_minutes) ?? null,
   };
   checkThresholds(next);
   await tx.query(
-    `update attendance_policy set effective_from = $3, effective_to = $4, grace_minutes = $5, present_percent = $6::numeric, half_day_percent = $7::numeric, overtime_enabled = $8, updated_by = $9
+    `update attendance_policy set effective_from = $3, effective_to = $4, grace_minutes = $5, present_percent = $6::numeric, half_day_percent = $7::numeric, overtime_enabled = $8, updated_by = $9,
+            overtime_basis = $10, overtime_minimum_minutes = $11, overtime_rounding_minutes = $12
       where company_id = $1 and id = $2`,
-    [grant.companyId, id, next.effectiveFrom, next.effectiveTo, next.graceMinutes, next.presentPercent, next.halfDayPercent, next.overtimeEnabled, grant.userId],
+    [
+      grant.companyId,
+      id,
+      next.effectiveFrom,
+      next.effectiveTo,
+      next.graceMinutes,
+      next.presentPercent,
+      next.halfDayPercent,
+      next.overtimeEnabled,
+      grant.userId,
+      next.overtimeBasis,
+      next.overtimeMinimumMinutes,
+      next.overtimeRoundingMinutes,
+    ],
   );
   await writeAudit(tx, {
     companyId: grant.companyId,
@@ -188,6 +237,9 @@ export async function updateAttendancePolicy(tx: Queryable, grant: AccessGrant, 
         presentPercent: p.present_percent,
         halfDayPercent: p.half_day_percent,
         overtimeEnabled: p.overtime_enabled,
+        overtimeBasis: p.overtime_basis,
+        overtimeMinimumMinutes: p.overtime_minimum_minutes,
+        overtimeRoundingMinutes: p.overtime_rounding_minutes,
       },
     },
     after: { operational: next },
@@ -272,6 +324,8 @@ export async function activateAttendancePolicy(tx: Queryable, grant: AccessGrant
   if (p.version !== expectedVersion) throw stale();
   if (p.state !== 'DRAFT') throw new HttpError(409, 'INVALID_STATE', 'Only draft policies can be activated');
   if (p.created_by === grant.userId || p.updated_by === grant.userId) throw new HttpError(403, 'SELF_APPROVAL', 'A policy cannot be activated by its author');
+  // I-78 item 5 (0181 refuses it too): overtime on needs its rules before the revision applies to anyone.
+  if (p.overtime_enabled && p.overtime_basis == null) throw new HttpError(409, 'OVERTIME_RULES_REQUIRED', 'With overtime on, state its basis, its minimum and its rounding unit before activation');
   const predecessors = (
     await tx.query<{ id: string; revision: number; effective_to: string | null; version: number }>(
       `select id, revision, effective_to, version from attendance_policy
@@ -368,6 +422,11 @@ const thresholds = {
   presentPercent: percent,
   halfDayPercent: percent,
   overtimeEnabled: { type: 'boolean' },
+  // I-78 item 5: together when overtime is on (no default: the BRD gives none).
+  overtimeBasis: { anyOf: [{ type: 'string', enum: ['AFTER_SHIFT_END', 'BEYOND_SCHEDULED_NET'] }, { type: 'null' }] },
+  // A type list, not anyOf: anyOf would let type coercion turn a refused 0 into null.
+  overtimeMinimumMinutes: { type: ['integer', 'null'], minimum: 0, maximum: 1440 },
+  overtimeRoundingMinutes: { type: ['integer', 'null'], minimum: 1, maximum: 1440 },
 } as const;
 
 export async function attendancePolicyRoutes(app: FastifyInstance, opts: { db: Database }): Promise<void> {

@@ -13,7 +13,7 @@ import type { AccessGrant } from '../access/authorize.js';
 import { auditProcessing, emptyProcessingTotals, type ProcessingTotals, processDateChunk, recordProcessingFailure } from '../attendance/service.js';
 import { cycleManagementAuthorised } from '../increment/cycles.js';
 import { emptyReviewTotals, openReviewChunk, recordReviewOpening, reviewOfJob, type ReviewTotals } from '../increment/roster.js';
-import { accrualAuthorised, type AccrualTotals, accrueMonthChunk, auditAccrual } from '../leave/service.js';
+import { accrualAuthorised, type AccrualTotals, accrueMonthChunk, auditAccrual, auditYearEnd, emptyYearEndTotals, yearEndChunk, type YearEndTotals } from '../leave/service.js';
 
 export interface BulkPermission {
   resource: string;
@@ -57,7 +57,7 @@ export interface BulkKind {
   recordFailure?(tx: Queryable, job: { companyId: string; jobId: string; requestedBy: string }, unit: string, errorCode: string): Promise<void>;
 }
 
-export const BULK_JOB_KINDS = ['ATTENDANCE_PROCESSING', 'LEAVE_ACCRUAL', 'INCREMENT_REVIEW_OPENING'] as const;
+export const BULK_JOB_KINDS = ['ATTENDANCE_PROCESSING', 'LEAVE_ACCRUAL', 'INCREMENT_REVIEW_OPENING', 'LEAVE_YEAR_END'] as const;
 export type BulkJobKind = (typeof BULK_JOB_KINDS)[number];
 
 export const BULK_KINDS: Record<BulkJobKind, BulkKind> = {
@@ -85,6 +85,19 @@ export const BULK_KINDS: Record<BulkJobKind, BulkKind> = {
       return { ...out, result: { ...totals } };
     },
     complete: (tx, grant, _p, result) => auditAccrual(tx, grant, result as unknown as AccrualTotals),
+  },
+  // FR-024/FR-025 year-end expiry above the carry cap (I-78 item 3; POST /v1/leave/year-end-runs): the accrual duty and an
+  // unrestricted company scope, as for the accrual. The result holds counts; skipped pending requests are read live (GET
+  // /v1/leave/year-end-runs/pending-requests), and a later run of the same year end takes them.
+  LEAVE_YEAR_END: {
+    permission: { resource: 'leave', action: 'accrue', fieldGroups: ['operational'] },
+    authorised: accrualAuthorised,
+    initialResult: (p) => ({ ...emptyYearEndTotals(p.yearEnd as string) }),
+    runChunk: async (tx, grant, p, result, cursor, size) => {
+      const { totals, ...out } = await yearEndChunk(tx, grant, p.yearEnd as string, result as unknown as YearEndTotals, cursor, size);
+      return { ...out, result: { ...totals } };
+    },
+    complete: (tx, grant, _p, result) => auditYearEnd(tx, grant, result as unknown as YearEndTotals),
   },
   // FR-091/DF15 opening of an increment cycle review for a year or a month (POST /v1/increment-cycles/:id/reviews):
   // the cycle duty in an unrestricted company-scope assignment, as for every cycle change; each chunk also checks the

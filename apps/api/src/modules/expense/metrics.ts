@@ -1,23 +1,16 @@
 // F2 dashboard metrics of expense claims and their payments, ready for the dashboard's metric catalogue:
-//   Treasury Operator "Pending outcome counts; Definitively failed outcome counts";
+//   Treasury Operator "Assigned payment preparation tasks; Pending outcome counts; Definitively failed outcome counts;
+//   Reservations needing reconciliation";
 //   Treasury Approver "Assigned independent release tasks; Overdue release tasks; Confirmed/reversed operation
-//   counts; Unresolved outcome tasks";
-//   Finance Reviewer "Assigned expense review tasks";
-//   Expense Finance Approver "Assigned final expense decisions; Late/receipt exception counts; Returned claim counts;
-//   Decision due tasks".
+//   counts; Unresolved outcome tasks".
 // Payment counts use the payables and payment lists' row-scope predicate on the claimant (DF07; GET /expense/payables,
-// GET /expense/claims/:id/payments), so they reconcile with them (BR-045). Task counts use the expense task list's
-// predicate (GET /expense/tasks). Counts and states only: never amounts, bank identifiers, receipts or reasons (F2).
+// GET /expense/claims/:id/payments), so they reconcile with them (BR-045). Counts and states only: never amounts, bank
+// identifiers, receipts or reasons (F2). The claim figures are in reporting/claim-states.ts (I-83).
 import type { Queryable } from '../../db/queryable.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import type { MetricResult } from '../dashboard/service.js';
-import { countOf, monthStart, myPendingTasks, notAvailable } from '../dashboard/tasks.js';
-
-const CLAIM_KIND = ['expense_claim'];
-/** The financial steps of the expense route (DF03/DF06): finance review and the high-value step above the threshold. */
-const FINAL_STEP_ACTIONS = ['finance_decide', 'high_value_decide'];
-/** Line flags raised at submission that F2 groups as "late/receipt exceptions". */
-const LATE_RECEIPT_FLAGS = ['LATE_SUBMISSION', 'RECEIPT_MISSING'];
+import { countOf, monthStart } from '../dashboard/tasks.js';
+import { AWAITING_PREPARATION } from './service.js';
 
 /** Payment instructions (alias pi: the row-scope predicate uses i, t and bt itself) of claimants in the caller's row scope. */
 export const instructionsInScope = (g: AccessGrant, p: SqlParams) => employeeScopePredicate(g, { company: 'pi.company_id', employee: 'pi.employee_id' }, p);
@@ -29,6 +22,10 @@ export const instructionsInScope = (g: AccessGrant, p: SqlParams) => employeeSco
 export const independentOf = (g: AccessGrant, p: SqlParams) =>
   `not hrms_payment_release_conflict(pi.company_id, pi.id, ${p.add(g.userId)}::uuid)
      and exists (select 1 from payment_batch pb where pb.company_id = pi.company_id and pb.id = pi.batch_id and pb.state = 'READY')`;
+
+/** Instruction `pi` belongs to a batch in this state (C5: DRAFT until its preparer marks it READY). */
+export const batchIn = (p: SqlParams, state: string) =>
+  `exists (select 1 from payment_batch pb where pb.company_id = pi.company_id and pb.id = pi.batch_id and pb.state = ${p.add(state)})`;
 
 /** Instruction `pi` has an event of this kind recorded on or after the company-local date. */
 export const paidEventSince = (p: SqlParams, kind: 'CONFIRMED' | 'REVERSED', from: string) =>
@@ -77,52 +74,46 @@ export const EXPENSE_METRICS: Readonly<Record<string, (db: Queryable, grant: Acc
     return { status: 'OK', value: `${row.confirmed}/${row.reversed}` };
   },
 
-  /** The caller's open expense claim tasks, every step (the expense task list). */
-  EXPENSE_REVIEW_TASKS: (db, g) => {
+  /**
+   * F2 Treasury Operator "Assigned payment preparation tasks" (I-84 item 5; decided under owner delegation, 6 Nov 2026, I-89 item 2):
+   * a count, not a workflow task. (a) approved claims awaiting preparation (GET /expense/payables?awaitingPreparation=true: an
+   * outstanding amount and no live reservation) plus (b) draft payments not yet marked ready (GET /expense/payments?state=PREPARED
+   * &batchState=DRAFT), both in the assignment's row scope over the claimant. Only an eligible Admin assignment prepares a payment
+   * (DF03, DF07), so a draft is never this ordinary assignment's own work: it is counted as a state of the scope, whoever prepared
+   * it, and never as the same person's tasks in another assignment (DF17 "no merging"; I-83 item 3).
+   */
+  PAYMENT_PREPARATION_TASKS: async (db, g) => {
     const p = new SqlParams();
-    return countOf(db, `select count(*) as n ${myPendingTasks(g, p, CLAIM_KIND)}`, p);
+    const claims = employeeScopePredicate(g, { company: 'c.company_id', employee: 'c.employee_id' }, p);
+    const drafts = instructionsInScope(g, p);
+    const row = (
+      await db.query<{ n: number }>(
+        `select (select count(*) from expense_claim c join expense_obligation_ledger l on l.company_id = c.company_id and l.claim_id = c.id
+                  where ${claims} and c.state = 'APPROVED' and c.payment_state <> 'PAID' and ${AWAITING_PREPARATION})::int
+              + (select count(*) from payment_instruction pi where ${drafts} and pi.state = 'PREPARED' and ${batchIn(p, 'DRAFT')})::int as n`,
+        p.values,
+      )
+    ).rows[0]!;
+    return { status: 'OK', value: row.n };
   },
-  /** The caller's open financial-step decisions (finance review and the high-value step). */
-  EXPENSE_FINAL_DECISION_TASKS: (db, g) => {
+
+  /**
+   * F2 Treasury Operator "Reservations needing reconciliation" (decided under owner delegation, 6 Nov 2026, docs/03 I-92; 0245):
+   * instructions still holding a reservation (C5: reserved at preparation, held until a definitive outcome; DF07 "unknown provider
+   * outcomes remain pending until reconciled") after their payment date: prepared but not released, or released with no outcome
+   * recorded. Both lists are the payment list's (GET /expense/payments?state=PREPARED|RELEASED&paymentDateBefore=<today>), in the
+   * assignment's row scope over the claimant. A count of the scope, whoever prepared or released them (DF17 "no merging").
+   */
+  PAYMENT_RESERVATIONS_TO_RECONCILE: (db, g) => {
     const p = new SqlParams();
-    return countOf(db, `select count(*) as n ${myPendingTasks(g, p, CLAIM_KIND)} and sp.action = any(${p.add(FINAL_STEP_ACTIONS)}::text[])`, p);
-  },
-  /** Claims awaiting the caller's financial decision whose current revision has a late-submission or missing-receipt line (flags only). */
-  EXPENSE_LATE_RECEIPT_EXCEPTIONS: (db, g) => {
-    const p = new SqlParams();
-    const tasks = myPendingTasks(g, p, CLAIM_KIND);
     return countOf(
       db,
-      `select count(distinct bt.id) as n ${tasks} and sp.action = any(${p.add(FINAL_STEP_ACTIONS)}::text[])
-          and exists (select 1 from expense_claim c
-                        join expense_revision r on r.company_id = c.company_id and r.claim_id = c.id and r.revision = c.current_revision
-                        join expense_line l on l.company_id = r.company_id and l.revision_id = r.id
-                       where c.company_id = bt.company_id and c.transaction_id = bt.id and l.exception_flags && ${p.add(LATE_RECEIPT_FLAGS)}::text[])`,
+      `select count(*) as n from payment_instruction pi where ${instructionsInScope(g, p)} and pi.state in ('PREPARED', 'RELEASED') and pi.payment_date < ${p.add(g.businessDate)}::date`,
       p,
     );
   },
-  /**
-   * Claims the caller returned in their latest approval round that still wait for the claimant's correction, within the assignment's row
-   * scope (BRD line 92 "counts"; BR-045). ASSIGNED scope lasts only while a task is pending, and these tasks are decided, so what is left of
-   * that scope is the assignment's own filters, as a deferred re-check reads it (sensitive-change/service.ts deferredRecheck).
-   */
-  EXPENSE_RETURNED_BY_ME: (db, g) => {
-    const p = new SqlParams();
-    const scope = employeeScopePredicate(g.scopeKind === 'ASSIGNED' ? { ...g, scopeKind: 'COMPANY' } : g, { company: 'c.company_id', employee: 'c.employee_id' }, p);
-    return countOf(
-      db,
-      `select count(*) as n from expense_claim c
-        where ${scope} and c.state = 'RETURNED'
-          and exists (select 1 from approval_instance i join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
-                       where i.company_id = c.company_id and i.transaction_id = c.transaction_id and i.state = 'RETURNED'
-                         and t.assignee_user_id = ${p.add(g.userId)}::uuid and t.state = 'RETURNED'
-                         and i.created_at = (select max(i2.created_at) from approval_instance i2 where i2.company_id = c.company_id and i2.transaction_id = c.transaction_id))`,
-      p,
-    );
-  },
-  /**
-   * Expense decision tasks carry no due date (approval_task.due_at is never set; DF03 defines reminders after 2 and
-   * escalation after 5 business days, not a due date), so "decision due" cannot be counted: unavailable, not zero.
-   */
-  EXPENSE_DECISION_DUE_TASKS: notAvailable,
+
+  // The Finance Reviewer's and Expense Finance Approver's claim figures (decision due included, I-92) count claim states in their
+  // organisation scope, never the tasks the same person holds through an Admin assignment (I-83 items 2 and 3; DF17 "no merging"):
+  // reporting/claim-states.ts.
 };
