@@ -1,0 +1,43 @@
+[Unit]
+Description=HRMS API (apps/api/src/main.ts)
+Documentation=file:///var/www/html/HRMS/deploy/README.md
+After=network-online.target postgresql.service clamav-daemon.service hrms-keycloak.service
+Wants=network-online.target clamav-daemon.service hrms-keycloak.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=hrms
+Group=hrms
+WorkingDirectory=/var/www/html/HRMS
+EnvironmentFile=/etc/hrms/hrms.env
+Environment=NODE_ENV=production
+ExecStart=/var/www/html/HRMS/node_modules/.bin/tsx apps/api/src/main.ts
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+# The provider may still be starting after a reboot: main.ts retries its discovery for up to 2.5 minutes.
+TimeoutStartSec=200
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/hrms/files
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

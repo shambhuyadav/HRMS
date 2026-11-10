@@ -331,14 +331,17 @@ describe('what the migrations leave alone', () => {
 });
 
 describe('the bootstrap setting stays out of serving code', () => {
-  it('only the helper, the development seed and test support mention it', () => {
+  it('only the helper, the development seed, the production first-run bootstrap and test support mention it', () => {
     const root = join(dirname(fileURLToPath(import.meta.url)), '../../apps/api/src');
     const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? walk(join(dir, name)) : [join(dir, name)]));
-    const offenders = walk(root)
-      .filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'))
+    const sources = walk(root).filter((file) => file.endsWith('.ts') && !file.endsWith('.test.ts'));
+    const offenders = sources
       .filter((file) => /hrms\.grant_bootstrap|withGrantBootstrap/.test(readFileSync(file, 'utf8')))
       .map((file) => relative(root, file).replace(/\\/g, '/'))
       .sort();
-    expect(offenders).toEqual(['dev/seed.ts', 'modules/access/provision.ts', 'test/harness.ts']);
+    expect(offenders).toEqual(['admin/bootstrap.ts', 'dev/seed.ts', 'modules/access/provision.ts', 'test/harness.ts']);
+    // The first-run bootstrap is a command-line step (db/bootstrap-production.ts): nothing the server runs imports it.
+    const importers = sources.filter((file) => /from '\.{1,2}\/(\.\.\/)*admin\/bootstrap\.js'/.test(readFileSync(file, 'utf8')));
+    expect(importers.map((file) => relative(root, file))).toEqual([]);
   });
 });

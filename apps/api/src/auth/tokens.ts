@@ -46,7 +46,20 @@ export function devTokenVerifier(config: DevTokenConfig): TokenVerifier {
   };
 }
 
-/** Issues development/test tokens for an existing session. Never used in production. */
+/**
+ * The HRMS session token: HS256, bound to a server-side session (sid), at most the absolute session lifetime. Development and tests issue
+ * it from the development sign-in; production issues it after an OIDC sign-in (auth/oidc.ts), with its own secret and issuer, and
+ * verifies it with `sessionTokenVerifier` (the same checks).
+ */
+export const sessionTokenVerifier = devTokenVerifier;
+
+/** Issues the session token for an existing session (production: after the provider's sign-in was verified). */
+export async function issueSessionToken(config: DevTokenConfig, userId: string, sessionId: string, lifetimeSeconds: number): Promise<string> {
+  if (lifetimeSeconds > ABSOLUTE_SESSION_SECONDS) throw new Error('A session token never outlives the absolute session limit');
+  return issueDevToken(config, userId, sessionId, lifetimeSeconds);
+}
+
+/** Issues development/test tokens for an existing session. Production issues them only through issueSessionToken. */
 export async function issueDevToken(config: DevTokenConfig, userId: string, sessionId: string, lifetimeSeconds = 3600): Promise<string> {
   return new SignJWT({ sid: sessionId })
     .setProtectedHeader({ alg: 'HS256' })

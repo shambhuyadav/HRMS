@@ -1,6 +1,8 @@
 ﻿import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { DevTokenConfig, TokenVerifier } from './auth/tokens.js';
+import type { OidcProvider } from './auth/oidc.js';
+import { signInRoutes } from './auth/sign-in-routes.js';
 import { devLoginRoutes, meRoutes } from './modules/access/me.js';
 import type { Database } from './db/transaction.js';
 import { instrumentDatabase } from './db/instrument.js';
@@ -71,6 +73,11 @@ export interface AppDependencies {
   scanInRequest?: boolean;
   /** Development-only sign-in for synthetic accounts. Never set in production. */
   devLogin?: DevTokenConfig;
+  /**
+   * Production sign-in (ADR-06): the OIDC provider whose ID tokens open a session, and the HRMS session token configuration the API
+   * verifies (auth/sign-in-routes.ts). Without it the API offers no sign-in of its own besides the development one.
+   */
+  oidc?: { provider: OidcProvider; tokens: DevTokenConfig };
   /** Request deadlines and transaction budgets per serving class (http/deadline.ts); else the environment, else the defaults. */
   serving?: ServingBudgetOverrides;
   /**
@@ -182,5 +189,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
     if (process.env.NODE_ENV === 'production') throw new Error('Development sign-in cannot be enabled in production');
     app.register(devLoginRoutes, { db: deps.db, sessions, tokens: deps.devLogin });
   }
+  if (!deps.oidc && process.env.NODE_ENV === 'production') throw new Error('An OIDC provider must be configured in production (ADR-06)');
+  app.register(signInRoutes, { db: deps.db, sessions, oidc: deps.oidc ?? null, devLogin: Boolean(deps.devLogin) });
   return app;
 }

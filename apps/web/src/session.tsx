@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type SessionState, setSession, setUnauthenticatedHandler } from './api';
+import { providerLogout } from './oidc';
 
 export interface Company {
   id: string;
@@ -133,6 +134,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           /* the session ends here either way */
         } finally {
           persist(null);
+          // Signed in through the organisation's provider: end that session too (oidc.ts).
+          providerLogout();
         }
       },
     }),

@@ -1,11 +1,97 @@
 import { useQuery } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
-import { api } from '../api';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { ApiError, api } from '../api';
+import { CALLBACK_PATH, completeOidcSignIn, type OidcSignInConfig, rememberProviderLogout, startOidcSignIn } from '../oidc';
 import { type Company, useSession } from '../session';
 import { ErrorNote } from '../ui';
 
-/** Development sign-in for synthetic accounts (the server only exposes it in development). */
+type SignInConfig = OidcSignInConfig | { mode: 'DEV' | 'NONE' };
+
+/**
+ * Sign-in: what the server offers (GET /sign-in/config). Production: the organisation's sign-in provider (OIDC, authorization code with
+ * PKCE; ../oidc.ts), including the way back to CALLBACK_PATH. Development: the account-key form for synthetic accounts (also when the
+ * server does not say, as an older development server does not).
+ */
 export function SignInPage() {
+  const config = useQuery({ queryKey: ['sign-in-config'], queryFn: () => api<SignInConfig>('/sign-in/config'), retry: false, staleTime: Infinity });
+  if (config.isPending) return <main className="narrow"><p className="hint">Loading…</p></main>;
+  const c = config.data;
+  if (c?.mode === 'OIDC') return window.location.pathname === CALLBACK_PATH ? <OidcCallback config={c} /> : <OidcSignIn config={c} />;
+  if (c?.mode === 'NONE') {
+    return (
+      <main className="narrow">
+        <h1>HRMS</h1>
+        <p>Sign-in is not configured on this server. Contact your administrator.</p>
+      </main>
+    );
+  }
+  return <DevSignIn />;
+}
+
+function OidcSignIn({ config }: { config: OidcSignInConfig }) {
+  const [error, setError] = useState<unknown>(null);
+  return (
+    <main className="narrow">
+      <h1>HRMS</h1>
+      <p className="hint">Sign in with your organisation account. You will be asked for your second factor (authenticator app).</p>
+      <button
+        type="button"
+        onClick={() => {
+          setError(null);
+          startOidcSignIn(config).catch(setError);
+        }}
+      >
+        Sign in
+      </button>
+      <ErrorNote error={error} />
+    </main>
+  );
+}
+
+/** Back from the provider: the code is exchanged, the API verifies the ID token and opens the HRMS session. */
+function OidcCallback({ config }: { config: OidcSignInConfig }) {
+  const { signIn } = useSession();
+  const [error, setError] = useState<unknown>(null);
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    (async () => {
+      const { idToken, nonce } = await completeOidcSignIn(config, window.location.search);
+      const res = await api<{ token: string; companies: Company[] }>('/sign-in/oidc', { body: { idToken, nonce } });
+      rememberProviderLogout(config);
+      window.history.replaceState(null, '', '/');
+      signIn(res.token, res.companies);
+    })().catch(setError);
+  }, [config, signIn]);
+  // A first sign-in sets up the authenticator app; that sign-in itself did not use it, so the API asks for one that does.
+  const secondFactorNeeded = error instanceof ApiError && error.code === 'SIGN_IN_MFA_REQUIRED';
+  return (
+    <main className="narrow">
+      <h1>HRMS</h1>
+      {secondFactorNeeded ? (
+        <>
+          <p>Your authenticator app is set up. To finish, sign in once more with your password and a code from the app.</p>
+          <button type="button" onClick={() => startOidcSignIn(config, undefined, { reauthenticate: true }).catch(setError)}>
+            Sign in with your code
+          </button>
+        </>
+      ) : error ? (
+        <>
+          <ErrorNote error={error} />
+          <button type="button" onClick={() => startOidcSignIn(config).catch(setError)}>
+            Sign in again
+          </button>
+        </>
+      ) : (
+        <p className="hint">Signing you in…</p>
+      )}
+    </main>
+  );
+}
+
+/** Development sign-in for synthetic accounts (the server only exposes it in development). */
+function DevSignIn() {
   const { signIn } = useSession();
   const [accountKey, setAccountKey] = useState('');
   const [error, setError] = useState<unknown>(null);

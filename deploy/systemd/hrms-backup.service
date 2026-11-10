@@ -1,0 +1,9 @@
+[Unit]
+Description=HRMS nightly backup (databases, uploaded files, keys)
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /var/www/html/HRMS/deploy/scripts/backup.sh
+Nice=10
+IOSchedulingClass=idle

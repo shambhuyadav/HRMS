@@ -1,0 +1,64 @@
+# HRMS site (installed by deploy/scripts/setup-server.sh as /etc/nginx/sites-available/hrms, enabled by the link
+# /etc/nginx/sites-enabled/hrms). Placeholders: __PUBLIC_HOST__ (the address users open), __CERT__ / __KEY__ (its certificate: Let's
+# Encrypt's for a domain name, else the server's own self-signed one in /etc/hrms/tls). The site itself is snippets/hrms-site.conf.
+#   port 80            Let's Encrypt's domain check (/.well-known/acme-challenge/), everything else to https://__PUBLIC_HOST__
+#   443, __PUBLIC_HOST__   the HRMS
+#   443, any other name (e.g. the bare IP address)   to https://__PUBLIC_HOST__
+#   127.0.0.1:443      the same HRMS for the server's own checks (install-release.sh, verify-sign-in.mjs), with the self-signed certificate
+
+limit_req_zone $binary_remote_addr zone=hrms_sign_in:10m rate=20r/m;
+limit_req_zone $binary_remote_addr zone=hrms_provider_login:10m rate=60r/m;
+limit_req_zone $binary_remote_addr zone=hrms_api:20m rate=20r/s;
+
+map $http_upgrade $hrms_connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+server {
+  listen 80 default_server;
+  listen [::]:80 default_server;
+  server_name _;
+  server_tokens off;
+  location ^~ /.well-known/acme-challenge/ {
+    root /var/www/letsencrypt;
+    default_type text/plain;
+  }
+  location / {
+    return 301 https://__PUBLIC_HOST__$request_uri;
+  }
+}
+
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  server_name __PUBLIC_HOST__;
+  server_tokens off;
+  ssl_certificate     __CERT__;
+  ssl_certificate_key __KEY__;
+  include /etc/nginx/snippets/hrms-tls.conf;
+  # Browsers keep to HTTPS for this name (ignored over a connection with a certificate warning, so harmless on a self-signed setup).
+  add_header Strict-Transport-Security "max-age=31536000" always;
+  include /etc/nginx/snippets/hrms-site.conf;
+}
+
+server {
+  listen 443 ssl default_server;
+  listen [::]:443 ssl default_server;
+  server_name _;
+  server_tokens off;
+  ssl_certificate     /etc/hrms/tls/hrms.crt;
+  ssl_certificate_key /etc/hrms/tls/hrms.key;
+  include /etc/nginx/snippets/hrms-tls.conf;
+  return 301 https://__PUBLIC_HOST__$request_uri;
+}
+
+server {
+  listen 127.0.0.1:443 ssl;
+  server_name _;
+  server_tokens off;
+  ssl_certificate     /etc/hrms/tls/hrms.crt;
+  ssl_certificate_key /etc/hrms/tls/hrms.key;
+  include /etc/nginx/snippets/hrms-tls.conf;
+  include /etc/nginx/snippets/hrms-site.conf;
+}

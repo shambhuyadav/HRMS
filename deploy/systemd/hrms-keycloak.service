@@ -1,0 +1,25 @@
+[Unit]
+Description=HRMS sign-in provider (Keycloak in Docker, 127.0.0.1:8080, path /kc)
+Documentation=file:///var/www/html/HRMS/deploy/README.md
+After=docker.service postgresql.service network-online.target
+Requires=docker.service postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/hrms/keycloak.env
+ExecStartPre=-/usr/bin/docker rm -f hrms-keycloak
+# Host networking: Keycloak reaches PostgreSQL on 127.0.0.1 and listens on 127.0.0.1 only (KC_HTTP_HOST); nginx is the way in.
+# The image is the one built for this installation (deploy/keycloak/Dockerfile), started without its build step.
+# The realm is imported on the first start only (an existing realm is left as it is).
+ExecStart=/usr/bin/docker run --rm --name hrms-keycloak --network host \
+  --env-file /etc/hrms/keycloak.env \
+  -v /etc/hrms/keycloak-import:/opt/keycloak/data/import:ro \
+  ${KEYCLOAK_LOCAL_IMAGE} start --optimized --import-realm
+ExecStop=/usr/bin/docker stop -t 30 hrms-keycloak
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
