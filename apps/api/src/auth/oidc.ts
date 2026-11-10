@@ -89,7 +89,7 @@ export async function oidcProvider(config: OidcConfig, opts: { fetch?: typeof fe
       } catch {
         throw refuse('SIGN_IN_TOKEN_INVALID', 'The sign-in could not be verified; sign in again');
       }
-      // OIDC Core 3.1.3.7: with several audiences the authorised party must be this client.
+      // OIDC Core section 3.1.3, step 7: with several audiences the authorised party must be this client.
       if (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== config.clientId) throw refuse('SIGN_IN_TOKEN_INVALID', 'The sign-in could not be verified; sign in again');
       if (typeof nonce !== 'string' || nonce.length < 16 || payload.nonce !== nonce) throw refuse('SIGN_IN_TOKEN_INVALID', 'The sign-in could not be verified; sign in again');
       const subject = payload.sub;

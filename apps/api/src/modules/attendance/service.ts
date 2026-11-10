@@ -94,7 +94,7 @@ export async function refuseIfPayrollLocked(tx: Queryable, companyId: string, em
 
 /** The result's values at this moment, kept before a change (FR-021, DB027). The caller holds the record's lock. */
 const REVISION_COLUMNS = `company_id, attendance_record_id, prior_version, shift_id, policy_id, scheduled_net_minutes, worked_minutes, late, early_departure,
-  status_id, exception_code, amended, calculation_count, cause, bulk_job_id, amendment_id, actor_id, created_by, late_minutes, overtime_candidate_minutes`;
+  status_id, exception_code, amended, calculation_count, cause, bulk_job_id, amendment_id, actor_id, created_by, late_minutes, overtime_candidate_minutes, early_departure_minutes`;
 
 async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: string, employeeId: string, day: string): Promise<Outcome> {
   // First: a locked day is not even evaluated, so a policy problem elsewhere in the month cannot fail the run for it.
@@ -237,8 +237,9 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
   if (!existing) {
     const created = await tx.query(
       `insert into attendance_record (company_id, employee_id, work_date, shift_id, policy_id, scheduled_net_minutes, worked_minutes,
-                                      late, early_departure, status_id, exception_code, created_by, updated_by, shift_revision_id, late_minutes, overtime_candidate_minutes)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $15)
+                                      late, early_departure, status_id, exception_code, created_by, updated_by, shift_revision_id, late_minutes, overtime_candidate_minutes,
+                                      early_departure_minutes)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14, $15, $16)
        on conflict (company_id, employee_id, work_date) do nothing`,
       [
         grant.companyId,
@@ -256,6 +257,7 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
         ctx.shift_revision_id,
         result.lateMinutes,
         result.overtimeCandidateMinutes,
+        result.earlyDepartureMinutes,
       ],
     );
     if (created.rowCount) return 'CREATED';
@@ -266,12 +268,13 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
   const changed = await tx.query(
     `insert into attendance_record_revision (${REVISION_COLUMNS})
      select r.company_id, r.id, r.version, r.shift_id, r.policy_id, r.scheduled_net_minutes, r.worked_minutes, r.late, r.early_departure,
-            r.status_id, r.exception_code, r.amended, r.calculation_count, 'PROCESSING', $10::uuid, null, $11::uuid, $11::uuid, r.late_minutes, r.overtime_candidate_minutes
+            r.status_id, r.exception_code, r.amended, r.calculation_count, 'PROCESSING', $10::uuid, null, $11::uuid, $11::uuid, r.late_minutes, r.overtime_candidate_minutes,
+            r.early_departure_minutes
        from attendance_record r
       where r.company_id = $1 and r.id = $2
         and (r.shift_id, r.shift_revision_id, r.policy_id, r.scheduled_net_minutes, r.worked_minutes, r.late, r.early_departure, r.status_id, r.exception_code,
-             r.late_minutes, r.overtime_candidate_minutes)
-            is distinct from ($3::uuid, $13::uuid, $4::uuid, $5::int, $6::int, $7::boolean, $8::boolean, $9::uuid, $12::text, $14::int, $15::int)`,
+             r.late_minutes, r.overtime_candidate_minutes, r.early_departure_minutes)
+            is distinct from ($3::uuid, $13::uuid, $4::uuid, $5::int, $6::int, $7::boolean, $8::boolean, $9::uuid, $12::text, $14::int, $15::int, $16::int)`,
     [
       grant.companyId,
       existing.id,
@@ -288,13 +291,14 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
       ctx.shift_revision_id,
       result.lateMinutes,
       result.overtimeCandidateMinutes,
+      result.earlyDepartureMinutes,
     ],
   );
   if (!changed.rowCount) return 'UNCHANGED';
   await tx.query(
     `update attendance_record
         set shift_id = $3, shift_revision_id = $12, policy_id = $4, scheduled_net_minutes = $5, worked_minutes = $6, late = $7, early_departure = $8, status_id = $9, exception_code = $10,
-            late_minutes = $13, overtime_candidate_minutes = $14, calculation_count = calculation_count + 1, updated_by = $11
+            late_minutes = $13, overtime_candidate_minutes = $14, early_departure_minutes = $15, calculation_count = calculation_count + 1, updated_by = $11
       where company_id = $1 and id = $2`,
     [
       grant.companyId,
@@ -311,6 +315,7 @@ async function evaluateEmployeeDay(tx: Queryable, grant: AccessGrant, jobId: str
       ctx.shift_revision_id,
       result.lateMinutes,
       result.overtimeCandidateMinutes,
+      result.earlyDepartureMinutes,
     ],
   );
   return 'UPDATED';
@@ -336,11 +341,14 @@ export const emptyProcessingTotals = (day: string): ProcessingTotals => ({
   NO_POLICY: 0,
 });
 
-/** With employedOnDay: who a processing run covers on a work date (the rule on processDateChunk). */
-const EMPLOYED_ON_DAY_JOINS = `join reference_value st on st.company_id = e.company_id and st.id = e.status_id
+/**
+ * With employedOnDay: who a processing run covers on a work date (the rule on processDateChunk). The attendance registers and
+ * the attendance dashboard (day-facts.ts) cover the same employees, so their counts reconcile with processing (BR-026).
+ */
+export const EMPLOYED_ON_DAY_JOINS = `join reference_value st on st.company_id = e.company_id and st.id = e.status_id
          cross join lateral (select hrms_exit_last_working_date(e.company_id, e.id) as last_working_date) x`;
 
-const employedOnDay = (day: string, params: SqlParams) =>
+export const employedOnDay = (day: string, params: SqlParams) =>
   `e.joining_date <= ${day}::date
           and (st.code = any(${params.add(ACTIVE_STATUSES)}::text[]) or (st.code = any(${params.add(ENDED_STATUSES)}::text[]) and x.last_working_date is not null))
           and (x.last_working_date is null or x.last_working_date >= ${day}::date)`;
@@ -548,9 +556,11 @@ export async function processingUnprocessed(db: Queryable, grant: AccessGrant, j
 /**
  * E07 "entity" (I-78 item 6, decided under owner delegation, 6 Nov 2026): the measured quantity the minute comparison applies
  * to. Worked, scheduled net and shortfall minutes (scheduled less worked, never below zero), late minutes (from the
- * scheduled start on a late day) and overtime candidate minutes (none under a policy without overtime rules).
+ * scheduled start on a late day) and overtime candidate minutes (none under a policy without overtime rules). Early-departure
+ * minutes (0265; the shift deviation register, CL-050) run from the last covered minute to the scheduled end on an
+ * early-departure day; a day evaluated before 0265 has none until it is processed again.
  */
-export const ATTENDANCE_MINUTE_FIELDS = ['WORKED', 'SCHEDULED', 'SHORTFALL', 'LATE', 'OVERTIME_CANDIDATE'] as const;
+export const ATTENDANCE_MINUTE_FIELDS = ['WORKED', 'SCHEDULED', 'SHORTFALL', 'LATE', 'OVERTIME_CANDIDATE', 'EARLY_DEPARTURE'] as const;
 
 /**
  * FR-021 / E07 attendance control filters. Every filter narrows; `minute*` compares stored minutes. I-78 item 6: the
@@ -580,6 +590,7 @@ const MINUTE_COLUMN: Record<NonNullable<AttendanceControlFilters['minuteField']>
   SHORTFALL: 'greatest(r.scheduled_net_minutes - r.worked_minutes, 0)',
   LATE: 'r.late_minutes',
   OVERTIME_CANDIDATE: 'r.overtime_candidate_minutes',
+  EARLY_DEPARTURE: 'r.early_departure_minutes',
 };
 const MINUTE_OP: Record<NonNullable<AttendanceControlFilters['minuteOp']>, string> = { LT: '<', LTE: '<=', EQ: '=', GTE: '>=', GT: '>' };
 
@@ -630,7 +641,8 @@ export async function attendanceControl(db: Queryable, grant: AccessGrant, f: At
   const rows = await db.query(
     `select r.id, r.employee_id as "employeeId", e.employee_code as "employeeCode", e.display_name as "employeeName", dep.code as "departmentCode", loc.code as "locationCode",
             r.work_date as "workDate", st.code as status, r.worked_minutes as "workedMinutes", r.scheduled_net_minutes as "scheduledNetMinutes",
-            r.late, r.late_minutes as "lateMinutes", r.early_departure as "earlyDeparture", r.overtime_candidate_minutes as "overtimeCandidateMinutes",
+            r.late, r.late_minutes as "lateMinutes", r.early_departure as "earlyDeparture", r.early_departure_minutes as "earlyDepartureMinutes",
+            r.overtime_candidate_minutes as "overtimeCandidateMinutes",
             r.exception_code as "exceptionCode", r.amended, r.calculation_count as "calculationCount", r.version,
             s.code as "shiftCode", p.code as "policyCode", p.revision as "policyRevision", hrms_attendance_day_frozen(r.company_id, r.employee_id, r.work_date) as "payrollLocked"
        ${ATTENDANCE_CONTROL_FROM} where ${where}
@@ -650,7 +662,8 @@ export async function attendanceDay(db: Queryable, grant: AccessGrant, recordId:
     await db.query<{ employee_id: string; from_at: string; to_at: string; derived: Record<string, unknown> }>(
       `select r.employee_id, w.from_at, w.to_at,
               json_build_object('workDate', r.work_date, 'status', st.code, 'workedMinutes', r.worked_minutes, 'scheduledNetMinutes', r.scheduled_net_minutes, 'late', r.late,
-                                'lateMinutes', r.late_minutes, 'earlyDeparture', r.early_departure, 'overtimeCandidateMinutes', r.overtime_candidate_minutes,
+                                'lateMinutes', r.late_minutes, 'earlyDeparture', r.early_departure, 'earlyDepartureMinutes', r.early_departure_minutes,
+                                'overtimeCandidateMinutes', r.overtime_candidate_minutes,
                                 'exceptionCode', r.exception_code, 'amended', r.amended, 'shiftCode', sh.code, 'shiftRevision', case when sh.id is not null then coalesce(rv.revision, 1) end,
                                 'bufferMinutes', t.buffer, 'policyCode', p.code, 'policyRevision', p.revision) as derived
          from attendance_record r
@@ -685,7 +698,7 @@ export async function listAttendance(db: Queryable, grant: AccessGrant, employee
   const rows = await db.query(
     `select r.id, r.work_date as "workDate", st.code as status, r.worked_minutes as "workedMinutes",
             r.scheduled_net_minutes as "scheduledNetMinutes", r.late, r.late_minutes as "lateMinutes", r.early_departure as "earlyDeparture",
-            r.overtime_candidate_minutes as "overtimeCandidateMinutes",
+            r.early_departure_minutes as "earlyDepartureMinutes", r.overtime_candidate_minutes as "overtimeCandidateMinutes",
             r.exception_code as "exceptionCode", r.amended, r.calculation_count as "calculationCount", r.version,
             s.code as "shiftCode", p.code as "policyCode", p.revision as "policyRevision"
        from attendance_record r
@@ -725,10 +738,12 @@ export async function amendRecord(
       late: boolean;
       late_minutes: number | null;
       early_departure: boolean;
+      early_departure_minutes: number | null;
       overtime_candidate_minutes: number | null;
       exception_code: string | null;
     }>(
-      `select employee_id, to_char(work_date, 'YYYY-MM-DD') as work_date, status_id, version, late, late_minutes, early_departure, overtime_candidate_minutes, exception_code
+      `select employee_id, to_char(work_date, 'YYYY-MM-DD') as work_date, status_id, version, late, late_minutes, early_departure, early_departure_minutes,
+              overtime_candidate_minutes, exception_code
          from attendance_record where company_id = $1 and id = $2 for update`,
       [grant.companyId, recordId],
     )
@@ -746,6 +761,8 @@ export async function amendRecord(
   const earlyDeparture = keepFlags && record.early_departure;
   // Late minutes follow the flag; overtime candidates stay only on an outcome that can carry them (I-78 items 5, 6).
   const lateMinutes = late ? record.late_minutes : record.late_minutes === null ? null : 0;
+  // Early-departure minutes follow their flag the same way (0265).
+  const earlyMinutes = earlyDeparture ? record.early_departure_minutes : record.early_departure_minutes === null ? null : 0;
   const overtime = record.overtime_candidate_minutes === null ? null : carriesOvertime(input.status) ? record.overtime_candidate_minutes : 0;
 
   const amendmentId = (
@@ -759,14 +776,16 @@ export async function amendRecord(
   await tx.query(
     `insert into attendance_record_revision (${REVISION_COLUMNS})
      select r.company_id, r.id, r.version, r.shift_id, r.policy_id, r.scheduled_net_minutes, r.worked_minutes, r.late, r.early_departure,
-            r.status_id, r.exception_code, r.amended, r.calculation_count, 'AMENDMENT', null, $3::uuid, $4::uuid, $4::uuid, r.late_minutes, r.overtime_candidate_minutes
+            r.status_id, r.exception_code, r.amended, r.calculation_count, 'AMENDMENT', null, $3::uuid, $4::uuid, $4::uuid, r.late_minutes, r.overtime_candidate_minutes,
+            r.early_departure_minutes
        from attendance_record r where r.company_id = $1 and r.id = $2`,
     [grant.companyId, recordId, amendmentId, grant.userId],
   );
   await tx.query(
-    `update attendance_record set status_id = $3, amended = true, exception_code = null, late = $5, early_departure = $6, late_minutes = $7, overtime_candidate_minutes = $8, updated_by = $4
+    `update attendance_record set status_id = $3, amended = true, exception_code = null, late = $5, early_departure = $6, late_minutes = $7, overtime_candidate_minutes = $8,
+            early_departure_minutes = $9, updated_by = $4
       where company_id = $1 and id = $2`,
-    [grant.companyId, recordId, newStatusId, grant.userId, late, earlyDeparture, lateMinutes, overtime],
+    [grant.companyId, recordId, newStatusId, grant.userId, late, earlyDeparture, lateMinutes, overtime, earlyMinutes],
   );
   await writeAudit(tx, {
     companyId: grant.companyId,
@@ -782,11 +801,12 @@ export async function amendRecord(
         late: record.late,
         lateMinutes: record.late_minutes,
         earlyDeparture: record.early_departure,
+        earlyDepartureMinutes: record.early_departure_minutes,
         overtimeCandidateMinutes: record.overtime_candidate_minutes,
         exceptionCode: record.exception_code,
       },
     },
-    after: { operational: { status: input.status, late, lateMinutes, earlyDeparture, overtimeCandidateMinutes: overtime } },
+    after: { operational: { status: input.status, late, lateMinutes, earlyDeparture, earlyDepartureMinutes: earlyMinutes, overtimeCandidateMinutes: overtime } },
     reason: input.reason,
   });
 }

@@ -55,7 +55,10 @@ function useDashboard(refetchInterval?: number) {
 }
 
 interface PendingTask {
-  taskId: string;
+  /** Null for a goal (KRA) review, which is a state on the appraisal rather than a routed task. */
+  taskId: string | null;
+  /** A goal review's appraisal (kind appraisal_goal_review): its review is on the appraisal itself. */
+  appraisalId?: string;
   kind: string;
   ownerEmployeeCode: string | null;
   ownerName: string | null;
@@ -66,6 +69,9 @@ interface PendingTask {
 }
 
 const words = (code: string) => code.replace(/_/g, ' ').toLowerCase();
+
+/** FR-041 KRA review (I-77 item 3): listed with the tasks, but reviewed on the appraisal (POST /v1/appraisals/:id/goal-review). */
+const GOAL_REVIEW = 'appraisal_goal_review';
 
 /** A figure as a person reads it: a code in words, a decimal without its padding zeros. Nothing is rounded, and other text stays as sent. */
 function widgetText(value: number | string | undefined): string {
@@ -96,9 +102,9 @@ function PendingTasks() {
           </thead>
           <tbody>
             {tasks.data.items.map((t) => (
-              <tr key={t.taskId}>
+              <tr key={t.taskId ?? `goal-review:${t.appraisalId}`}>
                 <td>
-                  {words(t.kind)} {t.delegated && <Badge tone="warn">delegated</Badge>}
+                  {t.kind === GOAL_REVIEW ? 'Goal (KRA) review' : words(t.kind)} {t.delegated && <Badge tone="warn">delegated</Badge>}
                 </td>
                 <td>{t.ownerName ? `${t.ownerName} (${t.ownerEmployeeCode})` : '—'}</td>
                 <td>{formatDate(t.assignedAt)}</td>
@@ -106,7 +112,11 @@ function PendingTasks() {
                   {formatDate(t.dueAt)} {t.overdue && <Badge tone="warn">overdue</Badge>}
                 </td>
                 <td>
-                  <Link to="/tasks">Open decisions</Link>
+                  {t.kind === GOAL_REVIEW && t.appraisalId ? (
+                    <Link to={`/appraisal/appraisals/${encodeURIComponent(t.appraisalId)}`}>Review the goals</Link>
+                  ) : (
+                    <Link to="/tasks">Open decisions</Link>
+                  )}
                 </td>
               </tr>
             ))}

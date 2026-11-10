@@ -160,6 +160,23 @@ install automatically (unattended-upgrades); a Let's Encrypt certificate and HST
 `OIDC_REQUIRE_MFA=true` in `/etc/hrms/hrms.env` makes the API refuse any ID token whose `amr` lacks `otp`. Keycloak's browser flow
 (`hrms-browser`, set by `configure-realm.sh`) asks every user for the code; `verify-sign-in.mjs` checks both.
 
+## Email notifications
+
+Off until configured, and then only for events whose email rule one administrator proposed and another published (FR-085, DF12;
+in-app notices are unaffected). To switch the channel on, put the SMTP password in a file on the server, then run setup with the
+account details — the password is copied to `/etc/hrms/smtp-password` (root:hrms, 0640) and never written into `hrms.env` or shown:
+
+```bash
+sudo PUBLIC_HOST=hrstop.duckdns.org SMTP_HOST=smtp.example.com SMTP_PORT=587 SMTP_SECURITY=starttls \
+     SMTP_USER=hrms@example.com SMTP_PASSWORD_SOURCE=/root/smtp-password.txt SMTP_FROM=hrms@example.com \
+     EMAIL_TEST_RECIPIENTS=@example.com bash /var/www/html/HRMS/deploy/scripts/setup-server.sh
+sudo rm /root/smtp-password.txt
+```
+
+`EMAIL_TEST_RECIPIENTS` (optional) limits sending to those addresses or `@domains` for a first safe test; run setup again without it
+to open sending to everyone. Emails carry state only (never pay, amounts or reasons) and a link to the app; the delivery log shows
+each attempt. Later setup runs keep these settings unless new ones are given.
+
 ## Backups
 
 `hrms-backup.timer` writes nightly to `/var/backups/hrms` (14 days): both databases (`pg_dump -Fc`), the uploaded files and

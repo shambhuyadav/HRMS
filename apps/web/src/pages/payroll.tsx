@@ -7,8 +7,8 @@
 // actions each state offers, each gated by its own key; the review and approval decision queues; for a processed run,
 // payslip publishing and bank manifests (preparation, independent authorisation, the restricted file, outcomes from
 // evidence and reversals); the loan decision queue and the loan request upload (LOAN_REQUESTS_V1, the shared batch
-// screens of records.tsx); salary hold and salary stop decisions and hold release (their
-// proposals need verified evidence documents and are not offered here), with the H7 reserved and confirmed totals of
+// screens of records.tsx); salary hold and salary stop decisions and hold release, salary stop proposals one at a time
+// and by upload (SALARY_STOPS_V1, the same shared batch screens), with the H7 reserved and confirmed totals of
 // every matching hold; the run reports (register, reconciliation, comparison) and their report catalogue exports (CSV
 // or XLSX, under the export key).
 // Configuration (payroll_config.* duties; I-28, no defaults, so nothing is prefilled): payroll calendars with their
@@ -81,6 +81,8 @@ const PATHS = {
   manifest: (id: string) => `/payroll/manifests/${encodeURIComponent(id)}`,
   loans: '/payroll/loans',
   loanUpload: '/payroll/loans/upload',
+  holds: '/payroll/holds',
+  stopUpload: '/payroll/holds/stop-upload',
   inputs: '/payroll/inputs',
   templates: '/payroll/bank-templates',
   statutory: '/payroll/statutory-outputs',
@@ -587,6 +589,7 @@ type Act =
   | 'input-reverse'
   | 'upload'
   | 'stop-propose'
+  | 'stop-upload'
   | 'stop-act'
   | 'hold-propose'
   | 'hold-act'
@@ -611,7 +614,7 @@ type Act =
   | 'salary-components';
 
 /** Actions that carry an idempotency or evidence key: resending the same one after a lost answer is safe. */
-const KEYED: ReadonlySet<Act> = new Set<Act>(['loan-request', 'loan-upload', 'run-decision', 'outcome', 'reverse', 'input', 'upload', 'input-decide', 'stop-propose', 'hold-propose', 'disburse']);
+const KEYED: ReadonlySet<Act> = new Set<Act>(['loan-request', 'loan-upload', 'run-decision', 'outcome', 'reverse', 'input', 'upload', 'input-decide', 'stop-propose', 'stop-upload', 'hold-propose', 'disburse']);
 
 const NOT_INDEPENDENT: Partial<Record<Act, string>> = {
   authorize:
@@ -661,12 +664,25 @@ const ACT_REFUSALS: Partial<Record<Act, Record<string, string>>> = {
     IDEMPOTENCY_KEY_IN_USE: 'That upload key is already in use. Choose the file again and validate it.',
   },
   'stop-propose': { EVIDENCE_REQUIRED: 'Give the evidence reference and choose at least one released, verified document of the employee.' },
+  // The shared batch import (imports/batch.ts, jobs.ts) answering the SALARY_STOPS_V1 upload.
+  'stop-upload': {
+    INVALID_HEADER: 'The file does not use the SALARY_STOPS_V1 header: download the template and keep exactly its header line.',
+    INVALID_FILE: 'The file is not a valid UTF-8 CSV file.',
+    EMPTY_FILE: 'The file has no rows below the header.',
+    FILE_SIZE: 'An upload file is between 1 byte and 10 MB.',
+    TOO_MANY_ROWS: 'At most 10,000 rows per upload: split the file.',
+    FILE_QUARANTINED: 'The malware scan flagged the file as unsafe: nothing in it was read and no salary stop was proposed.',
+    IDEMPOTENCY_KEY_IN_USE: 'That upload key is already in use. Choose the file again and validate it.',
+  },
   'hold-propose': { EVIDENCE_REQUIRED: 'Give the evidence reference and choose at least one released, verified document of the employee.' },
   disburse: {
     EVIDENCE_REQUIRED: 'Give the evidence reference and choose the released, verified document of the disbursement.',
     EVIDENCE_KEY_REUSED: 'This evidence key already recorded another disbursement.',
   },
-  criterion: { EVIDENCE_REQUIRED: 'Give the evidence reference of the criterion.' },
+  criterion: {
+    EVIDENCE_REQUIRED: 'Give the evidence reference of the criterion.',
+    REMINDER_INTERVAL_NOT_NARROWER: 'A criterion may shorten the escalation intervals (at most 2, then every 5 business days), never lengthen them.',
+  },
   calendar: { NAME_REQUIRED: 'Give the calendar name.' },
   'pay-component': { NAME_REQUIRED: 'Give the component name.' },
   period: { INVALID_CODE: 'The period code is letters, digits, dashes and underscores, starting with a letter or digit.' },
@@ -5145,6 +5161,9 @@ interface HoldCriterion {
   applicability: string;
   scopeMode: string;
   maxReviewDays: number;
+  /** H2 narrowing of the review cadence (null: the defaults of 2 and 5 business days); 0255. */
+  firstEscalationBusinessDays?: number | null;
+  escalationIntervalBusinessDays?: number | null;
   evidenceReference: string;
   validationReference: string;
   state: string;
@@ -5152,6 +5171,16 @@ interface HoldCriterion {
   activatedAt: string | null;
   retiredAt: string | null;
   version: number;
+}
+/** H2 selected defaults: first escalation after 2 business days unresolved, then every 5 (a criterion may narrow them). */
+const DEFAULT_FIRST_ESCALATION = 2;
+const DEFAULT_ESCALATION_INTERVAL = 5;
+/** A criterion's escalation cadence in words, defaults marked. */
+function cadenceText(c: Pick<HoldCriterion, 'firstEscalationBusinessDays' | 'escalationIntervalBusinessDays'>): string {
+  const first = c.firstEscalationBusinessDays ?? DEFAULT_FIRST_ESCALATION;
+  const every = c.escalationIntervalBusinessDays ?? DEFAULT_ESCALATION_INTERVAL;
+  const narrowed = c.firstEscalationBusinessDays != null || c.escalationIntervalBusinessDays != null;
+  return `After ${first}, then every ${every} business day${every === 1 ? '' : 's'}${narrowed ? ' (narrowed)' : ' (default)'}`;
 }
 interface HoldBalance {
   payable: string | null;
@@ -5215,6 +5244,7 @@ function HoldCriteriaSection() {
                 <th>Category</th>
                 <th>Holds allowed</th>
                 <th>Longest review</th>
+                <th>Escalation while unresolved</th>
                 <th>Applies when</th>
                 <th>State</th>
                 {manage && <th>Change</th>}
@@ -5228,6 +5258,7 @@ function HoldCriteriaSection() {
                   <td>{label(CRITERION_CATEGORY, c.category)}</td>
                   <td>{label(SCOPE_MODE, c.scopeMode)}</td>
                   <td>{`${c.maxReviewDays} days`}</td>
+                  <td>{cadenceText(c)}</td>
                   <td>{c.applicability}</td>
                   <td>
                     <Status map={CRITERION_STATE} code={c.state} />
@@ -5294,7 +5325,8 @@ function CriterionForm() {
   const keys = useKeys();
   const qc = useQueryClient();
   // Nothing prefilled: the category and whether partial holds are allowed are the definer's choice (I-28).
-  const empty = { code: '', category: '', applicability: '', scopeMode: '', maxReviewDays: '', evidenceReference: '', validationReference: '' };
+  // The escalation intervals stay at the H2 defaults unless the definer narrows them (never wider: 0255).
+  const empty = { code: '', category: '', applicability: '', scopeMode: '', maxReviewDays: '', firstEscalation: '', escalationInterval: '', evidenceReference: '', validationReference: '' };
   const [f, setF] = useState(empty);
   const [problem, setProblem] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -5324,6 +5356,8 @@ function CriterionForm() {
       applicability: f.applicability.trim(),
       scopeMode: f.scopeMode,
       maxReviewDays: Number(days),
+      ...(f.firstEscalation ? { firstEscalationBusinessDays: Number(f.firstEscalation) } : {}),
+      ...(f.escalationInterval ? { escalationIntervalBusinessDays: Number(f.escalationInterval) } : {}),
       evidenceReference: f.evidenceReference.trim(),
       validationReference: f.validationReference.trim(),
     });
@@ -5363,6 +5397,32 @@ function CriterionForm() {
         Longest review interval (days)
         <input value={f.maxReviewDays} onChange={(e) => set({ maxReviewDays: e.target.value })} inputMode="numeric" maxLength={3} />
       </label>
+      <label>
+        First escalation after (business days)
+        <select value={f.firstEscalation} onChange={(e) => set({ firstEscalation: e.target.value })}>
+          <option value="">{`${DEFAULT_FIRST_ESCALATION} (default)`}</option>
+          {Array.from({ length: DEFAULT_FIRST_ESCALATION - 1 }, (_, i) => String(i + 1)).map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Then escalate every (business days)
+        <select value={f.escalationInterval} onChange={(e) => set({ escalationInterval: e.target.value })}>
+          <option value="">{`${DEFAULT_ESCALATION_INTERVAL} (default)`}</option>
+          {Array.from({ length: DEFAULT_ESCALATION_INTERVAL - 1 }, (_, i) => String(i + 1)).map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="hint wide">
+        An unresolved hold under this criterion is reminded daily and escalated on this cadence. The criterion may shorten the H2 defaults (2, then every 5 business days), never
+        lengthen them; each hold keeps the cadence of the revision it was decided under. An automatic bank safety block always keeps the defaults.
+      </p>
       <label className="wide">
         When the criterion applies
         <textarea value={f.applicability} onChange={(e) => set({ applicability: e.target.value })} maxLength={2000} rows={2} style={TEXTAREA} />
@@ -5790,6 +5850,9 @@ function StopProposalForm() {
           <Problem error={propose.error} act="stop-propose" />
         </div>
       </form>
+      <p className="hint">
+        Many stops at once: <Link to={PATHS.stopUpload}>upload a file of salary stops</Link>.
+      </p>
     </Section>
   );
 }
@@ -7177,8 +7240,54 @@ function LoanUploadScreen() {
 }
 
 function LoanUpload() {
-  const t = LOAN_IMPORT;
   const keys = useKeys();
+  // A committed batch entered loan requests: the loan list and the decision queue show them.
+  return (
+    <TemplateUpload
+      template={LOAN_IMPORT}
+      title="Upload loan and advance requests"
+      form="Upload loan requests"
+      fileLabel="Loan requests file"
+      keyPrefix="payroll-loan-import"
+      act="loan-upload"
+      pending="Nothing is requested"
+      link={<Link to={PATHS.loans}>Loans and advances</Link>}
+      committed="Every request entered waits for an independent decision, loan by loan: someone other than you and the employee decides each one."
+      batches="Your loan request batches"
+      onCommitted={(qc) => void qc.invalidateQueries({ queryKey: keys.loansAll })}
+    />
+  );
+}
+
+/**
+ * An upload through the shared batch screens (records.tsx): the template and its rules, a row-by-row preview, an explicit
+ * all-or-nothing commit or cancel, a batch held for the malware scan, and the user's own batches of this template.
+ */
+function TemplateUpload({
+  template: t,
+  title,
+  form,
+  fileLabel,
+  keyPrefix,
+  act: problemAct,
+  pending,
+  link,
+  committed,
+  batches,
+  onCommitted,
+}: {
+  template: ImportTemplate;
+  title: string;
+  form: string;
+  fileLabel: string;
+  keyPrefix: string;
+  act: Act;
+  pending: string;
+  link: ReactNode;
+  committed: string;
+  batches: string;
+  onCommitted: (qc: ReturnType<typeof useQueryClient>) => void;
+}) {
   const qc = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   // Remounting the file input clears the chosen file once its preview is on screen.
@@ -7222,14 +7331,13 @@ function LoanUpload() {
     },
     onSuccess: (view) => {
       setJob(view);
-      // A committed batch entered loan requests: the loan list and the decision queue show them.
-      if (view.state === 'COMMITTED') void qc.invalidateQueries({ queryKey: keys.loansAll });
+      if (view.state === 'COMMITTED') onCommitted(qc);
     },
     onSettled: refresh,
   });
   const upload = useMutation({
     mutationFn: async (f: File) => {
-      const key = (uploadKey.current ??= idempotencyKey('payroll-loan-import'));
+      const key = (uploadKey.current ??= idempotencyKey(keyPrefix));
       return api<ImportJob>(t.base, { body: { fileName: f.name, contentBase64: await fileToBase64(f), idempotencyKey: key } });
     },
     onMutate: () => {
@@ -7256,16 +7364,16 @@ function LoanUpload() {
   };
   return (
     <>
-      <Section title="Upload loan and advance requests">
-        <form onSubmit={submit} aria-label="Upload loan requests" className="stack">
+      <Section title={title}>
+        <form onSubmit={submit} aria-label={form} className="stack">
           <p className="hint">
-            CSV with exactly the header <code>{t.columns}</code> (template {t.code}). {t.note} Nothing is requested until you commit a preview, and a batch is applied all or
-            nothing: one row with a problem rejects the whole batch. <Link to={PATHS.loans}>Loans and advances</Link>
+            CSV with exactly the header <code>{t.columns}</code> (template {t.code}). {t.note} {pending} until you commit a preview, and a batch is applied all or nothing:
+            one row with a problem rejects the whole batch. {link}
           </p>
           <TemplateDownload base={t.base} code={t.code} />
           <div className="inline">
             <label>
-              Loan requests file
+              {fileLabel}
               <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
             </label>
             <button type="submit" disabled={!file || busy}>
@@ -7273,21 +7381,147 @@ function LoanUpload() {
             </button>
           </div>
         </form>
-        <Problem error={upload.error ?? resume.error} act="loan-upload" />
+        <Problem error={upload.error ?? resume.error} act={problemAct} />
       </Section>
       {job && (
         <>
           <ImportJobView job={job} template={t} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
           {job.state === 'COMMITTED' && (
             <p role="status" className="ok">
-              Every request entered waits for an independent decision, loan by loan: someone other than you and the employee decides each one.
+              {committed}
             </p>
           )}
           <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
-      <ImportBatches base={t.base} title="Your loan request batches" openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />
+      <ImportBatches base={t.base} title={batches} openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// FR-031 "Upload Stop Salary" (CL-087; I-66 payroll-6): the SALARY_STOPS_V1 upload (payroll/stop-import.ts) through the shared
+// batch screens. Each row is checked exactly as a salary stop proposed one at a time on the salary holds and stops screen,
+// under the same payroll_stop.propose.hold grant; every proposed stop waits for its own independent decision, which confirms
+// its mode. Evidence documents are named by id, so the screen looks an employee's usable documents up.
+// ---------------------------------------------------------------------------------------------------------
+
+/** SALARY_STOPS_V1 row problems (stop-import.ts, imports/batch.ts and the proposal rules of inputs.ts) in plain words. */
+const STOP_ROW_PROBLEMS: Record<string, string> = {
+  UNKNOWN_PERIOD: 'No period of an active payroll calendar has this period code.',
+  PERIOD_AMBIGUOUS: 'More than one active payroll calendar has a period with this code.',
+  UNKNOWN_EMPLOYEE: 'No employee in this company has this employee code.',
+  OUT_OF_SCOPE: 'The employee is outside the scope of the selected role.',
+  SELF_ACTION_NOT_ALLOWED: 'This is your own record: someone else proposes a salary stop for you.',
+  INVALID_MODE: 'The mode is HOLD_DISBURSEMENT or EXCLUDE_CALCULATION, in capital letters, or blank (blank withholds the payment).',
+  UNKNOWN_CRITERION: 'No hold criterion has this code.',
+  HOLD_CRITERION_NOT_ACTIVE: 'Withholding a payment needs the code of an active hold criterion; none is active until a validated criterion is activated.',
+  RELEASE_CRITERION_REQUIRED: 'Withholding a payment needs the release criterion (at most 1,000 characters).',
+  NOT_A_HOLD: 'Leaving the employee out of the calculation is not a payment hold: leave the criterion code and the release criterion blank.',
+  REASON_REQUIRED: 'Give the reason for the salary stop (at most 1,000 characters).',
+  EVIDENCE_REQUIRED: 'Give the evidence reference and the id of at least one released, verified document of the employee.',
+  INVALID_DOCUMENT_IDS: 'The evidence document ids are one to ten different document ids, separated by semicolons.',
+  EVIDENCE_NOT_VERIFIED: 'An evidence document has not been released by the malware scan and verified by an independent reviewer.',
+  INVALID_EVIDENCE: 'An evidence document is not a document of this employee.',
+  STOP_EXISTS: 'The employee already has a salary stop for this period (from an earlier row, upload or proposal).',
+  PERIOD_PROCESSED: 'The payroll of this employee for the period is processed: a hold of the processed record goes through a hold case.',
+  FORBIDDEN: 'The selected role no longer holds the salary stop proposal grant.',
+  COLUMN_COUNT: 'The row does not have exactly one cell for each column of the header.',
+};
+
+const STOP_IMPORT: ImportTemplate = {
+  code: 'SALARY_STOPS_V1',
+  label: 'Salary stops',
+  permissions: [STOP_PROPOSE],
+  base: '/v1/payroll/salary-stop-imports',
+  columns: 'period_code,employee_code,mode,criterion_code,reason,release_criterion,evidence_reference,evidence_document_ids',
+  keyLabel: 'Period / employee code',
+  noun: ['salary stop', 'salary stops'],
+  verb: 'Propose',
+  note: 'Each row proposes a salary stop for one employee and period, checked exactly as a stop proposed on the salary holds and stops screen: period_code a period of an active payroll calendar; mode HOLD_DISBURSEMENT (the payment is withheld; a blank mode means this) with the criterion_code of an active hold criterion and the release_criterion, or EXCLUDE_CALCULATION (the employee is left out of the calculation, an exceptional mode) with both left blank; the reason; the evidence_reference; and evidence_document_ids, the ids of one to ten released, verified documents of the employee separated by semicolons (look them up below). Put a cell in double quotes if it holds a comma. Every stop proposed waits for an independent decision, stop by stop, which confirms its mode; the upload approves nothing.',
+  problems: STOP_ROW_PROBLEMS,
+};
+
+function StopUploadScreen() {
+  const { can } = useSession();
+  if (!can(STOP_PROPOSE)) {
+    return (
+      <Section title="Salary stop upload">
+        <Empty>The selected role cannot propose salary stops: that needs the salary stop proposal grant.</Empty>
+      </Section>
+    );
+  }
+  return (
+    <div className="stack">
+      <TemplateUpload
+        template={STOP_IMPORT}
+        title="Upload salary stops"
+        form="Upload salary stops"
+        fileLabel="Salary stops file"
+        keyPrefix="payroll-stop-import"
+        act="stop-upload"
+        pending="Nothing is proposed"
+        link={<Link to={PATHS.holds}>Salary holds and stops</Link>}
+        committed="Every salary stop proposed waits for an independent decision, stop by stop: someone other than you and the employee decides each one and confirms its mode."
+        batches="Your salary stop batches"
+        onCommitted={(qc) => void qc.invalidateQueries(byPrefix('payroll-stop'))}
+      />
+      <EvidenceIdLookup />
+    </div>
+  );
+}
+
+/** An employee's documents with their ids, for the evidence_document_ids column (only released, verified ones are usable). */
+function EvidenceIdLookup() {
+  const { can } = useSession();
+  const keys = useKeys();
+  const [employee, setEmployee] = useState<EmployeeHit | null>(null);
+  const docs = useQuery({
+    queryKey: keys.documents(employee?.id ?? ''),
+    queryFn: () => api<{ items: EvidenceDocument[] }>(`/v1/employees/${encodeURIComponent(employee!.id)}/documents`),
+    enabled: can(DOCUMENT_READ) && employee !== null,
+    retry: retryTransient,
+  });
+  return (
+    <Section title="Evidence document ids">
+      {!can(DOCUMENT_READ) ? (
+        <p className="hint">The selected role cannot list employees’ documents, so it cannot look the evidence document ids up here.</p>
+      ) : (
+        <div className="stack">
+          <p className="hint">Choose an employee to see their documents and ids. Only a document released by the malware scan and verified can be evidence.</p>
+          <div className="grid-form">
+            <EmployeePicker title="Employee" value={employee} onChange={setEmployee} />
+          </div>
+          {employee && docs.isPending && <p className="hint">Loading the employee’s documents…</p>}
+          {docs.error && <Problem error={docs.error} act="read" />}
+          {employee && docs.data && docs.data.items.length === 0 && <Empty>The employee has no documents yet.</Empty>}
+          {employee && docs.data && docs.data.items.length > 0 && (
+            <div style={SCROLL}>
+              <table aria-label="Evidence documents and their ids">
+                <thead>
+                  <tr>
+                    <th>Document</th>
+                    <th>Uploaded</th>
+                    <th>State</th>
+                    <th>Document id</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {docs.data.items.map((d) => (
+                    <tr key={d.id}>
+                      <td>{`${readable(d.documentType)}${d.fileName ? ` · ${d.fileName}` : ''}`}</td>
+                      <td>{formatDate(d.uploadedAt)}</td>
+                      <td>{usableEvidence(d) ? <Badge tone="good">usable</Badge> : evidenceState(d)}</td>
+                      <td>{usableEvidence(d) ? <code>{d.id}</code> : <span className="hint">not usable</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -8856,7 +9090,8 @@ export const PAYROLL_SCREENS: ScreenRoute[] = [
   { path: '/payroll/manifests/:id', title: 'Bank manifest', permission: BANK_READ, nav: false, component: ManifestScreen },
   { path: PATHS.loans, title: 'Loans and advances', permission: LOAN_READ, nav: true, component: LoansScreen },
   { path: PATHS.loanUpload, title: 'Loan and advance upload', permission: LOAN_REQUEST, nav: true, component: LoanUploadScreen },
-  { path: '/payroll/holds', title: 'Salary holds and stops', permission: HOLD_READ, nav: true, component: HoldsScreen },
+  { path: PATHS.holds, title: 'Salary holds and stops', permission: HOLD_READ, nav: true, component: HoldsScreen },
+  { path: PATHS.stopUpload, title: 'Salary stop upload', permission: STOP_PROPOSE, nav: true, component: StopUploadScreen },
   { path: PATHS.inputs, title: 'Payroll inputs', permission: INPUT_READ, nav: true, component: InputsScreen },
   { path: PATHS.templates, title: 'Bank file templates', permission: TEMPLATE_READ, nav: true, component: TemplatesScreen },
   { path: '/payroll/runs/:id/reports', title: 'Payroll reports', permission: REPORT_READ, nav: false, component: RunReportsScreen },

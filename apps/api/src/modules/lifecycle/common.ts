@@ -5,6 +5,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, canAccessEmployee } from '../access/authorize.js';
 import { assertStatusTransition, type StatusSourceKind, withStatusSource } from '../employee/status.js';
+import { decidedOnBehalfOfUser } from '../workflow/engine.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ACTIVE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED'] as const;
@@ -192,14 +193,15 @@ export async function pendingTaskOf(tx: Queryable, companyId: string, transactio
 /**
  * Decision history of a transaction: kind, step, decision and time (the reviewer's private reason stays out). `kind`
  * tells which transaction an entry belongs to (e.g. the resignation or a withdrawal request). With `actors`, each
- * entry also names the deciding user, for screens whose readers check independence (settlements).
+ * entry also names the deciding user, for screens whose readers check independence (settlements), and the delegator a
+ * delegated decision was taken for (`onBehalfOfUserId`, null otherwise; I-57 item 7).
  */
 export async function decisionTrail(db: Queryable, companyId: string, transactionIds: readonly string[], options: { actors?: boolean } = {}) {
   if (transactionIds.length === 0) return [];
   return (
-    await db.query<{ transactionId: string; kind: string; step: number; action: string; decision: string; decidedAt: Date; actorUserId?: string }>(
+    await db.query<{ transactionId: string; kind: string; step: number; action: string; decision: string; decidedAt: Date; actorUserId?: string; onBehalfOfUserId?: string | null }>(
       `select i.transaction_id as "transactionId", i.transaction_kind as kind, s.sequence as step, p.action, d.decision, d.occurred_at as "decidedAt"
-              ${options.actors ? `, d.actor_user_id as "actorUserId"` : ''}
+              ${options.actors ? `, d.actor_user_id as "actorUserId", ${decidedOnBehalfOfUser('t')} as "onBehalfOfUserId"` : ''}
          from approval_instance i
          join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
          join approval_decision d on d.company_id = t.company_id and d.task_id = t.id

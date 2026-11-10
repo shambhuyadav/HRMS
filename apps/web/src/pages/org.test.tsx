@@ -60,9 +60,10 @@ const LIST = 'GET /v1/org/departments';
 const ITEM = 'PATCH /v1/org/departments/d-1';
 
 describe('screens', () => {
-  it('are five menu screens, each under the read duty its route checks', () => {
+  it('are six menu screens, each under the read duty its route checks', () => {
     expect(ORG_SCREENS.map((s) => [s.path, s.title, s.permission, s.nav])).toEqual([
       ['/organisation/company', 'Company', READ, true],
+      ['/organisation/chart', 'Organisation chart', 'employee.list.operational', true],
       ['/organisation/departments', 'Departments', READ, true],
       ['/organisation/locations', 'Locations', READ, true],
       ['/organisation/designations', 'Designations', READ, true],

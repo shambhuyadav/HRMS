@@ -108,8 +108,8 @@ export async function lockEmployeeDays(tx: Queryable, employeeId: string) {
   await tx.query(`select pg_advisory_xact_lock(hashtextextended('employee_days:' || $1, 0))`, [employeeId]);
 }
 
-/** Serialises balance-changing work for one employee/leave type (FR-026: no double spend). */
-async function lockBalance(tx: Queryable, employeeId: string, leaveTypeId: string) {
+/** Serialises balance-changing work for one employee/leave type (FR-026: no double spend). Re-entrant within a transaction. */
+export async function lockBalance(tx: Queryable, employeeId: string, leaveTypeId: string) {
   await tx.query(`select pg_advisory_xact_lock(hashtextextended('leave_balance:' || $1 || ':' || $2, 0))`, [employeeId, leaveTypeId]);
 }
 
@@ -707,6 +707,11 @@ export interface BalanceAdjustment {
   effectiveDate: string;
   reason: string;
   idempotencyKey: string;
+  /**
+   * The movement's own ledger key in place of `leave:manual:<idempotencyKey>`, for an internal caller whose key is the
+   * business rule (the monthly balance upload: one per employee, type and month). Never taken from a request body.
+   */
+  ledgerKey?: string | undefined;
 }
 
 /**
@@ -722,7 +727,7 @@ export async function adjustBalance(tx: Queryable, grant: AccessGrant, input: Ba
   if (!type) throw new HttpError(422, 'INVALID_REFERENCE', 'Unknown leave type');
   await lockBalance(tx, input.employeeId, type.id);
   await reassertAccess(tx, grant, 'leave', 'adjust', ['operational']);
-  const key = `leave:manual:${input.idempotencyKey}`;
+  const key = input.ledgerKey ?? `leave:manual:${input.idempotencyKey}`;
   const isReplay = async () => {
     const prior = (
       await tx.query<{ same: boolean }>(

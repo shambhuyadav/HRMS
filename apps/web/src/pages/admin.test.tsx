@@ -227,6 +227,97 @@ describe('reviewer routing (DF03)', () => {
   });
 });
 
+describe('stranded tasks (C4, DF03, I-84 item 1)', () => {
+  const STRANDED = {
+    items: [
+      {
+        taskId: 't-1',
+        kind: 'leave_request',
+        transactionId: 'bt-1',
+        ownerEmployeeId: 'e-1',
+        ownerEmployeeCode: 'SYN-001',
+        ownerName: 'Asha Synthetic',
+        assignedAt: '2026-11-02T05:00:00Z',
+        assigneeUserId: 'u-old',
+        assigneeAccountKey: 'syn.former.manager',
+        step: 1,
+        delegationId: null,
+      },
+      {
+        taskId: 't-2',
+        kind: 'payroll_run',
+        transactionId: 'bt-2',
+        ownerEmployeeId: null,
+        ownerEmployeeCode: null,
+        ownerName: null,
+        assignedAt: '2026-11-03T05:00:00Z',
+        assigneeUserId: 'u-del',
+        assigneeAccountKey: 'syn.delegate',
+        step: 1,
+        delegationId: 'd-1',
+      },
+    ],
+  };
+  const ROUTING = { items: [] };
+
+  it('FR-003, FR-068: lists the tasks nobody can decide and reroutes one with a reason; the rule picks the reviewer, never the caller', async () => {
+    session.permissions = ['workflow.manage.operational', 'workflow.reroute_task.operational'];
+    let listed = 0;
+    const calls = mockApi({
+      'GET /v1/workflows/stranded-tasks': new Reply(() => [200, listed++ === 0 ? STRANDED : { items: [STRANDED.items[1]] }]),
+      'POST /v1/workflows/tasks/t-1/reroute': { taskId: 't-9', supersededTaskId: 't-1', assigneeUserId: 'u-new' },
+      'GET /v1/workflows': ROUTING,
+    });
+    renderPage(<RoutingPage />);
+    const table = await screen.findByRole('table', { name: 'Stranded tasks' });
+    const first = within(table).getByText('SYN-001 Asha Synthetic').closest('tr') as HTMLElement;
+    expect(first.textContent).toContain('leave request, step 1');
+    expect(first.textContent).toContain('syn.former.manager');
+    const second = within(table).getByText('No employee (company-wide)').closest('tr') as HTMLElement;
+    expect(within(second).getByText('delegated')).toBeTruthy();
+    const reroute = within(first).getByRole('button', { name: 'Reroute the task of SYN-001 Asha Synthetic' }) as HTMLButtonElement;
+    // A reason is required; no reviewer is offered to choose.
+    expect(reroute.disabled).toBe(true);
+    expect(within(first).queryByRole('combobox')).toBeNull();
+    fireEvent.change(within(first).getByLabelText('Reason to reroute the task of SYN-001 Asha Synthetic'), { target: { value: 'Former manager left (synthetic)' } });
+    fireEvent.click(reroute);
+    expect(await screen.findByText(/The leave request task of SYN-001 was rerouted: a new task went to the reviewer its step now selects/)).toBeTruthy();
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([{ url: '/v1/workflows/tasks/t-1/reroute', method: 'POST', body: { reason: 'Former manager left (synthetic)' } }]);
+    // The list is read again: the rerouted task is no longer stranded.
+    await waitFor(() => expect(screen.queryByText('SYN-001 Asha Synthetic')).toBeNull());
+  });
+
+  it('FR-003: explains a refusal, offers no reroute without the duty, and reads nothing without routing administration', async () => {
+    session.permissions = ['workflow.manage.operational', 'workflow.reroute_task.operational'];
+    mockApi({
+      'GET /v1/workflows/stranded-tasks': STRANDED,
+      'POST /v1/workflows/tasks/t-1/reroute': new Reply(() => [409, { error: 'TASK_NOT_STRANDED', message: 'The current assignee can still decide this task' }]),
+      'GET /v1/workflows': ROUTING,
+    });
+    renderPage(<RoutingPage />);
+    const table = await screen.findByRole('table', { name: 'Stranded tasks' });
+    fireEvent.change(within(table).getByLabelText('Reason to reroute the task of SYN-001 Asha Synthetic'), { target: { value: 'Synthetic' } });
+    fireEvent.click(within(table).getByRole('button', { name: 'Reroute the task of SYN-001 Asha Synthetic' }));
+    expect(await screen.findByText('The current assignee can still decide this task (TASK_NOT_STRANDED)')).toBeTruthy();
+    cleanup();
+
+    session.permissions = ['workflow.manage.operational'];
+    mockApi({ 'GET /v1/workflows/stranded-tasks': STRANDED, 'GET /v1/workflows': ROUTING });
+    renderPage(<RoutingPage />);
+    const readOnly = await screen.findByRole('table', { name: 'Stranded tasks' });
+    expect(within(readOnly).queryByRole('button', { name: /Reroute/ })).toBeNull();
+    expect(screen.getByText(/The selected role cannot reroute tasks\./)).toBeTruthy();
+    cleanup();
+
+    session.permissions = [];
+    const calls = mockApi({ 'GET /v1/workflows/stranded-tasks': STRANDED, 'GET /v1/workflows': ROUTING });
+    renderPage(<RoutingPage />);
+    await waitFor(() => expect(calls.some((c) => c.url === '/v1/workflows')).toBe(true));
+    expect(calls.some((c) => c.url === '/v1/workflows/stranded-tasks')).toBe(false);
+    expect(screen.queryByRole('heading', { name: 'Stranded tasks' })).toBeNull();
+  });
+});
+
 describe('mobile-app link review (FR-023)', () => {
   it('approves with the row version and needs a reason to revoke', async () => {
     const pending = { id: 'l-1', employeeCode: 'SYN-1', employeeName: 'Synthetic Person', appAccountRef: 'app-1', state: 'PENDING', replacesLinkId: 'l-0', version: 3, requestedAt: '2026-10-24T05:00:00Z' };

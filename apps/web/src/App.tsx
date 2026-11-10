@@ -1,5 +1,6 @@
-import type { ComponentType } from 'react';
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { type ComponentType, useEffect, useState } from 'react';
+import { NavLink, Navigate, Route, Routes, matchPath, useLocation } from 'react-router-dom';
+import { groupIcon, Icon, navIcon } from './icons';
 import { useSession } from './session';
 import { AccessAdminPage } from './pages/access';
 import { AuditTrailPage, MobileLinkReviewPage, RetentionPage, RoutingPage } from './pages/admin';
@@ -131,61 +132,188 @@ export function visibleModuleGroups(can: (permission: string) => boolean): { lab
   return [...groups].map(([label, screens]) => ({ label, screens }));
 }
 
+/** Where a path sits in the menu: its module group (none for the core pages) and its title, for the breadcrumb and the window title. */
+export function pageOf(pathname: string): { group: string | null; title: string } {
+  const core = NAV.find((n) => n.to === pathname);
+  if (core) return { group: null, title: core.label };
+  const screen = MODULE_SCREENS.find((s) => matchPath({ path: s.path, end: true }, pathname));
+  if (screen) return { group: moduleGroupOf(screen.path), title: screen.title };
+  if (matchPath('/team/:id', pathname)) return { group: 'My team', title: 'Team member' };
+  if (matchPath('/employees/:id/documents', pathname)) return { group: 'Employees', title: 'Documents' };
+  return { group: null, title: 'HRMS' };
+}
+
+const OPEN_GROUPS_KEY = 'hrms.nav.groups';
+function loadGroupChoices(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_GROUPS_KEY) ?? '{}') as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The menu: the core pages, then the module groups. A group opens by itself when the current page is in it; the user can open or
+ * close any group, and that choice is remembered on this device (a convenience only: nothing depends on it).
+ */
+function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () => void }) {
+  const { me, can } = useSession();
+  const entries = visibleNav(can, me ?? null);
+  const groups = visibleModuleGroups(can);
+  const activeGroup = groups.find((g) => g.screens.some((s) => matchPath({ path: s.path, end: true }, pathname)))?.label ?? null;
+  const [choices, setChoices] = useState<Record<string, boolean>>(loadGroupChoices);
+  const isOpen = (label: string) => choices[label] ?? label === activeGroup;
+  const toggle = (label: string) => {
+    const next = { ...choices, [label]: !isOpen(label) };
+    setChoices(next);
+    try {
+      localStorage.setItem(OPEN_GROUPS_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable: the choice lasts for this page only */
+    }
+  };
+  return (
+    <nav className="sidebar" aria-label="Main">
+      {entries.length > 0 && (
+        <div className="nav-section">
+          <p className="nav-section-title">Workspace</p>
+          {entries.map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.to === '/' || n.to === '/me'} onClick={onNavigate}>
+              <Icon name={navIcon(n.to)} />
+              <span>{n.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      )}
+      {groups.length > 0 && (
+        <div className="nav-section">
+          <p className="nav-section-title">Modules</p>
+          {groups.map((g) => {
+            const open = isOpen(g.label);
+            return (
+              <div key={g.label} className={`nav-group${open ? ' open' : ''}${g.label === activeGroup ? ' current' : ''}`} role="group" aria-label={g.label}>
+                <button type="button" className="nav-group-toggle" aria-expanded={open} onClick={() => toggle(g.label)}>
+                  <Icon name={groupIcon(g.label)} />
+                  <span className="nav-group-label">{g.label}</span>
+                  <span className="nav-count" aria-hidden="true">
+                    {g.screens.length}
+                  </span>
+                  <Icon name="chevron" size={15} className="chevron" />
+                </button>
+                {open && (
+                  <div className="nav-group-items">
+                    {g.screens.map((s) => (
+                      <NavLink key={s.path} to={s.path} end onClick={onNavigate}>
+                        {s.title}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </nav>
+  );
+}
+
+const initialsOf = (name: string) =>
+  name
+    .replace(/@.*/, '')
+    .split(/[\s._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('') || '?';
+
 export function App() {
-  const { stored, me, can, switchRole, signOut } = useSession();
+  const { stored, me, switchRole, signOut } = useSession();
+  const { pathname } = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const page = pageOf(pathname);
+  useEffect(() => {
+    document.title = page.title === 'HRMS' ? 'HRMS' : `${page.title} · HRMS`;
+  }, [page.title]);
   if (!stored) return <SignInPage />;
   if (!stored.companyId || !stored.assignmentId) return <SelectRolePage />;
 
+  const name = me ? (me.displayName ?? me.accountKey) : '';
   return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="brand">HRMS</div>
-        {/* FR-096: the acting role and its scope are always visible. */}
-        <div className="context" aria-label="Current role">
-          {me ? (
-            <>
-              <strong>{me.displayName ?? me.accountKey}</strong> · {me.companyName} · {me.roleName} <span className="hint">(scope {me.scopeKind.toLowerCase()})</span>
-            </>
-          ) : (
-            'Loading…'
-          )}
-        </div>
-        <button className="secondary" onClick={switchRole}>
-          Switch role
-        </button>
-        <button className="secondary" onClick={() => void signOut()}>
-          Sign out
-        </button>
-      </header>
-      <nav className="sidebar" aria-label="Main">
-        {visibleNav(can, me ?? null).map((n) => (
-          <NavLink key={n.to} to={n.to} end={n.to === '/' || n.to === '/me'}>
-            {n.label}
-          </NavLink>
-        ))}
-        {visibleModuleGroups(can).map((g) => (
-          <div key={g.label} className="nav-group" role="group" aria-label={g.label}>
-            <p className="nav-group-title">{g.label}</p>
-            {g.screens.map((s) => (
-              <NavLink key={s.path} to={s.path} end>
-                {s.title}
-              </NavLink>
-            ))}
+    <div className={`shell${menuOpen ? ' menu-open' : ''}`}>
+      <aside className="side">
+        <div className="side-brand">
+          <span className="brand-mark" aria-hidden="true" />
+          <div className="brand-text">
+            <span className="brand">HRMS</span>
+            <span className="brand-company">{me?.companyName ?? ''}</span>
           </div>
-        ))}
-      </nav>
-      <main className="content">
-        <Routes>
-          {CORE_ROUTES.map((r) => (
-            <Route key={r.path} path={r.path} element={<r.component />} />
-          ))}
-          {/* Wave-2 module screens (screens-registry.ts); each screen re-checks its permissions and the server re-checks every call. */}
-          {MODULE_SCREENS.map((s) => (
-            <Route key={s.path} path={s.path} element={<s.component />} />
-          ))}
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
-      </main>
+        </div>
+        <Sidebar pathname={pathname} onNavigate={() => setMenuOpen(false)} />
+      </aside>
+      {menuOpen && <div className="scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
+      <div className="main-col">
+        <header className="topbar">
+          <button type="button" className="icon-button menu-toggle" aria-label="Menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
+            <Icon name="menu" size={20} />
+          </button>
+          <nav className="crumbs" aria-label="Breadcrumb">
+            {page.group && (
+              <>
+                <span className="crumb">{page.group}</span>
+                <Icon name="chevron" size={14} className="crumb-sep" />
+              </>
+            )}
+            <span className="crumb current" aria-current="page">
+              {page.title}
+            </span>
+          </nav>
+          <div className="topbar-actions">
+            {/* FR-096: the acting role and its scope are always visible. */}
+            <div className="role-chip" aria-label="Current role">
+              {me ? (
+                <>
+                  <span className="role-name">{me.roleName}</span>
+                  <span className="role-meta">
+                    {me.companyName} · scope {me.scopeKind.toLowerCase()}
+                  </span>
+                </>
+              ) : (
+                'Loading…'
+              )}
+            </div>
+            <button type="button" className="ghost" aria-label="Switch role" title="Switch role" onClick={switchRole}>
+              <Icon name="swap" size={16} />
+              <span>Switch role</span>
+            </button>
+            <NavLink to="/inbox" className="icon-button" aria-label="Notifications" title="Notifications">
+              <Icon name="bell" size={19} />
+            </NavLink>
+            <div className="user-chip" title={me?.accountKey ?? ''}>
+              <span className="avatar" aria-hidden="true">
+                {initialsOf(name)}
+              </span>
+              <span className="user-name">{name}</span>
+            </div>
+            <button type="button" className="ghost" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>
+              <Icon name="logOut" size={16} />
+              <span>Sign out</span>
+            </button>
+          </div>
+        </header>
+        <main className="content">
+          <Routes>
+            {CORE_ROUTES.map((r) => (
+              <Route key={r.path} path={r.path} element={<r.component />} />
+            ))}
+            {/* Wave-2 module screens (screens-registry.ts); each screen re-checks its permissions and the server re-checks every call. */}
+            {MODULE_SCREENS.map((s) => (
+              <Route key={s.path} path={s.path} element={<s.component />} />
+            ))}
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </main>
+      </div>
     </div>
   );
 }

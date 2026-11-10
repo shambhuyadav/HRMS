@@ -22,8 +22,10 @@ export const documentsRegistration: ModuleRegistration = {
   active: true,
   roleGrants: {
     HR_ADMINISTRATOR: {
-      defaultDuties: [READ, 'company_policy.manage.operational'],
-      ceiling: ['company_policy.read.confidential', 'company_policy.manage.confidential'],
+      // CL-150 (0261): the mandatory document types are company configuration HR keeps (operational). The compliance report shows
+      // who lacks which confidential document, so it is a confidential export right, ceiling only (BR-045).
+      defaultDuties: [READ, 'company_policy.manage.operational', 'document_requirement.read.operational', 'document_requirement.manage.operational'],
+      ceiling: ['company_policy.read.confidential', 'company_policy.manage.confidential', 'document_compliance.export.document'],
     },
     REPORTING_MANAGER: { defaultDuties: [READ], ceiling: ['company_policy.read.confidential'] },
     SYSTEM_ADMINISTRATOR: reader,
@@ -39,7 +41,10 @@ export const documentsRegistration: ModuleRegistration = {
     TRAINING_COORDINATOR: reader,
     AUDITOR: reader,
   },
-  operationalFieldGroups: [{ resource: 'company_policy', fieldGroup: 'operational' }],
+  operationalFieldGroups: [
+    { resource: 'company_policy', fieldGroup: 'operational' },
+    { resource: 'document_requirement', fieldGroup: 'operational' },
+  ],
   notifications: [
     {
       // Which policy version expires and when; never the file name or content.

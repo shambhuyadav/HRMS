@@ -59,8 +59,10 @@ export async function workflowRoutes(app: FastifyInstance, opts: { db: Database 
     return strandedTasks(db, grant);
   });
 
-  // C4 "owner-approved rerouting creates new task with history". The permission is in no role's ceiling until the owner
-  // decides who approves a reroute, so this answers 403 for everyone today.
+  // C4 "owner-approved rerouting creates new task with history". Decided under owner delegation (docs/03 I-84 item 1; 0200):
+  // workflow.reroute_task is a ceiling and default duty of the HR Administrator only, within row scope (a task with no employee
+  // owner needs unrestricted company scope); the step's rule picks the new reviewer, never the caller, and nobody reroutes
+  // their own request. Shown on the approval routing screen's "Stranded tasks" panel.
   app.post(
     '/workflows/tasks/:id/reroute',
     {

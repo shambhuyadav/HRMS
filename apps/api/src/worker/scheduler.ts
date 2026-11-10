@@ -5,6 +5,8 @@
 //   scans         (with a file store and a scanner) beside the company loop: up to SCAN_PER_TICK due uploads, one per company in
 //                 turn, retried with backoff up to an attempt limit (storage/scan.ts). Uploads never wait for the scanner (NFR-S09).
 //   reports       beside the company loop: up to REPORTS_PER_TICK, one per company in turn (processReportQueue).
+//   emails        beside the company loop, after the relay's first pass: due email notices, one per company in turn, sent only by
+//                 the worker and only with SMTP settings; without them every open email is settled SUPPRESSED (email-delivery.ts).
 //   bulk jobs     up to BULK_CHUNKS_PER_TICK chunks (NFR-S09), each chunk transaction under the bulk statement budget
 //                 (bulkChunkBudget), not the API's interactive one.
 //   company loop  every active company in turn, its due runs only. Times are company-local:
@@ -29,7 +31,9 @@ import type { ProviderRegistry } from '../modules/biometric/routes.js';
 import { runSync } from '../modules/biometric/sync.js';
 import { failureCode, RETRY_MINUTES } from '../modules/bulk/retry.js';
 import { runBulkJobs } from '../modules/bulk/service.js';
+import type { EmailChannel } from '../mail/config.js';
 import { dispatchOutbox, runCelebrations } from '../modules/notification/dispatcher.js';
+import { deliverDueEmails } from '../modules/notification/email-delivery.js';
 import { runDocumentExpiry, runReminders } from '../modules/notification/reminders.js';
 import { processReportQueue } from '../modules/report/service.js';
 import { MODULE_DAILY_JOBS } from '../modules/jobs-registry.js';
@@ -51,6 +55,8 @@ export interface SchedulerDeps {
   scan?: ScanSettings;
   /** Relay and lease values; workerSettings() when absent. */
   settings?: WorkerSettings;
+  /** FR-085 email channel (mail/config.ts emailChannelFromEnv); absent or OFF: nothing is sent and open emails are settled SUPPRESSED. */
+  email?: EmailChannel | null;
 }
 
 /**
@@ -291,6 +297,7 @@ export async function runScheduledJobs(deps: SchedulerDeps, at: Date = new Date(
   // company none of them. Started here, outside the bulk scope below, so they keep the pool's statement defaults.
   const scanning = settle(async () => (deps.files && deps.scanner ? scanDueAttachments(db, deps.files, deps.scanner, deps.scan ?? scanSettings()) : null));
   const reporting = settle(() => processReportQueue(db, REPORTS_PER_TICK));
+  const emailing = settle(() => deliverDueEmails(db, deps.email));
   // Queued bulk jobs (attendance processing, leave accrual, increment review openings), bounded per tick. A failure here is reported at the end of
   // the tick and never holds back the company loop or the queues.
   const bulk = await settle(() => runInScope(newScope(deps.bulkBudget ?? bulkChunkBudget()), () => runBulkJobs(db, BULK_CHUNKS_PER_TICK)));
@@ -319,13 +326,14 @@ export async function runScheduledJobs(deps: SchedulerDeps, at: Date = new Date(
       if (!company.ok) companyFailures.push(company.error);
     }
   });
-  const [scanned, reported] = [await scanning, await reporting];
+  const [scanned, reported, emailed] = [await scanning, await reporting, await emailing];
   const relayed = await relay.stop();
   if (!bulk.ok) throw bulk.error;
   if (!loop.ok) throw loop.error;
   if (companyFailures.length > 0) throw companyFailures[0];
   if (!scanned.ok) throw scanned.error;
   if (!reported.ok) throw reported.error;
+  if (!emailed.ok) throw emailed.error;
   if (relayed.failure) throw relayed.failure.error;
-  return { ran, dispatched: relayed.dispatched, reports: reported.value, bulkChunks: bulk.value, scans: scanned.value };
+  return { ran, dispatched: relayed.dispatched, reports: reported.value, bulkChunks: bulk.value, scans: scanned.value, emails: emailed.value };
 }

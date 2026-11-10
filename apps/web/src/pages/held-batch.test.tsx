@@ -79,6 +79,7 @@ const byTitle = (routes: readonly { title: string; component: ComponentType }[],
 const SCREENS: { name: string; base: string; file: string; submit: RegExp; Screen: () => ComponentType }[] = [
   { name: 'salary master', base: '/v1/salary-master/imports', file: 'Salary file', submit: /^Validate$/, Screen: () => screenAt(SALARY_SCREENS, '/salary-master/upload') },
   { name: 'loan requests', base: '/v1/payroll-outputs/loan-imports', file: 'Loan requests file', submit: /^Validate$/, Screen: () => screenAt(PAYROLL_SCREENS, '/payroll/loans/upload') },
+  { name: 'salary stops', base: '/v1/payroll/salary-stop-imports', file: 'Salary stops file', submit: /^Validate$/, Screen: () => screenAt(PAYROLL_SCREENS, '/payroll/holds/stop-upload') },
   { name: 'employee imports', base: '/v1/employees/imports', file: 'Import file', submit: /^Validate$/, Screen: () => ImportsPage },
   { name: 'punch imports', base: '/v1/attendance/punch-imports', file: 'Import file', submit: /^Validate$/, Screen: () => PunchImportsPage },
   { name: 'settlement lines', base: '/v1/settlements/line-imports', file: 'Settlement lines file for several settlements (CSV)', submit: /^Validate$/, Screen: () => byTitle(LIFECYCLE_DOCUMENTS_SCREENS, 'Full and final settlements') },

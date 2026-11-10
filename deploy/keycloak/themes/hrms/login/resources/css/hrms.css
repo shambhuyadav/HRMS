@@ -151,6 +151,64 @@ a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--hrms-accent-hover); }
 .pf-v5-c-button.pf-m-secondary:hover::after { border-color: var(--hrms-accent) !important; }
 :focus-visible { outline: 3px solid rgba(231, 76, 60, 0.45); outline-offset: 2px; }
 
+/* Wide screens: the same split layout as the web app's sign-in (apps/web/src/pages/auth.tsx) — a dark brand panel with the product's
+   line on the left, the card on the right. Made with CSS only, so Keycloak's own page templates stay untouched. */
+@media (min-width: 920px) {
+  .pf-v5-c-login {
+    position: relative;
+    display: grid !important;
+    grid-template-columns: minmax(340px, 1fr) minmax(440px, 1fr);
+    align-items: center;
+    min-height: 100vh;
+    padding: 0 !important;
+  }
+  .pf-v5-c-login::before {
+    content: 'Hire-to-retire HR and payroll, in one place.';
+    grid-row: 1;
+    grid-column: 1;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    padding: 0 3rem;
+    color: #fff;
+    font-size: 2.1rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    background: radial-gradient(circle at 12% 12%, rgba(231, 76, 60, 0.38), transparent 45%),
+      radial-gradient(circle at 88% 88%, rgba(63, 127, 202, 0.32), transparent 45%), #121519;
+  }
+  .pf-v5-c-login::after {
+    content: 'Secure sign-in \00B7  Two-step verification \00B7  Your data stays on your company\2019s server';
+    position: absolute;
+    left: 3rem;
+    bottom: 2rem;
+    max-width: calc(50% - 6rem);
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+  }
+  .pf-v5-c-login__container {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: center;
+    width: 100%;
+    max-width: 30rem;
+    padding: 2rem 1.5rem;
+    /* Not a positioning box, so the name below is placed against the whole page (the brand panel), not against the card. */
+    position: static !important;
+  }
+  /* The product name moves to the brand panel's top-left corner, in white. */
+  /* Fixed to the window: Keycloak's layout leaves no ancestor that reliably frames the page, and the sign-in page does not scroll. */
+  .pf-v5-c-login__header {
+    position: fixed !important;
+    inset: 2.25rem auto auto 3rem !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    text-align: left;
+  }
+  #kc-header-wrapper { color: #fff !important; font-size: 1.4rem; }
+}
+
 /* Check boxes, radio buttons and the authenticator set-up steps. */
 input[type='checkbox'], input[type='radio'] { accent-color: var(--hrms-accent); }
 #kc-totp-secret-qr-code { border: 1px solid var(--hrms-line); border-radius: 10px; padding: 0.5rem; background: #fff; }

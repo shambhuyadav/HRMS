@@ -127,18 +127,21 @@ describe('import and message actions (BR-027)', () => {
     expect(await employeesNamed([good, bad])).toBe(0);
   });
 
-  it('BR-027: no recipient rule is confirmed, so sending stays disabled: the send action refuses and tells nobody', async () => {
+  // Since 0185 (I-81 item 9) sending is in-app delivery to the letter's own employee and a right of its own (letter.send.letter);
+  // lifecycle/letters.api.test.ts covers the delivery itself. Reading letters does not include sending, and a refused send tells nobody.
+  it('BR-027: sending is a right of its own: reading letters does not include it, and the refused send tells nobody', async () => {
     const letters = await h.actor(A, 'HR_ADMINISTRATOR', { extra: ['letter.read.letter'] });
     const before = await h.one<{ outbox: number; notifications: number }>(
       `select (select count(*)::int from outbox_event where company_id = $1) as outbox, (select count(*)::int from notification where company_id = $1) as notifications`,
       [A.id],
     );
-    const res = await h.call(letters, 'POST', '/v1/letter-outputs/00000000-0000-4000-8000-000000000123/send');
-    expect([res.statusCode, res.json().error]).toEqual([422, 'SENDING_NOT_AVAILABLE']);
+    const body = { recipientEmployeeId: '00000000-0000-4000-8000-000000000456' };
+    const res = await h.call(letters, 'POST', '/v1/letter-outputs/00000000-0000-4000-8000-000000000123/send', body);
+    expect(res.statusCode).toBe(403);
     expect(
       await h.one<{ outbox: number; notifications: number }>(`select (select count(*)::int from outbox_event where company_id = $1) as outbox, (select count(*)::int from notification where company_id = $1) as notifications`, [A.id]),
     ).toEqual(before);
     // Without the letter grant the action is not even reached.
-    expect((await h.call(hr, 'POST', '/v1/letter-outputs/00000000-0000-4000-8000-000000000123/send')).statusCode).toBe(403);
+    expect((await h.call(hr, 'POST', '/v1/letter-outputs/00000000-0000-4000-8000-000000000123/send', body)).statusCode).toBe(403);
   });
 });

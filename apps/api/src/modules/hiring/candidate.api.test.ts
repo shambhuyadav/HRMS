@@ -315,7 +315,8 @@ describe.runIf(isModuleActive('hiring'))('hiring: candidates and applications', 
       expect(await HIRING_METRICS.APPROVED_REQUISITIONS!(h.db, grant)).toEqual({ status: 'OK', value: t.vacancies.length });
       expect(await HIRING_METRICS.OPEN_PIPELINE_APPLICATIONS!(h.db, grant)).toEqual({ status: 'OK', value: 1 });
       expect(await HIRING_METRICS.OFFERS_AWAITING_APPROVAL!(h.db, grant)).toEqual({ status: 'OK', value: 0 });
-      expect(await HIRING_METRICS.INTERVIEW_TASKS_DUE!(h.db, grant)).toEqual({ status: 'NOT_AVAILABLE' });
+      // I-92 (0245): interview tasks are the viewer's own applications at the interview stage; none of the recruiter's is there.
+      expect(await HIRING_METRICS.INTERVIEW_TASKS_DUE!(h.db, grant)).toEqual({ status: 'OK', value: 0 });
       expect(await pipelineStageCounts(h.db, grant)).toEqual({ REJECTED: 1, SCREENING: 1 });
     });
 

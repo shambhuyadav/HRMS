@@ -177,8 +177,9 @@ describe('Recruiter (F2; FR-096; BR-045)', () => {
   });
 
   it('approved requisitions, open pipeline and offers awaiting review are the records made, and equal their lists', async () => {
-    await expectWidgets(recruiter, { APPROVED_REQUISITIONS: 3, PIPELINE: 3, OFFERS_AWAITING: 1 });
-    expect((await dashboardOf(recruiter)).byCode.INTERVIEWS_DUE).toMatchObject({ status: 'NOT_AVAILABLE' });
+    // I-92 (0245): "Interview tasks due" is now the viewer's own applications at the interview stage, equal to its list. The one
+    // application that reached the interview stage here moved on to an offer, so none is waiting.
+    await expectWidgets(recruiter, { APPROVED_REQUISITIONS: 3, PIPELINE: 3, OFFERS_AWAITING: 1, INTERVIEWS_DUE: 0 });
   });
 
   it('a department filter narrows every number, and a record outside it does not move them', async () => {
@@ -324,9 +325,9 @@ describe('payment widgets (F2 Treasury Operator, Treasury Approver; DF07; BR-045
   // reversal: an outstanding amount and no live reservation) plus the one draft not yet marked ready. Released, ready and paid
   // claims hold a reservation or nothing outstanding, so they are not counted.
   it('Treasury Operator: awaiting outcome, failed and payment preparation are the records made, and equal their source lists', async () => {
-    await expectWidgets(operator, { AWAITING_OUTCOME: 2, FAILED: 3, MY_TASKS: 5 });
-    const { byCode } = await dashboardOf(operator);
-    expect(byCode.RECONCILE).toMatchObject({ status: 'NOT_AVAILABLE' });
+    // I-92 (0245): RECONCILE counts payments still holding a reservation after their payment date (prepared, drafted or released
+    // without an outcome): the two ready ones and the draft dated in the past. Those released today are not yet past their date.
+    await expectWidgets(operator, { AWAITING_OUTCOME: 2, FAILED: 3, MY_TASKS: 5, RECONCILE: 3 });
   });
 
   it('Treasury Operator: a department filter counts its own people only', async () => {
@@ -409,7 +410,12 @@ describe('Finance Reviewer and Expense Finance Approver (F2; DF02; DF17; BR-045)
 
     const { byCode, body } = await dashboardOf(sameUser);
     expect((await h.call(sameUser, 'GET', '/v1/expense/tasks')).statusCode).toBe(403);
-    for (const code of ['RECONCILIATION_TASKS', 'UNRECONCILED_OUTCOMES', 'EXPENSE_STATES']) expect(byCode[code], code).toMatchObject({ status: 'NOT_AVAILABLE' });
+    // I-92 (0245): the reconciliation figures and operational states are now counted over the claims in scope and equal their
+    // claim-state lists (none of these claims has a payment yet).
+    for (const code of ['RECONCILIATION_TASKS', 'UNRECONCILED_OUTCOMES', 'EXPENSE_STATES']) {
+      expect(byCode[code], code).toMatchObject({ status: 'OK' });
+      expect(await fromSource(sameUser, byCode[code]!), `${code} against its source list`).toEqual(byCode[code]!.value);
+    }
     for (const marker of [AMOUNT, 'Widget Marker']) expect(body, marker).not.toContain(marker);
   });
 
@@ -434,7 +440,10 @@ describe('Finance Reviewer and Expense Finance Approver (F2; DF02; DF17; BR-045)
       expect(res.statusCode, res.body).toBe(200);
       const items = res.json().items as Record<string, unknown>[];
       expect(items).toHaveLength(4);
-      for (const item of items) expect(Object.keys(item).sort()).toEqual(['claimId', 'claimantEmployeeCode', 'claimantName', 'lateOrReceiptException', 'revision', 'state', 'updatedAt']);
+      // I-92 (0245) added the operational payment state and the final decision's due date (dates and states only, no amount).
+      for (const item of items) {
+        expect(Object.keys(item).sort()).toEqual(['claimId', 'claimantEmployeeCode', 'claimantName', 'decisionDueOn', 'lateOrReceiptException', 'paymentState', 'revision', 'state', 'updatedAt']);
+      }
       expect(items.filter((i) => i.lateOrReceiptException)).toHaveLength(2);
       // Purpose, merchant, the clearance reasons and the receipt file never travel (the claimant's own name does).
       for (const marker of [AMOUNT, 'Widget Marker', 'Late, synthetic', 'No receipt, synthetic', 'r.pdf', 'INR']) expect(res.body.toLowerCase(), marker).not.toContain(marker.toLowerCase());
@@ -478,8 +487,9 @@ describe('Finance Reviewer and Expense Finance Approver (F2; DF02; DF17; BR-045)
     const otherUser = await h.actor(c, 'EXPENSE_FINANCE_APPROVER');
     expect(await h.one<{ scope_kind: string }>(`select scope_kind from role_assignment where id = $1`, [otherUser.assignment])).toEqual({ scope_kind: 'COMPANY' });
     const w = await queued(c, decider);
-    for (const a of [sameUser, otherUser]) await expectWidgets(a, { FINAL_DECISIONS: 4, LATE_RECEIPT: 2, RETURNED: 0 });
-    expect((await dashboardOf(otherUser)).byCode.DECISIONS_DUE).toMatchObject({ status: 'NOT_AVAILABLE' });
+    // I-92 (0245): "Decision due" counts claims whose final decision falls due today or earlier, 5 business days (the dated
+    // reporting setting) after they reached the financial step; these arrived today, so none is due yet.
+    for (const a of [sameUser, otherUser]) await expectWidgets(a, { FINAL_DECISIONS: 4, LATE_RECEIPT: 2, RETURNED: 0, DECISIONS_DUE: 0 });
 
     // The finance step returns one: a claim fewer waiting, a return more. A return by the manager is not a financial-step return.
     const fin = ((await h.call(decider, 'GET', '/v1/expense/tasks')).json().items as { taskId: string; ownerEmployeeId: string }[]).find((t) => t.ownerEmployeeId === w.finEmployee)!;

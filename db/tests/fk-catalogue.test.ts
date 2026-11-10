@@ -15,6 +15,7 @@ const GLOBAL_TABLES: Record<string, string> = {
   user_account: 'a global root (BRD line 2800)',
   permission: 'a global root (BRD line 2800)',
   user_session: 'belongs to a global user_account (DF10)',
+  user_external_identity: 'links a global user_account to its sign-in provider identity (ADR-06; 0244)',
   currency: 'ISO 4217 reference shared by every company (0145)',
   schema_migration: 'migration bookkeeping',
   transaction_kind: 'the shared transaction catalogue (0002)',

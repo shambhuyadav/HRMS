@@ -155,6 +155,8 @@ interface DecisionRecord {
   reason: string | null;
   decidedAt: string;
   decidedBy: UserRef;
+  /** I-57 item 7: the delegator a delegate decided for (null when decided in the decider's own right). */
+  onBehalfOf?: UserRef | null;
 }
 
 interface PendingWith {
@@ -1085,7 +1087,10 @@ function DecisionTable({ decisions, myUserId }: { decisions: DecisionRecord[]; m
               <td>{d.revision}</td>
               <td>{stepText(d.step, d.action)}</td>
               <td>{DECISION_LABEL[d.decision] ?? readable(d.decision)}</td>
-              <td>{userLabel(d.decidedBy, myUserId)}</td>
+              <td>
+                {userLabel(d.decidedBy, myUserId)}
+                {d.onBehalfOf && <span className="hint">{` on behalf of ${userLabel(d.onBehalfOf, myUserId)}`}</span>}
+              </td>
               <td>
                 <When at={d.decidedAt} />
               </td>
@@ -1494,7 +1499,8 @@ function RequisitionDetailView({ id }: { id: string }) {
             )}
             {returned && (
               <p role="note">
-                Returned for changes by {userInSentence(returned.decidedBy, myUserId)} on <When at={returned.decidedAt} />
+                Returned for changes by {userInSentence(returned.decidedBy, myUserId)}
+                {returned.onBehalfOf ? ` on behalf of ${userInSentence(returned.onBehalfOf, myUserId)}` : ''} on <When at={returned.decidedAt} />
                 {returned.reason ? `: ${returned.reason}` : '.'}
               </p>
             )}

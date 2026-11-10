@@ -9,7 +9,7 @@
 //
 // A changed reporting line or scope (C4 "Changed organisation or manager"): a task never moves by itself. It stays with
 // its assignee, who neither sees nor decides it while the owner is outside their current row scope, until a reroute
-// (rerouteTask) supersedes it with a new task. Who may reroute is an owner decision (permission in no role's ceiling).
+// (rerouteTask) supersedes it with a new task. Who may reroute: the HR Administrator's workflow.reroute_task (I-84 item 1; 0200).
 //
 // Delegation (FR-003, FR-068, DF03, DB018, C4 "Delegated task", CI10): a step selected for a reviewer who has a live
 // delegation of the step's permission goes to the delegate with delegation_id, one hop only, when the delegate is
@@ -268,6 +268,25 @@ async function createTask(tx: Queryable, companyId: string, instanceId: string, 
     )
   ).rows[0]!.id;
 }
+
+/**
+ * C4 "Preserve delegator, delegate and actual actor in history" (docs/03 I-57 item 7): the person a decision on task `task` was
+ * taken for. A delegated task (delegation_id set) is decided only by its delegate, in the delegator's name, so a decision history
+ * names the delegator beside the actor: { userId, employeeCode, displayName } as linked on the decision's company-local date
+ * (`decision` is the approval_decision alias), or null for a decision in the actor's own right. Operational identity only.
+ */
+export const decidedOnBehalfOf = (task: string, decision: string) => `(case when ${task}.delegation_id is null then null else (
+    select json_build_object('userId', obd.delegator_user_id, 'employeeCode', obe.employee_code, 'displayName', obe.display_name)
+      from delegation obd
+      left join user_employee_link obl on obl.company_id = obd.company_id and obl.user_id = obd.delegator_user_id
+           and obl.effective_from <= hrms_business_date(${decision}.company_id, ${decision}.occurred_at)
+           and (obl.effective_to is null or obl.effective_to > hrms_business_date(${decision}.company_id, ${decision}.occurred_at))
+      left join employee obe on obe.company_id = obl.company_id and obe.id = obl.employee_id
+     where obd.company_id = ${task}.company_id and obd.id = ${task}.delegation_id
+     limit 1) end)`;
+
+/** The delegator's user id of a decision on task `task` taken under a delegation, or null (I-57 item 7). */
+export const decidedOnBehalfOfUser = (task: string) => `(select obd.delegator_user_id from delegation obd where obd.company_id = ${task}.company_id and obd.id = ${task}.delegation_id)`;
 
 /**
  * Who already decided a step of this instance, with the delegator whose authority a delegated decision used: a later step
@@ -728,7 +747,7 @@ export interface RerouteResult {
  * assignee can no longer decide it is SUPERSEDED (kept) and a new task on the same step goes to whoever selection now
  * finds (DF03: the current direct manager, or the fallback list, under the same rule that routed the step). The caller
  * never chooses the reviewer, and a task whose assignee can still decide it is not rerouted. Requires the
- * workflow.reroute_task permission, which is in no role's ceiling until the owner decides who approves a reroute.
+ * workflow.reroute_task permission: a ceiling and default duty of the HR Administrator only (docs/03 I-84 item 1; 0200).
  */
 export async function rerouteTask(tx: Queryable, grant: AccessGrant, taskId: string): Promise<RerouteResult> {
   const located = (

@@ -576,6 +576,8 @@ describe('exports for the navigation step', () => {
       ['/appraisal/ratings', 'Appraisal ratings', RATE, true],
       ['/appraisal/reviews', 'Appraisal reviews', CONFIRM, true],
       ['/appraisal/reports', 'Appraisal reports', REPORT, true],
+      // CL-132 (0262): the bell curve, under the confidential rating report right (appraisal-bell-curve.test.tsx).
+      ['/appraisal/bell-curve', 'Bell curve', 'appraisal.report.rating', true],
       ['/appraisal/goal-upload', 'KRA upload', IMPORT, true],
       // I-86: the result split, competency master and grade mapping (Appraisal Config).
       ['/appraisal/competencies', 'Appraisal competencies', CYCLE_READ, true],
@@ -766,6 +768,19 @@ describe('the register and enrolment (FR-041, FR-044)', () => {
 });
 
 describe('one appraisal (staff view)', () => {
+  it('FR-043, FR-068: a decision a delegate took names the person it was taken for beside the delegate (I-57 item 7)', async () => {
+    const view = fullView() as Obj & { decisions: Obj[] };
+    const forRavi = { userId: U_RAVI_MANAGER, employeeCode: 'SYN-009', displayName: 'Mira Manager' };
+    view.decisions = view.decisions.map((d, i) => (i === 1 ? { ...d, decidedBy: { userId: 'b9000000-0000-4000-8000-000000000009', employeeCode: 'SYN-010', displayName: 'Dev Delegate' }, onBehalfOf: forRavi } : { ...d, onBehalfOf: null }));
+    serve({ [`GET /v1/appraisals/${A_REVIEW}`]: () => [200, view] });
+    renderAt(`/appraisal/appraisals/${A_REVIEW}`, [CYCLE_READ, READ]);
+    const history = await screen.findByRole('table', { name: 'Decision history' });
+    const rows = within(history).getAllByRole('row').slice(1);
+    expect(rows[0]!.textContent).toContain('Mira Manager (SYN-009)');
+    expect(rows[0]!.textContent).not.toContain('on behalf of');
+    expect(rows[1]!.textContent).toContain('Dev Delegate (SYN-010) on behalf of Mira Manager (SYN-009)');
+  });
+
   it('shows the confidential parts only when the API returned them', async () => {
     serve();
     renderAt(`/appraisal/appraisals/${A_REVIEW}`, [CYCLE_READ, READ]);

@@ -1,0 +1,14 @@
+Emp No,Full Name,Official Email,DOJ,Emp Type,Status,Department,Location,Designation,Grade,Reporting To,Shift,PAN,Personal Mobile
+L001,Asha Varghese,asha.varghese@example.invalid,03-04-2023,Permanent,Active,MGMT,MUM,CEO,G4,,General,ZZTEST0001,+00 0000 000001
+L002,Rohit Menon,rohit.menon@example.invalid,15-01-2024,Permanent,Active,ENGG,MUM,ENG-MGR,G3,L001,General,ZZTEST0002,+00 0000 000002
+L003,Kavya Iyer,kavya.iyer@example.invalid,02-06-2025,Permanent,Probation,ENGG,MUM,SW-ENG,G1,L002,General,ZZTEST0003,
+L004,Farhan Qureshi,farhan.qureshi@example.invalid,19-08-2024,Permanent,Active,ENGG,PUN,SR-ENG,G2,L002,General,ZZTEST0004,
+L005,Meenal Joshi,meenal.joshi@example.invalid,01-09-2025,Trainee,Probation,ENGG,PUN,SW-ENG,G1,L002,General,ZZTEST0005,
+L006,Tarun Bhatia,tarun.bhatia@example.invalid,01-11-2023,Permanent,Active,HRD,MUM,HR-MGR,G3,L001,General,ZZTEST0006,
+L007,Sana Kapadia,sana.kapadia@example.invalid,17-03-2025,Contract,Active,HRD,MUM,HR-EXEC,G1,L006,General,ZZTEST0007,
+L008,Vivek Rao,vivek.rao@example.invalid,11-09-2023,Permanent,Active,FINC,MUM,FIN-MGR,G3,L001,General,ZZTEST0008,
+L009,Nisha Pillai,nisha.pillai@example.invalid,06-05-2024,Permanent,Active,FINC,MUM,ACCT,G2,L008,General,ZZTEST0009,
+L010,Arvind Kulkarni,arvind.kulkarni@example.invalid,01-02-2024,Permanent,Active,SALES,PUN,SALES-MGR,G3,L001,General,ZZTEST0010,
+L011,Ritu Saxena,ritu.saxena@example.invalid,13-10-2025,Permanent,Probation,SALES,PUN,SALES-EXEC,G1,L010,General,ZZTEST0011,
+L012,Imran Sheikh,imran.sheikh@example.invalid,04-01-2027,Permanent,Yet to Join,SALES,PUN,SALES-EXEC,G1,L010,General,ZZTEST0012,
+L013,Deepak Chawla,deepak.chawla@example.invalid,07-04-2024,Permanent,Resigned,SALES,MUM,SALES-EXEC,G1,L010,General,ZZTEST0013,

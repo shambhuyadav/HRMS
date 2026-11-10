@@ -64,17 +64,22 @@ export async function bankChecks(db: Queryable, companyId: string, employeeIds: 
   return out;
 }
 
-/** The users who approved the bank-change request a revision came from (they do not also release payment against it). */
+/**
+ * The users who approved the bank-change request a revision came from (they do not also release payment against it), with the
+ * delegator of an approval a delegate took in their name (I-57 item 7).
+ */
 export async function bankRevisionApprovers(db: Queryable, companyId: string, revisionId: string): Promise<string[]> {
   return (
     await db.query<{ u: string }>(
-      `select distinct d.actor_user_id as u
+      `select distinct u
          from employee_private_profile_revision r
          join employee_sensitive_change_request q on q.company_id = r.company_id and q.id = r.source_request_id
          join approval_instance i on i.company_id = q.company_id and i.transaction_id = q.transaction_id
          join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
          join approval_decision d on d.company_id = t.company_id and d.task_id = t.id and d.decision = 'APPROVE'
-        where r.company_id = $1 and r.id = $2`,
+         left join delegation dl on dl.company_id = t.company_id and dl.id = t.delegation_id
+         cross join lateral (values (d.actor_user_id), (dl.delegator_user_id)) as who (u)
+        where r.company_id = $1 and r.id = $2 and u is not null`,
       [companyId, revisionId],
     )
   ).rows.map((r) => r.u);

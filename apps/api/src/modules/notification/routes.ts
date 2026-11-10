@@ -6,7 +6,7 @@ import { HttpError, notFound } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import { SqlParams } from '../access/authorize.js';
 import { DELIVERY_LIST_SELECT, deliveryCondition, type DeliveryFilters, FAILED_EVENT_LIST_SELECT, FAILED_EVENT_STATES, failedEventCondition, type FailedEventFilters, NOTIFICATION_STATES } from './delivery-log.js';
-import { listRuleProposals, listRules, publishRuleRevision, rejectRuleRevision, type RuleRevisionInput, reviseRule } from './rules.js';
+import { type EmailRuleInput, listRuleProposals, listRules, proposeEmailRule, publishRuleRevision, rejectRuleRevision, type RuleRevisionInput, reviseRule } from './rules.js';
 
 const idParams = { type: 'object', required: ['id'], properties: { id: { type: 'string', format: 'uuid' } } } as const;
 
@@ -21,6 +21,7 @@ const preferenceSchema = {
     eventType: { type: 'string', enum: PREFERENCE_EVENTS },
     publishCelebration: { type: 'boolean' },
     receiveOptional: { type: 'boolean' },
+    receiveEmail: { type: 'boolean' },
   },
 } as const;
 
@@ -52,12 +53,12 @@ const failedEventsQuery = {
 export async function notificationRoutes(app: FastifyInstance, opts: { db: Database }): Promise<void> {
   const { db } = opts;
 
-  // The inbox belongs to the user; it needs no selected role but stays company-scoped.
+  // The inbox belongs to the user; it needs no selected role but stays company-scoped. In-app notices only: an email's copy is not a second notice.
   app.get('/me/notifications', { config: { assignmentOptional: true } }, async (request) => {
     const actor = actorOf(request);
     const rows = await db.query<{ id: string; category: string; title: string | null; body: string; occurredAt: string; readAt: string | null }>(
       `select id, category, title, body, occurred_at as "occurredAt", read_at as "readAt"
-         from notification where company_id = $1 and recipient_user_id = $2 and state = 'DELIVERED'
+         from notification where company_id = $1 and recipient_user_id = $2 and state = 'DELIVERED' and channel = 'IN_APP'
         order by occurred_at desc limit 100`,
       [actor.companyId, actor.userId],
     );
@@ -68,42 +69,59 @@ export async function notificationRoutes(app: FastifyInstance, opts: { db: Datab
     const actor = actorOf(request);
     const { id } = request.params as { id: string };
     const res = await db.query(
-      `update notification set read_at = coalesce(read_at, now()), updated_by = $3 where company_id = $1 and id = $2 and recipient_user_id = $3 and state = 'DELIVERED'`,
+      `update notification set read_at = coalesce(read_at, now()), updated_by = $3 where company_id = $1 and id = $2 and recipient_user_id = $3 and state = 'DELIVERED' and channel = 'IN_APP'`,
       [actor.companyId, id, actor.userId],
     );
     if (!res.rowCount) throw notFound();
     return { id, read: true };
   });
 
-  // FR-085: the user's own preferences, with DF12's defaults for an event never saved (publication off, receipt on).
+  // FR-085: the user's own preferences, with DF12's defaults for an event never saved (publication off, receipt on). `receiveEmail` is
+  // receipt by email (0247), which only matters once the company has an email rule in force for the event.
   app.get('/me/notification-preferences', { config: { assignmentOptional: true } }, async (request) => {
     const actor = actorOf(request);
-    const rows = await db.query<{ eventType: string; publishCelebration: boolean; receiveOptional: boolean }>(
-      `select e.event_type as "eventType", coalesce(p.publish_celebration, false) as "publishCelebration", coalesce(p.receive_optional, true) as "receiveOptional"
+    const rows = await db.query<{ eventType: string; publishCelebration: boolean; receiveOptional: boolean; receiveEmail: boolean }>(
+      `select e.event_type as "eventType", coalesce(p.publish_celebration, false) as "publishCelebration", coalesce(p.receive_optional, true) as "receiveOptional",
+              coalesce(m.receive_optional, true) as "receiveEmail"
          from unnest($3::text[]) with ordinality as e (event_type, position)
          left join notification_preference p on p.company_id = $1 and p.user_id = $2 and p.event_type = e.event_type and p.channel = 'IN_APP'
+         left join notification_preference m on m.company_id = $1 and m.user_id = $2 and m.event_type = e.event_type and m.channel = 'EMAIL'
         order by e.position`,
       [actor.companyId, actor.userId, PREFERENCE_EVENTS],
     );
     return { items: rows.rows };
   });
 
-  // DF12: celebration publication is opt-in; optional receipt can be switched off. Mandatory notices cannot.
+  // DF12: celebration publication is opt-in; optional receipt, in-app or by email, can be switched off. Mandatory notices cannot, on either
+  // channel: the dispatcher and the email worker read a preference for optional events only.
   app.put('/me/notification-preferences', { config: { assignmentOptional: true }, schema: { body: preferenceSchema } }, async (request) => {
     const actor = actorOf(request);
-    const body = request.body as { eventType: string; publishCelebration?: boolean; receiveOptional?: boolean };
-    const row = (
-      await db.query(
-        `insert into notification_preference (company_id, user_id, event_type, channel, publish_celebration, receive_optional, created_by, updated_by)
-         values ($1, $2, $3, 'IN_APP', coalesce($4, false), coalesce($5, true), $2, $2)
-         on conflict (company_id, user_id, event_type, channel) do update
-           set publish_celebration = coalesce($4, notification_preference.publish_celebration),
-               receive_optional = coalesce($5, notification_preference.receive_optional), updated_by = $2
-         returning event_type as "eventType", publish_celebration as "publishCelebration", receive_optional as "receiveOptional"`,
-        [actor.companyId, actor.userId, body.eventType, body.publishCelebration ?? null, body.receiveOptional ?? null],
-      )
-    ).rows[0];
-    return row;
+    const body = request.body as { eventType: string; publishCelebration?: boolean; receiveOptional?: boolean; receiveEmail?: boolean };
+    return withTransaction(db, async (tx) => {
+      const row = (
+        await tx.query<{ eventType: string; publishCelebration: boolean; receiveOptional: boolean }>(
+          `insert into notification_preference (company_id, user_id, event_type, channel, publish_celebration, receive_optional, created_by, updated_by)
+           values ($1, $2, $3, 'IN_APP', coalesce($4, false), coalesce($5, true), $2, $2)
+           on conflict (company_id, user_id, event_type, channel) do update
+             set publish_celebration = coalesce($4, notification_preference.publish_celebration),
+                 receive_optional = coalesce($5, notification_preference.receive_optional), updated_by = $2
+           returning event_type as "eventType", publish_celebration as "publishCelebration", receive_optional as "receiveOptional"`,
+          [actor.companyId, actor.userId, body.eventType, body.publishCelebration ?? null, body.receiveOptional ?? null],
+        )
+      ).rows[0]!;
+      const email = (
+        await tx.query<{ receiveEmail: boolean }>(
+          body.receiveEmail === undefined
+            ? `select coalesce((select receive_optional from notification_preference where company_id = $1 and user_id = $2 and event_type = $3 and channel = 'EMAIL'), true) as "receiveEmail"`
+            : `insert into notification_preference (company_id, user_id, event_type, channel, publish_celebration, receive_optional, created_by, updated_by)
+               values ($1, $2, $3, 'EMAIL', false, $4, $2, $2)
+               on conflict (company_id, user_id, event_type, channel) do update set receive_optional = $4, updated_by = $2
+               returning receive_optional as "receiveEmail"`,
+          body.receiveEmail === undefined ? [actor.companyId, actor.userId, body.eventType] : [actor.companyId, actor.userId, body.eventType, body.receiveEmail],
+        )
+      ).rows[0]!;
+      return { ...row, receiveEmail: email.receiveEmail };
+    });
   });
 
   // FR-085 / FR-061 rule configuration: every revision with its wording and whether it is in force.
@@ -179,6 +197,35 @@ export async function notificationRoutes(app: FastifyInstance, opts: { db: Datab
       const { code } = request.params as { code: string };
       const grant = await requireAccess(db, request, 'notification', 'manage_rules', ['operational'], { requireAll: true });
       const result = await withTransaction(db, (tx) => reviseRule(tx, grant, code, request.body as RuleRevisionInput));
+      reply.status(201);
+      return result;
+    },
+  );
+
+  // FR-085 "configurable supported channels"; DF12: email for one event, proposed from its in-app rule and in force only once someone
+  // else publishes it (the proposals routes above). Nothing is sent until the worker also has SMTP settings (mail/config.ts).
+  app.post(
+    '/notifications/rules/:code/email',
+    {
+      schema: {
+        params: { type: 'object', required: ['code'], properties: { code: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,59}$' } } },
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['effectiveFrom', 'reason'],
+          properties: {
+            effectiveFrom: { type: 'string', format: 'date-time' },
+            subjectTemplate: { type: 'string', minLength: 1, maxLength: 150 },
+            bodyTemplate: { type: 'string', minLength: 1, maxLength: 1000 },
+            reason: { type: 'string', minLength: 1, maxLength: 500, pattern: '\\S' },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { code } = request.params as { code: string };
+      const grant = await requireAccess(db, request, 'notification', 'manage_rules', ['operational'], { requireAll: true });
+      const result = await withTransaction(db, (tx) => proposeEmailRule(tx, grant, code, request.body as EmailRuleInput));
       reply.status(201);
       return result;
     },

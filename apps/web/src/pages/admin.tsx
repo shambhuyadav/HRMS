@@ -481,7 +481,137 @@ function FallbackEditor({ kind, current, onSaved }: { kind: string; current: Rou
   );
 }
 
+/** GET /v1/workflows/stranded-tasks (workflow.manage) and POST /v1/workflows/tasks/:id/reroute (workflow.reroute_task; I-84 item 1). */
+const MANAGE_ROUTING = 'workflow.manage.operational';
+const REROUTE_TASK = 'workflow.reroute_task.operational';
+
+/** An open task its assignee can no longer decide (workflow/engine.ts strandedTasks): operational fields only. */
+interface StrandedTask {
+  taskId: string;
+  kind: string;
+  transactionId: string;
+  ownerEmployeeId: string | null;
+  ownerEmployeeCode: string | null;
+  ownerName: string | null;
+  assignedAt: string;
+  assigneeUserId: string;
+  assigneeAccountKey: string;
+  step: number;
+  delegationId: string | null;
+}
+
+/**
+ * C4 "Changed organisation or manager" (DF03; I-57 item 3; I-84 item 1): open tasks in the caller's row scope whose assignee can no
+ * longer decide them (a changed manager, scope or grant, or a delegation that ended). Nobody else sees them, and a task never moves by
+ * itself. A reroute keeps the stranded task on record (superseded) and gives the same step to whoever the step's rule now selects: the
+ * person rerouting never chooses the reviewer, never reroutes their own request, and gives a reason, which is audited; the new
+ * assignee is told. The server decides every rule; this panel offers the action only with the reroute duty.
+ */
+function StrandedTasks() {
+  const { can } = useSession();
+  const qc = useQueryClient();
+  const stranded = useQuery({ queryKey: ['stranded-tasks'], queryFn: () => api<{ items: StrandedTask[] }>('/v1/workflows/stranded-tasks') });
+  const [reasons, setReasons] = useState<Record<string, string>>({});
+  const [note, setNote] = useState<string | null>(null);
+  const reroute = useMutation({
+    mutationFn: ({ task, reason }: { task: StrandedTask; reason: string }) =>
+      api<{ taskId: string; supersededTaskId: string; assigneeUserId: string }>(`/v1/workflows/tasks/${encodeURIComponent(task.taskId)}/reroute`, { body: { reason } }),
+    onMutate: () => setNote(null),
+    onSuccess: (_r, { task }) => {
+      setReasons((prev) => {
+        const next = { ...prev };
+        delete next[task.taskId];
+        return next;
+      });
+      setNote(`The ${task.kind.replace(/_/g, ' ')} task${task.ownerEmployeeCode ? ` of ${task.ownerEmployeeCode}` : ''} was rerouted: a new task went to the reviewer its step now selects, and the stranded one is kept as superseded.`);
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['stranded-tasks'] }),
+  });
+  const mayReroute = can(REROUTE_TASK);
+  const items = stranded.data?.items ?? [];
+  return (
+    <Section title="Stranded tasks">
+      <p className="hint">
+        Open approval tasks in your scope that their assignee can no longer decide, for example after a change of manager, scope or role, or when the delegation they were
+        assigned under ended. A task never moves by itself. Rerouting keeps it on record and gives the step to whoever its rule now selects: you never choose the reviewer, and
+        you cannot reroute your own request.
+        {mayReroute ? '' : ' The selected role cannot reroute tasks.'}
+      </p>
+      {stranded.data && items.length === 0 && <Empty>No stranded tasks in your scope.</Empty>}
+      {items.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table aria-label="Stranded tasks">
+            <thead>
+              <tr>
+                <th>Request</th>
+                <th>Employee</th>
+                <th>Assigned to</th>
+                <th>Since</th>
+                {mayReroute && <th>Reroute</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((t) => {
+                const who = t.ownerEmployeeCode ? `${t.ownerEmployeeCode}${t.ownerName ? ` ${t.ownerName}` : ''}` : 'No employee (company-wide)';
+                const reason = reasons[t.taskId] ?? '';
+                return (
+                  <tr key={t.taskId}>
+                    <td>
+                      {`${t.kind.replace(/_/g, ' ')}, step ${t.step}`} {t.delegationId && <Badge tone="warn">delegated</Badge>}
+                    </td>
+                    <td>{who}</td>
+                    <td>{t.assigneeAccountKey}</td>
+                    <td>{formatDate(t.assignedAt)}</td>
+                    {mayReroute && (
+                      <td>
+                        <div className="row">
+                          <input
+                            aria-label={`Reason to reroute the task of ${who}`}
+                            placeholder="Reason"
+                            maxLength={500}
+                            value={reason}
+                            onChange={(e) => setReasons({ ...reasons, [t.taskId]: e.target.value })}
+                          />
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={!reason.trim() || reroute.isPending}
+                            onClick={() => reroute.mutate({ task: t, reason: reason.trim() })}
+                            aria-label={`Reroute the task of ${who}`}
+                          >
+                            Reroute
+                          </button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {note && (
+        <p role="status" className="ok">
+          {note}
+        </p>
+      )}
+      <ErrorNote error={reroute.error ?? stranded.error} />
+    </Section>
+  );
+}
+
 export function RoutingPage() {
+  const { can } = useSession();
+  return (
+    <div className="stack">
+      <ReviewerRouting />
+      {can(MANAGE_ROUTING) && <StrandedTasks />}
+    </div>
+  );
+}
+
+function ReviewerRouting() {
   const qc = useQueryClient();
   const routing = useQuery({ queryKey: ['routing'], queryFn: () => api<{ items: RoutingKind[] }>('/v1/workflows') });
   const [editing, setEditing] = useState<string | null>(null);

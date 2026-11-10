@@ -50,7 +50,7 @@ async function linkedToAny(db: Queryable, companyId: string, userId: string, emp
  * C4 / H2 / DF07 ("the entitlement approver cannot release its payment"; preparer, reviewer, approver and releaser
  * distinct): whoever created, calculated, reviewed or approved the payroll run (the core's run deciders, as for hold
  * decisions), or approved any of its approval or record-cover tasks, never authorises the release of its payments or
- * records their outcomes.
+ * records their outcomes; nor does the delegator of such an approval a delegate took in their name (I-57 item 7).
  */
 async function assertNotRunActor(db: Queryable, companyId: string, runId: string, userId: string): Promise<void> {
   const r = (
@@ -59,7 +59,8 @@ async function assertNotRunActor(db: Queryable, companyId: string, runId: string
            or exists (select 1 from approval_instance i
                         join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
                         join approval_decision d on d.company_id = t.company_id and d.task_id = t.id
-                       where i.company_id = $1 and d.actor_user_id = $3 and d.decision = 'APPROVE'
+                        left join delegation dl on dl.company_id = t.company_id and dl.id = t.delegation_id
+                       where i.company_id = $1 and (d.actor_user_id = $3 or dl.delegator_user_id = $3) and d.decision = 'APPROVE'
                          and i.transaction_id in (select transaction_id from payroll_run where company_id = $1 and id = $2
                                                   union all select transaction_id from payroll_run_approval where company_id = $1 and run_id = $2
                                                   union all select transaction_id from payroll_record_cover where company_id = $1 and run_id = $2)) as involved`,

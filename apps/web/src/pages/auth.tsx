@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../api';
+import { Icon, type IconName } from '../icons';
 import { CALLBACK_PATH, completeOidcSignIn, type OidcSignInConfig, rememberProviderLogout, startOidcSignIn } from '../oidc';
 import { type Company, useSession } from '../session';
 import { ErrorNote } from '../ui';
@@ -12,7 +13,51 @@ type SignInConfig = OidcSignInConfig | { mode: 'DEV' | 'NONE' };
  * PKCE; ../oidc.ts), including the way back to CALLBACK_PATH. Development: the account-key form for synthetic accounts (also when the
  * server does not say, as an older development server does not).
  */
+const FEATURES: readonly [IconName, string][] = [
+  ['users', 'Employees, attendance and leave'],
+  ['wallet', 'Payroll, statutory compliance and tax'],
+  ['target', 'Hiring, appraisal and training'],
+  ['shield', 'Two-step sign-in and a full audit trail'],
+];
+
+/** The signed-out pages (sign-in, the way back from the provider, the role choice): the product beside the card. */
+function AuthLayout({ children }: { children: ReactNode }) {
+  return (
+    <div className="auth">
+      <section className="auth-brand">
+        <div className="auth-logo">
+          <span className="brand-mark" aria-hidden="true" />
+          <span>HRMS</span>
+        </div>
+        <div className="auth-pitch">
+          <p className="auth-headline">Hire-to-retire HR and payroll, in one place.</p>
+          <ul className="auth-features">
+            {FEATURES.map(([icon, text]) => (
+              <li key={text}>
+                <span className="auth-feature-icon">
+                  <Icon name={icon} size={18} />
+                </span>
+                {text}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="auth-foot">Secure sign-in · Your data stays on your company's server</p>
+      </section>
+      <div className="auth-panel">{children}</div>
+    </div>
+  );
+}
+
 export function SignInPage() {
+  return (
+    <AuthLayout>
+      <SignInContent />
+    </AuthLayout>
+  );
+}
+
+function SignInContent() {
   const config = useQuery({ queryKey: ['sign-in-config'], queryFn: () => api<SignInConfig>('/sign-in/config'), retry: false, staleTime: Infinity });
   if (config.isPending) return <main className="narrow"><p className="hint">Loading…</p></main>;
   const c = config.data;
@@ -32,10 +77,11 @@ function OidcSignIn({ config }: { config: OidcSignInConfig }) {
   const [error, setError] = useState<unknown>(null);
   return (
     <main className="narrow">
-      <h1>HRMS</h1>
+      <h1>Welcome back</h1>
       <p className="hint">Sign in with your organisation account. You will be asked for your second factor (authenticator app).</p>
       <button
         type="button"
+        className="block"
         onClick={() => {
           setError(null);
           startOidcSignIn(config).catch(setError);
@@ -140,8 +186,10 @@ export function SelectRolePage() {
   });
 
   return (
+    <AuthLayout>
     <main className="narrow">
       <h1>Choose how you are working</h1>
+      <p className="hint">Each role shows its own menu and data. You can switch at any time from the top bar.</p>
       {companies.length === 0 && <p>You have no active role in any company. Contact your administrator.</p>}
       {companies.length > 1 && (
         <label>
@@ -163,7 +211,13 @@ export function SelectRolePage() {
           {assignments.data.items.map((a) => (
             <li key={a.id}>
               <button onClick={() => selectAssignment(a.id)}>
-                <strong>{a.roleName}</strong> <span className="hint">scope: {a.scopeKind.toLowerCase()}</span>
+                <span className="choice-icon">
+                  <Icon name={roleIcon(a.roleCode)} size={20} />
+                </span>
+                <span className="choice-text">
+                  <strong>{a.roleName}</strong> <span className="hint">scope: {a.scopeKind.toLowerCase()}</span>
+                </span>
+                <Icon name="chevron" size={16} className="choice-go" />
               </button>
             </li>
           ))}
@@ -175,5 +229,15 @@ export function SelectRolePage() {
         Sign out
       </button>
     </main>
+    </AuthLayout>
   );
 }
+
+const ROLE_ICONS: Readonly<Record<string, IconName>> = {
+  SYSTEM_ADMINISTRATOR: 'settings',
+  HR_ADMINISTRATOR: 'users',
+  REPORTING_MANAGER: 'share',
+  EMPLOYEE: 'user',
+  AUDITOR: 'history',
+};
+const roleIcon = (code: string): IconName => ROLE_ICONS[code] ?? (/PAYROLL|FINANCE|TREASURY/.test(code) ? 'wallet' : 'idCard');

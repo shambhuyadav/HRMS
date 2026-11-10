@@ -9,6 +9,9 @@
 // only the placeholders already approved for the template (minimal personal data). A mandatory rule cannot be
 // switched off (FR-085: mandatory transaction alerts cannot be opted out unless the owner approves that policy).
 //
+// Email (0247) is not a change of a rule's channel: it is a separate EMAIL rule for the same event (proposeEmailRule), with its own
+// template limited to state placeholders and checked wording (email-content.ts). An EMAIL rule may be switched off again.
+//
 // C6 "publication and mandatory notification settings require business owner approval" (0133): a revision is proposed, and comes into
 // force only once someone other than its author publishes it, before its date; until then the revision in force keeps going and
 // nothing ends it. A rejected revision is kept, with its reason, and never comes into force. Who holds the approval is the owner's to say.
@@ -17,8 +20,15 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { DEFAULT_EMAIL_BODY, DEFAULT_EMAIL_SUBJECT, emailContentRefusal, emailPlaceholdersOf, unapprovedEmailPlaceholder } from './email-content.js';
 
 const PLACEHOLDER = /\{\{\s*([a-zA-Z][a-zA-Z0-9]*)\s*\}\}/g;
+
+/** BR-044, DF12: email wording carries no figure, currency, percentage, account-like value or link (email-content.ts). */
+function refuseEmailWording(subject: string | null, body: string) {
+  const reason = emailContentRefusal(`${subject ?? ''}\n${body}`);
+  if (reason) throw new HttpError(422, 'EMAIL_WORDING_NOT_ALLOWED', 'Email wording cannot contain amounts, percentages, account numbers, currency or links', { reason });
+}
 
 export interface RuleRevisionInput {
   expectedRevision: number;
@@ -96,7 +106,9 @@ export async function reviseRule(tx: Queryable, grant: AccessGrant, code: string
   if (!timing.after_latest) throw new HttpError(422, 'EFFECTIVE_DATE_BEFORE_LATEST', 'A rule change must take effect after the latest revision of the rule');
 
   const active = input.active ?? latest.active;
-  if (!active && !latest.optional_event) throw new HttpError(422, 'MANDATORY_RULE', 'A mandatory notification rule cannot be switched off');
+  // DF12 keeps mandatory notices in-app; an EMAIL rule (0247) is an extra channel the company chose, and may be switched off again
+  // through the same independent approval, leaving the in-app notice as it was.
+  if (!active && !latest.optional_event && latest.channel === 'IN_APP') throw new HttpError(422, 'MANDATORY_RULE', 'A mandatory notification rule cannot be switched off');
 
   const template = (
     await tx.query<{ language: string; subject_template: string | null; body_template: string; approved_placeholders: string[] }>(
@@ -113,9 +125,10 @@ export async function reviseRule(tx: Queryable, grant: AccessGrant, code: string
   if (!rewording && active === latest.active) throw new HttpError(422, 'NO_CHANGE', 'The revision changes nothing');
   if (body.trim() === '') throw new HttpError(422, 'VALIDATION_FAILED', 'The message body cannot be blank');
   for (const text of [subject ?? '', body]) {
-    const bad = unapprovedPlaceholder(text, template.approved_placeholders);
+    const bad = latest.channel === 'EMAIL' ? unapprovedEmailPlaceholder(text, template.approved_placeholders) : unapprovedPlaceholder(text, template.approved_placeholders);
     if (bad) throw new HttpError(422, 'PLACEHOLDER_NOT_APPROVED', 'The wording uses a placeholder that is not approved for this message', { placeholder: bad });
   }
+  if (latest.channel === 'EMAIL') refuseEmailWording(subject, body);
 
   let templateId = latest.template_id;
   let templateRevision = latest.template_revision;
@@ -184,6 +197,132 @@ export async function reviseRule(tx: Queryable, grant: AccessGrant, code: string
     reason: input.reason,
   });
   return { id: rule.id, code, revision: rule.revision, templateRevision, active, effectiveFrom: rule.effective_from.toISOString(), status: 'PROPOSED' as const };
+}
+
+export interface EmailRuleInput {
+  effectiveFrom: string;
+  subjectTemplate?: string | undefined;
+  bodyTemplate?: string | undefined;
+  reason: string;
+}
+
+/** The email rule of an in-app rule is its own rule, under this code (I-35: a revision never changes a rule's channel). */
+export const emailRuleCode = (code: string): string => `${code}_EMAIL`;
+
+/**
+ * FR-085 "configurable supported channels"; DF12 "Email may be enabled for non-confidential event templates": proposes email for one
+ * event, as a new EMAIL rule beside the event's in-app rule, with the same event, recipients, timing, retry ceiling and optional flag
+ * and its own template. Like any rule change (0133) it starts PROPOSED and comes into force only once someone else publishes it,
+ * before its date. The template keeps only the in-app template's state placeholders; without wording of its own, it takes the in-app
+ * subject when that subject is email-safe, else a neutral one. Later changes are revisions of the email rule (reviseRule).
+ */
+export async function proposeEmailRule(tx: Queryable, grant: AccessGrant, code: string, input: EmailRuleInput) {
+  const emailCode = emailRuleCode(code);
+  if (!/^[A-Z][A-Z0-9_]{0,59}$/.test(emailCode)) throw new HttpError(422, 'CODE_TOO_LONG', 'This rule code is too long to take an email rule');
+  const source = (
+    await tx.query<{
+      event_type: string;
+      channel: string;
+      recipient_selector: string;
+      template_id: string;
+      lead_minutes: number;
+      retry_ceiling: number;
+      optional_event: boolean;
+    }>(
+      `select event_type, channel, recipient_selector, template_id, lead_minutes, retry_ceiling, optional_event
+         from notification_rule where company_id = $1 and code = $2 and publication_state = 'PUBLISHED' order by revision desc limit 1`,
+      [grant.companyId, code],
+    )
+  ).rows[0];
+  // Every revision of the email rule, locked as a change locks them, so two proposals cannot both be first.
+  const existing = (
+    await tx.query<{ revision: number; publication_state: string }>(`select revision, publication_state from notification_rule where company_id = $1 and code = $2 order by revision desc for update`, [
+      grant.companyId,
+      emailCode,
+    ])
+  ).rows;
+  await reassertAccess(tx, grant, 'notification', 'manage_rules', ['operational']);
+  if (!source) throw notFound();
+  if (source.channel !== 'IN_APP') throw new HttpError(422, 'NOT_AN_IN_APP_RULE', 'Email is proposed from an in-app rule');
+  if (existing.some((r) => r.publication_state !== 'REJECTED')) {
+    throw new HttpError(409, 'EMAIL_RULE_EXISTS', 'This event already has an email rule; change it with a revision', { code: emailCode });
+  }
+  const future = (await tx.query<{ future: boolean }>(`select $1::timestamptz > now() as future`, [input.effectiveFrom])).rows[0]!.future;
+  if (!future) throw new HttpError(422, 'EFFECTIVE_DATE_NOT_FUTURE', 'A rule change takes effect from a future date only');
+
+  const inApp = (
+    await tx.query<{ language: string; subject_template: string | null; approved_placeholders: string[] }>(
+      `select language, subject_template, approved_placeholders from notification_template where company_id = $1 and id = $2`,
+      [grant.companyId, source.template_id],
+    )
+  ).rows[0]!;
+  const approved = emailPlaceholdersOf(inApp.approved_placeholders);
+  const derived =
+    inApp.subject_template && !unapprovedEmailPlaceholder(inApp.subject_template, approved) && !emailContentRefusal(inApp.subject_template) ? inApp.subject_template : null;
+  const subject = input.subjectTemplate ?? derived ?? DEFAULT_EMAIL_SUBJECT;
+  const body = input.bodyTemplate ?? (derived ? `There is a new notice for you in HRMS: ${derived}.` : DEFAULT_EMAIL_BODY);
+  if (subject.trim() === '' || body.trim() === '') throw new HttpError(422, 'VALIDATION_FAILED', 'The subject and body cannot be blank');
+  for (const text of [subject, body]) {
+    const bad = unapprovedEmailPlaceholder(text, approved);
+    if (bad) throw new HttpError(422, 'PLACEHOLDER_NOT_APPROVED', 'The wording uses a placeholder that is not approved for email', { placeholder: bad, approved });
+  }
+  refuseEmailWording(subject, body);
+
+  const template = (
+    await tx.query<{ id: string; revision: number }>(
+      `insert into notification_template (company_id, code, revision, language, channel, subject_template, body_template, approved_placeholders, active, created_by, updated_by)
+       select $1, $2, coalesce(max(revision), 0) + 1, $3, 'EMAIL', $4, $5, $6, true, $7, $7
+         from notification_template where company_id = $1 and code = $2
+       returning id, revision`,
+      [grant.companyId, emailCode, inApp.language, subject, body, approved, grant.userId],
+    )
+  ).rows[0]!;
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'notification_template',
+    recordKey: template.id,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'CREATE',
+    newVersion: 1,
+    after: { operational: { code: emailCode, revision: template.revision, channel: 'EMAIL' } },
+    reason: input.reason,
+  });
+  const rule = (
+    await tx.query<{ id: string; revision: number; effective_from: Date }>(
+      `insert into notification_rule (company_id, code, revision, event_type, channel, recipient_selector, template_code, template_revision, template_id,
+                                      lead_minutes, retry_ceiling, optional_event, effective_from, active, publication_state, proposal_reason, created_by, updated_by)
+       values ($1, $2, $3, $4, 'EMAIL', $5, $2, $6, $7, $8, $9, $10, $11::timestamptz, true, 'PROPOSED', $12, $13, $13)
+       returning id, revision, effective_from`,
+      [
+        grant.companyId,
+        emailCode,
+        (existing[0]?.revision ?? 0) + 1,
+        source.event_type,
+        source.recipient_selector,
+        template.revision,
+        template.id,
+        source.lead_minutes,
+        source.retry_ceiling,
+        source.optional_event,
+        input.effectiveFrom,
+        input.reason.trim(),
+        grant.userId,
+      ],
+    )
+  ).rows[0]!;
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'notification_rule',
+    recordKey: rule.id,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'CREATE',
+    newVersion: 1,
+    after: { operational: { code: emailCode, revision: rule.revision, channel: 'EMAIL', eventType: source.event_type, from: code, effectiveFrom: rule.effective_from.toISOString() } },
+    reason: input.reason,
+  });
+  return { id: rule.id, code: emailCode, revision: rule.revision, channel: 'EMAIL' as const, templateRevision: template.revision, effectiveFrom: rule.effective_from.toISOString(), status: 'PROPOSED' as const };
 }
 
 /** The changes waiting for a decision, each beside what is in force, for whoever holds the approval. */

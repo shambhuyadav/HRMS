@@ -10,6 +10,7 @@ import { api, ApiError, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section } from '../ui';
+import { ORG_CHART_PERMISSION, OrgChartPage } from './org-chart';
 
 const MASTER_READ = 'org_master.read.operational';
 const MASTER_CREATE = 'org_master.create.operational';
@@ -466,6 +467,7 @@ export const GradesPage = () => <MasterPage kind="grades" />;
 
 export const ORG_SCREENS: readonly ScreenRoute[] = [
   { path: '/organisation/company', title: 'Company', permission: MASTER_READ, nav: true, component: CompanyPage },
+  { path: '/organisation/chart', title: 'Organisation chart', permission: ORG_CHART_PERMISSION, nav: true, component: OrgChartPage },
   { path: '/organisation/departments', title: 'Departments', permission: MASTER_READ, nav: true, component: DepartmentsPage },
   { path: '/organisation/locations', title: 'Locations', permission: MASTER_READ, nav: true, component: LocationsPage },
   { path: '/organisation/designations', title: 'Designations', permission: MASTER_READ, nav: true, component: DesignationsPage },

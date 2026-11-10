@@ -153,6 +153,31 @@ describe('role dashboard (FR-096, FR-097, DF17)', () => {
     expect(screen.queryByRole('link', { name: 'Open decisions' })).toBeNull();
   });
 
+  it('FR-041, FR-096: lists a goal (KRA) review waiting for the user with the tasks, leading to the appraisal where it is reviewed', async () => {
+    const task = { taskId: 't-1', kind: 'leave_request', ownerEmployeeCode: 'SYN-9', ownerName: 'Synthetic Member', assignedAt: '2026-11-01T06:00:00Z', dueAt: null, overdue: false, delegated: false };
+    const review = {
+      taskId: null,
+      appraisalId: 'ap-1',
+      kind: 'appraisal_goal_review',
+      step: null,
+      ownerEmployeeCode: 'SYN-7',
+      ownerName: 'Synthetic Reviewee',
+      assignedAt: '2026-11-03T06:00:00Z',
+      dueAt: null,
+      overdue: false,
+      delegated: false,
+    };
+    mockRoutes({ '/v1/dashboard/tasks': { items: [task, review], total: 2 }, '/v1/dashboard': DASHBOARD });
+    renderAt('/', '/', <DashboardPage />);
+    expect(await screen.findByRole('heading', { name: 'Pending tasks (2)' })).toBeTruthy();
+    const row = (await screen.findByText('Goal (KRA) review')).closest('tr')!;
+    expect(within(row).getByText('Synthetic Reviewee (SYN-7)')).toBeTruthy();
+    expect(within(row).getByRole('link', { name: 'Review the goals' }).getAttribute('href')).toBe('/appraisal/appraisals/ap-1');
+    expect(within(row).queryByRole('link', { name: 'Open decisions' })).toBeNull();
+    const other = screen.getByText(/leave request/).closest('tr')!;
+    expect(within(other).getByRole('link', { name: 'Open decisions' }).getAttribute('href')).toBe('/tasks');
+  });
+
   it('a role without a dashboard reads the neutral state, with no task list', async () => {
     mockRoutes({ '/v1/dashboard': { ...DASHBOARD, title: null, state: 'NO_DASHBOARD', widgets: [], shortcuts: [] } });
     renderAt('/', '/', <DashboardPage />);

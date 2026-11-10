@@ -14,6 +14,8 @@ interface Preference {
   eventType: string;
   publishCelebration: boolean;
   receiveOptional: boolean;
+  /** FR-085 email channel: receipt by email, which matters only once the company has enabled email for the occasion. */
+  receiveEmail?: boolean;
 }
 
 const OCCASIONS: Record<string, { publish: string; receive: string; name: string }> = {
@@ -29,7 +31,8 @@ export function NotificationPreferencesPanel() {
   const key = ['notification-preferences', stored?.companyId ?? '-'] as const;
   const preferences = useQuery({ queryKey: key, queryFn: () => api<{ items: Preference[] }>('/v1/me/notification-preferences', { withoutAssignment: true }) });
   const save = useMutation({
-    mutationFn: (change: { eventType: string; publishCelebration?: boolean; receiveOptional?: boolean }) => api('/v1/me/notification-preferences', { method: 'PUT', body: change, withoutAssignment: true }),
+    mutationFn: (change: { eventType: string; publishCelebration?: boolean; receiveOptional?: boolean; receiveEmail?: boolean }) =>
+      api('/v1/me/notification-preferences', { method: 'PUT', body: change, withoutAssignment: true }),
     onSettled: () => void qc.invalidateQueries({ queryKey: key }),
   });
   return (
@@ -38,6 +41,7 @@ export function NotificationPreferencesPanel() {
         Publication is off until you turn it on. Colleagues then see your name, your department and the occasion, never your birth date, year or age. Task, decision and security notices
         are mandatory and cannot be switched off.
       </p>
+      <p className="hint">Email is sent only for notices your company has enabled for email. It says what happened and links here, never confidential details.</p>
       {preferences.isPending && <p className="hint">Loading preferences…</p>}
       {preferences.data && (
         <table>
@@ -46,6 +50,7 @@ export function NotificationPreferencesPanel() {
               <th scope="col">Occasion</th>
               <th scope="col">Publish mine</th>
               <th scope="col">Receive others’</th>
+              <th scope="col">By email</th>
             </tr>
           </thead>
           <tbody>
@@ -70,6 +75,15 @@ export function NotificationPreferencesPanel() {
                       checked={p.receiveOptional}
                       disabled={save.isPending}
                       onChange={(e) => save.mutate({ eventType: p.eventType, receiveOptional: e.target.checked })}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`${occasion.receive} by email`}
+                      checked={p.receiveEmail ?? true}
+                      disabled={save.isPending}
+                      onChange={(e) => save.mutate({ eventType: p.eventType, receiveEmail: e.target.checked })}
                     />
                   </td>
                 </tr>

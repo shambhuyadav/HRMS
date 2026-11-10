@@ -1394,6 +1394,7 @@ describe('exports for the navigation step', () => {
       ['/payroll/loans', LOAN_READ, true],
       ['/payroll/loans/upload', LOAN_REQUEST, true],
       ['/payroll/holds', HOLD_READ, true],
+      ['/payroll/holds/stop-upload', STOP_PROPOSE, true],
       ['/payroll/inputs', INPUT_READ, true],
       ['/payroll/bank-templates', TEMPLATE_READ, true],
       ['/payroll/runs/:id/reports', REPORT_READ, false],
@@ -2058,6 +2059,134 @@ describe('salary stop proposals', () => {
 });
 
 // =========================================================================================================
+// Salary stop upload (FR-031 "Upload Stop Salary", SALARY_STOPS_V1)
+// =========================================================================================================
+
+describe('salary stop upload', () => {
+  const STOP_IMPORTS = '/v1/payroll/salary-stop-imports';
+  const NO_BATCHES: Reply = [200, { items: [], total: 0, page: 1, pageSize: 25 }];
+  const STOP_HEADER = 'period_code,employee_code,mode,criterion_code,reason,release_criterion,evidence_reference,evidence_document_ids';
+  const STOP_FILE = `${STOP_HEADER}\n2026-10,SYN-001,,SYN_CONTRACT,Synthetic stop,Synthetic clearance,SYNTH-1,${DOC_OK}\n2026-10,SYN-002,EXCLUDE_CALCULATION,,Synthetic exclusion,,SYNTH-2,${DOC_OK}`;
+  const stopJob = (over: Record<string, unknown> = {}) => ({
+    id: 'job-s',
+    state: 'PREVIEWED',
+    template: 'SALARY_STOPS_V1',
+    fileName: 'stops.csv',
+    rowCount: 2,
+    acceptedCount: 0,
+    rejectedCount: 0,
+    scanState: 'CLEAN',
+    createdAt: '2026-10-28T09:00:00.000Z',
+    rows: [
+      { rowNumber: 1, businessKey: '2026-10/SYN-001', state: 'VALID', errorCode: null, proposedChanges: null },
+      { rowNumber: 2, businessKey: '2026-10/SYN-002', state: 'VALID', errorCode: null, proposedChanges: null },
+    ],
+    ...over,
+  });
+  const chooseStopFile = (text: string) => fireEvent.change(screen.getByLabelText('Salary stops file'), { target: { files: [new File([text], 'stops.csv', { type: 'text/csv' })] } });
+
+  it('FR-031: is offered next to the single stop proposal, explains the template, and puts every row problem of a rejected batch in words', async () => {
+    serve({ 'GET /v1/payroll/calendars': [200, CALENDARS], 'GET /v1/payroll/hold-criteria': [200, { items: [criterion(CRIT_FULL)] }], 'GET /v1/payroll/holds': [200, { items: [] }] });
+    renderScreen('/payroll/holds', [STOP_PROPOSE, HOLD_READ]);
+    await screen.findByRole('form', { name: 'Propose a salary stop' });
+    expect(screen.getByRole('link', { name: 'upload a file of salary stops' }).getAttribute('href')).toBe('/payroll/holds/stop-upload');
+    cleanup();
+
+    const files = stubDownloads();
+    try {
+      serve({
+        [`GET ${STOP_IMPORTS}`]: NO_BATCHES,
+        [`GET ${STOP_IMPORTS}/template`]: fileReply('SALARY_STOPS_V1.csv'),
+        [`POST ${STOP_IMPORTS}`]: [
+          201,
+          stopJob({
+            state: 'REJECTED',
+            rejectedCount: 2,
+            rows: [
+              { rowNumber: 1, businessKey: '2026-10/SYN-001', state: 'REJECTED', errorCode: 'HOLD_CRITERION_NOT_ACTIVE', proposedChanges: null },
+              { rowNumber: 2, businessKey: '2026-10/SYN-002', state: 'REJECTED', errorCode: 'NOT_A_HOLD', proposedChanges: null },
+            ],
+          }),
+        ],
+      });
+      renderScreen('/payroll/holds/stop-upload', [STOP_PROPOSE]);
+      const form = await screen.findByRole('form', { name: 'Upload salary stops' });
+      expect(form.textContent).toContain(STOP_HEADER);
+      expect(form.textContent).toContain('Every stop proposed waits for an independent decision, stop by stop, which confirms its mode; the upload approves nothing.');
+      expect(form.textContent).toContain('Nothing is proposed until you commit a preview');
+      fireEvent.click(button(form, 'Download the template'));
+      await waitFor(() => expect(files.click).toHaveBeenCalledTimes(1));
+      expect(callsTo('GET', `${STOP_IMPORTS}/template`)).toHaveLength(1);
+
+      chooseStopFile(STOP_FILE);
+      fireEvent.click(button(form, 'Validate'));
+      expect(await screen.findByText(/This batch was rejected, so nothing was applied/)).toBeTruthy();
+      const sent = bodiesTo('POST', STOP_IMPORTS);
+      expect(sent).toEqual([{ fileName: 'stops.csv', contentBase64: expect.any(String), idempotencyKey: expect.stringMatching(/^payroll-stop-import-/) }]);
+      expect(atob(sent[0]!.contentBase64 as string)).toBe(STOP_FILE);
+      expect(rowWith(document.body, '2026-10/SYN-001').textContent).toContain('Withholding a payment needs the code of an active hold criterion');
+      expect(rowWith(document.body, '2026-10/SYN-002').textContent).toContain('Leaving the employee out of the calculation is not a payment hold');
+      expect(screen.queryByRole('button', { name: /^Propose \d/ })).toBeNull();
+      expect(callsTo('POST', `${STOP_IMPORTS}/job-s/commit`)).toHaveLength(0);
+    } finally {
+      files.restore();
+    }
+  });
+
+  it('FR-031: commits a previewed batch only on request, and says every stop proposed waits for its own independent decision', async () => {
+    serve({
+      [`GET ${STOP_IMPORTS}`]: NO_BATCHES,
+      [`POST ${STOP_IMPORTS}`]: [201, stopJob()],
+      [`POST ${STOP_IMPORTS}/job-s/commit`]: [
+        200,
+        stopJob({
+          state: 'COMMITTED',
+          acceptedCount: 2,
+          rows: [
+            { rowNumber: 1, businessKey: '2026-10/SYN-001', state: 'ACCEPTED', errorCode: null, proposedChanges: null },
+            { rowNumber: 2, businessKey: '2026-10/SYN-002', state: 'ACCEPTED', errorCode: null, proposedChanges: null },
+          ],
+        }),
+      ],
+    });
+    renderScreen('/payroll/holds/stop-upload', [STOP_PROPOSE]);
+    const form = await screen.findByRole('form', { name: 'Upload salary stops' });
+    chooseStopFile(STOP_FILE);
+    fireEvent.click(button(form, 'Validate'));
+    expect(await screen.findByText(/All 2 rows are valid/)).toBeTruthy();
+    await settle();
+    expect(callsTo('POST', `${STOP_IMPORTS}/job-s/commit`)).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Propose 2 salary stops' }));
+    expect(await screen.findByText('All 2 rows were applied.')).toBeTruthy();
+    expect(
+      screen.getByText('Every salary stop proposed waits for an independent decision, stop by stop: someone other than you and the employee decides each one and confirms its mode.'),
+    ).toBeTruthy();
+    expect(calls.filter((c) => c.method === 'POST').map((c) => c.path)).toEqual([STOP_IMPORTS, `${STOP_IMPORTS}/job-s/commit`]);
+    await waitFor(() => expect(callsTo('GET', STOP_IMPORTS).length).toBeGreaterThanOrEqual(3));
+  });
+
+  it('FR-031: looks up the ids of an employee’s documents, giving the id of released, verified ones only', async () => {
+    serve({ [`GET ${STOP_IMPORTS}`]: NO_BATCHES, 'GET /v1/employees': [200, EMPLOYEES], [`GET /v1/employees/${E_1}/documents`]: [200, DOCUMENTS] });
+    renderScreen('/payroll/holds/stop-upload', [STOP_PROPOSE, EMPLOYEE_LIST, DOCUMENT_READ]);
+    const lookup = (await screen.findByRole('heading', { name: 'Evidence document ids' })).closest('section') as HTMLElement;
+    await chooseEmployee(lookup);
+    const table = await within(lookup).findByRole('table', { name: 'Evidence documents and their ids' });
+    expect(rowWith(table, 'Bank letter · synthetic-letter.pdf').textContent).toContain(DOC_OK);
+    expect(rowWith(table, 'Bank letter · pending.pdf').textContent).not.toContain(DOC_PENDING);
+    expect(rowWith(table, 'Bank letter · unverified.pdf').textContent).toContain('released, not verified yet, not usable');
+    expect(rowWith(table, 'Bank letter · unverified.pdf').textContent).not.toContain(DOC_UNVERIFIED);
+  });
+
+  it('FR-031: offers the upload only with the stop proposal grant, and asks the server nothing without it', async () => {
+    serve({});
+    renderScreen('/payroll/holds/stop-upload', [STOP_READ, STOP_DECIDE]);
+    expect(screen.getByText('The selected role cannot propose salary stops: that needs the salary stop proposal grant.')).toBeTruthy();
+    await settle();
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// =========================================================================================================
 // Hold proposals, criteria, withdrawal, renewal and the hold position
 // =========================================================================================================
 
@@ -2234,6 +2363,48 @@ describe('hold proposals and criteria', () => {
     expect(await within(define).findByText(/This situation is never a salary hold criterion/)).toBeTruthy();
     expect(bodiesTo('POST', '/v1/payroll/hold-criteria')).toEqual([
       { code: 'MISSING_TIMESHEET', category: 'CONTRACTUAL', applicability: 'Synthetic', scopeMode: 'FULL_ONLY', maxReviewDays: 30, evidenceReference: 'SYN-POLICY-2', validationReference: 'SYN-LEGAL-2' },
+    ]);
+  });
+
+  it('FR-101: shows each criterion’s escalation cadence and lets the definer only shorten the H2 defaults of 2 and 5 business days', async () => {
+    const items = [criterion(CRIT_FULL), criterion(CRIT_PARTIAL, { code: 'SYN_FAST', firstEscalationBusinessDays: 1, escalationIntervalBusinessDays: 2 })];
+    serve({
+      'GET /v1/payroll/hold-criteria': [200, { items }],
+      'GET /v1/payroll/holds': [200, { items: [] }],
+      'POST /v1/payroll/hold-criteria': [201, criterion(CRIT_DRAFT, { code: 'SYN_QUICK', state: 'DRAFT', firstEscalationBusinessDays: 1, escalationIntervalBusinessDays: 3 })],
+    });
+    renderScreen('/payroll/holds', [HOLD_READ, HOLD_DEFINE]);
+    const list = await section('Hold criteria');
+    const table = await within(list).findByRole('table', { name: 'Hold criteria' });
+    expect(rowWith(table, 'SYN_CONTRACT').textContent).toContain('After 2, then every 5 business days (default)');
+    expect(rowWith(table, 'SYN_FAST').textContent).toContain('After 1, then every 2 business days (narrowed)');
+    const define = within(list).getByRole('form', { name: 'Define a hold criterion' });
+    // Only shorter values than the defaults can be chosen.
+    expect(Array.from((within(define).getByLabelText('First escalation after (business days)') as HTMLSelectElement).options).map((o) => o.value)).toEqual(['', '1']);
+    expect(Array.from((within(define).getByLabelText('Then escalate every (business days)') as HTMLSelectElement).options).map((o) => o.value)).toEqual(['', '1', '2', '3', '4']);
+    type(define, 'Criterion code', 'syn_quick');
+    type(define, 'When the criterion applies', 'Synthetic');
+    type(define, 'Category', 'CONTRACTUAL');
+    type(define, 'Holds allowed', 'FULL_ONLY');
+    type(define, 'Longest review interval (days)', '30');
+    type(define, 'First escalation after (business days)', '1');
+    type(define, 'Then escalate every (business days)', '3');
+    type(define, 'Evidence reference', 'SYN-POLICY-3');
+    type(define, 'Validation reference', 'SYN-LEGAL-3');
+    fireEvent.click(button(define, 'Save the criterion as a draft'));
+    expect(await within(define).findByText('Criterion SYN_QUICK revision 1 saved as a draft: someone other than you activates it.')).toBeTruthy();
+    expect(bodiesTo('POST', '/v1/payroll/hold-criteria')).toEqual([
+      {
+        code: 'SYN_QUICK',
+        category: 'CONTRACTUAL',
+        applicability: 'Synthetic',
+        scopeMode: 'FULL_ONLY',
+        maxReviewDays: 30,
+        firstEscalationBusinessDays: 1,
+        escalationIntervalBusinessDays: 3,
+        evidenceReference: 'SYN-POLICY-3',
+        validationReference: 'SYN-LEGAL-3',
+      },
     ]);
   });
 });

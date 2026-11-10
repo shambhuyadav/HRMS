@@ -28,7 +28,7 @@ import { settingInForce } from '../reporting/settings.js';
 import { teamMemberPredicate } from '../team/service.js';
 import { TRAINING_METRICS } from '../training/metrics.js';
 import { METRIC_SOURCES, type MetricSource, type SourceCombine, type SourceList } from './sources.js';
-import { assignmentPendingTasks, countOf, monthStart, myPendingTasks, notAvailable } from './tasks.js';
+import { assignmentTaskCount, countOf, monthStart, myPendingTasks, notAvailable } from './tasks.js';
 
 export type MetricResult =
   | { status: 'OK'; value: number | string }
@@ -192,11 +192,9 @@ export const METRICS: Record<string, Metric> = {
       p.values,
     );
   },
-  // F2 "Assigned HR tasks" and the like: the pending-task list of this assignment (DF17 "no merging across role assignments").
-  MY_OPEN_TASKS: (db, g) => {
-    const p = new SqlParams();
-    return countOf(db, `select count(*) as n ${assignmentPendingTasks(g, p)}`, p);
-  },
+  // F2 "Assigned HR tasks" and the like: the pending-task list of this assignment (DF17 "no merging across role assignments"),
+  // with the goal sets it may review now (FR-041 KRA review: a state on the appraisal, not a routed task; tasks.ts).
+  MY_OPEN_TASKS: (db, g) => assignmentTaskCount(db, g),
   LEAVE_EXPENSE_TASKS: (db, g) => {
     const p = new SqlParams();
     return countOf(db, `select count(*) as n ${myPendingTasks(g, p, LEAVE_EXPENSE_TASK_KINDS)}`, p);

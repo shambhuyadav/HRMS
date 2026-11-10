@@ -17,7 +17,9 @@
 //   * SALARY_STOP           an approved HOLD_DISBURSEMENT salary stop, applied by processing as an active full hold.
 // States: PROPOSED -> APPROVED_ACTIVE -> RELEASED or EXPIRED_REVIEW (renewable by an independent decision); REJECTED
 // and WITHDRAWN never block. Review cadence (H2): daily reminders while unresolved, first escalation after 2 business
-// days, then every 5 business days; expiry alerts reviewers and pays, forgives or deletes nothing.
+// days, then every 5 business days, or the shorter intervals a criterion revision sets (H2 "Policy may narrow these values
+// through approved versioning"; 0255), copied onto each hold decided under it; expiry alerts reviewers and pays, forgives or
+// deletes nothing.
 import { type Paging, pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
@@ -36,6 +38,7 @@ import {
   attachEvidence,
   audit,
   checkAmount,
+  decisionDelegators,
   emit,
   emitOnce,
   evidenceOf,
@@ -49,6 +52,7 @@ import {
   requireText,
   requireVerifiedEvidence,
   setRootState,
+  taskDelegator,
   taskIsPending,
   taskTransaction,
   userIsEmployee,
@@ -56,7 +60,11 @@ import {
 
 export const HOLD_KIND = 'payroll_hold';
 const LIVE = ['PROPOSED', 'APPROVED_ACTIVE', 'EXPIRED_REVIEW'];
-/** H2 selected defaults: first escalation after 2 business days, then every 5 business days while unresolved. */
+/**
+ * H2 selected defaults: first escalation after 2 business days, then every 5 business days while unresolved. "Policy may narrow
+ * these values through approved versioning" (docs/03 I-66 payroll-8; 0255): a criterion revision may set shorter intervals (at most
+ * these), which each hold decided under it copies; an automatic payment safety block always keeps the defaults.
+ */
 export const FIRST_ESCALATION_BUSINESS_DAYS = 2;
 export const ESCALATION_INTERVAL_BUSINESS_DAYS = 5;
 /** Holds handled per review-job transaction (an engineering bound, not a business rule). */
@@ -81,6 +89,7 @@ const reassertHold = (tx: Queryable, grant: AccessGrant, action: 'propose' | 'de
 // ---------------------------------------------------------------------------------------------------------------
 
 const CRITERION_VIEW = `select id, code, revision, category, applicability, scope_mode as "scopeMode", max_review_days as "maxReviewDays",
+    first_escalation_business_days as "firstEscalationBusinessDays", escalation_interval_business_days as "escalationIntervalBusinessDays",
     evidence_reference as "evidenceReference", validation_reference as "validationReference", state, created_by as "createdBy",
     activated_by as "activatedBy", activated_at as "activatedAt", retired_at as "retiredAt", version
   from payroll_hold_criterion`;
@@ -95,8 +104,21 @@ export interface CriterionInput {
   applicability: string;
   scopeMode: 'FULL_ONLY' | 'FULL_OR_PARTIAL';
   maxReviewDays: number;
+  /** H2 narrowing (null or absent: the default of 2): the first escalation after 1 or 2 business days unresolved. */
+  firstEscalationBusinessDays?: number | null | undefined;
+  /** H2 narrowing (null or absent: the default of 5): later escalations every 1 to 5 business days. */
+  escalationIntervalBusinessDays?: number | null | undefined;
   evidenceReference: string;
   validationReference: string;
+}
+
+/** A narrowed interval: a whole number of business days from 1 to the H2 default; never wider (H2 "may narrow"). */
+function narrowedInterval(value: number | null | undefined, max: number, field: string): number | null {
+  if (value === undefined || value === null) return null;
+  if (!Number.isInteger(value) || value < 1 || value > max) {
+    throw new HttpError(422, 'REMINDER_INTERVAL_NOT_NARROWER', `The ${field} is a whole number of business days from 1 to ${max}: policy may narrow the H2 cadence, never widen it`, { field, max });
+  }
+  return value;
 }
 
 const RESERVED_CODES = ['MISSING_TIMESHEET', 'TIMESHEET', 'TIMESHEET_MISSING', 'INPUT_DISCREPANCY', 'SEPARATION', 'INACTIVITY', 'BANK_MISSING', 'BANK_INVALID', 'BANK_UNVERIFIED'];
@@ -108,13 +130,15 @@ export async function createCriterion(tx: Queryable, grant: AccessGrant, input: 
   // H2/BR-049: a missing timesheet, an input discrepancy or a separation is never a hold; bank problems are the
   // automatic safety block.
   if (RESERVED_CODES.includes(code)) throw new HttpError(422, 'NOT_A_HOLD_CRITERION', 'This situation is never a salary hold criterion (H2)');
+  const firstEscalation = narrowedInterval(input.firstEscalationBusinessDays, FIRST_ESCALATION_BUSINESS_DAYS, 'first escalation');
+  const escalationInterval = narrowedInterval(input.escalationIntervalBusinessDays, ESCALATION_INTERVAL_BUSINESS_DAYS, 'escalation interval');
   await advisoryLock(tx, `payroll_hold_criterion:${grant.companyId}:${code}`);
   await reassertHold(tx, grant, 'define_criterion');
   const id = (
     await tx.query<{ id: string }>(
       `insert into payroll_hold_criterion (company_id, code, revision, category, applicability, scope_mode, max_review_days, evidence_reference,
-                                           validation_reference, state, created_by, updated_by)
-       select $1, $2, coalesce(max(revision), 0) + 1, $3, $4, $5, $6, $7, $8, 'DRAFT', $9, $9 from payroll_hold_criterion where company_id = $1 and code = $2
+                                           validation_reference, state, created_by, updated_by, first_escalation_business_days, escalation_interval_business_days)
+       select $1, $2, coalesce(max(revision), 0) + 1, $3, $4, $5, $6, $7, $8, 'DRAFT', $9, $9, $10, $11 from payroll_hold_criterion where company_id = $1 and code = $2
        returning id`,
       [
         grant.companyId,
@@ -126,11 +150,20 @@ export async function createCriterion(tx: Queryable, grant: AccessGrant, input: 
         requireText(input.evidenceReference, 'evidence reference', 500, 'EVIDENCE_REQUIRED'),
         requireText(input.validationReference, 'validation reference', 500, 'VALIDATION_REQUIRED'),
         grant.userId,
+        firstEscalation,
+        escalationInterval,
       ],
     )
   ).rows[0]!.id;
   await audit(tx, actorOf(grant), 'payroll_hold_criterion', id, 'CREATE', null, {
-    operational: { code, category: input.category, scopeMode: input.scopeMode, maxReviewDays: input.maxReviewDays },
+    operational: {
+      code,
+      category: input.category,
+      scopeMode: input.scopeMode,
+      maxReviewDays: input.maxReviewDays,
+      firstEscalationBusinessDays: firstEscalation,
+      escalationIntervalBusinessDays: escalationInterval,
+    },
   });
   return (await tx.query(`${CRITERION_VIEW} where company_id = $1 and id = $2`, [grant.companyId, id])).rows[0];
 }
@@ -260,8 +293,9 @@ export async function proposeHold(tx: Queryable, grant: AccessGrant, recordId: s
   }
   if (rec.run_state !== 'PROCESSED_LOCKED') throw new HttpError(409, 'RUN_NOT_PROCESSED', 'A hold applies to a processed payroll record');
   const criterion = (
-    await tx.query<{ id: string; code: string; revision: number; state: string; scope_mode: string; max_review_days: number }>(
-      `select id, code, revision, state, scope_mode, max_review_days from payroll_hold_criterion where company_id = $1 and id = $2`,
+    await tx.query<{ id: string; code: string; revision: number; state: string; scope_mode: string; max_review_days: number; first_escalation: number | null; escalation_interval: number | null }>(
+      `select id, code, revision, state, scope_mode, max_review_days, first_escalation_business_days as first_escalation, escalation_interval_business_days as escalation_interval
+         from payroll_hold_criterion where company_id = $1 and id = $2`,
       [grant.companyId, input.criterionId],
     )
   ).rows[0];
@@ -297,8 +331,8 @@ export async function proposeHold(tx: Queryable, grant: AccessGrant, recordId: s
     await tx.query<{ id: string }>(
       `insert into payroll_hold (company_id, employee_id, payroll_record_id, run_id, transaction_id, hold_kind, criterion_id, policy_revision, reason_code, reason, scope,
                                  hold_amount, currency_code, idempotency_key, state, proposed_by, effective_date, review_due_on, release_criterion, evidence_reference,
-                                 unresolved_since, created_by, updated_by)
-       values ($1, $2, $3, $4, $5, 'POLICY_HOLD', $6, $7, $8, $9, $10, $11::numeric, $12, $13, 'PROPOSED', $14, $15, $16, $17, $18, $19, $14, $14) returning id`,
+                                 unresolved_since, created_by, updated_by, first_escalation_business_days, escalation_interval_business_days)
+       values ($1, $2, $3, $4, $5, 'POLICY_HOLD', $6, $7, $8, $9, $10, $11::numeric, $12, $13, 'PROPOSED', $14, $15, $16, $17, $18, $19, $14, $14, $20, $21) returning id`,
       [
         grant.companyId,
         rec.employee_id,
@@ -319,6 +353,9 @@ export async function proposeHold(tx: Queryable, grant: AccessGrant, recordId: s
         releaseCriterion,
         evidence,
         grant.businessDate,
+        // The review cadence of the criterion revision it is decided under, kept for good (0255).
+        criterion.first_escalation,
+        criterion.escalation_interval,
       ],
     )
   ).rows[0]!.id;
@@ -340,19 +377,29 @@ export async function proposeHold(tx: Queryable, grant: AccessGrant, recordId: s
   return { ...(await holdDetail(tx, grant, id)), replayed: false };
 }
 
-/** The creator, preparer, reviewer and approver of the run a hold belongs to (C4 / H4: none of them decides or releases its holds). */
+/**
+ * The creator, preparer, reviewer and approver of the run a hold belongs to (C4 / H4: none of them decides or releases its holds),
+ * and the delegator of each of its delegated review, approval and covering decisions (I-57 item 7: a decision taken under a
+ * delegation is the delegator's too).
+ */
 async function runDeciders(db: Queryable, companyId: string, runId: string): Promise<string[]> {
   const r = (
-    await db.query<{ created_by: string | null; calculated_by: string | null; reviewed_by: string | null; approved_by: string | null }>(
-      `select created_by, calculated_by, reviewed_by, approved_by from payroll_run where company_id = $1 and id = $2`,
+    await db.query<{ created_by: string | null; calculated_by: string | null; reviewed_by: string | null; approved_by: string | null; transaction_ids: string[] }>(
+      `select r.created_by, r.calculated_by, r.reviewed_by, r.approved_by,
+              array(select r.transaction_id union all select transaction_id from payroll_run_approval where company_id = r.company_id and run_id = r.id
+                    union all select transaction_id from payroll_record_cover where company_id = r.company_id and run_id = r.id) as transaction_ids
+         from payroll_run r where r.company_id = $1 and r.id = $2`,
       [companyId, runId],
     )
   ).rows[0];
-  return r ? [r.created_by, r.calculated_by, r.reviewed_by, r.approved_by].filter((u): u is string => !!u) : [];
+  if (!r) return [];
+  const delegators = await decisionDelegators(db, companyId, r.transaction_ids);
+  return [...new Set([r.created_by, r.calculated_by, r.reviewed_by, r.approved_by, ...delegators].filter((u): u is string => !!u))];
 }
 
-async function assertIndependentOfRun(db: Queryable, grant: AccessGrant, runId: string): Promise<void> {
-  if ((await runDeciders(db, grant.companyId, runId)).includes(grant.userId)) {
+async function assertIndependentOfRun(db: Queryable, grant: AccessGrant, runId: string, actingFor: string | null = null): Promise<void> {
+  const deciders = await runDeciders(db, grant.companyId, runId);
+  if (deciders.includes(grant.userId) || (actingFor !== null && deciders.includes(actingFor))) {
     throw new HttpError(403, 'NOT_INDEPENDENT', 'The preparer, reviewer and approver of a payroll run do not decide or release its holds');
   }
 }
@@ -377,10 +424,13 @@ export async function decideHold(tx: Queryable, grant: AccessGrant, taskId: stri
   if (await priorDecision(tx, grant.companyId, input.idempotencyKey, taskId)) return { holdId: h.id, state: h.state, replayed: true };
   if (!(await taskIsPending(tx, grant, taskId))) throw new HttpError(409, 'TASK_CLOSED', 'This task has already been decided');
   if (h.state !== 'PROPOSED') throw new HttpError(409, 'INVALID_STATE', 'This hold is not waiting for a decision');
-  // H2: maker proposes, an independent eligible Admin decides; the beneficiary is never the decision maker.
-  if (h.proposed_by === grant.userId) throw new HttpError(403, 'NOT_INDEPENDENT', 'The maker of a hold does not decide it');
+  // H2: maker proposes, an independent eligible Admin decides; the beneficiary is never the decision maker. I-57 item 7: a
+  // delegate decides in the delegator's name, so the delegator is held to the same rules.
+  const actingFor = await taskDelegator(tx, grant.companyId, taskId);
+  if (h.proposed_by === grant.userId || h.proposed_by === actingFor) throw new HttpError(403, 'NOT_INDEPENDENT', 'The maker of a hold does not decide it');
   assertNotSelf(grant, h.employee_id);
-  await assertIndependentOfRun(tx, grant, h.run_id);
+  if (actingFor && (await userIsEmployee(tx, grant.companyId, actingFor, h.employee_id))) throw new HttpError(403, 'SELF_ACTION_NOT_ALLOWED', 'You cannot act on your own record in this context');
+  await assertIndependentOfRun(tx, grant, h.run_id, actingFor);
   if (input.decision === 'REJECT') requireText(input.reason, 'reason', 1000);
   // BR-050: "an activated hold policy" when the hold is approved, not only when it was proposed (a rejection stays possible).
   else await requireActiveCriterion(tx, grant.companyId, h.criterion_id);
@@ -444,7 +494,8 @@ export async function createAutomaticHolds(tx: Queryable, actor: Actor, business
     await tx.query<{ id: string }>(
       `with src as materialized (
          select gen_random_uuid() as tx_id, rec.id as record_id, rec.employee_id, rec.run_id, rec.net, rec.currency_code, ss.id as stop_id, ss.reason, ss.release_criterion,
-                ss.evidence_reference, ss.proposed_by, ss.decided_by, ss.decided_at, c.id as criterion_id, c.code, c.revision, c.max_review_days
+                ss.evidence_reference, ss.proposed_by, ss.decided_by, ss.decided_at, c.id as criterion_id, c.code, c.revision, c.max_review_days,
+                c.first_escalation_business_days, c.escalation_interval_business_days
            from payroll_record rec
            join payroll_salary_stop ss on ss.company_id = rec.company_id and ss.id = rec.salary_stop_id and ss.mode = 'HOLD_DISBURSEMENT'
            join payroll_hold_criterion c on c.company_id = ss.company_id and c.id = ss.criterion_id
@@ -455,10 +506,10 @@ export async function createAutomaticHolds(tx: Queryable, actor: Actor, business
        )
        insert into payroll_hold (company_id, employee_id, payroll_record_id, run_id, transaction_id, hold_kind, criterion_id, salary_stop_id, policy_revision, reason_code,
                                  reason, scope, hold_amount, currency_code, state, proposed_by, effective_date, review_due_on, approved_at, approved_by,
-                                 release_criterion, evidence_reference, created_by, updated_by)
+                                 release_criterion, evidence_reference, created_by, updated_by, first_escalation_business_days, escalation_interval_business_days)
        select $1, s.employee_id, s.record_id, s.run_id, s.tx_id, 'SALARY_STOP', s.criterion_id, s.stop_id, s.code || '@r' || s.revision, s.code, s.reason, 'FULL', s.net,
               s.currency_code, 'APPROVED_ACTIVE', s.proposed_by, $4::date, $4::date + s.max_review_days, s.decided_at, s.decided_by, s.release_criterion,
-              s.evidence_reference, $3, $3
+              s.evidence_reference, $3, $3, s.first_escalation_business_days, s.escalation_interval_business_days
          from src s where s.tx_id in (select id from bt)
        returning id`,
       [actor.companyId, runId, actor.userId, businessDate, recordIds],
@@ -595,7 +646,10 @@ const HOLD_VIEW = `select h.id, h.hold_kind as "holdKind", h.state, h.employee_i
     h.release_criterion as "releaseCriterion", h.evidence_reference as "evidenceReference", h.proposed_at as "proposedAt", h.proposed_by as "proposedBy",
     h.approved_at as "approvedAt", h.approved_by as "approvedBy", h.expired_at as "expiredAt", h.released_at as "releasedAt", h.released_by as "releasedBy",
     h.release_reason as "releaseReason", h.release_evidence_reference as "releaseEvidenceReference", h.release_bank_revision_id as "releaseBankRevisionId",
-    h.release_bank_check as "releaseBankCheck", h.transaction_id as "transactionId", h.version
+    h.release_bank_check as "releaseBankCheck",
+    coalesce(h.first_escalation_business_days, ${FIRST_ESCALATION_BUSINESS_DAYS}) as "firstEscalationBusinessDays",
+    coalesce(h.escalation_interval_business_days, ${ESCALATION_INTERVAL_BUSINESS_DAYS}) as "escalationIntervalBusinessDays",
+    h.transaction_id as "transactionId", h.version
   from payroll_hold h
   join employee e on e.company_id = h.company_id and e.id = h.employee_id
   join payroll_run ru on ru.company_id = h.company_id and ru.id = h.run_id
@@ -718,7 +772,8 @@ export async function holdTasks(db: Queryable, grant: AccessGrant) {
  * per day (a proposal waiting for its decider from the day after it was proposed; an expired review and an
  * automatic safety block, both for the fallback reviewers, from the day they became unresolved), its first
  * escalation once it has been unresolved for 2 business days and a further escalation every 5 business days after
- * that. Business days are Monday to Friday on the company calendar date (as for the approval reminders). Each
+ * that, or the shorter intervals the hold copied from its criterion revision (0255; a safety block keeps 2 and 5).
+ * Business days are Monday to Friday on the company calendar date (as for the approval reminders). Each
  * occurrence has its own outbox key, so reruns never duplicate; work runs in bounded pages, each its own transaction.
  */
 export async function runPayrollHoldReviews(db: Database, companyId: string, localDate: string, systemUserId: string) {
@@ -755,14 +810,15 @@ export async function runPayrollHoldReviews(db: Database, companyId: string, loc
   for (;;) {
     const page: { reminders: number; escalations: number; last: string | null; size: number } = await withTransaction(db, async (tx) => {
       const open = (
-        await tx.query<{ id: string; state: string; hold_kind: string; transaction_id: string; unresolved_since: string; business_days: number }>(
+        await tx.query<{ id: string; state: string; hold_kind: string; transaction_id: string; unresolved_since: string; business_days: number; first: number; every: number }>(
           `select h.id, h.state, h.hold_kind, h.transaction_id, to_char(h.unresolved_since, 'YYYY-MM-DD') as unresolved_since,
-                  (select count(*)::int from generate_series(h.unresolved_since + 1, $2::date, interval '1 day') g (d) where extract(isodow from g.d) < 6) as business_days
+                  (select count(*)::int from generate_series(h.unresolved_since + 1, $2::date, interval '1 day') g (d) where extract(isodow from g.d) < 6) as business_days,
+                  coalesce(h.first_escalation_business_days, $5)::int as first, coalesce(h.escalation_interval_business_days, $6)::int as every
              from payroll_hold h
             where h.company_id = $1 and h.unresolved_since is not null and h.unresolved_since <= $2::date and ($3::uuid is null or h.id > $3::uuid)
               and (h.state in ('PROPOSED', 'EXPIRED_REVIEW') or (h.state = 'APPROVED_ACTIVE' and h.hold_kind = 'PAYMENT_SAFETY_BLOCK'))
             order by h.id limit $4`,
-          [companyId, localDate, after, REVIEW_PAGE],
+          [companyId, localDate, after, REVIEW_PAGE, FIRST_ESCALATION_BUSINESS_DAYS, ESCALATION_INTERVAL_BUSINESS_DAYS],
         )
       ).rows;
       let r = 0;
@@ -776,8 +832,9 @@ export async function runPayrollHoldReviews(db: Database, companyId: string, loc
         } else if (await emitOnce(tx, companyId, 'payroll_hold.review_due', h.id, `${h.id}:${localDate}`, { holdId: h.id, date: localDate })) {
           r++;
         }
-        if (h.business_days >= FIRST_ESCALATION_BUSINESS_DAYS) {
-          const n = 1 + Math.floor((h.business_days - FIRST_ESCALATION_BUSINESS_DAYS) / ESCALATION_INTERVAL_BUSINESS_DAYS);
+        // H2 cadence, as the hold's criterion revision narrowed it (copied onto the hold; a safety block keeps the defaults).
+        if (h.business_days >= h.first) {
+          const n = 1 + Math.floor((h.business_days - h.first) / h.every);
           if (await emitOnce(tx, companyId, 'payroll_hold.escalation', h.id, `${h.id}:${h.unresolved_since}:${n}`, { holdId: h.id, number: n, waitingDays: h.business_days })) e++;
         }
       }

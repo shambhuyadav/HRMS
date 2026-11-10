@@ -67,23 +67,24 @@ describe('own notification preferences (FR-083, FR-085, DF12)', () => {
     return res.json().items as { eventType: string; publishCelebration: boolean; receiveOptional: boolean }[];
   };
 
-  it('never saved reads as DF12’s defaults: publication off, receipt on', async () => {
+  it('never saved reads as DF12’s defaults: publication off, receipt on (in-app and by email)', async () => {
     expect(await read(employee)).toEqual([
-      { eventType: 'BIRTHDAY', publishCelebration: false, receiveOptional: true },
-      { eventType: 'WORK_ANNIVERSARY', publishCelebration: false, receiveOptional: true },
+      { eventType: 'BIRTHDAY', publishCelebration: false, receiveOptional: true, receiveEmail: true },
+      { eventType: 'WORK_ANNIVERSARY', publishCelebration: false, receiveOptional: true, receiveEmail: true },
     ]);
   });
 
   it('a saved choice reads back for its owner alone, one event at a time', async () => {
     expect((await h.call(employee, 'PUT', '/v1/me/notification-preferences', { eventType: 'BIRTHDAY', publishCelebration: true })).statusCode).toBe(200);
     expect((await h.call(employee, 'PUT', '/v1/me/notification-preferences', { eventType: 'WORK_ANNIVERSARY', receiveOptional: false })).statusCode).toBe(200);
+    // Receipt by email (0247) is its own choice: switching in-app receipt off leaves it as it was.
     expect(await read(employee)).toEqual([
-      { eventType: 'BIRTHDAY', publishCelebration: true, receiveOptional: true },
-      { eventType: 'WORK_ANNIVERSARY', publishCelebration: false, receiveOptional: false },
+      { eventType: 'BIRTHDAY', publishCelebration: true, receiveOptional: true, receiveEmail: true },
+      { eventType: 'WORK_ANNIVERSARY', publishCelebration: false, receiveOptional: false, receiveEmail: true },
     ]);
     expect(await read(other)).toEqual([
-      { eventType: 'BIRTHDAY', publishCelebration: false, receiveOptional: true },
-      { eventType: 'WORK_ANNIVERSARY', publishCelebration: false, receiveOptional: true },
+      { eventType: 'BIRTHDAY', publishCelebration: false, receiveOptional: true, receiveEmail: true },
+      { eventType: 'WORK_ANNIVERSARY', publishCelebration: false, receiveOptional: true, receiveEmail: true },
     ]);
   });
 

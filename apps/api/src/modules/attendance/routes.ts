@@ -4,6 +4,7 @@ import { HttpError } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import { BULK_KINDS } from '../bulk/kinds.js';
 import { enqueueBulkJob } from '../bulk/service.js';
+import { attendanceDashboard, attendanceDashboardList, DASHBOARD_LISTS, DASHBOARD_MAX_DEPARTMENTS, type DashboardListQuery, type DashboardQuery } from './dashboard.js';
 import {
   amendmentLog,
   amendRecord,
@@ -66,8 +67,46 @@ const controlQuery = {
   },
 } as const;
 
+/** CL-053 attendance dashboard: a date (default today) and any of the departments (repeat `departmentId`). */
+const dashboardProps = {
+  date,
+  departmentId: { type: 'array', items: uuid, maxItems: DASHBOARD_MAX_DEPARTMENTS, uniqueItems: true },
+} as const;
+
 export async function attendanceRoutes(app: FastifyInstance, opts: { db: Database }): Promise<void> {
   const { db } = opts;
+
+  // CL-053 attendance dashboard (dashboard.ts): the counts of a date per department and in total, over the caller's row scope,
+  // under the attendance read duty (operational fields only), and the employees behind one count with the same predicate.
+  app.get('/attendance/dashboard', { schema: { querystring: { type: 'object', additionalProperties: false, properties: dashboardProps } } }, async (request) => {
+    const grant = await requireAccess(db, request, 'attendance', 'read', ['operational']);
+    return attendanceDashboard(db, grant, request.query as DashboardQuery);
+  });
+
+  app.get(
+    '/attendance/dashboard/employees',
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['list'],
+          properties: {
+            ...dashboardProps,
+            list: { type: 'string', enum: [...DASHBOARD_LISTS] },
+            inDepartment: uuid,
+            withoutDepartment: { type: 'boolean' },
+            page: { type: 'integer', minimum: 1, default: 1 },
+            pageSize: { type: 'integer', enum: [25, 50, 100], default: 25 },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const grant = await requireAccess(db, request, 'attendance', 'read', ['operational']);
+      return attendanceDashboardList(db, grant, request.query as DashboardListQuery);
+    },
+  );
 
   // FR-022 processing of one work date over the caller's scope: queued as a bulk job and run by the worker in bounded
   // chunks under the caller's re-checked authority (NFR-S09); the answer is 202 with the job to follow (GET

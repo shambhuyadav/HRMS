@@ -1,0 +1,5 @@
+Loan No,Emp No,Loan Type,Currency,Sanctioned Amount,Balance Outstanding,Loan Status,Purpose,Sanction Date
+LN-2024-001,L004,Personal Loan,INR,"1,50,000.00","90,000.00",Running,Home repairs,10-12-2024
+LN-2025-007,L007,Salary Advance,INR,30000.00,10000.00,Running,Medical expenses,05-06-2025
+LN-2026-003,L009,Personal Loan,INR,80000.00,80000.00,Sanctioned,Vehicle purchase,20-10-2026
+LN-2024-010,L002,Personal Loan,INR,100000.00,0.00,Closed,Laptop purchase,01-03-2024

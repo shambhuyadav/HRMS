@@ -107,7 +107,8 @@ describe('attendance control (FR-021, E07)', () => {
     expect(screen.getByText('overtime candidate 45 min')).toBeTruthy();
     expect(screen.getByText(/Organisation and working organisation: the company you are acting for/)).toBeTruthy();
     const entity = screen.getByLabelText('Entity (minutes of)') as HTMLSelectElement;
-    expect([...entity.options].map((o) => o.value)).toEqual(['', 'WORKED', 'SCHEDULED', 'SHORTFALL', 'LATE', 'OVERTIME_CANDIDATE']);
+    // 0265 (CL-050) added early-departure minutes beside late and overtime-candidate minutes.
+    expect([...entity.options].map((o) => o.value)).toEqual(['', 'WORKED', 'SCHEDULED', 'SHORTFALL', 'LATE', 'EARLY_DEPARTURE', 'OVERTIME_CANDIDATE']);
     fireEvent.change(entity, { target: { value: 'OVERTIME_CANDIDATE' } });
     fireEvent.change(screen.getByLabelText('Compared'), { target: { value: 'GTE' } });
     fireEvent.change(screen.getByLabelText('Number of minutes'), { target: { value: '30' } });

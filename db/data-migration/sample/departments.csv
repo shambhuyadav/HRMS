@@ -1,0 +1,7 @@
+Dept Code,Dept Name,Active,Cost Centre
+MGMT,Management,Y,CC-010
+ENGG,Engineering,Y,CC-100
+HRD,Human Resources,Y,CC-200
+FINC,Finance,Y,CC-300
+SALES,Sales,Y,CC-400
+OPS-OLD,Operations (closed 2022),N,CC-900

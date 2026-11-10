@@ -1,0 +1,115 @@
+{
+  "$comment": "Synthetic sample extract (made-up names, example.invalid emails, fake identity numbers). It documents the manifest format and is the fixture of db/data-migration/*.test.ts.",
+  "manifestVersion": 1,
+  "migrationId": "SAMPLE-LEGACY-2026",
+  "sourceSystem": "Legacy HR Suite (synthetic sample)",
+  "cutoverDate": "2026-10-31",
+  "formats": { "date": "DD-MM-YYYY", "thousandsSeparator": "," },
+  "files": [
+    { "file": "departments.csv", "entity": "department", "owner": "HR data owner", "columns": { "Dept Code": "code", "Dept Name": "name", "Active": "active" }, "ignoredColumns": ["Cost Centre"] },
+    { "file": "locations.csv", "entity": "location", "owner": "HR data owner", "columns": { "Location Code": "code", "Location Name": "name", "Active": "active" } },
+    { "file": "designations.csv", "entity": "designation", "owner": "HR data owner", "columns": { "Designation": "code", "Description": "name", "Active": "active" } },
+    { "file": "grades.csv", "entity": "grade", "owner": "HR data owner", "columns": { "Grade": "code", "Grade Name": "name" } },
+    {
+      "file": "employees.csv",
+      "entity": "employee",
+      "owner": "HR data owner",
+      "columns": {
+        "Emp No": "employeeCode",
+        "Full Name": "displayName",
+        "Official Email": "workEmail",
+        "DOJ": "joiningDate",
+        "Emp Type": "employmentType",
+        "Status": "status",
+        "Department": "departmentCode",
+        "Location": "locationCode",
+        "Designation": "designationCode",
+        "Grade": "gradeCode",
+        "Reporting To": "managerEmployeeCode",
+        "Shift": "shiftCode",
+        "PAN": "identityNumber"
+      },
+      "ignoredColumns": ["Personal Mobile"]
+    },
+    {
+      "file": "assignment_history.csv",
+      "entity": "assignment_history",
+      "owner": "HR data owner",
+      "columns": { "Emp No": "employeeCode", "From Date": "effectiveFrom", "Department": "departmentCode", "Location": "locationCode", "Designation": "designationCode", "Grade": "gradeCode" }
+    },
+    {
+      "file": "salary.csv",
+      "entity": "salary",
+      "owner": "Payroll data owner",
+      "columns": { "Emp No": "employeeCode", "Effective From": "effectiveFrom", "Annual CTC": "annualCtc", "Monthly Gross": "monthlyGross", "Currency": "currency" }
+    },
+    {
+      "file": "leave_balances.csv",
+      "entity": "leave_opening",
+      "owner": "HR data owner",
+      "columns": { "Emp No": "employeeCode", "Leave Code": "leaveType", "Balance": "units", "As On": "effectiveDate" }
+    },
+    {
+      "file": "loans.csv",
+      "entity": "loan",
+      "owner": "Payroll data owner",
+      "columns": {
+        "Loan No": "loanReference",
+        "Emp No": "employeeCode",
+        "Loan Type": "loanKind",
+        "Currency": "currency",
+        "Sanctioned Amount": "principal",
+        "Balance Outstanding": "outstanding",
+        "Loan Status": "status",
+        "Purpose": "purpose",
+        "Sanction Date": "sanctionDate"
+      }
+    }
+  ],
+  "codeMaps": {
+    "department": { "MGMT": "MGT", "ENGG": "ENG", "HRD": "HR", "FINC": "FIN", "SALES": "SAL", "OPS-OLD": "OPS" },
+    "employmentType": { "Permanent": "PERMANENT", "Contract": "CONTRACTOR", "Trainee": "INTERN" },
+    "shift": { "General": "GEN" },
+    "leaveType": { "PL": "ANNUAL", "SL": "SICK", "CL": "CASUAL" },
+    "loanKind": { "Personal Loan": "LOAN", "Salary Advance": "ADVANCE" }
+  },
+  "statusMaps": {
+    "employee": { "Active": "ACTIVE_CONFIRMED", "Probation": "ACTIVE_PROBATION", "Notice Period": "NOTICE", "Yet to Join": "DRAFT", "Resigned": "INACTIVE_SEPARATED", "Absconded": "INACTIVE_SEPARATED" },
+    "loan": { "Applied": "REQUESTED", "Sanctioned": "APPROVED", "Running": "DISBURSED", "Closed": "CLOSED", "Rejected": "REJECTED" }
+  },
+  "exclusionPolicies": {
+    "INACTIVE_EMPLOYEE": { "reason": "Separated employments are kept in the archived extract; only current and future employments are migrated", "approvedBy": "Sample Data Owner", "approvedOn": "2026-11-09" },
+    "CLOSED_LOAN": { "reason": "Fully recovered or rejected loans stay in the archived extract", "approvedBy": "Sample Data Owner", "approvedOn": "2026-11-09" },
+    "INACTIVE_MASTER": { "reason": "Closed organisation units are not recreated", "approvedBy": "Sample Data Owner", "approvedOn": "2026-11-09" },
+    "SALARY_HISTORY": { "reason": "Earlier salary revisions stay in the archived extract; the arrangement in force at cut-over is migrated", "approvedBy": "Sample Data Owner", "approvedOn": "2026-11-09" },
+    "ZERO_LEAVE_BALANCE": { "reason": "A zero balance needs no opening entry", "approvedBy": "Sample Data Owner", "approvedOn": "2026-11-09" }
+  },
+  "policies": {
+    "noManagerReason": "Chief executive: top of the reporting chain (migrated from Legacy HR Suite)",
+    "loanAmountBasis": "OUTSTANDING"
+  },
+  "amountClassification": {
+    "salary.annualCtc": "CAPTURED",
+    "salary.monthlyGross": "DERIVED",
+    "leave_opening.units": "DERIVED",
+    "loan.principal": "CAPTURED",
+    "loan.outstanding": "DERIVED"
+  },
+  "controlTotals": {
+    "department": { "rows": 6 },
+    "location": { "rows": 2 },
+    "designation": { "rows": 10 },
+    "grade": { "rows": 4 },
+    "employee": {
+      "rows": 13,
+      "byStatus": { "Active": 8, "Probation": 3, "Yet to Join": 1, "Resigned": 1 },
+      "byDepartment": { "MGMT": 1, "ENGG": 4, "HRD": 2, "FINC": 2, "SALES": 4 }
+    },
+    "assignment_history": { "rows": 4 },
+    "salary": { "rows": 13, "amounts": { "annualCtc": { "INR": "25980000.00" }, "monthlyGross": { "INR": "2165000.00" } } },
+    "leave_opening": { "rows": 15, "amounts": { "units": { "PL": "110", "SL": "6", "CL": "7.5" } } },
+    "loan": { "rows": 4, "byStatus": { "Running": 2, "Sanctioned": 1, "Closed": 1 }, "amounts": { "principal": { "INR": "360000.00" }, "outstanding": { "INR": "180000.00" } } }
+  },
+  "dispositions": [],
+  "signOffs": {}
+}

@@ -20,7 +20,7 @@ import { enqueueEvent } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, canAccessEmployee, employeeScopePredicate, SqlParams } from '../access/authorize.js';
-import { cancelActiveApproval, lockTransaction } from '../workflow/engine.js';
+import { cancelActiveApproval, decidedOnBehalfOf, lockTransaction } from '../workflow/engine.js';
 import {
   ACTIVE_EMPLOYEE_STATUSES,
   activeGoals,
@@ -541,11 +541,12 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
                      join appraisal_revision ar on ar.company_id = sr.company_id and ar.id = sr.revision_id
                     where sr.company_id = $1 and sr.appraisal_id = $3)`;
   const decisions = (
-    await db.query<{ revision: number; step: number; decision: string; reason: string | null; decided_at: Date; decided_by: Person }>(
+    await db.query<{ revision: number; step: number; decision: string; reason: string | null; decided_at: Date; decided_by: Person; on_behalf_of: Person | null }>(
       `select coalesce(rt.revision, i.transaction_revision) as revision,
               case when i.transaction_kind = '${SECOND_REVIEW_KIND}' then 3 else s.sequence end as step,
               d.decision, ${col(scope.showRating, 'd.reason', 'reason')}, d.occurred_at as decided_at,
-              json_build_object('userId', d.actor_user_id, 'employeeCode', de.employee_code, 'displayName', de.display_name) as decided_by
+              json_build_object('userId', d.actor_user_id, 'employeeCode', de.employee_code, 'displayName', de.display_name) as decided_by,
+              ${decidedOnBehalfOf('t', 'd')} as on_behalf_of
          from ${routes} rt
          join approval_instance i on i.company_id = $1 and i.transaction_id = rt.transaction_id
          join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
@@ -743,7 +744,8 @@ export async function appraisalView(db: Queryable, grant: AccessGrant, id: strin
       ...stepStage(d.step),
       decision: d.decision,
       decidedAt: d.decided_at,
-      ...(scope.own ? {} : { decidedBy: d.decided_by }),
+      // I-57 item 7: a decision taken under a delegation names the delegator it was taken for beside the delegate who acted.
+      ...(scope.own ? {} : { decidedBy: d.decided_by, onBehalfOf: d.on_behalf_of }),
       ...(scope.showRating ? { remark: d.reason } : {}),
     })),
     ...(scope.showRating ? { finalRating: a.final_rating } : {}),

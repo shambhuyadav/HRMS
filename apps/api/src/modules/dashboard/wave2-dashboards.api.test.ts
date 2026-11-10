@@ -75,13 +75,13 @@ describe('F2 dashboards of the wave-2 roles', () => {
     }
   });
 
-  it('Recruiter: approved requisitions, pipeline and offers counted in scope; interview tasks unavailable, not zero', async () => {
+  it('Recruiter: approved requisitions, pipeline, offers and the viewer’s own interview tasks counted in scope (I-92)', async () => {
     const d = await dashboard('RECRUITER');
     expect(d).toMatchObject({ title: 'Recruitment', state: 'OK' });
     expect(d.byCode.APPROVED_REQUISITIONS).toMatchObject({ status: 'OK', value: 0 });
     expect(d.byCode.PIPELINE).toMatchObject({ status: 'OK', value: 0 });
-    expect(d.byCode.INTERVIEWS_DUE).toMatchObject({ status: 'NOT_AVAILABLE' });
-    expect(d.byCode.INTERVIEWS_DUE).not.toHaveProperty('value');
+    // I-92 (0245): interview tasks are now counted (the viewer's own applications at the interview stage); none exist here.
+    expect(d.byCode.INTERVIEWS_DUE).toMatchObject({ status: 'OK', value: 0 });
   });
 
   it('Training Coordinator: sessions, confirmations, completion/no-show and pending feedback (counts only)', async () => {

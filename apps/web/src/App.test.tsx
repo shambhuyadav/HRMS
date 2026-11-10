@@ -2,7 +2,7 @@
 // permission (the server still re-checks every call). Own-record entries (H3, BR-055) appear only in an OWN context
 // linked to an employee. Synthetic data only.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App, APP_ROUTE_PATHS, moduleGroupOf, visibleModuleGroups, visibleNav } from './App';
@@ -28,6 +28,7 @@ vi.mock('./session', () => ({
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -155,7 +156,15 @@ describe('the menu', () => {
     );
     const nav = screen.getByRole('navigation', { name: 'Main' });
     const group = within(nav).getByRole('group', { name: 'Payroll' });
+    // Module groups are collapsed unless the current page is in them; opening one shows its screens.
+    const toggle = within(group).getByRole('button', { name: /Payroll/ });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(within(group).queryByRole('link', { name: payroll.title })).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(within(group).getByRole('link', { name: payroll.title })).toBeTruthy();
     expect(within(nav).queryByRole('group', { name: 'Hiring' })).toBeNull();
+    // The breadcrumb names the page.
+    expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Decisions')).toBeTruthy();
   });
 });

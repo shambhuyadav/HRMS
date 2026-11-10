@@ -9,6 +9,7 @@ import { type Database, withTransaction } from '../../db/transaction.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess, requireAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { orgChart } from './chart.js';
 
 const MASTER_TABLES = { departments: 'department', locations: 'location', designations: 'designation', grades: 'grade' } as const;
 type MasterKind = keyof typeof MASTER_TABLES;
@@ -121,6 +122,45 @@ async function assertNotStranded(tx: Queryable, table: string, grant: AccessGran
   if (assignments > 0) throw new HttpError(409, 'MASTER_IN_USE', `Move the ${assignments} assignment(s) on this ${table} first`, { assignments });
 }
 
+export type OrgMasterTable = (typeof MASTER_TABLES)[MasterKind];
+
+/**
+ * Creates one master inside the caller's transaction, under a grant already resolved for org_master.create: company-wide scope,
+ * a valid period, the grant re-checked in the transaction, the insert (code trimmed and upper-cased) and its audit. POST /org/:kind
+ * and the data migration toolkit (db/data-migration/load.ts) both come through here.
+ */
+export async function createOrgMaster(
+  tx: Queryable,
+  grant: AccessGrant,
+  table: OrgMasterTable,
+  input: { code: string; name: string; validFrom?: string | undefined; validTo?: string | undefined },
+): Promise<MasterRow> {
+  assertCompanyWide(grant);
+  const validFrom = input.validFrom ?? null;
+  const validTo = input.validTo ?? null;
+  assertPeriod(validFrom, validTo);
+  await reassertAccess(tx, grant, 'org_master', 'create', ['operational']);
+  const created = (
+    await tx.query<MasterRow>(
+      `insert into ${table} (company_id, code, name, active, valid_from, valid_to, created_by, updated_by)
+       values ($1, $2, $3, true, $4, $5, $6, $6) returning ${MASTER_COLUMNS}`,
+      [grant.companyId, input.code.trim().toUpperCase(), input.name.trim(), validFrom, validTo, grant.userId],
+    )
+  ).rows[0]!;
+  const kind = (Object.keys(MASTER_TABLES) as MasterKind[]).find((k) => MASTER_TABLES[k] === table)!;
+  await writeAudit(tx, {
+    companyId: grant.companyId,
+    resource: 'org_master',
+    recordKey: created.id,
+    actorUserId: grant.userId,
+    actingAssignmentId: grant.assignmentId,
+    action: 'CREATE',
+    newVersion: created.version,
+    after: { operational: { kind, code: created.code, name: created.name, active: true, validFrom, validTo } },
+  });
+  return created;
+}
+
 interface CompanyRow {
   id: string;
   code: string;
@@ -157,6 +197,12 @@ async function assertCompanyEmpty(tx: Queryable, grant: AccessGrant): Promise<vo
 
 export async function orgRoutes(app: FastifyInstance, opts: { db: Database }): Promise<void> {
   const { db } = opts;
+
+  // CL-023: the organisation chart, under the employee list's own permission and scope (org/chart.ts).
+  app.get('/org/chart', async (request) => {
+    const grant = await requireAccess(db, request, 'employee', 'list', ['operational']);
+    return orgChart(db, grant);
+  });
 
   app.get('/org/company', async (request) => {
     const grant = await requireAccess(db, request, 'org_master', 'read', ['operational']);
@@ -221,31 +267,10 @@ export async function orgRoutes(app: FastifyInstance, opts: { db: Database }): P
     const { kind } = request.params as { kind: MasterKind };
     const body = request.body as { code: string; name: string; validFrom?: string; validTo?: string };
     const grant = await requireAccess(db, request, 'org_master', 'create', ['operational'], { requireAll: true });
+    // Scope and period are refused before a connection is taken, as before; createOrgMaster checks them again in the transaction.
     assertCompanyWide(grant);
-    const validFrom = body.validFrom ?? null;
-    const validTo = body.validTo ?? null;
-    assertPeriod(validFrom, validTo);
-    const row = await withTransaction(db, async (tx) => {
-      await reassertAccess(tx, grant, 'org_master', 'create', ['operational']);
-      const created = (
-        await tx.query<MasterRow>(
-          `insert into ${MASTER_TABLES[kind]} (company_id, code, name, active, valid_from, valid_to, created_by, updated_by)
-           values ($1, $2, $3, true, $4, $5, $6, $6) returning ${MASTER_COLUMNS}`,
-          [grant.companyId, body.code.trim().toUpperCase(), body.name.trim(), validFrom, validTo, grant.userId],
-        )
-      ).rows[0]!;
-      await writeAudit(tx, {
-        companyId: grant.companyId,
-        resource: 'org_master',
-        recordKey: created.id,
-        actorUserId: grant.userId,
-        actingAssignmentId: grant.assignmentId,
-        action: 'CREATE',
-        newVersion: created.version,
-        after: { operational: { kind, code: created.code, name: created.name, active: true, validFrom, validTo } },
-      });
-      return created;
-    });
+    assertPeriod(body.validFrom ?? null, body.validTo ?? null);
+    const row = await withTransaction(db, (tx) => createOrgMaster(tx, grant, MASTER_TABLES[kind], body));
     reply.status(201);
     return row;
   });

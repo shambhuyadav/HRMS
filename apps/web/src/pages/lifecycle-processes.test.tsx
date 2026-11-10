@@ -641,6 +641,9 @@ describe('exports for the navigation step', () => {
       ['/lifecycle/employees/:id', 'Employee processes and exit', PROCESS_READ, false],
       ['/lifecycle/exits', 'Exit cases', EXIT_READ, true],
       ['/lifecycle/exits/:id', 'Exit case', EXIT_READ, false],
+      // CL-040 (0260): the notes register and its bulk upload (lifecycle-notes.test.tsx).
+      ['/lifecycle/notes', 'Exit notes, remarks and warnings', NOTE_READ, true],
+      ['/lifecycle/notes/upload', 'Notes bulk upload', 'employee_note.import.restricted', true],
       ['/me/resignation', 'My resignation', EXIT_SUBMIT, true],
       ['/me/processes', 'My processes', PROCESS_READ, false],
     ]);

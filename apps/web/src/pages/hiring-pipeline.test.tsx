@@ -1256,6 +1256,15 @@ describe('offers (F1: approved requisition, confidential compensation, independe
     await waitFor(() => expect(callsTo('GET', '/v1/hiring/offers').at(-1)!.params.toString()).toBe('state=SUBMITTED'));
   });
 
+  it('FR-068: an offer decision a delegate took names the person it was taken for (I-57 item 7)', async () => {
+    const delegated = decisions(false).map((d, i) => ({ ...d, onBehalfOf: i === 1 ? person(OTHER_USER, 'Asha Approver', 'SYN-8') : null }));
+    serve({ [detail]: [200, offerView({ state: 'APPROVED', currentRevision: 2, decisions: delegated })] });
+    renderAt(path, RECRUITER);
+    const history = await screen.findByRole('table', { name: 'Approval history' });
+    expect(cells(rows(history)[0]!)[2]).toBe('Nila Synthetic, SYN-7');
+    expect(cells(rows(history)[1]!)[2]).toBe('Nila Synthetic, SYN-7 on behalf of Asha Approver, SYN-8');
+  });
+
   it('shows no compensation and no decision reasons when the API omits them', async () => {
     serve({ [detail]: [200, offerView({ state: 'APPROVED', currentRevision: 2, decisions: decisions(false) })] });
     renderAt(path, RECRUITER);

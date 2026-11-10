@@ -27,6 +27,8 @@ interface ControlRow {
   late: boolean;
   lateMinutes?: number | null;
   earlyDeparture: boolean;
+  /** 0265: minutes before the scheduled end on an early-departure day (none on a day evaluated before it). */
+  earlyDepartureMinutes?: number | null;
   overtimeCandidateMinutes?: number | null;
   exceptionCode: string | null;
   amended: boolean;
@@ -286,6 +288,7 @@ function AttendanceControlPage() {
               <option value="SCHEDULED">Scheduled</option>
               <option value="SHORTFALL">Short of scheduled</option>
               <option value="LATE">Late</option>
+              <option value="EARLY_DEPARTURE">Early departure</option>
               <option value="OVERTIME_CANDIDATE">Overtime candidate</option>
             </select>
           </label>
@@ -306,7 +309,7 @@ function AttendanceControlPage() {
           </label>
         </form>
         <p className="hint">
-          Organisation and working organisation: the company you are acting for. Late minutes count from the shift start on a late day; overtime candidates are proposals for a manager’s decision, never pay.
+          Organisation and working organisation: the company you are acting for. Late minutes count from the shift start on a late day, early-departure minutes up to the shift end; overtime candidates are proposals for a manager’s decision, never pay.
         </p>
         {!ready && <p className="hint">Choose a period to list attendance.</p>}
         <ErrorNote error={list.error} />
@@ -337,7 +340,8 @@ function AttendanceControlPage() {
                     <td>{r.locationCode ?? '—'}</td>
                     <td>{r.shiftCode ?? '—'}</td>
                     <td>
-                      {statusText(r.status)} {r.late && <Badge tone="warn">{r.lateMinutes ? `late ${r.lateMinutes} min` : 'late'}</Badge>} {r.earlyDeparture && <Badge tone="warn">left early</Badge>}{' '}
+                      {statusText(r.status)} {r.late && <Badge tone="warn">{r.lateMinutes ? `late ${r.lateMinutes} min` : 'late'}</Badge>}{' '}
+                      {r.earlyDeparture && <Badge tone="warn">{r.earlyDepartureMinutes ? `left ${r.earlyDepartureMinutes} min early` : 'left early'}</Badge>}{' '}
                       {!!r.overtimeCandidateMinutes && <Badge>{`overtime candidate ${r.overtimeCandidateMinutes} min`}</Badge>} {r.amended && <Badge>amended</Badge>} {r.payrollLocked && <Badge tone="warn">payroll locked</Badge>}
                       {r.exceptionCode && <span className="hint"> {r.exceptionCode}</span>}
                     </td>
@@ -362,4 +366,411 @@ function AttendanceControlPage() {
   );
 }
 
-export const ATTENDANCE_CONTROL_SCREENS: readonly ScreenRoute[] = [{ path: '/attendance/control', title: 'Attendance control', permission: 'attendance.amend.operational', nav: true, component: AttendanceControlPage }];
+// ---------------------------------------------------------------------------------------------------------
+// Attendance dashboard (BRD coverage CL-053): a date (today unless chosen) and any departments, with the counts per department
+// and in total; every count opens the employees behind it, read by the server with the same rule, so a list's total is the
+// count clicked. A processed day is read from its results; a day not processed yet shows what is known (punched, not punched,
+// on approved leave, off days), and the page says which it is.
+// ---------------------------------------------------------------------------------------------------------
+
+const DASHBOARD_TEXT: Record<string, string> = {
+  PRESENT: 'Present',
+  ABSENT: 'Absent',
+  ON_LEAVE: 'On leave',
+  OUTDOOR_OR_HOLIDAY_WORK: 'Outdoor duty or holiday work',
+  OFF_DAY: 'Weekly off or holiday',
+  NEEDS_REVIEW: 'Exception to review',
+  PUNCHED: 'Punched, not yet processed',
+  NOT_PUNCHED: 'Not punched yet',
+  LATE: 'Late',
+};
+const dashboardText = (code: string) => DASHBOARD_TEXT[code] ?? code;
+
+interface DashboardCounts {
+  departmentId: string | null;
+  departmentCode: string | null;
+  departmentName: string | null;
+  total: number;
+  counts: Record<string, number>;
+}
+interface DashboardView {
+  date: string;
+  processing: { state: 'PROCESSED' | 'PARTLY_PROCESSED' | 'NOT_PROCESSED'; employees: number; processed: number };
+  categories: string[];
+  departments: DashboardCounts[];
+  total: DashboardCounts;
+}
+interface DashboardRow {
+  employeeId: string;
+  employeeCode: string;
+  employeeName: string;
+  departmentCode: string | null;
+  shiftCode: string | null;
+  category: string;
+  processedStatus: string | null;
+  processed: boolean;
+  late: boolean;
+  lateMinutes: number | null;
+  punchCount: number;
+  firstPunch: string | null;
+  lastPunch: string | null;
+  punchSourceUnavailable: boolean;
+}
+interface OpenedCount {
+  list: string;
+  department: DashboardCounts | null;
+}
+
+function processingNote(p: DashboardView['processing']): string {
+  if (p.employees === 0) return 'Nobody in your scope is employed on this date.';
+  if (p.state === 'PROCESSED') return `Processed for all ${p.employees} ${p.employees === 1 ? 'employee' : 'employees'}: the counts are the processed results.`;
+  if (p.state === 'PARTLY_PROCESSED')
+    return `Processed for ${p.processed} of ${p.employees} employees. The others are not processed yet, so they show what is known: punched, not punched, on approved leave or an off day.`;
+  return 'This date has not been processed yet, so the counts show what is known: punched, not punched, on approved leave or an off day. Absence and lateness are known once it is processed.';
+}
+
+const departmentsQuery = (ids: string[]) => ids.map((id) => `departmentId=${encodeURIComponent(id)}`).join('&');
+
+function DashboardList({ date, departments, opened }: { date: string; departments: string[]; opened: OpenedCount }) {
+  const [page, setPage] = useState(1);
+  const where = opened.department ? (opened.department.departmentId ? `&inDepartment=${opened.department.departmentId}` : '&withoutDepartment=true') : '';
+  const choice = departmentsQuery(departments);
+  const list = useQuery({
+    queryKey: ['attendance-dashboard-list', date, choice, opened.list, opened.department?.departmentId ?? null, page],
+    queryFn: () =>
+      api<{ items: DashboardRow[]; total: number; page: number }>(`/v1/attendance/dashboard/employees?date=${date}&list=${opened.list}${choice ? `&${choice}` : ''}${where}&${pageParams(page)}`),
+  });
+  const scope = opened.department ? ` in ${opened.department.departmentCode ?? 'no department'}` : '';
+  return (
+    <Section title={`${dashboardText(opened.list)}${scope} on ${formatDate(date)}`}>
+      <ErrorNote error={list.error} />
+      {list.isSuccess && list.data.total === 0 && <Empty>Nobody is in this count.</Empty>}
+      {list.isSuccess && list.data.items.length > 0 && (
+        <>
+          <p role="status">{`${list.data.total} ${list.data.total === 1 ? 'employee' : 'employees'}`}</p>
+          <table aria-label="Employees in this count">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Employee</th>
+                <th>Department</th>
+                <th>Shift</th>
+                <th>Day</th>
+                <th>Punches</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.data.items.map((r) => (
+                <tr key={r.employeeId}>
+                  <td>{r.employeeCode}</td>
+                  <td>{r.employeeName}</td>
+                  <td>{r.departmentCode ?? '—'}</td>
+                  <td>{r.shiftCode ?? 'No shift'}</td>
+                  <td>
+                    {r.processed && r.processedStatus ? statusText(r.processedStatus) : dashboardText(r.category)} {!r.processed && <Badge>not processed</Badge>}{' '}
+                    {r.late && <Badge tone="warn">{r.lateMinutes ? `late ${r.lateMinutes} min` : 'late'}</Badge>} {r.punchSourceUnavailable && <Badge tone="warn">punch source failed</Badge>}
+                  </td>
+                  <td>{r.punchCount === 0 ? 'None' : `${r.punchCount}: ${r.firstPunch ?? ''}${r.punchCount > 1 ? ` – ${r.lastPunch ?? ''}` : ''}`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <Pager page={list.data.page} pageSize={LIST_PAGE_SIZE} total={list.data.total} onPage={setPage} label="Employees in this count pages" noun="employee" />
+        </>
+      )}
+    </Section>
+  );
+}
+
+function AttendanceDashboardPage() {
+  const { can } = useSession();
+  const [date, setDate] = useState('');
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [opened, setOpened] = useState<OpenedCount | null>(null);
+  const choice = departmentsQuery(departments);
+  const query = [date ? `date=${date}` : '', choice].filter(Boolean).join('&');
+  const dashboard = useQuery({ queryKey: ['attendance-dashboard', query], queryFn: () => api<DashboardView>(`/v1/attendance/dashboard${query ? `?${query}` : ''}`) });
+  const options = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
+  const view = dashboard.data;
+  const columns = view ? [...view.categories, 'LATE'] : [];
+  const cell = (row: DashboardCounts, column: string, isTotal: boolean) => {
+    const n = row.counts[column] ?? 0;
+    if (n === 0) return '0';
+    return (
+      <button type="button" className="link" onClick={() => setOpened({ list: column, department: isTotal ? null : row })}>
+        {String(n)}
+        <span className="hint">{` ${dashboardText(column)}${isTotal ? '' : ` in ${row.departmentCode ?? 'no department'}`}`}</span>
+      </button>
+    );
+  };
+  return (
+    <>
+      <Section title="Attendance dashboard">
+        <form className="grid-form" onSubmit={keepOnPage}>
+          <label>
+            Date
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => {
+                setDate(e.target.value);
+                setOpened(null);
+              }}
+            />
+          </label>
+          {options.data && (
+            <label>
+              Departments
+              <select
+                multiple
+                value={departments}
+                onChange={(e) => {
+                  setDepartments(Array.from(e.target.selectedOptions, (o) => o.value));
+                  setOpened(null);
+                }}
+              >
+                {options.data.items.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </form>
+        <p className="hint">Today unless you choose a date; every department of your scope unless you choose some. Each count opens the employees behind it.</p>
+        <ErrorNote error={dashboard.error ?? options.error} />
+        {view && (
+          <>
+            <p role="status">
+              {`${formatDate(view.date)}: `}
+              {view.processing.state !== 'PROCESSED' && <Badge tone="warn">{view.processing.state === 'NOT_PROCESSED' ? 'not processed' : 'partly processed'}</Badge>} {processingNote(view.processing)}
+            </p>
+            {view.total.total > 0 && (
+              <table aria-label="Attendance by department">
+                <thead>
+                  <tr>
+                    <th>Department</th>
+                    <th>Employees</th>
+                    {columns.map((c) => (
+                      <th key={c}>{dashboardText(c)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {view.departments.map((d) => (
+                    <tr key={d.departmentId ?? 'none'}>
+                      <td>{d.departmentName ? `${d.departmentCode} ${d.departmentName}` : 'No department'}</td>
+                      <td>{d.total}</td>
+                      {columns.map((c) => (
+                        <td key={c}>{cell(d, c, false)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                  <tr>
+                    <th scope="row">Total</th>
+                    <td>{view.total.total}</td>
+                    {columns.map((c) => (
+                      <td key={c}>{cell(view.total, c, true)}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            )}
+            <p className="hint">Each employee is counted once; late is counted beside present, from processed results only.</p>
+          </>
+        )}
+      </Section>
+      {view && opened && <DashboardList key={`${opened.list}:${opened.department?.departmentId ?? 'all'}`} date={view.date} departments={departments} opened={opened} />}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Attendance reports (BRD coverage CL-047 shift punch register, CL-049 shift plan register, CL-050 shift deviation register,
+// CL-051 absconding report): the filters each report takes, generated in the background as CSV or XLSX with the filter
+// context (FR-056, DF09). The server applies the row scope and checks every filter again.
+// ---------------------------------------------------------------------------------------------------------
+
+const ATTENDANCE_REPORTS = [
+  { code: 'SHIFT_PUNCH_REGISTER', title: 'Shift punch register', maxDays: 31, note: 'Each employee and day with the shift and the punches of its capture window. Terminal: a biometric device; Import: a punch file. No mobile punch is captured.' },
+  { code: 'SHIFT_PLAN_REGISTER', title: 'Shift plan register', maxDays: 92, note: 'The shift planned for each employee and day, its times, and whether the day is a working day, a weekly off or a holiday.' },
+  { code: 'SHIFT_DEVIATION_REGISTER', title: 'Shift deviation register', maxDays: 366, note: 'Processed days with a late arrival, an early departure or overtime-candidate minutes. A day not processed yet is not listed.' },
+  {
+    code: 'ABSCONDING_REPORT',
+    title: 'Absconding report',
+    maxDays: 92,
+    note: 'Runs of consecutive absent working days before today: no punch, no approved leave or outdoor duty. A weekend or holiday in between neither counts nor ends a run; leave, outdoor duty or a punch ends it.',
+  },
+] as const;
+type AttendanceReportCode = (typeof ATTENDANCE_REPORTS)[number]['code'];
+
+interface ReportForm {
+  from: string;
+  to: string;
+  departmentId: string;
+  shiftId: string;
+  search: string;
+  punchView: string;
+  punchSource: string;
+  deviation: string;
+  minimumMinutes: string;
+  minimumDays: string;
+  sort: string;
+  format: 'CSV' | 'XLSX';
+}
+const blankReport: ReportForm = { from: '', to: '', departmentId: '', shiftId: '', search: '', punchView: 'ALL', punchSource: '', deviation: '', minimumMinutes: '', minimumDays: '', sort: 'employeeCode', format: 'CSV' };
+
+/** The filters sent for a report: only what it takes, only what is filled in. */
+export function attendanceReportFilters(code: AttendanceReportCode, f: ReportForm): Record<string, string | number> {
+  const out: Record<string, string | number> = { from: f.from, to: f.to };
+  if (f.departmentId) out.departmentId = f.departmentId;
+  if (f.search.trim()) out.search = f.search.trim();
+  if (f.shiftId && code !== 'ABSCONDING_REPORT') out.shiftId = f.shiftId;
+  if (code === 'SHIFT_PUNCH_REGISTER') {
+    if (f.punchView !== 'ALL') out.punchView = f.punchView;
+    if (f.punchSource) out.punchSource = f.punchSource;
+  }
+  if (code === 'SHIFT_DEVIATION_REGISTER' && f.deviation) Object.assign(out, { minuteField: f.deviation, minuteOp: 'GTE', minuteValue: f.minimumMinutes === '' ? 1 : Number(f.minimumMinutes) });
+  if (code === 'ABSCONDING_REPORT') {
+    if (f.minimumDays !== '') out.minimumDays = Number(f.minimumDays);
+    if (f.sort !== 'employeeCode') out.sort = f.sort;
+  }
+  return out;
+}
+
+function AttendanceReportsPage() {
+  const { can } = useSession();
+  const [code, setCode] = useState<AttendanceReportCode>('SHIFT_PUNCH_REGISTER');
+  const [form, setForm] = useState(blankReport);
+  const set = (key: keyof Omit<ReportForm, 'format'>, value: string) => setForm({ ...form, [key]: value });
+  const def = ATTENDANCE_REPORTS.find((r) => r.code === code)!;
+  const departments = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
+  const shifts = useQuery({ queryKey: ['control-shifts'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/shifts'), enabled: can('shift.read.operational') });
+  const ready = !!form.from && !!form.to && (code !== 'ABSCONDING_REPORT' || /^\d{1,3}$/.test(form.minimumDays));
+  return (
+    <Section title="Attendance reports">
+      <form className="grid-form" onSubmit={keepOnPage}>
+        <label>
+          Report
+          <select value={code} onChange={(e) => setCode(e.target.value as AttendanceReportCode)}>
+            {ATTENDANCE_REPORTS.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          From
+          <input type="date" required value={form.from} onChange={(e) => set('from', e.target.value)} />
+        </label>
+        <label>
+          To
+          <input type="date" required value={form.to} onChange={(e) => set('to', e.target.value)} />
+        </label>
+        <label>
+          Employee or code
+          <input maxLength={100} value={form.search} onChange={(e) => set('search', e.target.value)} />
+        </label>
+        {departments.data && (
+          <label>
+            Department
+            <select value={form.departmentId} onChange={(e) => set('departmentId', e.target.value)}>
+              <option value="">All</option>
+              {departments.data.items.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.code}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {shifts.data && code !== 'ABSCONDING_REPORT' && (
+          <label>
+            Shift
+            <select value={form.shiftId} onChange={(e) => set('shiftId', e.target.value)}>
+              <option value="">All</option>
+              {shifts.data.items.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.code}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {code === 'SHIFT_PUNCH_REGISTER' && (
+          <>
+            <label>
+              Show
+              <select value={form.punchView} onChange={(e) => set('punchView', e.target.value)}>
+                <option value="ALL">All days</option>
+                <option value="PUNCHED">Punched</option>
+                <option value="NOT_PUNCHED">Not punched</option>
+                <option value="FIRST_LAST">Only first and last punch</option>
+              </select>
+            </label>
+            <label>
+              Punch source
+              <select value={form.punchSource} onChange={(e) => set('punchSource', e.target.value)}>
+                <option value="">Any</option>
+                <option value="TERMINAL">Terminal</option>
+                <option value="IMPORT">Import</option>
+              </select>
+            </label>
+          </>
+        )}
+        {code === 'SHIFT_DEVIATION_REGISTER' && (
+          <>
+            <label>
+              Deviation
+              <select value={form.deviation} onChange={(e) => set('deviation', e.target.value)}>
+                <option value="">Any</option>
+                <option value="LATE">Late in</option>
+                <option value="EARLY_DEPARTURE">Early out</option>
+                <option value="OVERTIME_CANDIDATE">Overtime only</option>
+              </select>
+            </label>
+            <label>
+              At least (minutes)
+              <input inputMode="numeric" pattern="\d{1,5}" disabled={!form.deviation} value={form.minimumMinutes} onChange={(e) => set('minimumMinutes', e.target.value)} />
+            </label>
+          </>
+        )}
+        {code === 'ABSCONDING_REPORT' && (
+          <>
+            <label>
+              Consecutive absent days, at least
+              <input required inputMode="numeric" pattern="\d{1,3}" value={form.minimumDays} onChange={(e) => set('minimumDays', e.target.value)} />
+            </label>
+            <label>
+              Sort by
+              <select value={form.sort} onChange={(e) => set('sort', e.target.value)}>
+                <option value="employeeCode">Employee code</option>
+                <option value="fromDate">First absent day</option>
+              </select>
+            </label>
+          </>
+        )}
+        <label>
+          Format
+          <select value={form.format} onChange={(e) => setForm({ ...form, format: e.target.value === 'XLSX' ? 'XLSX' : 'CSV' })}>
+            <option value="CSV">CSV</option>
+            <option value="XLSX">XLSX</option>
+          </select>
+        </label>
+      </form>
+      <p className="hint">{`${def.note} At most ${def.maxDays} days per request.`}</p>
+      {!ready && <p className="hint">{code === 'ABSCONDING_REPORT' ? 'Choose a period and the number of consecutive absent days.' : 'Choose a period.'}</p>}
+      {ready && <ReportExport key={code} reportCode={code} label={`Generate the ${def.title.toLowerCase()}`} filters={attendanceReportFilters(code, form)} format={form.format} />}
+    </Section>
+  );
+}
+
+export const ATTENDANCE_CONTROL_SCREENS: readonly ScreenRoute[] = [
+  { path: '/attendance/control', title: 'Attendance control', permission: 'attendance.amend.operational', nav: true, component: AttendanceControlPage },
+  // CL-053: shown to the roles that review attendance (HR and managers); the server answers anyone with the attendance read duty, over their scope.
+  { path: '/attendance/dashboard', title: 'Attendance dashboard', permission: 'attendance.approve_correction.operational', nav: true, component: AttendanceDashboardPage },
+  // CL-047, CL-049 to CL-051: under the attendance export duty, as every attendance report.
+  { path: '/attendance/reports', title: 'Attendance reports', permission: 'attendance.export.operational', nav: true, component: AttendanceReportsPage },
+];

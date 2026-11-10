@@ -307,7 +307,8 @@ describe('a link or shortcut appears only when the destination is permitted in t
     expect(finance.byCode.EXPENSE_REVIEW_TASKS).toMatchObject({ status: 'OK', source: { lists: [{ api: '/v1/expense/claim-states?states=MANAGER_PENDING%2CFINANCE_PENDING%2CHIGH_VALUE_PENDING' }] } });
     const approver = await dashboardOf(await h.actor(A, 'EXPENSE_FINANCE_APPROVER'));
     for (const code of ['FINAL_DECISIONS', 'LATE_RECEIPT', 'RETURNED']) expect(approver.byCode[code]!.source, code).toBeTruthy();
-    expect(approver.byCode.DECISIONS_DUE).not.toHaveProperty('source');
+    // I-92 (0245): "Decision due" is now a figure of its own and links to the claim-state list of the claims whose decision is due.
+    expect(approver.byCode.DECISIONS_DUE).toMatchObject({ status: 'OK', source: { lists: [{ api: '/v1/expense/claim-states?states=FINANCE_PENDING%2CHIGH_VALUE_PENDING&decision=DUE' }] } });
     const payroll = await dashboardOf(await h.actor(A, 'PAYROLL_APPROVER'));
     expect(payroll.byCode.REVIEW_TASKS).toMatchObject({ status: 'OK', source: { lists: [{ api: '/v1/payroll/runs?states=IN_REVIEW' }] } });
     expect(payroll.byCode.OVERDUE_REVIEWS).toMatchObject({ status: 'OK' });
@@ -316,9 +317,14 @@ describe('a link or shortcut appears only when the destination is permitted in t
   });
 
   it('a widget that is not available has no link, and a role without a dashboard gets the neutral state with no shortcuts', async () => {
+    // I-92 (0245): the Auditor's "Review evidence tasks" is the one figure left unavailable (no evidence-review process exists to
+    // count); the Treasury Operator's RECONCILE is now counted and links to its two payment lists.
+    const auditor = await dashboardOf(await h.actor(A, 'AUDITOR'));
+    expect(auditor.byCode.REVIEW_EVIDENCE).toMatchObject({ status: 'NOT_AVAILABLE' });
+    expect(auditor.byCode.REVIEW_EVIDENCE).not.toHaveProperty('source');
     const operator = await dashboardOf(await h.actor(A, 'TREASURY_OPERATOR'));
-    expect(operator.byCode.RECONCILE).toMatchObject({ status: 'NOT_AVAILABLE' });
-    expect(operator.byCode.RECONCILE).not.toHaveProperty('source');
+    expect(operator.byCode.RECONCILE).toMatchObject({ status: 'OK' });
+    expect(operator.byCode.RECONCILE!.source!.lists).toHaveLength(2);
     // I-89 item 2: the payment preparation figure links to the two lists it counts.
     expect(operator.byCode.MY_TASKS).toMatchObject({
       status: 'OK',

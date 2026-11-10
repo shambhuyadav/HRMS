@@ -14,6 +14,7 @@ import type { FileStore } from '../../storage/files.js';
 import { externalDeductionRoutes } from './external-deductions.js';
 import { payrollInputImportRoutes } from './input-import.js';
 import { gradeStructureRoutes } from './grade-structures.js';
+import { salaryStopImportRoutes } from './stop-import.js';
 import {
   activateCalendar,
   activateHeadRevision,
@@ -137,6 +138,8 @@ export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; 
   // FR-028 external deduction mapping and the PAYROLL_INPUTS_V2 import on the stored framework (I-91).
   await externalDeductionRoutes(app, { db });
   await payrollInputImportRoutes(app, opts);
+  // FR-031 "Upload Stop Salary": the SALARY_STOPS_V1 upload, each row exactly the stop proposal below (stop-import.ts).
+  await salaryStopImportRoutes(app, opts);
   type Req = Parameters<typeof requireAccess>[1];
   const config = (request: Req, action: 'read' | 'manage' | 'activate') => requireAccess(db, request, 'payroll_config', action, ['operational'], { requireAll: true });
   const run = (request: Req, action: 'prepare' | 'review' | 'approve' | 'process' | 'cancel', recordKey?: string) =>
@@ -849,6 +852,9 @@ export async function payrollRoutes(app: FastifyInstance, opts: { db: Database; 
             applicability: { type: 'string', minLength: 1, maxLength: 2000 },
             scopeMode: { type: 'string', enum: ['FULL_ONLY', 'FULL_OR_PARTIAL'] },
             maxReviewDays: { type: 'integer', minimum: 1, maximum: 366 },
+            // H2 "Policy may narrow these values" (0255): at most 2 and 5 business days, checked by the service (422).
+            firstEscalationBusinessDays: { type: 'integer', minimum: 1, maximum: 366 },
+            escalationIntervalBusinessDays: { type: 'integer', minimum: 1, maximum: 366 },
             evidenceReference: reference,
             validationReference: reference,
           },

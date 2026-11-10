@@ -7,10 +7,11 @@
 // Decided under owner delegation, 6 Nov 2026 (I-78 item 3): a revision names the month its leave year starts (no default:
 // without it nothing expires), and the year-end run expires what is held above the carry cap on the year's last day.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ApiError, download, formatDate } from '../api';
+import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey } from '../api';
 import { isReportRefusal, reportProblem } from '../report-failures';
+import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from './records';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
@@ -75,8 +76,9 @@ export const keepOnPage = (e: FormEvent) => e.preventDefault();
  * Requests a report for the shown filters and offers its download when it is ready: reports are generated in the
  * background and the download re-checks access (FR-056).
  */
-export function ReportExport({ reportCode, filters, label }: { reportCode: string; filters: Record<string, unknown>; label: string }) {
-  const request = useMutation({ mutationFn: () => api<{ id: string }>('/v1/reports', { body: { reportCode, filters } }) });
+export function ReportExport({ reportCode, filters, label, format }: { reportCode: string; filters: Record<string, unknown>; label: string; format?: 'CSV' | 'XLSX' | undefined }) {
+  // FR-046: XLSX only where the report offers it; without a format the report is CSV.
+  const request = useMutation({ mutationFn: () => api<{ id: string }>('/v1/reports', { body: { reportCode, filters, ...(format && format !== 'CSV' ? { format } : {}) } }) });
   const id = request.data?.id;
   const status = useQuery({
     queryKey: ['report', id],
@@ -887,8 +889,118 @@ function LeaveLedgerPage() {
   );
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Monthly leave-balance upload (the reference's "Upload Monthly Leave Balance"; FR-025, DF05, DF09): one adjustment per
+// employee, leave type and month, added to the leave ledger with its reason (never overwriting it), previewed with each
+// balance at the month end before and after, then committed all or nothing.
+// ---------------------------------------------------------------------------------------------------------
+
+export const MONTHLY_BALANCE_TEMPLATE: ImportTemplate = {
+  code: 'LEAVE_MONTHLY_ADJUSTMENT_V1',
+  label: 'Monthly leave balance',
+  permissions: ['leave.import.operational', 'leave.adjust.operational'],
+  base: '/v1/leave/monthly-adjustment-imports',
+  columns: 'employeeCode,leaveType,month,units,reason',
+  keyLabel: 'Employee @ leave type @ month',
+  noun: ['adjustment', 'adjustments'],
+  verb: 'Record',
+  note: 'Each row adds or removes days (for example 1.5 or -1) in the employee’s leave ledger for a month (YYYY-MM), dated its last day, with your reason.',
+  changeFields: ['balanceAtMonthEnd'],
+  problems: {
+    MONTH_ALREADY_ADJUSTED: 'This employee already has an uploaded adjustment of this leave type for this month. Record a further correction as a single adjustment.',
+    NEGATIVE_BALANCE: 'This deduction would take a paid leave balance below zero, at the month end or overall.',
+    DUPLICATE_IN_BATCH: 'The file already has a row for this employee, leave type and month.',
+    UNKNOWN_EMPLOYEE: 'No employee in this company has this employee code.',
+    UNKNOWN_LEAVE_TYPE: 'There is no leave type with this code.',
+    INVALID_UNITS: 'Units must be a number other than zero, with at most 4 decimals, for example 1.5 or -1.',
+    INVALID_MONTH: 'The month must be written YYYY-MM, for example 2026-10.',
+    FUTURE_MONTH: 'This month has not started yet.',
+    NOT_EMPLOYED_IN_MONTH: 'The employee was not employed in this month (before joining, or after the last working date).',
+    INVALID_REASON: 'A reason of at most 500 characters is required.',
+    OUT_OF_SCOPE: 'This employee is outside your role’s scope, or it is your own balance, which another administrator must record.',
+  },
+};
+
+function MonthlyLeaveBalancePage() {
+  const { can } = useSession();
+  const t = MONTHLY_BALANCE_TEMPLATE;
+  const [file, setFile] = useState<File | null>(null);
+  const [fileInput, setFileInput] = useState(0);
+  const [job, setJob] = useState<ImportJob | null>(null);
+  const uploadKey = useRef<string | null>(null);
+  const { resume, open, refresh, watch } = useBatchFollowUp(
+    t.base,
+    {
+      show: setJob,
+      closed: (id) => setJob((shown) => (shown?.id === id ? null : shown)),
+      onStart: () => {
+        upload.reset();
+        act.reset();
+      },
+    },
+    job,
+  );
+  const upload = useMutation({
+    mutationFn: async (f: File) => {
+      const key = (uploadKey.current ??= idempotencyKey('monthly-leave'));
+      return api<ImportJob>(t.base, { body: { fileName: f.name, contentBase64: await fileToBase64(f), idempotencyKey: key } });
+    },
+    onSettled: refresh,
+    onSuccess: (view) => {
+      setJob(view);
+      setFile(null);
+      uploadKey.current = null;
+      setFileInput((n) => n + 1);
+    },
+  });
+  const act = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'commit' | 'cancel' }) => api<ImportJob>(`${t.base}/${id}/${action}`, { method: 'POST' }),
+    onSuccess: setJob,
+    onSettled: refresh,
+  });
+  if (!t.permissions.every((p) => can(p))) return <Empty>Uploading leave balances needs the leave import and adjustment duties.</Empty>;
+  const busy = upload.isPending || act.isPending || resume.isPending || open.isPending;
+  return (
+    <>
+      <Section title="Upload monthly leave balance">
+        <form
+          className="stack"
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            if (file && !busy) upload.mutate(file);
+          }}
+        >
+          <p className="hint">
+            CSV with exactly the header <code>{t.columns}</code>. {t.note} Nothing is applied until you commit the preview, and one row with a problem rejects the whole
+            file. Each employee, leave type and month takes one uploaded adjustment, so a file cannot be applied twice; a deduction never takes a paid balance below zero.
+          </p>
+          <TemplateDownload base={t.base} code={t.code} />
+          <div className="inline">
+            <label>
+              Balance file
+              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            </label>
+            <button type="submit" disabled={!file || busy}>
+              Validate
+            </button>
+          </div>
+        </form>
+        <ErrorNote error={upload.error ?? resume.error} />
+      </Section>
+      {job && (
+        <>
+          <ImportJobView job={job} template={t} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
+          <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
+        </>
+      )}
+      <ImportBatches base={t.base} title="Your monthly leave balance batches" openedId={job?.id ?? null} busy={busy} onOpen={(id) => open.mutate(id)} error={open.error} />
+    </>
+  );
+}
+
 export const LEAVE_ADMIN_SCREENS: readonly ScreenRoute[] = [
   { path: '/leave/policies', title: 'Leave policies', permission: MANAGE, nav: true, component: LeavePoliciesPage },
   { path: '/leave/before-accrual', title: 'Before leave accrual', permission: 'leave.accrue.operational', nav: true, component: BeforeAccrualPage },
   { path: '/leave/ledger', title: 'Leave ledger', permission: 'leave.adjust.operational', nav: true, component: LeaveLedgerPage },
+  { path: '/leave/monthly-balance', title: 'Upload monthly leave balance', permission: 'leave.import.operational', nav: true, component: MonthlyLeaveBalancePage },
 ];

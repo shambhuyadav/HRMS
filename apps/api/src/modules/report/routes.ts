@@ -4,6 +4,8 @@ import { type Database, withTransaction } from '../../db/transaction.js';
 import { actorOf } from '../../http/context.js';
 import { HttpError } from '../../http/errors.js';
 import { auditDenial, requireAccess } from '../../http/guard.js';
+import { PUNCH_SOURCES } from '../attendance/day-facts.js';
+import { ABSCONDING_SORTS, PUNCH_VIEWS } from '../attendance/registers.js';
 import { ATTENDANCE_MINUTE_FIELDS } from '../attendance/service.js';
 import { EMPLOYEE_SORTS, EMPLOYEE_STATUS_GROUPS, SORT_DIRECTIONS } from '../employee/service.js';
 import { TEAM_SORTS } from '../team/service.js';
@@ -52,7 +54,7 @@ export async function reportRoutes(app: FastifyInstance, opts: { db: Database })
                 joinedFrom: { type: 'string', format: 'date' },
                 joinedTo: { type: 'string', format: 'date' },
                 // Each report's own sort columns are checked when it is requested (the employee list's, or My Team's).
-                sort: { type: 'string', enum: [...new Set<string>([...EMPLOYEE_SORTS, ...TEAM_SORTS])] },
+                sort: { type: 'string', enum: [...new Set<string>([...EMPLOYEE_SORTS, ...TEAM_SORTS, ...ABSCONDING_SORTS])] },
                 direction: { type: 'string', enum: [...SORT_DIRECTIONS] },
                 // DF16: the My Team list's filters, for its export.
                 reviewDueFrom: { type: 'string', format: 'date' },
@@ -86,6 +88,10 @@ export async function reportRoutes(app: FastifyInstance, opts: { db: Database })
                 view: { type: 'string', pattern: '^[A-Z_0-9]{1,20}$' },
                 category: { type: 'string', pattern: '^[A-Z][A-Z0-9_]{0,59}$' },
                 profileId: uuid,
+                // CL-047 the shift punch register's view and punch source; CL-051 the absconding report's run length.
+                punchView: { type: 'string', enum: [...PUNCH_VIEWS] },
+                punchSource: { type: 'string', enum: [...PUNCH_SOURCES] },
+                minimumDays: { type: 'integer', minimum: 1, maximum: 366 },
               },
             },
             // FR-046: CSV by default; XLSX for reports that declare it.

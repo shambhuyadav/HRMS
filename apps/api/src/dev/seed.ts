@@ -203,6 +203,10 @@ const SEED_HR_CONFIDENTIAL: PermissionKey[] = [
   'employee_process.read_evidence.evidence',
   'employee_note.read.restricted',
   'employee_note.write.restricted',
+  // The notes register's void and bulk upload (CL-040, 0260) and the document compliance report (CL-150, 0261).
+  'employee_note.void.restricted',
+  'employee_note.import.restricted',
+  'document_compliance.export.document',
   // Training: restricted feedback comments and participation reasons.
   'training_feedback.read.comment',
   'training_participant.read.reason',

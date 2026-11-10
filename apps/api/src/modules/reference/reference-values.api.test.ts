@@ -34,12 +34,15 @@ describe('module reference lists as form choices (DF04)', () => {
 
     const tax = await list(config, 'PAYROLL_TAX_TREATMENT');
     expect(tax.statusCode).toBe(200);
-    expect(tax.json().items).toHaveLength(3);
+    // Three since the start, and the two house rent allowance treatments since 0238.
+    expect(tax.json().items).toHaveLength(5);
     expect(tax.json().items).toEqual(
       expect.arrayContaining([
         { code: 'TAXABLE', label: 'Taxable (as declared by the company)' },
         { code: 'NON_TAXABLE', label: 'Not taxable (as declared by the company)' },
         { code: 'PER_TAX_RULE_PACK', label: 'Treatment set by the tax rule pack' },
+        { code: 'HRA_RULE_2A', label: 'House rent allowance: taxable, less the exemption the income tax pack computes (s.10(13A))' },
+        { code: 'SALARY_FOR_HRA', label: 'Taxable, and salary for the house rent allowance exemption (Basic and DA)' },
       ]),
     );
     expect(await codes(inputs, 'PAYROLL_INPUT_KIND')).toEqual(['OTHER_INPUT', 'VARIABLE_PAYMENT']);

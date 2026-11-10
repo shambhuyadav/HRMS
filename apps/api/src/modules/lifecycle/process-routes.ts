@@ -8,7 +8,7 @@ import { HttpError } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import { downloadHeaders, type FileStore, MAX_UPLOAD_BYTES, UPLOAD_FILE_NAME } from '../../storage/files.js';
 import { type ScanProvider, scanAttachment } from '../../storage/scan.js';
-import { addNote, listNotes, type NoteInput } from './notes.js';
+import { createNote, listNotes, NOTE_KINDS, type NoteInput } from './notes.js';
 import { LIFECYCLE_REFERENCE_CATEGORIES, listLifecycleReferenceValues, taskOwnerRoles } from './options.js';
 import {
   cancelProcess,
@@ -329,10 +329,11 @@ export async function processRoutes(app: FastifyInstance, opts: { db: Database; 
     return bytes;
   });
 
-  // ---- Restricted HR notes and warnings (FR-018) ----
+  // ---- Restricted HR notes and warnings (FR-018; the register's types, date and supporting file, CL-040, 0260) ----
   app.post(
     '/employees/:id/notes',
     {
+      bodyLimit: Math.ceil(MAX_UPLOAD_BYTES * 1.4),
       schema: {
         params: idParams,
         body: {
@@ -340,11 +341,18 @@ export async function processRoutes(app: FastifyInstance, opts: { db: Database; 
           additionalProperties: false,
           required: ['kind', 'body'],
           properties: {
-            kind: { type: 'string', enum: ['NOTE', 'REMARK', 'WARNING'] },
+            kind: { type: 'string', enum: [...NOTE_KINDS] },
             body: { type: 'string', minLength: 1, maxLength: 4000 },
+            noteDate: date,
             exitCaseId: uuid,
             employeeProcessId: uuid,
             supersedesNoteId: uuid,
+            attachment: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['fileName', 'contentBase64'],
+              properties: { fileName: UPLOAD_FILE_NAME, contentBase64: { type: 'string', minLength: 4 } },
+            },
           },
         },
       },
@@ -352,7 +360,7 @@ export async function processRoutes(app: FastifyInstance, opts: { db: Database; 
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const grant = await requireAccess(db, request, 'employee_note', 'write', ['restricted'], { requireAll: true, recordKey: id });
-      const result = await withTransaction(db, (tx) => addNote(tx, grant, id, request.body as NoteInput));
+      const result = await createNote(db, files, scanner, grant, id, request.body as NoteInput & { attachment?: { fileName: string; contentBase64: string } });
       reply.status(201);
       return result;
     },

@@ -37,6 +37,8 @@ import {
   reviewers,
   SALARY,
   salary,
+  STOP_DECIDE,
+  STOP_PROPOSE,
   submitAndApprove,
   today,
   trailText,
@@ -605,5 +607,115 @@ describe.runIf(isModuleActive('payroll'))('salary holds (FR-101, DB110, H2)', ()
     const withoutAmounts = await listHolds(h.db, { ...g, allowedFieldGroups: g.allowedFieldGroups.filter((x) => x !== 'hold') }, { page: 1, pageSize: 25 });
     expect(withoutAmounts).not.toHaveProperty('totals');
     expect(withoutAmounts.total).toBe(all.total);
+  });
+
+  // Last in the file: its review run on a 2030 date expires every earlier active hold of the company.
+  it('FR-101, BR-051: a criterion revision may narrow the escalation intervals (never widen them); each policy hold and stop copies them, a safety block keeps 2 and 5', async () => {
+    const body = (over: Record<string, unknown>) => ({
+      code: `HD_CADENCE_${Object.keys(over).length}${String(Date.now()).slice(-6)}`,
+      category: 'CONTRACTUAL',
+      applicability: 'Synthetic contractual criterion with a narrowed review cadence',
+      scopeMode: 'FULL_OR_PARTIAL',
+      maxReviewDays: 20,
+      evidenceReference: 'SYNTH-CLAUSE-9',
+      validationReference: 'SYNTH-VALIDATION-9',
+      ...over,
+    });
+    // H2 "Policy may narrow these values": never wider than 2 and 5 business days.
+    expect((await h.call(configA, 'POST', '/v1/payroll/hold-criteria', body({ firstEscalationBusinessDays: 3 }))).json().error).toBe('REMINDER_INTERVAL_NOT_NARROWER');
+    expect((await h.call(configA, 'POST', '/v1/payroll/hold-criteria', body({ escalationIntervalBusinessDays: 6 }))).json().error).toBe('REMINDER_INTERVAL_NOT_NARROWER');
+    expect((await h.call(configA, 'POST', '/v1/payroll/hold-criteria', body({ escalationIntervalBusinessDays: 0 }))).statusCode).toBe(400);
+    const draft = await ok<{ id: string; version: number; firstEscalationBusinessDays: number | null; escalationIntervalBusinessDays: number | null }>(
+      await h.call(configA, 'POST', '/v1/payroll/hold-criteria', body({ firstEscalationBusinessDays: 1, escalationIntervalBusinessDays: 2 })),
+      201,
+    );
+    expect(draft).toMatchObject({ firstEscalationBusinessDays: 1, escalationIntervalBusinessDays: 2 });
+    await ok(await h.call(configB, 'POST', `/v1/payroll/hold-criteria/${draft.id}/activate`, { expectedVersion: draft.version }));
+    const crit = draft.id;
+    // A revision's cadence is fixed once created, like the rest of it (database rule too).
+    await expect(h.db.query(`update payroll_hold_criterion set escalation_interval_business_days = 5 where id = $1`, [crit])).rejects.toMatchObject({ code: '23514' });
+    // An unnarrowed criterion lists no values (the defaults apply).
+    const plain = await criterion(h, configA, configB);
+    const listed = (await ok<{ items: { id: string; firstEscalationBusinessDays: number | null; escalationIntervalBusinessDays: number | null }[] }>(await h.call(configA, 'GET', '/v1/payroll/hold-criteria'))).items;
+    expect(listed.find((c) => c.id === plain)).toMatchObject({ firstEscalationBusinessDays: null, escalationIntervalBusinessDays: null });
+
+    // A salary stop withholding the payment under the narrowed criterion, approved before the run.
+    const stopMaker = await h.actor(A, 'HR_ADMINISTRATOR', { extra: STOP_PROPOSE });
+    const stopDecider = await h.actor(A, 'HR_ADMINISTRATOR', { extra: STOP_DECIDE });
+    await reviewers(h, hr, 'payroll_salary_stop', [stopDecider]);
+    const dept = await department('HD_CADENCE');
+    const held = await paid(dept, '20000');
+    const stopped = await paid(dept, '18000');
+    const blocked = await paid(dept, '15000');
+    await bankRevision(h, A, held);
+    const stopDoc = await evidenceDocument(h, uploader, verifier, stopped);
+    const stop = await ok<{ id: string }>(
+      await h.call(stopMaker, 'POST', `/v1/payroll/periods/${periods['2026-09']}/salary-stops`, {
+        employeeId: stopped,
+        criterionId: crit,
+        reason: 'Synthetic contractual stop',
+        releaseCriterion: 'Synthetic clearance',
+        evidenceReference: 'SYNTH-STOP-9',
+        evidenceDocumentIds: [stopDoc],
+      }),
+      201,
+    );
+    const stopTask = ((await h.call(stopDecider, 'GET', '/v1/payroll/salary-stops/tasks/mine')).json().items as { taskId: string; stop: { id: string } | null }[]).find((x) => x.stop?.id === stop.id)!.taskId;
+    await ok(await h.call(stopDecider, 'POST', `/v1/payroll/stop-tasks/${stopTask}/decision`, { decision: 'APPROVE', confirmMode: 'HOLD_DISBURSEMENT', idempotencyKey: key() }));
+    const { records } = await processed('2026-09', dept, [held, stopped, blocked]);
+    const block = (await holdsOn(records[held]!))[0]!;
+    await ok(await h.call(releaser, 'POST', `/v1/payroll/holds/${block.id}/release`, { reason: 'Verified (synthetic)', evidenceReference: 'SYNTH-9', expectedVersion: (await holdOf(releaser, block.id)).version }));
+    const start = await today(h, A);
+    const doc = await evidenceDocument(h, uploader, verifier, held);
+    const proposal = await ok<{ id: string; firstEscalationBusinessDays: number; escalationIntervalBusinessDays: number }>(
+      await propose(maker, records[held]!, { criterionId: crit, scope: 'PARTIAL', amount: '700.00', effectiveDate: start, reviewDueOn: addDays(start, 10), evidenceDocumentIds: [doc] }),
+      201,
+    );
+    expect(proposal).toMatchObject({ firstEscalationBusinessDays: 1, escalationIntervalBusinessDays: 2 });
+    const stopHold = (await holdsOn(records[stopped]!)).find((x) => x.hold_kind === 'SALARY_STOP')!;
+    const safety = (await holdsOn(records[blocked]!)).find((x) => x.hold_kind === 'PAYMENT_SAFETY_BLOCK')!;
+    const cadence = async (id: string) =>
+      (await h.db.query<{ f: number | null; e: number | null }>(`select first_escalation_business_days as f, escalation_interval_business_days as e from payroll_hold where id = $1`, [id])).rows[0];
+    expect(await cadence(proposal.id)).toEqual({ f: 1, e: 2 });
+    expect(await cadence(stopHold.id)).toEqual({ f: 1, e: 2 });
+    expect(await cadence(safety.id)).toEqual({ f: null, e: null });
+    expect(await holdOf(releaser, stopHold.id)).toMatchObject({ firstEscalationBusinessDays: 1, escalationIntervalBusinessDays: 2 });
+    expect(await holdOf(releaser, safety.id)).toMatchObject({ firstEscalationBusinessDays: 2, escalationIntervalBusinessDays: 5 });
+    // A hold's cadence never changes, and a safety block never takes a narrowed one (database rules).
+    await expect(h.db.query(`update payroll_hold set first_escalation_business_days = 2 where id = $1`, [proposal.id])).rejects.toMatchObject({ code: '23514' });
+    await expect(h.db.query(`update payroll_hold set first_escalation_business_days = 1 where id = $1`, [safety.id])).rejects.toMatchObject({ code: '23514' });
+
+    // The review job: the proposal and the safety block unresolved from a fixed Monday; the applied stop's review expires that day.
+    const monday = '2030-01-07';
+    await h.db.query(`update payroll_hold set unresolved_since = $2 where id = any($1::uuid[])`, [[proposal.id, safety.id], monday]);
+    const run = (day: string) => runPayrollHoldReviews(h.pool, A.id, day, systemUser);
+    await run(monday);
+    expect((await h.db.query(`select state, to_char(unresolved_since, 'YYYY-MM-DD') as since from payroll_hold where id = $1`, [stopHold.id])).rows[0]).toEqual({ state: 'EXPIRED_REVIEW', since: monday });
+    for (let d = 1; d <= 9; d++) await run(addDays(monday, d));
+    const escalations = async (holdId: string) =>
+      (await h.db.query<{ payload: { number: number; waitingDays: number } }>(`select payload from outbox_event where topic = 'payroll_hold.escalation' and aggregate_id = $1 order by created_at, seq`, [holdId])).rows.map(
+        (x) => [x.payload.number, x.payload.waitingDays],
+      );
+    // Business days after Mon 7 Jan 2030: Tue 8 (1), Wed 9 (2), Thu 10 (3), Fri 11 (4), Mon 14 (5), Tue 15 (6), Wed 16 (7).
+    // Narrowed to 1 and 2: escalations at 1, 3, 5 and 7 business days.
+    expect(await escalations(proposal.id)).toEqual([
+      [1, 1],
+      [2, 3],
+      [3, 5],
+      [4, 7],
+    ]);
+    expect(await escalations(stopHold.id)).toEqual([
+      [1, 1],
+      [2, 3],
+      [3, 5],
+      [4, 7],
+    ]);
+    // The safety block keeps the H2 defaults: 2, then every 5.
+    expect(await escalations(safety.id)).toEqual([
+      [1, 2],
+      [2, 7],
+    ]);
+    // Reminders stay daily whatever the cadence.
+    expect((await h.db.query(`select 1 from outbox_event where topic = 'payroll_hold.reminder' and aggregate_id = $1`, [proposal.id])).rowCount).toBe(9);
   });
 });

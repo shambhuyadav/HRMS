@@ -5,6 +5,7 @@
 // recipient/channel/rule revision (idempotency key), then deliver. Delivery re-checks recipient authority at
 // delivery time (not only at queue time), renders only approved placeholders, and records an attempt.
 // Application idempotency does not imply exactly-once delivery by any external provider (BR-034).
+// An EMAIL rule (0247) goes through the same checks; its notice is rendered for email and left QUEUED for the worker (email-delivery.ts).
 // An event is described as it was raised (the revision and dates in its payload), not from a later state.
 // Everything written here is written by the dispatcher itself, whoever's request raised the event, so it names the system actor.
 // Claims take one event per company in turn (db/company-turns.ts), so a burst from one company never starves another.
@@ -17,6 +18,7 @@ import { loadFilters, withinAdministrativeScope } from '../access/admin.js';
 import { type AccessGrant, canAccessEmployee, resolveAccess, taskDelegationLive } from '../access/authorize.js';
 import { MODULE_EVENT_DESCRIBERS } from '../events-registry.js';
 import { usersCoveringEmployee } from '../workflow/engine.js';
+import { DEFAULT_EMAIL_SUBJECT, emailContentRefusal, emailData, emailSubjectLine } from './email-content.js';
 
 interface OutboxRow {
   id: string;
@@ -685,10 +687,15 @@ export async function stillEligible(tx: Queryable, companyId: string, userId: st
   return true;
 }
 
+/**
+ * In-app: delivered at once. Email (0247): the same preference and recipient checks, then the notice is rendered for email (state
+ * placeholders only, values neutralised, wording checked; email-content.ts) and left QUEUED for the worker, which alone sends it
+ * (email-delivery.ts). A request's transaction never waits for a mail server.
+ */
 async function deliver(
   tx: Queryable,
   companyId: string,
-  n: { id: string; userId: string; selector: string; optional: boolean; eventType: string },
+  n: { id: string; userId: string; selector: string; optional: boolean; eventType: string; channel: 'IN_APP' | 'EMAIL' },
   ev: EventSpec,
   template: { subject: string | null; body: string; approved: string[] },
 ): Promise<string> {
@@ -704,8 +711,8 @@ async function deliver(
   if (n.optional) {
     const pref = (
       await tx.query<{ receive_optional: boolean }>(
-        `select receive_optional from notification_preference where company_id = $1 and user_id = $2 and event_type = $3 and channel = 'IN_APP'`,
-        [companyId, n.userId, n.eventType],
+        `select receive_optional from notification_preference where company_id = $1 and user_id = $2 and event_type = $3 and channel = $4`,
+        [companyId, n.userId, n.eventType, n.channel],
       )
     ).rows[0];
     if (pref && !pref.receive_optional) {
@@ -718,6 +725,29 @@ async function deliver(
     await settle('SUPPRESSED');
     await attempt('SUPPRESSED', 'RECIPIENT_NOT_ELIGIBLE');
     return 'SUPPRESSED';
+  }
+  if (n.channel === 'EMAIL') {
+    const data = emailData(ev.data);
+    const body = render(template.body, template.approved, data);
+    const subject = render(template.subject ?? DEFAULT_EMAIL_SUBJECT, template.approved, data);
+    if ('missing' in body || 'missing' in subject) {
+      await settle('FAILED');
+      await attempt('FAILED', 'MISSING_PLACEHOLDER');
+      return 'FAILED';
+    }
+    if (emailContentRefusal(`${subject.text}\n${body.text}`)) {
+      await settle('FAILED');
+      await attempt('FAILED', 'CONFIDENTIAL_CONTENT_BLOCKED');
+      return 'FAILED';
+    }
+    await tx.query(`update notification set title = $3, body = $4, email_next_attempt_at = now(), updated_by = $5 where company_id = $1 and id = $2`, [
+      companyId,
+      n.id,
+      emailSubjectLine(subject.text),
+      body.text,
+      SYSTEM_ACTOR_ID,
+    ]);
+    return 'QUEUED';
   }
   const body = render(template.body, template.approved, ev.data);
   const subject = template.subject ? render(template.subject, template.approved, ev.data) : { text: null as string | null };
@@ -741,7 +771,7 @@ export async function fanOut(tx: Queryable, companyId: string, eventKey: string,
 
   const rules = (
     await tx.query<NoticeRule>(
-      `select r.id, r.revision, r.recipient_selector, r.optional_event, t.subject_template, t.body_template, t.approved_placeholders
+      `select r.id, r.revision, r.channel, r.recipient_selector, r.optional_event, t.subject_template, t.body_template, t.approved_placeholders
          from notification_rule r join notification_template t on t.company_id = r.company_id and t.id = r.template_id and t.active
         where r.company_id = $1 and r.event_type = $2 and ${RULE_IN_FORCE}`,
       [companyId, ev.eventType],
@@ -760,6 +790,7 @@ export async function fanOut(tx: Queryable, companyId: string, eventKey: string,
 interface NoticeRule {
   id: string;
   revision: number;
+  channel: 'IN_APP' | 'EMAIL';
   recipient_selector: string;
   optional_event: boolean;
   subject_template: string | null;
@@ -783,17 +814,17 @@ async function recordEvent(tx: Queryable, companyId: string, eventKey: string, o
   ).rows[0]?.id;
 }
 
-/** One notification and its delivery. False when this recipient already has it under this rule revision (BR-034). */
+/** One notification and its delivery. False when this recipient already has it under this rule revision and channel (BR-034). */
 async function notifyRecipient(tx: Queryable, companyId: string, eventId: string, rule: NoticeRule, userId: string, ev: EventSpec): Promise<boolean> {
   const n = (
     await tx.query<{ id: string }>(
       `insert into notification (company_id, recipient_user_id, transaction_id, category, state, event_id, rule_id, channel, idempotency_key, created_by, updated_by)
-       values ($1, $2, $3, $4, 'QUEUED', $5, $6, 'IN_APP', $7, $8, $8) on conflict (company_id, idempotency_key) do nothing returning id`,
-      [companyId, userId, ev.transactionId, ev.eventType, eventId, rule.id, `${eventId}:${userId}:IN_APP:${rule.id}:${rule.revision}`, SYSTEM_ACTOR_ID],
+       values ($1, $2, $3, $4, 'QUEUED', $5, $6, $7, $8, $9, $9) on conflict (company_id, idempotency_key) do nothing returning id`,
+      [companyId, userId, ev.transactionId, ev.eventType, eventId, rule.id, rule.channel, `${eventId}:${userId}:${rule.channel}:${rule.id}:${rule.revision}`, SYSTEM_ACTOR_ID],
     )
   ).rows[0];
   if (!n) return false;
-  await deliver(tx, companyId, { id: n.id, userId, selector: rule.recipient_selector, optional: rule.optional_event, eventType: ev.eventType }, ev, {
+  await deliver(tx, companyId, { id: n.id, userId, selector: rule.recipient_selector, optional: rule.optional_event, eventType: ev.eventType, channel: rule.channel }, ev, {
     subject: rule.subject_template,
     body: rule.body_template,
     approved: rule.approved_placeholders,
@@ -845,7 +876,7 @@ async function openFanOut(tx: Queryable, companyId: string, eventKey: string, oc
 async function fanOutBatch(tx: Queryable, companyId: string, eventId: string, ev: EventSpec, batchSize: number): Promise<{ created: number; done: boolean }> {
   const position = (
     await tx.query<NoticeRule & { after_user_id: string | null }>(
-      `select r.id, r.revision, r.recipient_selector, r.optional_event, t.subject_template, t.body_template, t.approved_placeholders, f.after_user_id
+      `select r.id, r.revision, r.channel, r.recipient_selector, r.optional_event, t.subject_template, t.body_template, t.approved_placeholders, f.after_user_id
          from notification_fan_out f
          join notification_rule r on r.company_id = f.company_id and r.id = f.rule_id
          join notification_template t on t.company_id = r.company_id and t.id = r.template_id

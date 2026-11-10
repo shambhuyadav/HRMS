@@ -5,10 +5,12 @@
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { ATTENDANCE_REGISTERS } from '../attendance/registers.js';
 import { assertMinuteFilter, ATTENDANCE_CONTROL_FROM, attendanceControlConditions, type AttendanceControlFilters } from '../attendance/service.js';
 import { auditEventQuery } from '../audit-trail/service.js';
 import { BIOMETRIC_REPORTS } from '../biometric/reports.js';
 import { CONFIRMATION_VIEWS, type ConfirmationView, listConfirmations } from '../confirmation/service.js';
+import { DOCUMENT_COMPLIANCE_REPORTS } from '../documents/compliance.js';
 import { EMPLOYEE_DETAIL_REPORTS } from '../employee/detail-reports.js';
 import { type EmployeeFilters, employeeFilterConditions, employeeOrderBy } from '../employee/service.js';
 import { claimsInScope, EXPENSE_REPORTS } from '../expense/reports.js';
@@ -19,6 +21,7 @@ import { isModuleActive } from '../registry.js';
 import { CURRENT_MEMBER_STATUSES, TEAM_SORTS, teamExportRows } from '../team/service.js';
 import { ALLOCATION_STATES, allocationExportRows } from '../timesheet/allocations.js';
 import { hoursExportRows, MAX_REPORT_DAYS } from '../timesheet/reports.js';
+import { ATTRITION_REPORTS } from './attrition.js';
 import { cellText, contextCsvLines, csvCell, oneLine, type ReportContext } from './context.js';
 import { PLAIN_DECIMAL, type SheetCell, xlsxWorkbook } from './xlsx.js';
 
@@ -33,7 +36,7 @@ export type ReportFormat = (typeof REPORT_FORMATS)[number];
  * A list's record filters (one employee, project, job or activity, or the payroll run of a run report, by id); only
  * reports that declare them accept them.
  */
-export const RECORD_FILTERS = ['employeeId', 'projectId', 'jobId', 'activityId', 'runId', 'locationId', 'shiftId', 'minuteField', 'minuteOp', 'minuteValue', 'leaveType', 'resource', 'recordKey', 'actorUserId', 'action', 'reviewDueFrom', 'reviewDueTo', 'todayAttendance', 'confirmationDueTo', 'view', 'category', 'profileId'] as const;
+export const RECORD_FILTERS = ['employeeId', 'projectId', 'jobId', 'activityId', 'runId', 'locationId', 'shiftId', 'minuteField', 'minuteOp', 'minuteValue', 'leaveType', 'resource', 'recordKey', 'actorUserId', 'action', 'reviewDueFrom', 'reviewDueTo', 'todayAttendance', 'confirmationDueTo', 'view', 'category', 'profileId', 'punchView', 'punchSource', 'minimumDays'] as const;
 export type RecordFilter = (typeof RECORD_FILTERS)[number];
 
 export interface ReportFilters extends EmployeeFilters {
@@ -71,6 +74,10 @@ export interface ReportFilters extends EmployeeFilters {
   category?: string | undefined;
   /** FR-087 / section 11.2 one biometric profile. */
   profileId?: string | undefined;
+  /** CL-047, CL-051 the attendance registers' own filters (attendance/registers.ts). */
+  punchView?: string | undefined;
+  punchSource?: string | undefined;
+  minimumDays?: number | undefined;
 }
 
 /** The employee list filters beyond status (FR-007); only reports that declare `employeeFilters` accept them. */
@@ -470,6 +477,12 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
   ...BIOMETRIC_REPORTS,
   // FR-007 family, qualification and prior-employment exports (I-82 item 2).
   ...EMPLOYEE_DETAIL_REPORTS,
+  // Attrition register and summaries (coverage CL-147, CL-148; FR-056, FR-058).
+  ...ATTRITION_REPORTS,
+  // Employees missing mandatory document types (coverage CL-150; FR-056, FR-058; 0261), while the documents module is active.
+  ...DOCUMENT_COMPLIANCE_REPORTS,
+  // Shift punch, shift plan and shift deviation registers and the absconding report (coverage CL-047, CL-049 to CL-051; FR-019 to FR-027, FR-056).
+  ...ATTENDANCE_REGISTERS,
 
   INCREMENT_HISTORY: {
     code: 'INCREMENT_HISTORY',

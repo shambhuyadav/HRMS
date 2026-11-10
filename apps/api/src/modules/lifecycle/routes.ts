@@ -6,6 +6,7 @@ import type { ScanProvider } from '../../storage/scan.js';
 import { deliveryRoutes } from './delivery-routes.js';
 import { exitRoutes } from './exit-routes.js';
 import { letterRoutes } from './letter-routes.js';
+import { noteRegisterRoutes } from './notes-register.js';
 import { processRoutes } from './process-routes.js';
 import { settlementCalculationRoutes } from './settlement-calculation-routes.js';
 import { settlementImportRoutes } from './settlement-import.js';
@@ -17,6 +18,8 @@ export async function lifecycleRoutes(app: FastifyInstance, opts: { db: Database
   await processRoutes(app, opts);
   await exitRoutes(app, opts);
   await letterRoutes(app, opts);
+  // CL-040 (0260): the notes register, voiding a note, its supporting file and the bulk upload.
+  await noteRegisterRoutes(app, opts);
   await settlementRoutes(app, opts);
   // FR-052 (I-88): calculation, notice waiver, settlement policy and the statutory rule pack registry.
   await settlementCalculationRoutes(app, opts);

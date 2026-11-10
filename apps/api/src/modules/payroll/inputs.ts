@@ -50,6 +50,7 @@ import {
   requireVerifiedEvidence,
   reviewersLackingScope,
   setRootState,
+  taskDelegator,
   taskIsPending,
   taskTransaction,
   userIsEmployee,
@@ -528,13 +529,15 @@ export async function decideBatch(tx: Queryable, grant: AccessGrant, taskId: str
   if (await priorDecision(tx, grant.companyId, input.idempotencyKey, taskId)) return { batchId: b.id, state: b.state, replayed: true };
   if (!(await taskIsPending(tx, grant, taskId))) throw new HttpError(409, 'TASK_CLOSED', 'This task has already been decided');
   if (b.state !== 'SUBMITTED') throw new HttpError(409, 'INVALID_STATE', 'This batch is not waiting for a decision');
-  if (b.prepared_by === grant.userId) throw new HttpError(403, 'NOT_INDEPENDENT', 'The preparer of a batch does not decide it');
+  // I-57 item 7: a delegate decides in the delegator's name, so the delegator is held to the same rules as the decider.
+  const actingFor = await taskDelegator(tx, grant.companyId, taskId);
+  if (b.prepared_by === grant.userId || b.prepared_by === actingFor) throw new HttpError(403, 'NOT_INDEPENDENT', 'The preparer of a batch does not decide it');
   const employees = await batchEmployees(tx, grant.companyId, b.id);
   await requireFullScope(tx, grant, employees);
-  // One statement whatever the batch size (up to 10,000 lines): is or was the decider linked to any of its employees?
-  const self = await tx.query(`select 1 from user_employee_link where company_id = $1 and user_id = $2 and employee_id = any($3::uuid[]) limit 1`, [
+  // One statement whatever the batch size (up to 10,000 lines): is or was the decider (or the person decided for) linked to any of its employees?
+  const self = await tx.query(`select 1 from user_employee_link where company_id = $1 and user_id = any($2::uuid[]) and employee_id = any($3::uuid[]) limit 1`, [
     grant.companyId,
-    grant.userId,
+    [grant.userId, ...(actingFor ? [actingFor] : [])],
     employees,
   ]);
   if ((self.rowCount ?? 0) > 0) throw new HttpError(403, 'SELF_ACTION_NOT_ALLOWED', 'The batch contains your own input; another approver decides it');
@@ -807,8 +810,11 @@ export async function decideStop(
   if (await priorDecision(tx, grant.companyId, input.idempotencyKey, taskId)) return { stopId: s.id, state: s.state, replayed: true };
   if (!(await taskIsPending(tx, grant, taskId))) throw new HttpError(409, 'TASK_CLOSED', 'This task has already been decided');
   if (s.state !== 'SUBMITTED') throw new HttpError(409, 'INVALID_STATE', 'This salary stop is not waiting for a decision');
-  if (s.proposed_by === grant.userId) throw new HttpError(403, 'NOT_INDEPENDENT', 'The maker of a salary stop does not decide it');
+  // I-57 item 7: a delegate decides in the delegator's name, so the delegator is held to the same rules as the decider.
+  const actingFor = await taskDelegator(tx, grant.companyId, taskId);
+  if (s.proposed_by === grant.userId || s.proposed_by === actingFor) throw new HttpError(403, 'NOT_INDEPENDENT', 'The maker of a salary stop does not decide it');
   assertNotSelf(grant, s.employee_id);
+  if (actingFor && (await userIsEmployee(tx, grant.companyId, actingFor, s.employee_id))) throw new HttpError(403, 'SELF_ACTION_NOT_ALLOWED', 'You cannot act on your own record in this context');
   if (input.decision === 'REJECT') requireText(input.reason, 'reason', 1000);
   else {
     // DF05: the mode is approved explicitly (EXCLUDE_CALCULATION is an exceptional mode, never implied).

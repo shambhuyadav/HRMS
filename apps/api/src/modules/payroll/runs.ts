@@ -68,6 +68,7 @@ import {
   assertInScope,
   assertNotSelf,
   audit,
+  decisionDelegators,
   decisionTrail,
   emit,
   holds,
@@ -80,6 +81,7 @@ import {
   reviewersLackingScope,
   runMembersOutsideScope,
   setRootState,
+  taskDelegator,
   taskIsPending,
   taskTransaction,
   userIsEmployee,
@@ -698,8 +700,27 @@ export interface RunDecisionInput {
   excludeEmployeeIds?: string[] | undefined;
 }
 
-function assertIndependent(grant: AccessGrant, deciders: readonly (string | null)[]): void {
-  if (deciders.includes(grant.userId)) throw new HttpError(403, 'NOT_INDEPENDENT', 'The creator, preparer, reviewer and approver of a run are different people');
+/**
+ * C4: the creator, preparer, reviewer and approver of a run are different people. I-57 item 7: a decision taken under a
+ * delegation is the delegator's too, so `deciders` carries the delegators of the run's delegated decisions, and a delegate
+ * deciding a task in someone's name (`actingFor`) is refused when that person is one of them.
+ */
+function assertIndependent(grant: AccessGrant, deciders: readonly (string | null)[], actingFor: string | null = null): void {
+  if (deciders.includes(grant.userId) || (actingFor !== null && deciders.includes(actingFor))) {
+    throw new HttpError(403, 'NOT_INDEPENDENT', 'The creator, preparer, reviewer and approver of a run are different people');
+  }
+}
+
+/** The delegators of the delegated decisions of a run revision: its review, its approval stage and its covering approvals. */
+async function runDelegators(db: Queryable, companyId: string, r: RunRow): Promise<string[]> {
+  const stages = (
+    await db.query<{ transaction_id: string }>(
+      `select transaction_id from payroll_run_approval where company_id = $1 and run_id = $2
+       union all select transaction_id from payroll_record_cover where company_id = $1 and run_id = $2`,
+      [companyId, r.id],
+    )
+  ).rows.map((x) => x.transaction_id);
+  return decisionDelegators(db, companyId, [r.transaction_id, ...stages]);
 }
 
 async function unresolvedBlocking(db: Queryable, companyId: string, runId: string) {
@@ -719,7 +740,8 @@ export async function reviewRun(tx: Queryable, grant: AccessGrant, taskId: strin
   if (await priorDecision(tx, grant.companyId, input.idempotencyKey, taskId)) return { runId: r.id, state: r.state, replayed: true };
   if (!(await taskIsPending(tx, grant, taskId))) throw new HttpError(409, 'TASK_CLOSED', 'This task has already been decided');
   if (r.state !== 'IN_REVIEW' || r.reviewed_by) throw new HttpError(409, 'INVALID_STATE', 'This run is not waiting for review');
-  assertIndependent(grant, [r.created_by, r.calculated_by]);
+  const actingFor = await taskDelegator(tx, grant.companyId, taskId);
+  assertIndependent(grant, [r.created_by, r.calculated_by], actingFor);
   await requireRunScope(tx, grant, r.id);
   const ret = input.decision === 'RETURN' ? await returnInput(tx, grant.companyId, r, input.reason, input.excludeEmployeeIds) : null;
   const result = await decideTask(tx, { grant, taskId, decision: input.decision, reason: input.reason, idempotencyKey: input.idempotencyKey, permission: { resource: 'payroll_run', action: 'review' } });
@@ -743,7 +765,8 @@ export async function reviewRun(tx: Queryable, grant: AccessGrant, taskId: strin
     transactionId: stageTx,
     ownerEmployeeId: null,
     actorUserId: grant.userId,
-    excludeUserIds: [r.created_by, r.calculated_by, grant.userId, ...(await runReviewersLackingScope(tx, grant.companyId, APPROVAL_KIND, r.id))].filter(
+    // ...nor the person a delegated review was decided for (I-57 item 7).
+    excludeUserIds: [r.created_by, r.calculated_by, grant.userId, actingFor, ...(await runReviewersLackingScope(tx, grant.companyId, APPROVAL_KIND, r.id))].filter(
       (u): u is string => !!u,
     ),
   });
@@ -778,7 +801,8 @@ export async function approveRun(tx: Queryable, grant: AccessGrant, taskId: stri
   if (await priorDecision(tx, grant.companyId, input.idempotencyKey, taskId)) return { runId: r.id, state: r.state, replayed: true };
   if (!(await taskIsPending(tx, grant, taskId))) throw new HttpError(409, 'TASK_CLOSED', 'This task has already been decided');
   if (r.state !== 'IN_REVIEW' || stage.state !== 'SUBMITTED') throw new HttpError(409, 'INVALID_STATE', 'This run is not waiting for approval');
-  assertIndependent(grant, [r.created_by, r.calculated_by, r.reviewed_by]);
+  const delegators = await runDelegators(tx, grant.companyId, r);
+  assertIndependent(grant, [r.created_by, r.calculated_by, r.reviewed_by, ...delegators], await taskDelegator(tx, grant.companyId, taskId));
   await requireRunScope(tx, grant, r.id);
   const ret = input.decision === 'RETURN' ? await returnInput(tx, grant.companyId, r, input.reason, input.excludeEmployeeIds) : null;
   if (!ret) {
@@ -827,7 +851,7 @@ export async function approveRun(tx: Queryable, grant: AccessGrant, taskId: stri
       transactionId: coverTx,
       ownerEmployeeId: o.employee_id,
       actorUserId: grant.userId,
-      excludeUserIds: [r.created_by, r.calculated_by, r.reviewed_by, grant.userId].filter((u): u is string => !!u),
+      excludeUserIds: [r.created_by, r.calculated_by, r.reviewed_by, grant.userId, ...(await runDelegators(tx, grant.companyId, r))].filter((u): u is string => !!u),
     });
     await emit(tx, grant.companyId, 'payroll_run.assigned', r.id, `${r.id}:cover:${coverId}`, { runId: r.id, taskId: coverTask, step: 'cover', revision: r.revision });
   }
@@ -844,7 +868,7 @@ export async function coverRecord(tx: Queryable, grant: AccessGrant, taskId: str
   if (await priorDecision(tx, grant.companyId, input.idempotencyKey, taskId)) return { runId: r.id, state: r.state, replayed: true };
   if (!(await taskIsPending(tx, grant, taskId))) throw new HttpError(409, 'TASK_CLOSED', 'This task has already been decided');
   if (r.state !== 'IN_REVIEW' || stage.state !== 'SUBMITTED' || !r.approved_by) throw new HttpError(409, 'INVALID_STATE', 'This record is not waiting for a covering approval');
-  assertIndependent(grant, [r.created_by, r.calculated_by, r.reviewed_by, r.approved_by]);
+  assertIndependent(grant, [r.created_by, r.calculated_by, r.reviewed_by, r.approved_by, ...(await runDelegators(tx, grant.companyId, r))], await taskDelegator(tx, grant.companyId, taskId));
   assertNotSelf(grant, coveredEmployee);
   if (await userIsEmployee(tx, grant.companyId, grant.userId, coveredEmployee)) throw new HttpError(403, 'SELF_ACTION_NOT_ALLOWED', 'You cannot act on your own record in this context');
   await assertInScope(tx, grant, coveredEmployee);

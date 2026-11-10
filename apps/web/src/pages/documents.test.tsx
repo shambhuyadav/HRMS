@@ -891,6 +891,8 @@ describe('registry exports', () => {
       ['/documents/policies', MANAGE, true],
       ['/documents/policies/:id', MANAGE, false],
       ['/documents/bulk-mapping', UPLOAD, true],
+      // CL-150 (0261): the mandatory document types and the compliance report (document-compliance.test.tsx).
+      ['/documents/mandatory-types', 'document_requirement.read.operational', true],
     ]);
     expect(DOCUMENTS_ESS_PANELS).toEqual([]);
     expect(DOCUMENTS_TASK_QUEUES).toEqual([]);

@@ -25,6 +25,8 @@ export const appraisalRegistration: ModuleRegistration = {
         'appraisal.import.operational',
         'appraisal.report.operational',
         'appraisal.export.operational',
+        // CL-132 (0262): the rating bands and target shares the bell curve compares against (configuration, never a rating).
+        'appraisal_distribution.manage.operational',
       ],
       ceiling: ['appraisal.read.rating', 'appraisal.rate.rating', 'appraisal.confirm.rating', 'appraisal.report.rating', 'appraisal.export.rating', 'appraisal.read.reason'],
     },
@@ -42,6 +44,7 @@ export const appraisalRegistration: ModuleRegistration = {
   operationalFieldGroups: [
     { resource: 'appraisal_cycle', fieldGroup: 'operational' },
     { resource: 'appraisal', fieldGroup: 'operational' },
+    { resource: 'appraisal_distribution', fieldGroup: 'operational' },
   ],
   workflows: [
     // F1/DF03: the current direct manager rates (HR fallback list when the manager is ineligible), then an independent

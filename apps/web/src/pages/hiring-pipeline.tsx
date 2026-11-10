@@ -683,6 +683,8 @@ interface OfferDecision {
   reason?: string | null;
   decidedAt: string;
   decidedBy: Person;
+  /** I-57 item 7: the delegator a delegate decided for (null when decided in the decider's own right). */
+  onBehalfOf?: Person | null;
 }
 
 interface CompensationCurrent {
@@ -3664,7 +3666,10 @@ function OfferDetail({ id }: { id: string }) {
                       <tr key={`${d.decidedAt}-${index}`}>
                         <td>{d.revision}</td>
                         <td>{labelOf(DECISION_LABEL, d.decision)}</td>
-                        <td>{personText(d.decidedBy, userId)}</td>
+                        <td>
+                          {personText(d.decidedBy, userId)}
+                          {d.onBehalfOf && <span className="hint">{` on behalf of ${personText(d.onBehalfOf, userId)}`}</span>}
+                        </td>
                         <td>{formatDate(d.decidedAt)}</td>
                         {withReasons && <td>{d.reason ?? '—'}</td>}
                       </tr>

@@ -35,6 +35,7 @@ import { employeeUpdateImportRoutes } from './modules/employee/update-import.js'
 import { essRoutes } from './modules/ess/routes.js';
 import { expenseRoutes } from './modules/expense/routes.js';
 import { incrementRoutes } from './modules/increment/routes.js';
+import { leaveMonthlyAdjustmentImportRoutes } from './modules/leave/monthly-adjustment-import.js';
 import { leaveOpeningImportRoutes } from './modules/leave/opening-import.js';
 import { leaveRoutes } from './modules/leave/routes.js';
 import { notificationRoutes } from './modules/notification/routes.js';
@@ -161,6 +162,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   app.register(shiftRoutes, { prefix: '/v1', db: deps.db });
   app.register(leaveRoutes, { prefix: '/v1', db: deps.db, files });
   app.register(leaveOpeningImportRoutes, { prefix: '/v1', db: deps.db, files, scanner });
+  app.register(leaveMonthlyAdjustmentImportRoutes, { prefix: '/v1', db: deps.db, files, scanner });
   app.register(attendanceRoutes, { prefix: '/v1', db: deps.db });
   app.register(attendancePolicyRoutes, { prefix: '/v1', db: deps.db });
   app.register(punchImportRoutes, { prefix: '/v1', db: deps.db, files, scanner });

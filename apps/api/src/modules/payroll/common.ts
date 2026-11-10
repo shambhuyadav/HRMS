@@ -185,6 +185,41 @@ export async function pendingTaskOf(db: Queryable, companyId: string, transactio
   return r?.id ?? null;
 }
 
+/**
+ * docs/03 I-57 item 7 (decided under owner delegation; see the builder report): a decision a delegate takes under a delegation is
+ * the delegator's for every payroll independence check, as the workflow engine already treats it for later steps
+ * (engine.ts priorDecidersOf). The delegators of the delegated decisions taken in the given transactions.
+ */
+export async function decisionDelegators(db: Queryable, companyId: string, transactionIds: readonly string[], opts: { approvedOnly?: boolean } = {}): Promise<string[]> {
+  if (transactionIds.length === 0) return [];
+  return (
+    await db.query<{ u: string }>(
+      `select distinct dl.delegator_user_id as u
+         from approval_instance i
+         join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
+         join approval_decision d on d.company_id = t.company_id and d.task_id = t.id
+         join delegation dl on dl.company_id = t.company_id and dl.id = t.delegation_id
+        where i.company_id = $1 and i.transaction_id = any($2::uuid[]) and ($3::boolean is false or d.decision = 'APPROVE')`,
+      [companyId, transactionIds, opts.approvedOnly === true],
+    )
+  ).rows.map((r) => r.u);
+}
+
+/**
+ * I-57 item 7: the person a task is decided for when it was routed under a delegation (its delegate decides in their name), or
+ * null. Every independence check of a decision applies to them as it does to the delegate who acts.
+ */
+export async function taskDelegator(db: Queryable, companyId: string, taskId: string): Promise<string | null> {
+  return (
+    (
+      await db.query<{ u: string }>(
+        `select dl.delegator_user_id as u from approval_task t join delegation dl on dl.company_id = t.company_id and dl.id = t.delegation_id where t.company_id = $1 and t.id = $2`,
+        [companyId, taskId],
+      )
+    ).rows[0]?.u ?? null
+  );
+}
+
 /** Decision history of transactions: step action, decision and time only (the decider's private reason stays out). */
 export async function decisionTrail(db: Queryable, companyId: string, transactionIds: readonly string[]) {
   if (transactionIds.length === 0) return [];

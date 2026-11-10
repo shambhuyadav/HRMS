@@ -206,7 +206,8 @@ async function createCompany(db: pg.Pool, fid: string, plan: CompanyPlan, approv
     const locationId = await master('location', 'HQ', 'Head office (synthetic)');
     const designations = { MGR: await master('designation', 'MGR', 'Manager'), STAFF: await master('designation', 'STAFF', 'Staff') };
     const shiftId = await one(
-      `insert into shift (company_id, code, name, in_time, out_time, spans_midnight, active, created_by) values ($1, 'DAY', 'Day shift', '09:00', '18:00', false, true, $2) returning id`,
+      // buffer_minutes (0180): the punch capture window, here the largest a nine-hour shift is given (4 hours either side).
+      `insert into shift (company_id, code, name, in_time, out_time, spans_midnight, buffer_minutes, active, created_by) values ($1, 'DAY', 'Day shift', '09:00', '18:00', false, 240, true, $2) returning id`,
       [id, approver],
     );
     await tx.query(`insert into shift_break (company_id, shift_id, sequence, start_offset_minutes, end_offset_minutes) values ($1, $2, 1, 240, 300)`, [id, shiftId]);

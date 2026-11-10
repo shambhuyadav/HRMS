@@ -1035,6 +1035,19 @@ describe('a new requisition (FR-011 fields)', () => {
 });
 
 describe('one requisition', () => {
+  it('FR-003, FR-068: a decision a delegate took names the person it was taken for beside the delegate (I-57 item 7)', async () => {
+    serve({
+      [`GET /v1/hiring/requisitions/${R_APPROVED}`]: () => {
+        const r = db.requisitions.get(R_APPROVED)!;
+        const meera = { userId: U_MEERA, employeeCode: 'SYN-003', displayName: 'Meera Synthetic' };
+        return [200, { ...r, decisions: r.decisions.map((d, i) => ({ ...d, onBehalfOf: i === 1 ? meera : null })) }];
+      },
+    });
+    renderAt(`/hiring/requisitions/${R_APPROVED}`, [READ]);
+    const history = await screen.findByRole('table', { name: 'Approval history' });
+    expect(bodyRows(history).map(cells).map((row) => row[3])).toEqual(['You', 'A user without an employee record on behalf of Meera Synthetic (SYN-003)']);
+  });
+
   it('shows a decided requisition with its approval history and revisions, and only what the server returned', async () => {
     serve();
     renderAt(`/hiring/requisitions/${R_APPROVED}`, [READ]);

@@ -32,6 +32,10 @@
 //     net minutes. Precedence: on a weekly off or holiday every worked minute; on a working day a PRESENT result only;
 //     none on leave, half-day leave, on duty, an exception, absence or a half day. Below the minimum, none; at or above
 //     it, rounded down to whole rounding units.
+//
+// Decided under owner delegation (6 Nov 2026; recorded 10 Nov 2026; 0265; BRD coverage CL-050 shift deviation register):
+//   * Early-departure minutes: from the last covered minute to the scheduled end (the end of the working half on a half
+//     weekly-off) on an early-departure day, rounded up to whole minutes, so a flagged day shows at least one; 0 otherwise.
 
 export type AttendanceStatus = 'PRESENT' | 'HALF_DAY' | 'ABSENT' | 'EXCEPTION' | 'LEAVE' | 'HALF_DAY_LEAVE' | 'HOLIDAY' | 'WEEKLY_OFF' | 'ON_DUTY';
 
@@ -71,6 +75,8 @@ export interface DayResult {
   /** Minutes from the scheduled start to the first covered minute on a late day; 0 otherwise. */
   lateMinutes: number;
   earlyDeparture: boolean;
+  /** Minutes from the last covered minute to the scheduled end on an early-departure day (rounded up); 0 otherwise. */
+  earlyDepartureMinutes: number;
   /** Overtime candidate minutes; null when the policy's overtime setting is off (or has no rules). */
   overtimeCandidateMinutes: number | null;
   exceptionCode: string | null;
@@ -160,6 +166,7 @@ export function evaluateDay(input: DayInput): DayResult {
   const minutesLate = input.shift && firstIn !== undefined ? Math.floor((firstIn - input.shift.startMs) / MINUTE) : 0;
   const late = !!input.shift && firstIn !== undefined && minutesLate > input.policy.graceMinutes;
   const earlyDeparture = scheduledEndMs !== undefined && lastOut !== undefined && lastOut < scheduledEndMs;
+  const minutesEarly = earlyDeparture && scheduledEndMs !== undefined && lastOut !== undefined ? Math.ceil((scheduledEndMs - lastOut) / MINUTE) : 0;
 
   const overtimeOf = (status: AttendanceStatus): number | null => {
     const rule = input.policy.overtime;
@@ -183,6 +190,7 @@ export function evaluateDay(input: DayInput): DayResult {
       late: flagged && late,
       lateMinutes: flagged && late ? minutesLate : 0,
       earlyDeparture: flagged && earlyDeparture,
+      earlyDepartureMinutes: flagged && earlyDeparture ? minutesEarly : 0,
       overtimeCandidateMinutes: overtimeOf(status),
       exceptionCode,
     };

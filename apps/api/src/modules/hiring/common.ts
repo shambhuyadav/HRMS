@@ -3,6 +3,7 @@ import { writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { decidedOnBehalfOf } from '../workflow/engine.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ACTIVE_EMPLOYEE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'];
@@ -232,12 +233,17 @@ export async function taskTransaction(tx: Queryable, companyId: string, taskId: 
   return t && t.kind === kind ? t.transaction_id : undefined;
 }
 
-/** Approval history of a transaction: step, decision, decider (operational identity), time and reason. */
+/**
+ * Approval history of a transaction: step, decision, decider (operational identity), time and reason. A decision taken under a
+ * delegation names the delegator it was taken for (`onBehalfOf`, I-57 item 7); otherwise that is null.
+ */
 export async function decisionHistory(db: Queryable, companyId: string, transactionId: string) {
+  type PersonRef = { userId: string; employeeCode: string | null; displayName: string | null };
   return (
-    await db.query<{ revision: number; step: number; action: string; decision: string; reason: string | null; decidedAt: Date; decidedBy: { userId: string; employeeCode: string | null; displayName: string | null } }>(
+    await db.query<{ revision: number; step: number; action: string; decision: string; reason: string | null; decidedAt: Date; decidedBy: PersonRef; onBehalfOf: PersonRef | null }>(
       `select i.transaction_revision as revision, s.sequence as step, p.action, d.decision, d.reason, d.occurred_at as "decidedAt",
-              json_build_object('userId', d.actor_user_id, 'employeeCode', e.employee_code, 'displayName', e.display_name) as "decidedBy"
+              json_build_object('userId', d.actor_user_id, 'employeeCode', e.employee_code, 'displayName', e.display_name) as "decidedBy",
+              ${decidedOnBehalfOf('t', 'd')} as "onBehalfOf"
          from approval_instance i
          join approval_task t on t.company_id = i.company_id and t.instance_id = i.id
          join approval_decision d on d.company_id = t.company_id and d.task_id = t.id

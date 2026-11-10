@@ -42,6 +42,9 @@ export const lifecycleRegistration: ModuleRegistration = {
         'employee_process.read_evidence.evidence',
         'employee_note.read.restricted',
         'employee_note.write.restricted',
+        // CL-040 (0260): voiding a note with a reason and the notes bulk upload are rights of their own, confidential like the notes.
+        'employee_note.void.restricted',
+        'employee_note.import.restricted',
         'letter.generate.letter',
         'letter.read.letter',
         'exit.read.reason',

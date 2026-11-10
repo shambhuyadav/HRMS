@@ -28,6 +28,7 @@ import {
   updateSectionEntry,
 } from './record-sections.js';
 import { employeeTimeline } from './timeline.js';
+import { type BulkManagerChange, changeManagers, MANAGER_BULK_LIMIT } from './manager-bulk.js';
 import {
   type CreateEmployeeInput,
   createEmployee,
@@ -132,6 +133,19 @@ const managerChangeSchema = {
   },
 } as const;
 
+const bulkManagerChangeSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['employeeIds', 'managerEmployeeId', 'effectiveFrom', 'reason'],
+  properties: {
+    employeeIds: { type: 'array', minItems: 1, maxItems: MANAGER_BULK_LIMIT, items: uuid },
+    managerEmployeeId: uuid,
+    effectiveFrom: date,
+    reason: { type: 'string', minLength: 1, maxLength: 500 },
+    moveOpenApprovals: { type: 'boolean' },
+  },
+} as const;
+
 const shiftChangeSchema = {
   type: 'object',
   additionalProperties: false,
@@ -190,6 +204,15 @@ export async function employeeRoutes(app: FastifyInstance, opts: { db: Database 
     const id = await withTransaction(db, (tx) => createEmployee(tx, grant, input));
     reply.status(201);
     return readFor(request, id);
+  });
+
+  // Several people to one new manager (manager-bulk.ts). Moving their open approvals is the routing administrator's duty, checked
+  // before anything changes.
+  app.post('/employees/manager-changes', { schema: { body: bulkManagerChangeSchema } }, async (request) => {
+    const body = request.body as BulkManagerChange;
+    const grant = await requireAccess(db, request, 'employee', 'update', ['operational'], { requireAll: true });
+    if (body.moveOpenApprovals) await requireAccess(db, request, 'workflow', 'reroute_task', ['operational']);
+    return withTransaction(db, (tx) => changeManagers(tx, grant, body));
   });
 
   app.post('/employees/:id/manager', { schema: { params: idParams, body: managerChangeSchema } }, async (request) => {

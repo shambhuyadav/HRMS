@@ -250,6 +250,30 @@ if [ -f /etc/hrms/hrms.env ] && [ -z "${OIDC_REQUIRE_MFA:-}" ]; then
   kept="$(awk -F= '$1 == "OIDC_REQUIRE_MFA" {print $2}' /etc/hrms/hrms.env)"
   [ -n "${kept}" ] && sed -i "s/^OIDC_REQUIRE_MFA=.*/OIDC_REQUIRE_MFA=${kept}/" /etc/hrms/hrms.env.new
 fi
+# Email notifications (FR-085): off unless SMTP_HOST is given to this script (then SMTP_FROM is required, and SMTP_USER with a password
+# file SMTP_PASSWORD_SOURCE, which is copied to /etc/hrms/smtp-password, root:hrms 0640 — the password never goes into this file or a
+# command line). A later run without SMTP_HOST keeps the email settings already there. Emails still go out only for events whose email
+# rule two administrators have proposed and published.
+if [ -n "${SMTP_HOST:-}" ]; then
+  : "${SMTP_FROM:?SMTP_FROM (the sender address) is required with SMTP_HOST}"
+  if [ -n "${SMTP_USER:-}" ]; then
+    if [ -n "${SMTP_PASSWORD_SOURCE:-}" ]; then
+      install -o root -g hrms -m 0640 "${SMTP_PASSWORD_SOURCE}" /etc/hrms/smtp-password
+    fi
+    [ -s /etc/hrms/smtp-password ] || { echo "SMTP_USER needs its password in a file: give SMTP_PASSWORD_SOURCE=<path>" >&2; exit 1; }
+  fi
+  {
+    echo "SMTP_HOST=${SMTP_HOST}"
+    echo "SMTP_PORT=${SMTP_PORT:-587}"
+    echo "SMTP_SECURITY=${SMTP_SECURITY:-starttls}"
+    if [ -n "${SMTP_USER:-}" ]; then echo "SMTP_USER=${SMTP_USER}"; echo "SMTP_PASSWORD_FILE=/etc/hrms/smtp-password"; fi
+    echo "SMTP_FROM=${SMTP_FROM}"
+    echo "APP_PUBLIC_URL=${PUBLIC_ORIGIN}"
+    if [ -n "${EMAIL_TEST_RECIPIENTS:-}" ]; then echo "EMAIL_TEST_RECIPIENTS=${EMAIL_TEST_RECIPIENTS}"; fi
+  } >> /etc/hrms/hrms.env.new
+elif [ -f /etc/hrms/hrms.env ]; then
+  grep -E '^(SMTP_[A-Z_]+|APP_PUBLIC_URL|EMAIL_TEST_RECIPIENTS)=' /etc/hrms/hrms.env >> /etc/hrms/hrms.env.new || true
+fi
 mv /etc/hrms/hrms.env.new /etc/hrms/hrms.env
 chown root:hrms /etc/hrms/hrms.env
 chmod 0640 /etc/hrms/hrms.env

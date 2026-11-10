@@ -39,6 +39,7 @@ import {
   updateCompetency,
 } from './competencies.js';
 import { closeCycle, createCycle, type CycleInput, CYCLE_START_MONTHS, type CycleUpdate, getCycle, getSetting, listCycles, putSetting, updateCycle } from './cycles.js';
+import { bellCurveRoutes } from './bell-curve.js';
 import { goalImportRoutes } from './goal-import.js';
 import { cycleExport, cycleReport, trainingNeeds } from './reports.js';
 import { SECTION_CODES, SECTIONS } from './sections.js';
@@ -512,4 +513,6 @@ export async function appraisalRoutes(app: FastifyInstance, opts: { db: Database
 
   // FR-041 KRA/goal upload (shared batch framework).
   await goalImportRoutes(app, opts);
+  // CL-132 (0262): the bell curve of a cycle and the rating bands and targets it compares against (read-only for ratings).
+  await bellCurveRoutes(app, opts);
 }

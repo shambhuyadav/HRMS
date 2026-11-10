@@ -51,8 +51,8 @@ describe('notification preferences panel (FR-083, FR-085, DF12)', () => {
   /** A little server: remembers what was saved, as the API does. */
   function preferenceServer(refuse = false) {
     const saved = [
-      { eventType: 'BIRTHDAY', publishCelebration: false, receiveOptional: true },
-      { eventType: 'WORK_ANNIVERSARY', publishCelebration: true, receiveOptional: false },
+      { eventType: 'BIRTHDAY', publishCelebration: false, receiveOptional: true, receiveEmail: true },
+      { eventType: 'WORK_ANNIVERSARY', publishCelebration: true, receiveOptional: false, receiveEmail: false },
     ];
     return mockApi((call) => {
       if (call.method === 'PUT') {
@@ -86,6 +86,18 @@ describe('notification preferences panel (FR-083, FR-085, DF12)', () => {
     fireEvent.click(await box('Receive colleagues’ work anniversaries'));
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)).toEqual({ url: PREFERENCES, method: 'PUT', body: { eventType: 'WORK_ANNIVERSARY', receiveOptional: true } }));
     await waitFor(async () => expect((await box('Receive colleagues’ work anniversaries')).checked).toBe(true));
+  });
+
+  it('FR-085: receipt by email is its own choice: the toggle sends only that, and the box shows the saved answer', async () => {
+    const calls = preferenceServer();
+    renderPage(<NotificationPreferencesPanel />);
+    expect((await box('Receive colleagues’ birthdays by email')).checked).toBe(true);
+    expect((await box('Receive colleagues’ work anniversaries by email')).checked).toBe(false);
+    expect(screen.getByText(/never confidential details/)).toBeTruthy();
+    fireEvent.click(await box('Receive colleagues’ birthdays by email'));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toEqual([{ url: PREFERENCES, method: 'PUT', body: { eventType: 'BIRTHDAY', receiveEmail: false } }]));
+    await waitFor(async () => expect((await box('Receive colleagues’ birthdays by email')).checked).toBe(false));
+    expect((await box('Receive colleagues’ birthdays')).checked).toBe(true);
   });
 
   it('a refused save shows the refusal and leaves the box as saved', async () => {

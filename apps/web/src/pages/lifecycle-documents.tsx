@@ -529,7 +529,16 @@ interface LineBody {
 // ---------------------------------------------------------------------------------------------------------
 const REVISION_STATE_LABEL: Record<string, string> = { DRAFT: 'Draft', PUBLISHED: 'Published', RETIRED: 'Retired' };
 const SOURCE_LABEL: Record<string, string> = { EMPLOYEE: 'Employee record', COMPANY: 'Company', EXIT: 'Approved exit', LETTER: 'The letter', OFFER: 'Approved offer (Hiring)' };
-const NOTE_KIND_LABEL: Record<string, string> = { NOTE: 'Note', REMARK: 'Remark', WARNING: 'Warning' };
+const NOTE_KIND_LABEL: Record<string, string> = {
+  NOTE: 'Note',
+  REMARK: 'Remark',
+  WARNING: 'Warning',
+  // The register's types (CL-040, 0260).
+  APPRECIATION: 'Appreciation',
+  EXIT_NOTE: 'Exit note',
+  OFFER_REJECTION: 'Offer rejection',
+  PIP: 'Performance improvement plan (PIP)',
+};
 const DELIVERY_LABEL: Record<string, string> = { NOT_SENT: 'Not sent', DELIVERED_IN_APP: 'Delivered to the employee’s self-service' };
 const DELIVERY_STATUS_LABEL: Record<string, string> = { DELIVERED: 'Delivered, not yet opened', READ: 'Opened by the employee' };
 
