@@ -6,6 +6,7 @@ import { runPolicyExpiry } from './documents/expiry.js';
 import { runIncrementReviewReminders } from './increment/reminders.js';
 import { separateDueExits } from './lifecycle/exit.js';
 import { runPayrollHoldReviews } from './payroll/holds.js';
+import { purgeExpiredEdocFiles } from './payroll-extras/edoc.js';
 import { isModuleActive } from './registry.js';
 import { runMissingTimesheetReminders } from './timesheet/exceptions.js';
 
@@ -30,6 +31,8 @@ const ALL_JOBS: readonly ModuleDailyJob[] = [
   { key: 'payroll', code: 'PAYROLL_HOLD_REVIEW', fromHour: 8, run: runPayrollHoldReviews },
   // DF12 document expiry for company policy versions (documents), from 08:00 with the employee document expiry notices.
   { key: 'documents', code: 'POLICY_EXPIRY', fromHour: 8, run: (db, companyId, localDate) => runPolicyExpiry(db, companyId, localDate) },
+  // CL-100: payslip PDFs of EDOC exports are kept only while they can be downloaded (payroll-extras). At night, when nobody exports.
+  { key: 'payroll-extras', code: 'EDOC_PURGE', fromHour: 1, run: (db, companyId) => purgeExpiredEdocFiles(db, companyId) },
 ];
 
 /** Daily jobs of core modules (not in the registry, so always on). */

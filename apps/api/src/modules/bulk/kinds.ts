@@ -14,6 +14,7 @@ import { auditProcessing, emptyProcessingTotals, type ProcessingTotals, processD
 import { cycleManagementAuthorised } from '../increment/cycles.js';
 import { emptyReviewTotals, openReviewChunk, recordReviewOpening, reviewOfJob, type ReviewTotals } from '../increment/roster.js';
 import { accrualAuthorised, type AccrualTotals, accrueMonthChunk, auditAccrual, auditYearEnd, emptyYearEndTotals, yearEndChunk, type YearEndTotals } from '../leave/service.js';
+import { completeEdoc, EDOC_PERMISSION, edocChunk, type EdocTotals } from '../payroll-extras/edoc.js';
 
 export interface BulkPermission {
   resource: string;
@@ -57,7 +58,7 @@ export interface BulkKind {
   recordFailure?(tx: Queryable, job: { companyId: string; jobId: string; requestedBy: string }, unit: string, errorCode: string): Promise<void>;
 }
 
-export const BULK_JOB_KINDS = ['ATTENDANCE_PROCESSING', 'LEAVE_ACCRUAL', 'INCREMENT_REVIEW_OPENING', 'LEAVE_YEAR_END'] as const;
+export const BULK_JOB_KINDS = ['ATTENDANCE_PROCESSING', 'LEAVE_ACCRUAL', 'INCREMENT_REVIEW_OPENING', 'LEAVE_YEAR_END', 'PAYSLIP_EDOC_EXPORT'] as const;
 export type BulkJobKind = (typeof BULK_JOB_KINDS)[number];
 
 export const BULK_KINDS: Record<BulkJobKind, BulkKind> = {
@@ -117,6 +118,17 @@ export const BULK_KINDS: Record<BulkJobKind, BulkKind> = {
       return { ...out, result: { ...totals } };
     },
     complete: (tx, grant, _p, result, jobId) => recordReviewOpening(tx, grant, jobId, result as unknown as ReviewTotals),
+  },
+  // CL-100 EDOC export (POST /v1/payroll-extras/edoc-exports, migration 0270): the issued payslips of a month rendered as PDFs over the
+  // requester's row scope, never their own; each chunk stores its files with the job, and the requester downloads them as one ZIP.
+  PAYSLIP_EDOC_EXPORT: {
+    permission: EDOC_PERMISSION,
+    initialResult: (p) => ({ month: p.month as string, files: 0 }),
+    runChunk: async (tx, grant, p, result, cursor, size, jobId) => {
+      const { totals, ...out } = await edocChunk(tx, grant, p.month as string, result as unknown as EdocTotals, cursor, size, jobId);
+      return { ...out, result: { ...totals } };
+    },
+    complete: (tx, grant, _p, result, jobId) => completeEdoc(tx, grant, result as unknown as EdocTotals, jobId),
   },
 };
 

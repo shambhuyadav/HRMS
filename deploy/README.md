@@ -125,6 +125,19 @@ sudo systemctl restart hrms-api hrms-worker
 
 Or install the older release tarball again with `install-release.sh`.
 
+A release that adds a duty to a role's defaults does not change grants approved before it: an approved grant's permissions are fixed,
+and the normal way to widen one is a new grant approved by a third person. While the deployment has only its two first administrators
+(no independent approver), the owner authorised (11 Nov 2026) a one-time refresh after each such release: existing grants get only
+their own role's new default duties (nothing confidential, nothing an administrator switched off), each widened grant is marked
+bootstrapped and audited. Look at the plan first, then apply it:
+
+```bash
+sudo REFRESH_COMPANY=HRMS bash /var/www/html/HRMS/deploy/scripts/refresh-duties.sh                                    # dry run
+sudo REFRESH_COMPANY=HRMS REFRESH_CONFIRM=add-default-duties bash /var/www/html/HRMS/deploy/scripts/refresh-duties.sh  # apply
+```
+
+Once a third administrator exists, widen grants the normal way instead.
+
 If a database password was ever exposed: `sudo ROTATE_DB_PASSWORDS=yes PUBLIC_HOST=<address> bash …/setup-server.sh` replaces both
 without showing them.
 

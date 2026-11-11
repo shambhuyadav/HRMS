@@ -21,6 +21,8 @@ export interface TimelineEvent {
   effectiveDate: string;
   recordedAt: string;
   actor: string | null;
+  /** The account a delegated approval decision was taken for (C4; I-57 item 7); null or absent otherwise. */
+  onBehalfOf?: string | null;
   reason: string | null;
   source: { kind: string; id: string; decisionId?: string | null } | null;
   details: Record<string, unknown>;
@@ -231,7 +233,10 @@ function HistoryOf({ employeeId }: { employeeId: string }) {
                   </td>
                   <td>{EVENTS[e.type] ?? readable(e.type)}</td>
                   <td>{detailText(e)}</td>
-                  <td>{e.actor ?? 'System'}</td>
+                  <td>
+                    {e.actor ?? 'System'}
+                    {e.onBehalfOf && <span className="hint">{` on behalf of ${e.onBehalfOf}`}</span>}
+                  </td>
                   <td>{e.reason ?? '—'}</td>
                   <td>
                     <SourceLink event={e} />

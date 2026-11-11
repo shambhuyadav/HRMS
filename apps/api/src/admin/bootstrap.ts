@@ -9,7 +9,9 @@
 // bootstrap setting (withGrantBootstrap) is transaction-local, so outside a transaction it would end with its own statement.
 import type pg from 'pg';
 import { SYSTEM_ACTOR_ID } from '../audit/actors.js';
+import { writeAudit } from '../audit/audit.js';
 import type { Queryable } from '../db/queryable.js';
+import { OWN_ESS_ROLE_CODES } from '../modules/access/authorize.js';
 import { BASELINE_ROLES, parsePermissionKey } from '../modules/access/baseline.js';
 import { provisionCompany, withGrantBootstrap } from '../modules/access/provision.js';
 
@@ -104,4 +106,151 @@ async function bootstrapInTransaction(db: Queryable, o: BootstrapOptions): Promi
   await assign(adminId, 'SYSTEM_ADMINISTRATOR', hrId);
   await assign(hrId, 'HR_ADMINISTRATOR', adminId);
   return { companyId, companyCreated: !existing, granted };
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// One-time refresh of default duties (authorised by the owner on 11 Nov 2026). An approved grant's allowlist is fixed (0099), so a duty
+// a later release adds to a role's defaults never reaches the grants approved before it; the normal path is a new grant, proposed and
+// approved by someone who is neither its requester nor its beneficiary. A deployment with only its two first administrators has no
+// such person. This adds, to every active grant of a baseline role in one company, the role's current default duties that the grant
+// lacks and that a release added to the role after the grant was approved (security review, 11 Nov 2026: a duty that was already in
+// the role then but not on the grant was left out on purpose, and is never added), through the same bootstrap path as the first grants
+// (so each row is marked bootstrapped and an access review lists it), and
+// audits each grant it widens with the owner's reason. It adds nothing else: no ceiling-only right, no confidential group (but the
+// own-record groups an Employee OWN grant holds by default), nothing outside the role's ceiling, nothing to a grant that ends or a role
+// that is not a baseline one. A dry run (apply: false) reports the same plan and writes nothing; a second run adds nothing.
+// ---------------------------------------------------------------------------------------------------------
+
+export interface DutyRefreshOptions {
+  companyCode: string;
+  apply: boolean;
+  /** Recorded on each widened grant's audit entry. */
+  reason: string;
+}
+
+export interface DutyRefreshPlan {
+  assignmentId: string;
+  accountKey: string;
+  roleCode: string;
+  add: string[];
+  /** Default duties left out, each with why (confidential, outside the ceiling, not in the catalogue). */
+  skipped: string[];
+}
+
+export interface DutyRefreshResult {
+  companyId: string;
+  applied: boolean;
+  grants: DutyRefreshPlan[];
+}
+
+/** Runs the refresh in one transaction of this connection, which must not be in a transaction already. */
+export async function refreshDefaultDuties(connection: pg.ClientBase, o: DutyRefreshOptions): Promise<DutyRefreshResult> {
+  if (!o.reason.trim()) throw new Error('A reason is required');
+  await connection.query('begin');
+  try {
+    const result = await refreshInTransaction(connection, o);
+    await connection.query(o.apply ? 'commit' : 'rollback');
+    return result;
+  } catch (err) {
+    await connection.query('rollback');
+    throw err;
+  }
+}
+
+async function refreshInTransaction(db: Queryable, o: DutyRefreshOptions): Promise<DutyRefreshResult> {
+  const code = o.companyCode.trim().toUpperCase();
+  const company = (await db.query<{ id: string }>(`select id from company where code = $1 and active`, [code])).rows[0];
+  if (!company) throw new Error(`No active company ${code}`);
+  const companyId = company.id;
+  const grants = (
+    await db.query<{ id: string; role_id: string; role_code: string; scope_kind: string; account_key: string; effective_to: string | null; approved_at: string }>(
+      `select ra.id, ra.role_id, r.code as role_code, ra.scope_kind, ua.account_key, ra.effective_to, coalesce(ra.approved_at, ra.created_at) as approved_at
+         from role_assignment ra
+         join role r on r.company_id = ra.company_id and r.id = ra.role_id
+         join user_account ua on ua.id = ra.user_id and ua.active
+        where ra.company_id = $1 and ra.state = 'ACTIVE' and ra.effective_from <= now() and (ra.effective_to is null or ra.effective_to > now())
+        order by ua.account_key, r.code
+        for update of ra`,
+      [companyId],
+    )
+  ).rows;
+
+  const plans: DutyRefreshPlan[] = [];
+  for (const g of grants) {
+    const baseline = BASELINE_ROLES.find((r) => r.code === g.role_code);
+    if (!baseline) continue;
+    const add: { id: string; key: string }[] = [];
+    const skipped: string[] = [];
+    for (const key of baseline.defaultDuties) {
+      const { resource, action, fieldGroup } = parsePermissionKey(key);
+      const p = (
+        await db.query<{ id: string; own_ess: boolean; allowed: boolean; released_later: boolean; classification: string; held: 'HELD' | 'ENDED' | null }>(
+          `select p.id, p.own_ess,
+                  exists (select 1 from role_permission rp where rp.company_id = $1 and rp.role_id = $2 and rp.permission_id = p.id and rp.effect = 'ALLOW') as allowed,
+                  exists (select 1 from role_permission rp where rp.company_id = $1 and rp.role_id = $2 and rp.permission_id = p.id and rp.effect = 'ALLOW'
+                                                             and rp.created_at > $7::timestamptz) as released_later,
+                  coalesce((select cfp.classification from confidential_field_policy cfp
+                             where cfp.company_id = $1 and cfp.resource_code = p.resource and cfp.field_group = p.field_group
+                               and cfp.effective_from <= hrms_business_date($1, now())
+                               and (cfp.effective_to is null or cfp.effective_to > hrms_business_date($1, now()))), 'CONFIDENTIAL') as classification,
+                  (select case when rap.active and (rap.effective_to is null or rap.effective_to > now()) then 'HELD' else 'ENDED' end
+                     from role_assignment_permission rap
+                    where rap.company_id = $1 and rap.role_assignment_id = $3 and rap.permission_id = p.id) as held
+             from permission p where p.resource = $4 and p.action = $5 and p.field_group = $6`,
+          [companyId, g.role_id, g.id, resource, action, fieldGroup, g.approved_at],
+        )
+      ).rows[0];
+      if (!p) {
+        skipped.push(`${key}: not in the catalogue`);
+        continue;
+      }
+      if (p.held === 'HELD') continue;
+      // Switched off or ended on this grant by an administrator: that decision stands.
+      if (p.held === 'ENDED') {
+        skipped.push(`${key}: switched off on this grant, left as it is`);
+        continue;
+      }
+      if (!p.allowed) {
+        skipped.push(`${key}: outside the role ceiling`);
+        continue;
+      }
+      // Only a duty a release added after this grant was approved: one already in the role's ceiling then, and not on the grant, was
+      // left out by whoever proposed and approved it (a narrower list), and that decision stands.
+      if (!p.released_later) {
+        skipped.push(`${key}: in the role before this grant was approved and not given then, left as approved`);
+        continue;
+      }
+      const ownRecord = OWN_ESS_ROLE_CODES.includes(g.role_code) && g.scope_kind === 'OWN' && p.own_ess;
+      if (p.classification === 'CONFIDENTIAL' && !ownRecord) {
+        skipped.push(`${key}: confidential, needs a grant of its own`);
+        continue;
+      }
+      add.push({ id: p.id, key });
+    }
+    if (add.length === 0 && skipped.length === 0) continue;
+    plans.push({ assignmentId: g.id, accountKey: g.account_key, roleCode: g.role_code, add: add.map((a) => a.key), skipped });
+    if (add.length === 0) continue;
+    await withGrantBootstrap(db, async () => {
+      for (const a of add) {
+        await db.query(
+          `insert into role_assignment_permission (company_id, role_assignment_id, permission_id, active, effective_from, effective_to, created_by, updated_by)
+           values ($1, $2, $3, true, now(), $4, $5, $5)`,
+          [companyId, g.id, a.id, g.effective_to, SYSTEM_ACTOR_ID],
+        );
+      }
+      // Touching the grant in this mode marks it bootstrapped for good (0099), so an access review lists it with the first grants.
+      await db.query(`update role_assignment set updated_by = $3 where company_id = $1 and id = $2`, [companyId, g.id, SYSTEM_ACTOR_ID]);
+    });
+    await writeAudit(db, {
+      companyId,
+      resource: 'access_grant',
+      recordKey: g.id,
+      actorUserId: SYSTEM_ACTOR_ID,
+      actingAssignmentId: null,
+      action: 'BOOTSTRAP_DUTIES',
+      after: { operational: { roleCode: g.role_code, added: add.map((x) => x.key) } },
+      reason: o.reason.trim(),
+    });
+  }
+  return { companyId, applied: o.apply, grants: plans };
 }

@@ -8,7 +8,7 @@ import { HttpError } from '../../http/errors.js';
 import { requireAccess } from '../../http/guard.js';
 import { downloadHeaders, type FileStore, MAX_UPLOAD_BYTES, UPLOAD_FILE_NAME } from '../../storage/files.js';
 import { type ScanProvider, scanAttachment } from '../../storage/scan.js';
-import { createNote, listNotes, NOTE_KINDS, type NoteInput } from './notes.js';
+import { createNote, listNotes, NOTE_KINDS, type NoteInput, WARNING_CATEGORIES } from './notes.js';
 import { LIFECYCLE_REFERENCE_CATEGORIES, listLifecycleReferenceValues, taskOwnerRoles } from './options.js';
 import {
   cancelProcess,
@@ -342,6 +342,8 @@ export async function processRoutes(app: FastifyInstance, opts: { db: Database; 
           required: ['kind', 'body'],
           properties: {
             kind: { type: 'string', enum: [...NOTE_KINDS] },
+            // CL-052 (0283): a warning's category; addNote refuses it on any other type.
+            warningCategory: { type: 'string', enum: [...WARNING_CATEGORIES] },
             body: { type: 'string', minLength: 1, maxLength: 4000 },
             noteDate: date,
             exitCaseId: uuid,

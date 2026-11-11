@@ -10,8 +10,8 @@
 // the reason, the new assignee is told). Approvals whose assignee can still decide them (an HR step, say) stay where they are.
 // Moving is offered only when the change is already in effect: before that day the old manager still decides.
 import type { Queryable } from '../../db/queryable.js';
-import { HttpError } from '../../http/errors.js';
-import type { AccessGrant } from '../access/authorize.js';
+import { HttpError, notFound } from '../../http/errors.js';
+import { type AccessGrant, canAccessEmployee } from '../access/authorize.js';
 import { rerouteOpenTask } from '../workflow/admin.js';
 import { changeManager } from './changes.js';
 
@@ -35,7 +35,11 @@ export interface BulkManagerResult {
   left: number;
 }
 
-export async function changeManagers(tx: Queryable, grant: AccessGrant, input: BulkManagerChange): Promise<BulkManagerResult> {
+/**
+ * `rerouteGrant`: the caller's workflow.reroute_task grant when they asked to move open approvals; the moves are made under it, so its
+ * own scope and denied scopes apply to them, not the employee.update grant's.
+ */
+export async function changeManagers(tx: Queryable, grant: AccessGrant, input: BulkManagerChange, rerouteGrant?: AccessGrant): Promise<BulkManagerResult> {
   const ids = [...new Set(input.employeeIds)];
   if (ids.length !== input.employeeIds.length) throw new HttpError(422, 'VALIDATION_FAILED', 'A person is listed twice');
   if (ids.length === 0 || ids.length > MANAGER_BULK_LIMIT) {
@@ -48,6 +52,13 @@ export async function changeManagers(tx: Queryable, grant: AccessGrant, input: B
   }
   // A stable order, so two changes over the same people lock them in the same order.
   ids.sort();
+  // Everyone named, and the new manager, must be in the caller's scope before anything is read about them: otherwise the "already
+  // reports to that manager" answer below would tell a narrower-scoped caller about reporting lines outside their scope. Out of scope
+  // reads as not found, as everywhere.
+  for (const id of [...ids, input.managerEmployeeId]) {
+    if (!(await canAccessEmployee(tx, grant, id))) throw notFound();
+  }
+  if (input.moveOpenApprovals && !rerouteGrant) throw new HttpError(403, 'FORBIDDEN', 'Moving open approvals needs the routing duty');
 
   const current = new Map(
     (
@@ -89,7 +100,7 @@ export async function changeManagers(tx: Queryable, grant: AccessGrant, input: B
       // rest of the change whatever that refusal touched.
       await tx.query('savepoint manager_move');
       try {
-        const r = await rerouteOpenTask(tx, grant, task.id, reason);
+        const r = await rerouteOpenTask(tx, rerouteGrant!, task.id, reason);
         await tx.query('release savepoint manager_move');
         moved.push({ taskId: r.taskId, supersededTaskId: r.supersededTaskId, ownerEmployeeId: task.owner });
       } catch (error) {

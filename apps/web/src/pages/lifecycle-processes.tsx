@@ -33,6 +33,7 @@ import { type MeContext, useSession } from '../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, nextSort, Pager, pageParams, Section, SortHeader, type SortState, sortParams, StateBadge } from '../ui';
 import { DelegatedBadge } from './delegations';
 import { VerifiedEvidencePicker } from './exit-finance';
+import { keepOnPage, ReportExport } from './leave-admin';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from './records';
 import { EnterSeparationForm } from './separation-entry';
 
@@ -392,6 +393,8 @@ interface NoteItem {
   id: string;
   /** NOTE, REMARK or WARNING. */
   kind: string;
+  /** CL-052 (0283): a warning's category; ABSCONDING is the only one. */
+  warningCategory?: string | null;
   body: string;
   exitCaseId: string | null;
   processId: string | null;
@@ -404,6 +407,8 @@ interface NoteItem {
 type NoteKind = 'NOTE' | 'REMARK' | 'WARNING' | 'APPRECIATION' | 'EXIT_NOTE' | 'OFFER_REJECTION' | 'PIP';
 interface NoteBody {
   kind: NoteKind;
+  /** CL-052 (0283): sent only for a warning marked as an absconding warning. */
+  warningCategory?: 'ABSCONDING';
   body: string;
   exitCaseId?: string;
   employeeProcessId?: string;
@@ -529,6 +534,16 @@ const NOTE_KINDS: readonly (readonly [NoteKind, string])[] = [
   ['PIP', 'Performance improvement plan (PIP)'],
 ];
 const noteKindLabel = (kind: string) => NOTE_KINDS.find(([k]) => k === kind)?.[1] ?? readable(kind);
+/** A note's type in words, lower case: an absconding warning (CL-052, 0283) says so. */
+const noteTypeText = (n: { kind: string; warningCategory?: string | null }) => (n.kind === 'WARNING' && n.warningCategory === 'ABSCONDING' ? 'absconding warning' : noteKindLabel(n.kind).toLowerCase());
+/** CL-052 (0283): the checkbox that marks a warning as an absconding warning; the server refuses the mark on any other type. */
+function AbscondingMark({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="inline">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> Absconding warning (away from work without leave or word)
+    </label>
+  );
+}
 const SCAN_TEXT: Record<string, string> = {
   PENDING_SCAN: 'waiting for the malware scan',
   CLEAN: 'released by the malware scan',
@@ -2671,7 +2686,7 @@ function RestrictedNotes({ employeeId, own, processes, exits }: { employeeId: st
               {items.map((n) => (
                 <li key={n.id}>
                   <div>
-                    <Badge tone={n.kind === 'WARNING' ? 'bad' : 'neutral'}>{noteKindLabel(n.kind).toLowerCase()}</Badge> <When at={n.createdAt} /> by {userText(n.createdBy, me?.userId ?? null)}
+                    <Badge tone={n.kind === 'WARNING' ? 'bad' : 'neutral'}>{noteTypeText(n)}</Badge> <When at={n.createdAt} /> by {userText(n.createdBy, me?.userId ?? null)}
                   </div>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
                   {(n.processId || n.exitCaseId) && <div className="hint">{linkText(n)}</div>}
@@ -2741,6 +2756,7 @@ function NoteForm({
 }) {
   const initialLink = correcting?.processId ? `process:${correcting.processId}` : correcting?.exitCaseId ? `exit:${correcting.exitCaseId}` : '';
   const [kind, setKind] = useState<NoteKind>(correcting && NOTE_KINDS.some(([k]) => k === correcting.kind) ? (correcting.kind as NoteKind) : 'NOTE');
+  const [absconding, setAbsconding] = useState(correcting?.warningCategory === 'ABSCONDING');
   const [body, setBody] = useState(correcting?.body ?? '');
   const [link, setLink] = useState(initialLink);
   const [problem, setProblem] = useState<string | null>(null);
@@ -2748,7 +2764,7 @@ function NoteForm({
   const qc = useQueryClient();
   const save = useMutation({
     mutationFn: (note: NoteBody) => api<{ id: string }>(`/v1/employees/${employeeId}/notes`, { body: note }),
-    onSuccess: (_r, note) => onSaved(note.supersedesNoteId ? 'Saved the correction; the earlier note is kept and marked as corrected.' : `Saved the ${noteKindLabel(note.kind).toLowerCase()}.`),
+    onSuccess: (_r, note) => onSaved(note.supersedesNoteId ? 'Saved the correction; the earlier note is kept and marked as corrected.' : `Saved the ${noteTypeText(note)}.`),
     // A note corrected meanwhile: the list reloads and shows the later correction; what was typed stays.
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) void qc.invalidateQueries({ queryKey: keys.notes(employeeId) });
@@ -2767,6 +2783,7 @@ function NoteForm({
     const [linkKind, linkId] = link.split(':');
     save.mutate({
       kind,
+      ...(kind === 'WARNING' && absconding ? { warningCategory: 'ABSCONDING' as const } : {}),
       body: text,
       ...(linkKind === 'process' && linkId ? { employeeProcessId: linkId } : {}),
       ...(linkKind === 'exit' && linkId ? { exitCaseId: linkId } : {}),
@@ -2778,7 +2795,7 @@ function NoteForm({
       <h3 style={H3}>{correcting ? 'Correct a note' : 'Add a note'}</h3>
       {correcting && (
         <p className="hint" style={FLUSH}>
-          Correcting the {noteKindLabel(correcting.kind).toLowerCase()} of {localDateTime(correcting.createdAt)}: the correction is saved as a new note and the earlier one stays.
+          Correcting the {noteTypeText(correcting)} of {localDateTime(correcting.createdAt)}: the correction is saved as a new note and the earlier one stays.
         </p>
       )}
       <div style={FIELDS}>
@@ -2792,6 +2809,7 @@ function NoteForm({
             ))}
           </select>
         </label>
+        {kind === 'WARNING' && <AbscondingMark checked={absconding} onChange={setAbsconding} />}
         <label>
           Linked to
           <select value={link} onChange={(e) => setLink(e.target.value)}>
@@ -4137,6 +4155,8 @@ const noteStatusLabel = (s: string) => NOTE_STATUSES.find(([k]) => k === s)?.[1]
 interface RegisterNote {
   id: string;
   kind: string;
+  /** CL-052 (0283): a warning's category. */
+  warningCategory?: string | null;
   noteDate: string;
   body: string;
   source: 'ENTRY' | 'IMPORT';
@@ -4302,7 +4322,7 @@ function NotesRegister() {
                     {n.employee.displayName} <span className="hint">({n.employee.employeeCode})</span>
                   </td>
                   <td>
-                    <Badge tone={n.kind === 'WARNING' || n.kind === 'PIP' ? 'warn' : 'neutral'}>{noteKindLabel(n.kind).toLowerCase()}</Badge>
+                    <Badge tone={n.kind === 'WARNING' || n.kind === 'PIP' ? 'warn' : 'neutral'}>{noteTypeText(n)}</Badge>
                     {n.source === 'IMPORT' && <div className="hint">uploaded</div>}
                   </td>
                   <td>
@@ -4354,6 +4374,7 @@ function NotesRegister() {
         </div>
       )}
       {data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(data)} onPage={setPage} label="Note pages" noun="note" />}
+      {can(NOTE_EXPORT) && <NotesRegisterExport filters={applied} />}
       <ErrorNote error={file.error} />
       {voiding && (
         <VoidNoteForm
@@ -4423,6 +4444,7 @@ function NewRegisterNote() {
   const [term, setTerm] = useState<string | null>(null);
   const [employeeId, setEmployeeId] = useState('');
   const [kind, setKind] = useState<NoteKind>('NOTE');
+  const [absconding, setAbsconding] = useState(false);
   const [noteDate, setNoteDate] = useState('');
   const [body, setBody] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -4445,8 +4467,9 @@ function NewRegisterNote() {
     onSuccess: (created, input) => {
       const scan = created.attachment?.scanState;
       const fileText = scan === 'QUARANTINED' ? ' The malware scan flagged the file, so it will never be served.' : scan === 'PENDING_SCAN' ? ' The file opens once the malware scan releases it.' : '';
-      setNotice({ text: `Saved the ${noteKindLabel(String(input.note.kind)).toLowerCase()}.${fileText}`, ok: scan !== 'QUARANTINED' });
+      setNotice({ text: `Saved the ${noteTypeText({ kind: String(input.note.kind), warningCategory: (input.note.warningCategory as string | undefined) ?? null })}.${fileText}`, ok: scan !== 'QUARANTINED' });
       setBody('');
+      setAbsconding(false);
       setFile(null);
       setNoteDate('');
       setFormKey((k) => k + 1);
@@ -4466,7 +4489,7 @@ function NewRegisterNote() {
     if (file && (file.name.length > MAX_FILE_NAME || !FILE_NAME.test(file.name))) return setProblem('Rename the file: its name has characters that are not accepted.');
     setProblem(null);
     setNotice(null);
-    save.mutate({ employeeId, note: { kind, body: text, ...(noteDate ? { noteDate } : {}) }, file });
+    save.mutate({ employeeId, note: { kind, ...(kind === 'WARNING' && absconding ? { warningCategory: 'ABSCONDING' } : {}), body: text, ...(noteDate ? { noteDate } : {}) }, file });
   };
   const dateRefusal = save.error instanceof ApiError && save.error.code === 'NOTE_DATE_IN_FUTURE' ? 'A note cannot be dated after today.' : null;
   const fileRefusal = save.error instanceof ApiError && save.error.code === 'UNSUPPORTED_FILE' ? 'Only PDF, JPEG and PNG files are accepted.' : null;
@@ -4520,6 +4543,7 @@ function NewRegisterNote() {
                   ))}
                 </select>
               </label>
+              {kind === 'WARNING' && <AbscondingMark checked={absconding} onChange={setAbsconding} />}
               <label>
                 Date it is about (blank: today)
                 <input type="date" value={noteDate} max={localDate()} onChange={(e) => setNoteDate(e.target.value)} />
@@ -4555,9 +4579,9 @@ const NOTES_IMPORT: ImportTemplate = {
   keyLabel: 'Employee / type / date',
   noun: ['note', 'notes'],
   verb: 'Add',
-  note: 'One note per row. The type is a code or its name (Appreciation, Exit note, Offer rejection, PIP, Remarks, Warning, Note); the date is YYYY-MM-DD and not after today.',
+  note: 'One note per row. The type is a code or its name (Appreciation, Exit note, Offer rejection, PIP, Remarks, Warning, Absconding warning, Note); the date is YYYY-MM-DD and not after today.',
   problems: {
-    UNKNOWN_NOTE_TYPE: 'The type is not one of Appreciation, Exit note, Offer rejection, PIP, Remarks, Warning or Note.',
+    UNKNOWN_NOTE_TYPE: 'The type is not one of Appreciation, Exit note, Offer rejection, PIP, Remarks, Warning, Absconding warning or Note.',
     INVALID_DATE: 'The date is not a valid YYYY-MM-DD date.',
     NOTE_DATE_IN_FUTURE: 'The date is after today.',
     INVALID_TEXT: 'The text is empty or longer than 4000 characters.',
@@ -4691,6 +4715,90 @@ function NotesUpload() {
   );
 }
 
+/**
+ * CL-040 follow-up: the register as a file (EMPLOYEE_NOTES_REGISTER, CSV or XLSX), with the filters last applied to the list (the
+ * type is sent as `category`), under its own confidential export right. The server applies the row scope and leaves out the user's
+ * own record; the text of a note and a void's reason are never in the file.
+ */
+function NotesRegisterExport({ filters }: { filters: RegisterFilters }) {
+  const [format, setFormat] = useState<'CSV' | 'XLSX'>('CSV');
+  const sent: Record<string, string> = {
+    ...(filters.from ? { from: filters.from } : {}),
+    ...(filters.to ? { to: filters.to } : {}),
+    ...(filters.kind ? { category: filters.kind } : {}),
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.search.trim() ? { search: filters.search.trim() } : {}),
+  };
+  return (
+    <div className="stack">
+      <p className="hint">
+        Export the notes the list shows (its filters as last applied) as a file: the employee, type, date, status, who submitted the note, when it was recorded and whether it was uploaded.
+        The text of a note and the reason for a void are never in the file.
+      </p>
+      <form className="grid-form" aria-label="Notes register export" onSubmit={keepOnPage}>
+        <label>
+          Format
+          <select value={format} onChange={(e) => setFormat(e.target.value === 'XLSX' ? 'XLSX' : 'CSV')}>
+            <option value="CSV">CSV</option>
+            <option value="XLSX">XLSX</option>
+          </select>
+        </label>
+      </form>
+      <ReportExport key={`${JSON.stringify(sent)}:${format}`} reportCode="EMPLOYEE_NOTES_REGISTER" filters={sent} format={format} label="Export the notes register" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// The absconding audit report (CL-052; 0283): the absconding warnings issued from a date (and up to one, if given) about the employees
+// in the selected role's scope: employee, date, type, number, status and who issued them, never the text. Generated in the background
+// by the report framework (ABSCONDING_AUDIT) under its own confidential export right; the company is the selected role's.
+// ---------------------------------------------------------------------------------------------------------
+const NOTE_EXPORT = 'employee_note.export.restricted';
+const ABSCONDING_AUDIT_PATH = '/lifecycle/absconding-audit';
+
+function AbscondingAuditScreen() {
+  const { can, me } = useSession();
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const filters: Record<string, string> = { ...(from ? { from } : {}), ...(to ? { to } : {}) };
+  const reversed = from !== '' && to !== '' && to < from;
+  return (
+    <>
+      <h1>Absconding audit</h1>
+      <RoleReady>
+        {can(NOTE_EXPORT) ? (
+          <Section title="Absconding warnings issued">
+            <p className="hint">
+              Lists every absconding warning about the employees in the selected role’s scope{me?.companyName ? ` at ${me.companyName}` : ''}, dated on or after the day chosen: the employee,
+              the warning’s date, its number among the employee’s warnings in force, whether it was corrected or voided, and who issued it. The text of a warning is never in the
+              report. A warning counts as an absconding warning when it was marked so when written (a warning without the mark is not counted). Generated as a file in the
+              background, then downloaded here or from Reports.
+            </p>
+            <form className="grid-form" aria-label="Absconding audit filters" onSubmit={keepOnPage}>
+              <label>
+                Warning issued from
+                <input type="date" required value={from} max={localDate()} onChange={(e) => setFrom(e.target.value)} />
+              </label>
+              <label>
+                Up to (blank: today)
+                <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              </label>
+            </form>
+            {!from && <p className="hint">Choose the date the warnings were issued from.</p>}
+            {reversed && <Problem text="The end is before the start." />}
+            {from && !reversed && <ReportExport reportCode="ABSCONDING_AUDIT" filters={filters} label="Generate the absconding audit" />}
+          </Section>
+        ) : (
+          <Section title="Absconding warnings issued">
+            <NotPermitted>The selected role cannot export the absconding audit: it needs its own confidential export right.</NotPermitted>
+          </Section>
+        )}
+      </RoleReady>
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------------------------------------
 // Exports for the navigation step (App.tsx wires them): screens, own-record panels and decision queues
 // ---------------------------------------------------------------------------------------------------------
@@ -4707,6 +4815,8 @@ export const LIFECYCLE_PROCESSES_SCREENS: ScreenRoute[] = [
   // CL-040 (0260): the restricted notes register and its bulk upload.
   { path: PATHS.notes, title: 'Exit notes, remarks and warnings', permission: NOTE_READ, nav: true, component: NotesRegisterScreen },
   { path: PATHS.notesUpload, title: 'Notes bulk upload', permission: NOTE_IMPORT, nav: true, component: NotesUploadScreen },
+  // CL-052 (0283): the absconding warnings issued, a report under its own confidential export right.
+  { path: ABSCONDING_AUDIT_PATH, title: 'Absconding audit', permission: NOTE_EXPORT, nav: true, component: AbscondingAuditScreen },
   { path: PATHS.myResignation, title: 'My resignation', permission: EXIT_SUBMIT, nav: true, component: MyResignationScreen },
   { path: PATHS.myProcesses, title: 'My processes', permission: PROCESS_READ, nav: false, component: MyProcessesScreen },
 ];

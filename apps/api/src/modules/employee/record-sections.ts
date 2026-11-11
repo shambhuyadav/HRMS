@@ -322,7 +322,8 @@ export async function removeSectionEntry(tx: Queryable, grant: AccessGrant, empl
 // Payroll identifiers
 // ---------------------------------------------------------------------------------------------------------------
 
-const identifierBinding = (companyId: string, employeeId: string) => ({ purpose: 'employee.payroll_identifier', companyId, ownerId: employeeId, recordId: employeeId });
+/** The binding a sealed payroll identifier record is sealed and opened with; every reader of those records uses this one. */
+export const identifierBinding = (companyId: string, employeeId: string) => ({ purpose: 'employee.payroll_identifier', companyId, ownerId: employeeId, recordId: employeeId });
 
 type Identifiers = Partial<Record<PayrollIdentifierKey, string>>;
 

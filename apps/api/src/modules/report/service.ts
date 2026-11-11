@@ -34,6 +34,15 @@ async function holdsHistoryGrant(db: Queryable, def: ReportDefinition, actor: { 
   return (await resolveAccess(db, { userId: actor.userId, companyId: actor.companyId, assignmentId: actor.assignmentId, resource: needed.resource, action: 'history_read', fieldGroups: [needed.fieldGroup] })).allowed;
 }
 
+/** The read grants of the records the report is worked from (sourceGrants), every one under the assignment that asks. */
+async function holdsSourceGrants(db: Queryable, def: ReportDefinition, actor: { userId: string; companyId: string; assignmentId: string }): Promise<boolean> {
+  for (const g of def.sourceGrants ?? []) {
+    const decision = await resolveAccess(db, { userId: actor.userId, companyId: actor.companyId, assignmentId: actor.assignmentId, resource: g.resource, action: g.action, fieldGroups: [g.fieldGroup] });
+    if (!decision.allowed) return false;
+  }
+  return true;
+}
+
 /**
  * The reports this assignment may ask for (FR-046): its export grant for the report's resource and field group, and unrestricted
  * company scope where the report needs it, as requestReport requires. A history grant depends on the filters chosen, so it is still
@@ -48,7 +57,7 @@ export async function reportCatalogue(db: Queryable, actor: { userId: string; co
     const key = `${def.resource}:${def.fieldGroup}`;
     if (!decisions.has(key)) decisions.set(key, resolveAccess(db, { ...actor, assignmentId, resource: def.resource, action: 'export', fieldGroups: [def.fieldGroup] }));
     const decision = await decisions.get(key)!;
-    if (decision.allowed && (!def.companyScopeOnly || isCompanyWide(decision))) listed.push(def);
+    if (decision.allowed && (!def.companyScopeOnly || isCompanyWide(decision)) && (await holdsSourceGrants(db, def, { ...actor, assignmentId }))) listed.push(def);
   }
   return listed;
 }
@@ -78,6 +87,7 @@ export async function requestReport(tx: Queryable, grant: AccessGrant, code: str
   }
   def.checkFilters?.(filters);
   if (def.companyScopeOnly) assertCompanyWide(grant);
+  if (!(await holdsSourceGrants(tx, def, grant))) throw new HttpError(403, 'SOURCE_GRANT_REQUIRED', 'This report is worked from records that need their own read grant in the same assignment');
   if (!(await holdsHistoryGrant(tx, def, grant, filters, grant.businessDate))) throw new HttpError(403, 'HISTORY_GRANT_REQUIRED', 'This report reaches into history, which needs its own history grant');
   await def.checkRequest?.(tx, grant, filters);
   const id = (
@@ -135,7 +145,12 @@ async function generateReport(tx: Queryable, job: QueuedReport): Promise<void> {
     action: 'export',
     fieldGroups: [def.fieldGroup],
   });
-  if (!decision.allowed || (def.companyScopeOnly && !isCompanyWide(decision)) || !(await holdsHistoryGrant(tx, def, decision, job.filter_snapshot, decision.businessDate))) {
+  if (
+    !decision.allowed ||
+    (def.companyScopeOnly && !isCompanyWide(decision)) ||
+    !(await holdsSourceGrants(tx, def, decision)) ||
+    !(await holdsHistoryGrant(tx, def, decision, job.filter_snapshot, decision.businessDate))
+  ) {
     // Access changed after the request: nothing is generated (ZT05).
     await tx.query(`update report_execution set state = 'FAILED', failure_code = 'ACCESS_REVOKED', next_attempt_at = null, running_since = null where id = $1`, [job.id]);
     return;
@@ -276,7 +291,7 @@ function reportAccessRule(db: Queryable, actor: { userId: string; companyId: str
     if (!def) return false;
     if (!decisions.has(code)) decisions.set(code, resolveAccess(db, { ...actor, resource: def.resource, action: 'export', fieldGroups: [def.fieldGroup] }));
     const decision = await decisions.get(code)!;
-    if (!decision.allowed || (def.companyScopeOnly && !isCompanyWide(decision))) return false;
+    if (!decision.allowed || (def.companyScopeOnly && !isCompanyWide(decision)) || !(await holdsSourceGrants(db, def, decision))) return false;
     return holdsHistoryGrant(db, def, decision, filters, decision.businessDate);
   };
 }
@@ -399,7 +414,14 @@ export async function downloadReport(db: Queryable, actor: { userId: string; com
   const def = REPORTS[r.report_code];
   if (!def) throw notFound();
   const decision = await resolveAccess(db, { ...actor, assignmentId: actor.assignmentId, resource: def.resource, action: 'export', fieldGroups: [def.fieldGroup] });
-  if (!decision.allowed || (def.companyScopeOnly && !isCompanyWide(decision)) || !(await holdsHistoryGrant(db, def, decision, r.filter_snapshot, decision.businessDate))) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
+  if (
+    !decision.allowed ||
+    (def.companyScopeOnly && !isCompanyWide(decision)) ||
+    !(await holdsSourceGrants(db, def, decision)) ||
+    !(await holdsHistoryGrant(db, def, decision, r.filter_snapshot, decision.businessDate))
+  ) {
+    throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
+  }
   // After access (ZT05): someone refused must not learn how far the report got.
   if (r.state !== 'COMPLETED') throw new HttpError(409, 'NOT_READY', 'The report is not available');
   if (r.expired) throw new HttpError(410, 'EXPIRED', 'The download has expired; request the report again');

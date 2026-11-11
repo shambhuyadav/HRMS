@@ -27,6 +27,7 @@ const NOTE_READ = 'employee_note.read.restricted';
 const NOTE_WRITE = 'employee_note.write.restricted';
 const NOTE_VOID = 'employee_note.void.restricted';
 const NOTE_IMPORT = 'employee_note.import.restricted';
+const NOTE_EXPORT = 'employee_note.export.restricted';
 const EMPLOYEE_LIST = 'employee.list.operational';
 const E1 = '20000000-0000-4000-8000-000000000001';
 const N1 = '60000000-0000-4000-8000-000000000001';
@@ -146,6 +147,37 @@ describe('notes register screen (CL-040; FR-018)', () => {
     expect(Object.fromEntries(asked)).toEqual({ from: '2026-10-01', to: '2026-11-01', kind: 'EXIT_NOTE', status: 'VOIDED', search: 'noor', page: '1', pageSize: '25' });
     fireEvent.click(await screen.findByRole('button', { name: 'Next page' }));
     expect(await screen.findByText('Synthetic praise')).toBeTruthy();
+  });
+
+  it('CL-040 BR-045: with its own export right the register is exported with the filters applied (the type as category), as CSV or XLSX; without it nothing is offered', async () => {
+    serve({
+      'GET /v1/employee-notes': [200, { items: [note(N1)], total: 1, page: 1, pageSize: 25 }],
+      'POST /v1/reports': [202, { id: 'r-1', state: 'QUEUED' }],
+      'GET /v1/reports/r-1': [200, { state: 'QUEUED', rowCount: null, failureCode: null }],
+    });
+    renderAt('/lifecycle/notes', [NOTE_READ]);
+    await screen.findByRole('table', { name: 'Notes' });
+    expect(screen.queryByRole('button', { name: 'Export the notes register' })).toBeNull();
+    cleanup();
+
+    renderAt('/lifecycle/notes', [NOTE_READ, NOTE_EXPORT]);
+    await screen.findByRole('table', { name: 'Notes' });
+    expect(screen.getByText(/The text of a note and the reason for a void are never in the file/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Export the notes register' }));
+    await waitFor(() => expect(callsTo('POST', '/v1/reports')).toHaveLength(1));
+    expect(callsTo('POST', '/v1/reports')[0]!.body).toEqual({ reportCode: 'EMPLOYEE_NOTES_REGISTER', filters: {} });
+
+    const filters = screen.getByRole('search', { name: 'Filter notes' });
+    change(filters, 'From', '2026-10-01');
+    change(filters, 'Type', 'WARNING');
+    change(filters, 'Status', 'ACTIVE');
+    change(filters, 'Employee, code or submitted by', ' noor ');
+    // Only the filters applied to the list are exported.
+    fireEvent.click(within(filters).getByRole('button', { name: 'Show notes' }));
+    change(screen.getByRole('form', { name: 'Notes register export' }), 'Format', 'XLSX');
+    fireEvent.click(screen.getByRole('button', { name: 'Export the notes register' }));
+    await waitFor(() => expect(callsTo('POST', '/v1/reports')).toHaveLength(2));
+    expect(callsTo('POST', '/v1/reports')[1]!.body).toEqual({ reportCode: 'EMPLOYEE_NOTES_REGISTER', filters: { from: '2026-10-01', category: 'WARNING', status: 'ACTIVE', search: 'noor' }, format: 'XLSX' });
   });
 
   it('DF08: voids an active note with a reason, never a corrected one, and says the note stays on record', async () => {

@@ -1,6 +1,10 @@
 // Small shared UI pieces. Status is always shown as text, never by colour alone (DF10).
-import type { ReactNode } from 'react';
+import { createContext, type ReactNode, useContext } from 'react';
 import { ApiError } from './api';
+
+/** A role's scope in plain words (FR-096: the acting scope is always visible). */
+const SCOPE_WORDS: Readonly<Record<string, string>> = { COMPANY: 'Company-wide', TEAM: 'My team', ASSIGNED: 'Assigned people', OWN: 'My own record' };
+export const scopeWords = (scopeKind: string) => SCOPE_WORDS[scopeKind.toUpperCase()] ?? scopeKind.toLowerCase();
 
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'good' | 'warn' | 'bad' }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
@@ -117,7 +121,32 @@ export function Pager({
   );
 }
 
+/**
+ * The title of the page the shell shows above the content (App.tsx), or null when the page shows its own. A card whose title only
+ * repeats it (say "Employees (16)" under the page "Employees") keeps its heading for assistive technology but does not print it again:
+ * its count, if any, and its actions stay.
+ */
+export const PageTitleContext = createContext<string | null>(null);
+
+const bareTitle = (title: string) => title.replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+
 export function Section({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
+  const page = useContext(PageTitleContext);
+  if (page !== null && bareTitle(title) === bareTitle(page)) {
+    const extra = /\(([^)]*)\)\s*$/.exec(title)?.[1];
+    return (
+      <section className="card">
+        <h2 className="sr-only">{title}</h2>
+        {(extra || actions) && (
+          <header className="card-header card-header-plain">
+            <span className="card-count">{extra ? (/^\d+$/.test(extra) ? `${extra} in total` : extra) : ''}</span>
+            {actions}
+          </header>
+        )}
+        {children}
+      </section>
+    );
+  }
   return (
     <section className="card">
       <header className="card-header">

@@ -1,4 +1,4 @@
-import { type ComponentType, useEffect, useState } from 'react';
+import { type ComponentType, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, matchPath, useLocation } from 'react-router-dom';
 import { groupIcon, Icon, navIcon } from './icons';
 import { useSession } from './session';
@@ -15,6 +15,7 @@ import { WorkRequestsPage } from './pages/requests';
 import { ExpensesPage, InboxPage, LeavePage, PaymentsPage, ReportsPage, TasksPage } from './pages/work';
 import type { ScreenRoute } from './screens';
 import { MODULE_SCREENS } from './screens-registry';
+import { PageTitleContext, scopeWords } from './ui';
 
 interface NavEntry {
   to: string;
@@ -90,6 +91,7 @@ export const APP_ROUTE_PATHS: readonly string[] = [...CORE_ROUTES.map((r) => r.p
 
 /** Menu group of a module screen, from the first segment of its path. */
 const GROUP_LABELS: Readonly<Record<string, string>> = {
+  announcements: 'Events and announcements',
   hiring: 'Hiring',
   lifecycle: 'Employee lifecycle',
   me: 'My records',
@@ -195,9 +197,6 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () =>
                 <button type="button" className="nav-group-toggle" aria-expanded={open} onClick={() => toggle(g.label)}>
                   <Icon name={groupIcon(g.label)} />
                   <span className="nav-group-label">{g.label}</span>
-                  <span className="nav-count" aria-hidden="true">
-                    {g.screens.length}
-                  </span>
                   <Icon name="chevron" size={15} className="chevron" />
                 </button>
                 {open && (
@@ -235,6 +234,19 @@ export function App() {
   useEffect(() => {
     document.title = page.title === 'HRMS' ? 'HRMS' : `${page.title} · HRMS`;
   }, [page.title]);
+  // The page header names the page, unless the page names itself (its own h1 first in the content: the dashboard, and pages with
+  // their own title and introduction). Checked after each render of the content, so a page that shows its title later is seen too.
+  const mainRef = useRef<HTMLElement>(null);
+  const [ownTitle, setOwnTitle] = useState(false);
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (!main) return undefined;
+    const check = () => setOwnTitle(main.querySelector(':scope > h1:not(.page-title)') !== null);
+    check();
+    const watcher = new MutationObserver(check);
+    watcher.observe(main, { childList: true });
+    return () => watcher.disconnect();
+  }, [pathname, stored?.assignmentId]);
   if (!stored) return <SignInPage />;
   if (!stored.companyId || !stored.assignmentId) return <SelectRolePage />;
 
@@ -275,7 +287,7 @@ export function App() {
                 <>
                   <span className="role-name">{me.roleName}</span>
                   <span className="role-meta">
-                    {me.companyName} · scope {me.scopeKind.toLowerCase()}
+                    {me.companyName} · {scopeWords(me.scopeKind)}
                   </span>
                 </>
               ) : (
@@ -301,7 +313,14 @@ export function App() {
             </button>
           </div>
         </header>
-        <main className="content">
+        <main className="content" ref={mainRef}>
+          {!ownTitle && page.title !== 'HRMS' && (
+            <header className="page-header">
+              {page.group && <p className="page-eyebrow">{page.group}</p>}
+              <h1 className="page-title">{page.title}</h1>
+            </header>
+          )}
+          <PageTitleContext.Provider value={!ownTitle && page.title !== 'HRMS' ? page.title : null}>
           <Routes>
             {CORE_ROUTES.map((r) => (
               <Route key={r.path} path={r.path} element={<r.component />} />
@@ -312,6 +331,7 @@ export function App() {
             ))}
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
+          </PageTitleContext.Provider>
         </main>
       </div>
     </div>

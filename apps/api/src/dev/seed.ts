@@ -207,6 +207,10 @@ const SEED_HR_CONFIDENTIAL: PermissionKey[] = [
   'employee_note.void.restricted',
   'employee_note.import.restricted',
   'document_compliance.export.document',
+  // Documents exported to a ZIP (CL-027, 0281), send mail (CL-041, 0282) and the absconding audit (CL-052, 0283).
+  'document.export.document',
+  'hr_mail.send.message',
+  'employee_note.export.restricted',
   // Training: restricted feedback comments and participation reasons.
   'training_feedback.read.comment',
   'training_participant.read.reason',

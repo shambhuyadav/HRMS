@@ -211,8 +211,8 @@ export async function employeeRoutes(app: FastifyInstance, opts: { db: Database 
   app.post('/employees/manager-changes', { schema: { body: bulkManagerChangeSchema } }, async (request) => {
     const body = request.body as BulkManagerChange;
     const grant = await requireAccess(db, request, 'employee', 'update', ['operational'], { requireAll: true });
-    if (body.moveOpenApprovals) await requireAccess(db, request, 'workflow', 'reroute_task', ['operational']);
-    return withTransaction(db, (tx) => changeManagers(tx, grant, body));
+    const rerouteGrant = body.moveOpenApprovals ? await requireAccess(db, request, 'workflow', 'reroute_task', ['operational']) : undefined;
+    return withTransaction(db, (tx) => changeManagers(tx, grant, body, rerouteGrant));
   });
 
   app.post('/employees/:id/manager', { schema: { params: idParams, body: managerChangeSchema } }, async (request) => {

@@ -104,8 +104,8 @@ describe('role dashboard (FR-096, FR-097, DF17)', () => {
     expect(screen.getByText('Policy not active')).toBeTruthy();
     expect(screen.getByText('Not available yet')).toBeTruthy();
     const context = screen.getByText(/Synthetic Company/).textContent!;
-    expect(context).toContain('reporting manager');
-    expect(context).toContain('scope team');
+    expect(context).toContain('Reporting manager');
+    expect(context).toContain('My team');
     expect(context).toContain('2026-11-01');
   });
 
@@ -133,7 +133,7 @@ describe('role dashboard (FR-096, FR-097, DF17)', () => {
     renderAt('/', '/', <DashboardPage />);
     await screen.findByRole('link', { name: '2' });
     expect(screen.queryByRole('link', { name: 'My team' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Shortcuts' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Quick actions' })).toBeNull();
   });
 
   it('lists pending tasks, each leading to the decisions, says when nothing is waiting, and marks delegated and overdue', async () => {

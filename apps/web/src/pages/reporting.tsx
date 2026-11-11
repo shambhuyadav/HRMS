@@ -351,6 +351,7 @@ export function ReportingSettingsScreen() {
       )}
       <Section title="Start a new revision">
         <form
+          className="grid-form"
           onSubmit={(e) => {
             e.preventDefault();
             save.mutate();

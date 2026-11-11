@@ -31,7 +31,8 @@ import { EMPLOYED_ON_DAY_JOINS, employedOnDay } from './service.js';
 /** Punch sources a register can be limited to: a terminal (biometric device feed) or a file import. No mobile punch exists. */
 export const PUNCH_SOURCES = ['TERMINAL', 'IMPORT'] as const;
 export type PunchSource = (typeof PUNCH_SOURCES)[number];
-const SOURCE_KIND: Record<PunchSource, string> = { TERMINAL: 'BIOMETRIC_API', IMPORT: 'MANUAL_IMPORT' };
+/** The stored source_kind of each punch source. */
+export const SOURCE_KIND: Record<PunchSource, string> = { TERMINAL: 'BIOMETRIC_API', IMPORT: 'MANUAL_IMPORT' };
 /** The source of a stored punch in words. */
 export const SOURCE_LABEL_SQL = (alias: string) => `case ${alias}.source_kind when 'BIOMETRIC_API' then 'Terminal' when 'MANUAL_IMPORT' then 'Import' else ${alias}.source_kind end`;
 
@@ -94,6 +95,7 @@ export function dayFactsSql(grant: AccessGrant, p: SqlParams, f: DayFactsFilters
            ${holidaySql('g.d', 'e.id', 'e.company_id')} as holiday,
            lv.leave, du.duty_full, du.duty_timed,
            pu.punch_count, pu.punch_list, pu.first_label, pu.last_label, pu.sources,
+           w.from_at as punch_window_from, w.to_at as punch_window_to,
            to_char(pu.first_at at time zone c.business_timezone, 'YYYY-MM-DD HH24:MI') as first_punch,
            to_char(pu.last_at at time zone c.business_timezone, 'YYYY-MM-DD HH24:MI') as last_punch,
            r.id as record_id, rs.code as record_status, r.late as record_late, r.late_minutes as record_late_minutes,

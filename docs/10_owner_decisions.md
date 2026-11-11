@@ -26,9 +26,9 @@ These are the reasons for the 63 "Blocked" rows in the verification register (60
 9. Decided (I-81): a settlement is paid outside the system and recorded from evidence by a separate person. The disbursement month is the month of the payment date.
 10. Decided (I-81): records approved for days after the last working date are kept and listed for HR. HR may enter a resignation given outside the system, with evidence.
 11. Decided (I-81): at separation the leaver's roles end, except their own self-service, so payslips and letters stay reachable. Their pending approvals are rerouted; account deactivation stays manual.
-11a. **Sign-off needed (quick review):** the BRD (FR-055) makes these closure actions depend on an offboarding policy you approve. Reply "11a approved" or say what to change.
+11a. Decided (owner sign-off, 11 Nov 2026): the offboarding policy above (item 11; I-81 item 4) is the approved policy FR-055 asks for.
 12. Decided (I-81, I-88): a component already paid in a monthly payroll for the final period blocks the settlement; it never just warns. The settlement is calculated from a frozen snapshot: earnings due, leave encashment (Basic + DA ÷ 30 by default, capped), notice shortfall (waivable by a separate approver), loans, pending arrears and gratuity. Gratuity's statutory pack stays switched off until an authorised person checks it against current law and activates it.
-12a. **Sign-off needed (quick review):** the worked settlement examples A to F in I-88. For example, a mid-month leaver nets 18,369.89, and gratuity for 7 years on 36,000 is 1,45,384.62. FR-052 asks you to approve them. Reply "12a approved" or say what to change.
+12a. Decided (owner sign-off, 11 Nov 2026): the worked settlement examples A to F in I-88 are approved as FR-052's joiner and leaver examples (for example, a mid-month leaver nets 18,369.89, and gratuity for 7 years on 36,000 is 1,45,384.62).
 13. Decided (I-81): an approved withdrawal cancels a settlement before release; once released for payment, it must be paid or voided first.
 14. Decided (I-81): uploaded lists match exact employee codes only; unknown and out-of-scope codes read the same.
 14a. Decided (I-81): "send" means delivery to the employee's own self-service, never e-mail (FR-054, FR-018). A claim already reimbursed through payroll needs a recorded review before any direct payment (BR-024).
@@ -37,7 +37,7 @@ These are the reasons for the 63 "Blocked" rows in the verification register (60
 
 15. Decided (I-82): HR writes the offer letter template. Its figures come only from the approved offer. HR downloads the letter, hands it over and records the delivery; the system never e-mails it.
 16. Decided (I-82): fields for family, qualifications, previous employment and payroll identifiers (PAN, UAN, ESIC). All are confidential; identifiers are shown masked except to holders of a separate right; Aadhaar is not collected.
-16a. **Sign-off needed (quick review):** FR-007 asks you to approve the export columns before release. The new family, qualification and previous-employment exports list the fields in item 16, never identifiers. Reply "16a approved" or say what to change.
+16a. Decided (owner sign-off, 11 Nov 2026): the export columns of the family, qualification and previous-employment exports (the fields in item 16, never identifiers) are approved for release (FR-007).
 17. Decided (I-82): Offered, Offered Rejected, Current (which includes people on notice), On Probation, On Notice and Left are views on the employee list.
 18. Decided (I-82): CV text becomes searchable only after an HR Admin approves it, for a scanned file of a consenting candidate. Search returns a match flag, never the text.
 
@@ -48,7 +48,7 @@ These are the reasons for the 63 "Blocked" rows in the verification register (60
 21. Decided (I-78): weekly-off patterns can add days off on given weeks (for example 2nd and 4th Saturdays) and half weekly-offs (I-48 item 6).
 22. Decided (I-78): overtime candidates per policy (basis, minimum, rounding down); nothing pays overtime yet (DF05).
 23. Decided (I-78): organisation is the employing company; late minutes run from the shift start on a late day (E07).
-23a. **Sign-off needed (quick review):** the midnight and threshold test cases and the next-day out-time rule are built and tested (I-78 item 2). FR-020, FR-005 and BR-008 ask for your approval of them; reply "23a approved" or say what to change.
+23a. Decided (owner sign-off, 11 Nov 2026): the midnight and threshold test cases and the next-day out-time rule (I-78 item 2) are approved as the owner-approved durations, attendance date and business examples FR-020, FR-005 and BR-008 ask for.
 
 **Appraisal**
 
@@ -58,11 +58,11 @@ These are the reasons for the 63 "Blocked" rows in the verification register (60
 27. Decided (I-77): a cycle setting for formula or manual rating; in manual mode the manager also enters an overall 1–5 rating, which becomes final (FR-042/BR-014).
 28. Decided (I-77): rating tasks are due when the rating window closes, reviewer tasks on the cycle's review due date; overdue is counted from those dates.
 28a. Decided (I-86): grade-mapped competencies with weights totalling 100. A dated goals/competencies split, 70/30 by default, that HR can change. Four unscored sections chosen per cycle; an excluded section never blocks submission.
-28b. **Sign-off needed (quick review):** the worked appraisal examples A to E in I-86. For example, goal score 4.10 and competency score 3.10 give 3.80 under 70/30, and 3.245 rounds half up to 3.25. FR-042 and BR-014 ask you to approve these results. Reply "28b approved" or say what to change.
+28b. Decided (owner sign-off, 11 Nov 2026): the worked appraisal examples A to E in I-86 are approved as FR-042's test scores and BR-014's confirmed weights and results (for example, goal score 4.10 and competency score 3.10 give 3.80 under 70/30, and 3.245 rounds half up to 3.25).
 
 **Reports and dashboards**
 
-29. Every report's columns need your approval with sample outputs before release (BRD section 11; I-40 item 12). The reimbursement register's columns and source are not defined at all (item 11).
+29. Decided (owner sign-off, 11 Nov 2026): the columns of all 46 catalogue reports as built are approved for release (BRD section 11; I-40 item 12), the reimbursement register's included (record, employee, component, basis, amount and currency, from the payroll reimbursement heads; I-40 item 11). Sample files of any report remain available on request.
 30. Decided (I-83): the salary progression chart shows one employee's monthly fixed pay (or annual CTC) by financial year, over the last 5 years by default. Only roles holding both salary rights see it.
 31. Decided (I-83): Treasury Approver and Expense Finance Approver may hold organisation scope, so their figures count real items. Small people-counts show as "Fewer than 5" (the threshold is a dated setting HR can change).
 32. Decided (I-76): the payroll run list has a financial-year filter, using each payroll calendar's own year label (BR-012).
@@ -107,16 +107,16 @@ Under the owner's delegation (6 Nov 2026), each of these readings stands as deci
 3. State professional tax slabs and the TDS challan format (FR-028). Draft PF, ESIC and professional tax packs (Maharashtra, Karnataka) are built and switched off (I-85). An authorised person must check each against the law in force before a second person activates it.
 4. NPS, EDOC and liability-provision output specifications (FR-038).
 5. The biometric device export format (OQ-23).
-6. A text-extraction component for CV search (FR-013).
-7. A capacity test environment (G4) for the 10-million-user tests ZT31 to ZT35.
-8. A production identity provider, malware scanner and email, SMS and push delivery.
+6. Decided (under owner delegation, 11 Nov 2026): at go-live CV text is transcribed by the approving Admin from the released file, as built (FR-013; I-82 item 18); no automatic extractor is added, because parsing uploaded PDFs and images on the server adds risk and a dependency. One can be plugged in later at `registerCvTextExtractor`.
+7. A capacity test environment (G4) for the 10-million-user tests ZT31 to ZT35. Owner decision, 11 Nov 2026: the 10-million-user target is to be revised to the company's real size. Revised targets, set under owner delegation the same day (the owner may change them): 1,000 employees with 300 people signed in at once; 20 requests per second for 2 hours and 60 for 15 minutes with 95% of answers under 1.5 seconds and no errors (ZT31); 300 sign-ins in 10 minutes with every access check still correct (ZT32); no duplicate or lost decision under concurrent approvals (ZT33); a backup restored and reconciled and a 24-hour steady run (ZT34); a written capacity report (ZT35). A test server the same size as production (a second Oracle E2.1.Micro) is still needed to run them.
+8. Decided (owner, 11 Nov 2026): the production identity provider (Keycloak, ADR-06) and the malware scanner (ClamAV) are in place; email is sent through SMTP once its details are given; SMS and push delivery are not needed at go-live.
 
 ## E. Handover and go-live steps (need your go-ahead or timing)
 
-1. Apply migrations 0144 and 0160 in a quiet window, and run `npm run db:check-go-live` on a copy of the live database first.
+1. Done 11 Nov 2026: the live database was created on 9 Nov with every migration, 0144 and 0160 included, before it held any data, so no quiet window was needed. `npm run db:check-go-live` was run on a copy of the live database (removed afterwards): no broken key, check, transaction or guard; the only finding is CREATOR_MISSING on rows written by the first-run bootstrap, the test data and role ceilings (employment, manager and shift assignments, leave openings, grant and role permissions), the kind the approved exception in item 6 keeps.
 2. The development database (`.dev-pg`) must be rebuilt, because an applied migration's comment changed.
 3. Done 6 Nov (owner: replace). No shared password remains in `README.md`, `.env.example`, `docker-compose.yml` or `db/dev-db.ts`; each developer sets `DEV_DB_PASSWORD`. An existing `.dev-pg` keeps its old password until rebuilt (E2). (I-75 item 8)
-4. The code reached `github.com/shambhuyadav/HRMS` on 4 Nov under that account. Nothing has been pushed since; confirm where the code should live.
+4. Decided (under owner delegation, 11 Nov 2026): the code stays in `github.com/shambhuyadav/HRMS`, where it reached on 4 Nov; the owner commits the working tree, and nothing is pushed except on the owner's instruction.
 5. Decided (I-84): a file whose scan keeps failing stays unusable, and the uploader is told. A System Administrator may requeue it with a reason. Small payroll and settlement uploads are still scanned during the request, under a time and concurrency limit.
-6. Database housekeeping: `NOT NULL` on `created_by` for 194 more tables, and `updated_by`/`updated_at` for 41 tables, or an approved exception (I-72 item 2).
-7. Existing companies' Employee assignments cannot gain the new right to read delivered documents, because an approved grant's list is fixed (0099). Those employees need fresh assignments at go-live (I-81).
+6. Decided (owner, 11 Nov 2026): an approved exception to the database housekeeping (I-72 item 2): the 194 tables without a required `created_by` and the 41 without `updated_by`/`updated_at` keep them optional, because requiring them on the live database could break saves that do not set them; new tables follow the rule.
+7. Done 11 Nov 2026: an approved grant's list is fixed (0099), so existing Employee assignments could not gain a new default right such as reading delivered documents (I-81). The owner authorised a one-time refresh instead of fresh assignments: `deploy/scripts/refresh-duties.sh` adds only each role's own default duties, never a confidential one, marks the grant bootstrapped and audits it; on the live company it was applied and a second dry run found nothing left to add.

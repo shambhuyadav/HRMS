@@ -347,6 +347,11 @@ describe.runIf(isModuleActive('lifecycle'))('full-and-final settlement (FR-052 t
       ['settlement', rev.user],
       ['settlement_approval', appr.user],
     ]);
+    // access-4 follow-up: each decider also by operational identity, in the hiring history's shape; neither decided for someone else.
+    expect(approved.decisions.map((d: { decidedBy: Record<string, unknown>; onBehalfOf: unknown }) => [Object.keys(d.decidedBy).sort(), d.decidedBy.userId, d.onBehalfOf])).toEqual([
+      [['displayName', 'employeeCode', 'userId'], rev.user, null],
+      [['displayName', 'employeeCode', 'userId'], appr.user, null],
+    ]);
     await dispatchOutbox(h.pool);
     expect(((await h.call(prep, 'GET', '/v1/me/notifications')).json().items as { category: string; body: string }[]).some((n) => n.category === 'SETTLEMENT_DECIDED' && n.body.includes('was approved'))).toBe(true);
   });

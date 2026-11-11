@@ -40,6 +40,7 @@ import { leaveOpeningImportRoutes } from './modules/leave/opening-import.js';
 import { leaveRoutes } from './modules/leave/routes.js';
 import { notificationRoutes } from './modules/notification/routes.js';
 import { orgRoutes } from './modules/org/routes.js';
+import { payrollExtrasRoutes } from './modules/payroll-extras/routes.js';
 import { referenceValueRoutes } from './modules/reference/routes.js';
 import { reportRoutes } from './modules/report/routes.js';
 import { shiftRoutes } from './modules/shift/routes.js';
@@ -183,6 +184,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   app.register(mobileLinkRoutes, { prefix: '/v1', db: deps.db });
   app.register(shiftPlanImportRoutes, { prefix: '/v1', db: deps.db, files, scanner });
   app.register(scanFailureRoutes, { prefix: '/v1', db: deps.db });
+  app.register(payrollExtrasRoutes, { prefix: '/v1', db: deps.db, files, scanner });
   // Business modules added through modules/registry.ts and modules/routes-registry.ts.
   for (const m of MODULE_ROUTES) app.register(m.routes, { prefix: '/v1', db: deps.db, files, scanner });
   app.register(workflowRoutes, { prefix: '/v1', db: deps.db });

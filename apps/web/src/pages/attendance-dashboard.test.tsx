@@ -177,4 +177,30 @@ describe('attendance reports (CL-047, CL-049 to CL-051; FR-056)', () => {
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'fromDate' } });
     expect(await generate(calls)).toEqual({ reportCode: 'ABSCONDING_REPORT', filters: { from: '2026-03-01', to: '2026-03-31', minimumDays: 3, sort: 'fromDate' } });
   });
+
+  it('CL-047 CL-049 FR-056: the punch register one row per punch and the plan register as a month grid, with the same filters; one row per day stays the default', async () => {
+    session.permissions = ['attendance.export.operational'];
+    const calls = mockApi({ 'POST /v1/reports': [202, { id: 'x-3', state: 'QUEUED' }], 'GET /v1/reports/x-3': [200, { state: 'QUEUED', rowCount: null, failureCode: null }] });
+    open('/attendance/reports');
+    choosePeriod();
+    const layout = () => screen.getByLabelText('Layout') as HTMLSelectElement;
+    expect(layout().value).toBe('DAY');
+    expect([...layout().options].map((o) => o.textContent)).toEqual(['One row per employee and day', 'One row per punch']);
+    fireEvent.change(layout(), { target: { value: 'OTHER' } });
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'PUNCHED' } });
+    fireEvent.change(screen.getByLabelText('Punch source'), { target: { value: 'IMPORT' } });
+    expect(screen.getByRole('button', { name: 'Generate the shift punch register, one row per punch' })).toBeTruthy();
+    expect(await generate(calls)).toEqual({ reportCode: 'SHIFT_PUNCH_REGISTER_PUNCHES', filters: { from: '2026-03-01', to: '2026-03-31', punchView: 'PUNCHED', punchSource: 'IMPORT' } });
+
+    // Another register starts again from one row per day.
+    fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'SHIFT_PLAN_REGISTER' } });
+    expect(layout().value).toBe('DAY');
+    expect(await generate(calls)).toEqual({ reportCode: 'SHIFT_PLAN_REGISTER', filters: { from: '2026-03-01', to: '2026-03-31' } });
+    fireEvent.change(layout(), { target: { value: 'OTHER' } });
+    expect(screen.getByText(/W a weekly off, H a holiday, "No shift" when none is assigned/)).toBeTruthy();
+    expect(await generate(calls)).toEqual({ reportCode: 'SHIFT_PLAN_MONTH_GRID', filters: { from: '2026-03-01', to: '2026-03-31' } });
+
+    fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'SHIFT_DEVIATION_REGISTER' } });
+    expect(screen.queryByLabelText('Layout')).toBeNull();
+  });
 });

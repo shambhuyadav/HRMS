@@ -9,6 +9,7 @@
 // approved assignment, manager, status and, with the salary history grant, salary on a chosen date (FR-089 acceptance).
 import type { Queryable } from '../../db/queryable.js';
 import { type AccessGrant, canAccessEmployee, resolveAccess } from '../access/authorize.js';
+import { decidedOnBehalfOfUser } from '../workflow/engine.js';
 
 export type TimelineCategory = 'JOINING' | 'STATUS' | 'CONFIRMATION' | 'ORGANISATION' | 'MANAGER' | 'MASTER' | 'SALARY' | 'INCREMENT' | 'EXIT';
 
@@ -18,6 +19,11 @@ export interface TimelineEvent {
   effectiveDate: string;
   recordedAt: Date;
   actor: string | null;
+  /**
+   * access-4 follow-up (C4; I-57 item 7): the account an approval decision was taken for, when the event's actor took it as a delegate
+   * under a delegation (the event links that decision as its `source.decisionId`); null otherwise. Always present in the answer.
+   */
+  onBehalfOf?: string | null;
   reason: string | null;
   source: { kind: string; id: string; decisionId?: string | null } | null;
   details: Record<string, unknown>;
@@ -320,6 +326,23 @@ async function salaryEvents(db: Queryable, companyId: string, employeeId: string
   return events;
 }
 
+/**
+ * access-4 follow-up (C4 "Preserve delegator, delegate and actual actor in history"; I-57 item 7): the approval decisions among
+ * `decisionIds` that were taken under a delegation, with their actor's account and the delegator's account they were taken for.
+ */
+async function delegatedDecisions(db: Queryable, companyId: string, decisionIds: readonly string[]): Promise<Map<string, { actor: string | null; onBehalfOf: string }>> {
+  if (decisionIds.length === 0) return new Map();
+  const rows = (
+    await db.query<{ id: string; actor: string | null; on_behalf_of: string }>(
+      `select d.id, ${ACTOR('d.actor_user_id')} as actor, ${ACTOR(decidedOnBehalfOfUser('t'))} as on_behalf_of
+         from approval_decision d join approval_task t on t.company_id = d.company_id and t.id = d.task_id
+        where d.company_id = $1 and d.id = any($2::uuid[]) and t.delegation_id is not null`,
+      [companyId, [...new Set(decisionIds)]],
+    )
+  ).rows;
+  return new Map(rows.filter((r) => r.on_behalf_of !== null).map((r) => [r.id, { actor: r.actor, onBehalfOf: r.on_behalf_of }]));
+}
+
 /** FR-089 acceptance "reconstructs the approved assignment and salary at a chosen date". */
 async function asOfView(db: Queryable, companyId: string, employeeId: string, day: string, withSalary: boolean) {
   const inForce = `effective_from <= $3::date and (effective_to is null or effective_to > $3::date)`;
@@ -386,6 +409,13 @@ export async function employeeTimeline(db: Queryable, grant: AccessGrant, employ
     ...(await masterEvents(db, companyId, employeeId)),
     ...(await salaryEvents(db, companyId, employeeId, { salary, increment, incrementReason })),
   ].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate) || b.recordedAt.getTime() - a.recordedAt.getTime());
+  // A decision the event's actor took as a delegate names the person it was taken for (the confirmation decision, the exit approval
+  // and the increment it applied are recorded by the deciding user).
+  const delegated = await delegatedDecisions(db, companyId, events.flatMap((e) => (e.source?.decisionId ? [e.source.decisionId] : [])));
+  for (const e of events) {
+    const d = e.source?.decisionId ? delegated.get(e.source.decisionId) : undefined;
+    e.onBehalfOf = d && d.actor === e.actor ? d.onBehalfOf : null;
+  }
   return {
     employeeId,
     employeeCode: who.employee_code,

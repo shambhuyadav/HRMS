@@ -1038,6 +1038,8 @@ interface SectionField {
   list?: string;
   /** A reference: the entry's key that carries the chosen value's words. */
   words?: string;
+  /** Text: a company list whose labels are offered as suggestions; any other text may still be typed (CL-007 qualification master). */
+  suggestions?: string;
 }
 
 interface ListSection {
@@ -1070,7 +1072,7 @@ const LIST_SECTIONS: readonly ListSection[] = [
     noun: 'qualification',
     fields: [
       { name: 'level', label: 'Level', kind: 'reference', required: true, list: 'QUALIFICATION_LEVEL', words: 'levelLabel' },
-      { name: 'qualification', label: 'Qualification', kind: 'text', required: true },
+      { name: 'qualification', label: 'Qualification', kind: 'text', required: true, suggestions: 'QUALIFICATION' },
       { name: 'specialisation', label: 'Specialisation', kind: 'text' },
       { name: 'institution', label: 'Institution or board', kind: 'text' },
       { name: 'completionYear', label: 'Year of completion', kind: 'year' },
@@ -1269,11 +1271,39 @@ function EntryField({ field: f, value, known, onChange }: { field: SectionField;
   }
   const text = typeof value === 'string' ? value : '';
   if (f.kind === 'reference') return <ReferenceSelect category={f.list ?? ''} label={f.label} value={text} known={known} required={f.required} onChange={onChange} />;
+  const listId = f.suggestions ? `suggest-${f.name}` : undefined;
   return (
     <label>
       {f.label}
-      <input type={f.kind === 'date' ? 'date' : f.kind === 'year' ? 'number' : 'text'} required={f.required} maxLength={f.kind === 'text' ? 200 : undefined} value={text} onChange={(e) => onChange(e.target.value)} />
+      <input
+        type={f.kind === 'date' ? 'date' : f.kind === 'year' ? 'number' : 'text'}
+        required={f.required}
+        maxLength={f.kind === 'text' ? 200 : undefined}
+        value={text}
+        list={listId}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {f.suggestions && listId && <Suggestions id={listId} category={f.suggestions} />}
     </label>
+  );
+}
+
+/**
+ * CL-007: the company's list of names (the qualification master) as suggestions for a text field. The field stays free text, so an
+ * entry recorded before the list, or a name the list lacks, is kept as typed; a role that cannot read the list just gets no suggestions.
+ */
+function Suggestions({ id, category }: { id: string; category: string }) {
+  const options = useQuery({
+    queryKey: ['employee-reference-values', category],
+    queryFn: () => api<{ items: { code: string; label: string }[] }>(`/v1/reference-values?category=${enc(category)}`),
+    retry: false,
+  });
+  return (
+    <datalist id={id}>
+      {(options.data?.items ?? []).map((o) => (
+        <option key={o.code} value={o.label} />
+      ))}
+    </datalist>
   );
 }
 

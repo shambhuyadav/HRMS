@@ -7,7 +7,8 @@
 //   2. with the channel OFF (no SMTP settings), settles every open email SUPPRESSED, EMAIL_NOT_CONFIGURED: nothing is sent, and
 //      nothing waits to be sent later about events long past;
 //   3. with the channel ON, takes due emails one company at a time in turn. In one transaction it checks the recipient again (active
-//      account, an active assignment in the company, the optional-event preference, a usable address, the test list) and the content
+//      account, an active assignment in the company, the optional-event preference, a usable address, the test list; for an HR message
+//      to an employee, CL-041 and 0282: still employed, with a usable work email, and the test list) and the content
 //      again (email-content.ts), then claims the send (email_sending_since) and commits. Only then does it talk to the mail server,
 //      holding no transaction. The outcome is recorded only by the claim that sent it (the claim's time fences it), with one
 //      delivery attempt per send; the attempt keeps a failure class or the server's queue reference, never an address or text.
@@ -20,7 +21,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
 import type { EmailChannel, EmailChannelSettings } from '../../mail/config.js';
 import { isMailAddress, type MailMessage, type MailSender, type SendResult } from '../../mail/smtp.js';
-import { emailBodyText, emailContentRefusal, emailSubjectLine } from './email-content.js';
+import { emailBodyText, emailContentRefusal, emailSubjectLine, HR_MAIL_CATEGORY, hrMessageBodyText } from './email-content.js';
 
 /** DF12: a failed attempt is retried after 1, 5 and 15 minutes; a rule with a higher ceiling waits 15 minutes for each later one. */
 export const EMAIL_RETRY_MINUTES: readonly number[] = [1, 5, 15];
@@ -84,18 +85,33 @@ async function suppressUnconfigured(db: Queryable, batch: number): Promise<numbe
 interface DueEmail {
   id: string;
   company_id: string;
-  recipient_user_id: string;
+  /** A user account's notice; null for an HR message to an employee (CL-041, 0282). */
+  recipient_user_id: string | null;
   category: string;
   title: string | null;
   body: string | null;
-  account_key: string;
-  account_active: boolean;
+  account_key: string | null;
+  account_active: boolean | null;
   company_active: boolean;
   optional_event: boolean | null;
   event_type: string | null;
   retry_ceiling: number | null;
   attempts: number;
+  /** An HR message's employee, with their work email and status as they are at the send (DF12 "recheck recipient at delivery"). */
+  recipient_employee_id: string | null;
+  employee_email: string | null;
+  employee_status: string | null;
 }
+
+/** An HR message (0282) goes only to someone employed today: on probation, confirmed or on notice. */
+const EMPLOYED = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'];
+
+/** The columns and joins of an HR message's employee recipient (0282): their work email and status as they are now. */
+const EMPLOYEE_RECIPIENT = {
+  columns: `n.recipient_employee_id, re.work_email as employee_email, rs.code as employee_status`,
+  joins: `left join employee re on re.company_id = n.company_id and re.id = n.recipient_employee_id
+          left join reference_value rs on rs.company_id = re.company_id and rs.id = re.status_id`,
+};
 
 type Claimed = { companyId: string; settled: 'SUPPRESSED' | 'FAILED' } | { companyId: string; send: { id: string; claim: string; message: MailMessage; attempts: number; retryCeiling: number } };
 
@@ -107,6 +123,13 @@ export const onTestList = (address: string, list: readonly string[]): boolean =>
 
 /** Why this recipient should not be emailed now, or null. Checked at the send, as DF12 asks, beside the dispatcher's check at queueing. */
 async function recipientRefusal(tx: Queryable, e: DueEmail, settings: EmailChannelSettings): Promise<string | null> {
+  // CL-041: an HR message goes to an employee's work email while they are employed; no account, assignment or preference applies.
+  if (e.recipient_employee_id) {
+    if (!e.company_active || !EMPLOYED.includes(e.employee_status ?? '')) return 'RECIPIENT_NOT_ELIGIBLE';
+    if (!e.employee_email || !isMailAddress(e.employee_email)) return 'NO_EMAIL_ADDRESS';
+    if (settings.testRecipients && !onTestList(e.employee_email, settings.testRecipients)) return 'RECIPIENT_NOT_IN_TEST_LIST';
+    return null;
+  }
   if (!e.account_active) return 'RECIPIENT_INACTIVE';
   if (!e.company_active) return 'RECIPIENT_NOT_ELIGIBLE';
   // The dispatcher's base rule (stillEligible): an active, approved assignment in the company, except for the notice that a user's own
@@ -131,7 +154,7 @@ async function recipientRefusal(tx: Queryable, e: DueEmail, settings: EmailChann
     ).rows[0];
     if (pref && !pref.receive_optional) return 'RECIPIENT_OPTED_OUT';
   }
-  if (!isMailAddress(e.account_key)) return 'NO_EMAIL_ADDRESS';
+  if (!e.account_key || !isMailAddress(e.account_key)) return 'NO_EMAIL_ADDRESS';
   if (settings.testRecipients && !onTestList(e.account_key, settings.testRecipients)) return 'RECIPIENT_NOT_IN_TEST_LIST';
   return null;
 }
@@ -150,12 +173,13 @@ async function claimNext(tx: Queryable, settings: EmailChannelSettings, after: s
   const e = (
     await tx.query<DueEmail>(
       `select n.id, n.company_id, n.recipient_user_id, n.category, n.title, n.body, u.account_key, u.active as account_active, c.active as company_active,
-              r.optional_event, r.event_type, r.retry_ceiling,
+              r.optional_event, r.event_type, r.retry_ceiling, ${EMPLOYEE_RECIPIENT.columns},
               (select count(*)::int from notification_delivery_attempt a where a.company_id = n.company_id and a.notification_id = n.id) as attempts
          from notification n
-         join user_account u on u.id = n.recipient_user_id
+         left join user_account u on u.id = n.recipient_user_id
          join company c on c.id = n.company_id
          left join notification_rule r on r.company_id = n.company_id and r.id = n.rule_id
+         ${EMPLOYEE_RECIPIENT.joins}
         where n.channel = 'EMAIL' and n.email_next_attempt_at <= now() and n.company_id > $1
         order by n.company_id, n.email_next_attempt_at limit 1 for update of n skip locked`,
       [after],
@@ -168,7 +192,8 @@ async function claimNext(tx: Queryable, settings: EmailChannelSettings, after: s
     return { companyId: e.company_id, settled: 'SUPPRESSED' };
   }
   // BR-044 again, on exactly what would leave the system.
-  if (e.body === null || emailContentRefusal(`${e.title ?? ''}\n${e.body}`)) {
+  // An HR message is free text a person wrote, so it gets the free-text rules too.
+  if (e.body === null || emailContentRefusal(`${e.title ?? ''}\n${e.body}`, { freeText: e.category === HR_MAIL_CATEGORY })) {
     await settle(tx, e, 'FAILED', 'CONFIDENTIAL_CONTENT_BLOCKED');
     return { companyId: e.company_id, settled: 'FAILED' };
   }
@@ -187,9 +212,10 @@ async function claimNext(tx: Queryable, settings: EmailChannelSettings, after: s
       attempts: e.attempts,
       retryCeiling: e.retry_ceiling ?? EMAIL_RETRY_MINUTES.length,
       message: {
-        to: e.account_key,
+        // recipientRefusal has checked whichever address applies.
+        to: e.recipient_employee_id ? e.employee_email! : e.account_key!,
         subject: emailSubjectLine(e.title),
-        text: emailBodyText(e.body, settings.appUrl),
+        text: e.recipient_employee_id ? hrMessageBodyText(e.body, settings.appUrl) : emailBodyText(e.body, settings.appUrl),
         messageId: `${e.id}@${settings.fromDomain}`,
       },
     },

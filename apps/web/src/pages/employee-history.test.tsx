@@ -106,6 +106,19 @@ describe('employee history', () => {
     expect(row('Exit approved').textContent).toContain('Last working date');
   });
 
+  it('access-4 FR-089 C4: a decision taken by a delegate says whom it was taken for; any other event names its actor alone', async () => {
+    const events = [
+      event({ category: 'CONFIRMATION', type: 'CONFIRMED', effectiveDate: '2026-06-01', actor: 'delegate@demo.test', onBehalfOf: 'reviewer@demo.test', source: { kind: 'CONFIRMATION_CASE', id: 'c-1', decisionId: 'd-7' } }),
+      event({ category: 'CONFIRMATION', type: 'EXTENDED', effectiveDate: '2026-04-30', actor: 'reviewer@demo.test', onBehalfOf: null, source: { kind: 'CONFIRMATION_CASE', id: 'c-1', decisionId: 'd-6' }, details: { priorDueDate: '2026-04-30', newDueDate: '2026-05-30' } }),
+    ];
+    mockApi({ 'GET /v1/employees/e-1/timeline': [200, { ...TIMELINE, events }] });
+    open('/employee-history/e-1');
+    const table = await screen.findByRole('table', { name: 'Employee history' });
+    const byCell = (name: string) => within(within(table).getByRole('cell', { name }).closest('tr')!).getAllByRole('cell')[4]!.textContent;
+    expect(byCell('Confirmed')).toBe('delegate@demo.test on behalf of reviewer@demo.test');
+    expect(byCell('Probation extended')).toBe('reviewer@demo.test');
+  });
+
   it('shows a corrected increment as a further event beside the one it replaced', async () => {
     const details = { currency: 'INR', beforeAmount: '100000.0000', percentNaReason: null };
     mockApi({

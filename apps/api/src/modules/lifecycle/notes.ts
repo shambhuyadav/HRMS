@@ -27,9 +27,17 @@ export type NoteKind = (typeof NOTE_KINDS)[number];
 export const NOTE_STATUSES = ['ACTIVE', 'SUPERSEDED', 'VOIDED'] as const;
 export type NoteStatus = (typeof NOTE_STATUSES)[number];
 export const MAX_NOTE_TEXT = 4000;
+/**
+ * CL-052 (0283): why a warning was given, when it says; ABSCONDING (staying away from work without leave or word) is the only category
+ * so far, and the absconding audit report (absconding-audit.ts) lists the warnings that carry it. Only a warning has one.
+ */
+export const WARNING_CATEGORIES = ['ABSCONDING'] as const;
+export type WarningCategory = (typeof WARNING_CATEGORIES)[number];
 
 export interface NoteInput {
   kind: NoteKind;
+  /** CL-052: a warning's category (0283); refused on any other note type. */
+  warningCategory?: WarningCategory | undefined;
   body: string;
   /** The day the note is about; today (the company's business date) when omitted. */
   noteDate?: string | undefined;
@@ -63,6 +71,10 @@ export async function addNote(tx: Queryable, grant: AccessGrant, employeeId: str
   await assertInScope(tx, grant, employeeId);
   assertNotSelf(grant, employeeId);
   if (!(NOTE_KINDS as readonly string[]).includes(input.kind)) throw new HttpError(422, 'INVALID_NOTE_TYPE', 'Unknown note type', { field: 'kind' });
+  const warningCategory = input.warningCategory ?? null;
+  if (warningCategory !== null && (input.kind !== 'WARNING' || !(WARNING_CATEGORIES as readonly string[]).includes(warningCategory))) {
+    throw new HttpError(422, 'INVALID_WARNING_CATEGORY', 'Only a warning has a category, and only one the register knows', { field: 'warningCategory' });
+  }
   const body = input.body.trim();
   if (!body || body.length > MAX_NOTE_TEXT) throw new HttpError(422, 'INVALID_TEXT', `The note needs text of at most ${MAX_NOTE_TEXT} characters`, { field: 'body' });
   const noteDate = checkNoteDate(grant, input.noteDate);
@@ -95,16 +107,32 @@ export async function addNote(tx: Queryable, grant: AccessGrant, employeeId: str
   const source = opts.source ?? 'ENTRY';
   const note = (
     await tx.query<{ id: string; created_at: Date }>(
-      `insert into employee_note (company_id, employee_id, note_kind, body, note_date, attachment_id, source, exit_case_id, employee_process_id, supersedes_note_id, created_by, acting_assignment_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) returning id, created_at`,
-      [grant.companyId, employeeId, input.kind, body, noteDate, attachmentId, source, input.exitCaseId ?? null, input.employeeProcessId ?? null, input.supersedesNoteId ?? null, grant.userId, grant.assignmentId],
+      `insert into employee_note (company_id, employee_id, note_kind, warning_category, body, note_date, attachment_id, source, exit_case_id, employee_process_id, supersedes_note_id,
+                                  created_by, acting_assignment_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) returning id, created_at`,
+      [
+        grant.companyId,
+        employeeId,
+        input.kind,
+        warningCategory,
+        body,
+        noteDate,
+        attachmentId,
+        source,
+        input.exitCaseId ?? null,
+        input.employeeProcessId ?? null,
+        input.supersedesNoteId ?? null,
+        grant.userId,
+        grant.assignmentId,
+      ],
     )
   ).rows[0]!;
-  // The note text stays in its confidential group; the audit carries the kind, date, source and links only.
+  // The note text stays in its confidential group; the audit carries the kind, category, date, source and links only.
   await audit(tx, actorOf(grant), 'employee_note', note.id, 'CREATE', null, {
     restricted: {
       employeeId,
       kind: input.kind,
+      ...(warningCategory ? { warningCategory } : {}),
       noteDate,
       source,
       attachment: attachmentId !== null,
@@ -113,7 +141,7 @@ export async function addNote(tx: Queryable, grant: AccessGrant, employeeId: str
       supersedes: input.supersedesNoteId ?? null,
     },
   });
-  return { id: note.id, employeeId, kind: input.kind, noteDate, attachmentId, createdAt: note.created_at };
+  return { id: note.id, employeeId, kind: input.kind, warningCategory, noteDate, attachmentId, createdAt: note.created_at };
 }
 
 /**
@@ -160,7 +188,8 @@ const SUBMITTER_SQL = `coalesce((select se.display_name from user_employee_link 
                                  (select u.account_key from user_account u where u.id = n.created_by))`;
 
 /** The columns of one note `n` as every note list answers them. */
-const NOTE_COLUMNS = `n.id, n.employee_id as "employeeId", n.note_kind as kind, n.note_date as "noteDate", n.body, n.source,
+const NOTE_COLUMNS = `n.id, n.employee_id as "employeeId", n.note_kind as kind, n.warning_category as "warningCategory",
+            n.note_date as "noteDate", n.body, n.source,
             n.exit_case_id as "exitCaseId", n.employee_process_id as "processId", n.supersedes_note_id as "supersedesNoteId",
             (select s.id from employee_note s where s.company_id = n.company_id and s.supersedes_note_id = n.id) as "supersededByNoteId",
             ${STATUS_SQL} as status,
@@ -190,15 +219,14 @@ export interface RegisterQuery extends Paging {
 }
 
 /**
- * The notes register (CL-040): every note about the employees in the caller's row scope, the caller's own record left out, newest
- * note date first, one page at a time with the total of every match (FR-056; BR-026: the filters apply before paging, so the
- * total reconciles with the pages).
+ * The register's conditions over note `n` and its employee `e` (CL-040): the caller's row scope (BR-026), never the caller's own
+ * record, and the filters, the status applied to the derived status. The list and its export (notes-export.ts) both use them, so a
+ * filtered list and its file hold the same notes (ZT17).
  */
-export async function listNoteRegister(db: Queryable, grant: AccessGrant, q: RegisterQuery) {
+export function noteRegisterConditions(grant: AccessGrant, q: Omit<RegisterQuery, keyof Paging>, p: SqlParams): string[] {
   if (q.from && !isIsoDate(q.from)) throw new HttpError(422, 'INVALID_DATE', 'The from date is not a valid date', { field: 'from' });
   if (q.to && !isIsoDate(q.to)) throw new HttpError(422, 'INVALID_DATE', 'The to date is not a valid date', { field: 'to' });
   if (q.from && q.to && q.to < q.from) throw new HttpError(422, 'INVALID_PERIOD', 'The period ends before it starts');
-  const p = new SqlParams();
   const where = [employeeScopePredicate(grant, { company: 'n.company_id', employee: 'n.employee_id' }, p)];
   if (grant.linkedEmployeeId) where.push(`n.employee_id <> ${p.add(grant.linkedEmployeeId)}::uuid`);
   if (q.from) where.push(`n.note_date >= ${p.add(q.from)}::date`);
@@ -208,10 +236,25 @@ export async function listNoteRegister(db: Queryable, grant: AccessGrant, q: Reg
     const pattern = p.add(`%${q.search.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
     where.push(`(e.employee_code ilike ${pattern} or e.display_name ilike ${pattern} or ${SUBMITTER_SQL} ilike ${pattern})`);
   }
-  const base = `select ${NOTE_COLUMNS}, e.employee_code as "employeeCode", e.display_name as "employeeName"
-                  from employee_note n join employee e on e.company_id = n.company_id and e.id = n.employee_id
-                 where ${where.join(' and ')}`;
-  const sql = q.status ? `select r.* from (${base}) r where r.status = ${p.add(q.status)}` : base;
+  if (q.status) where.push(`${STATUS_SQL} = ${p.add(q.status)}::text`);
+  return where;
+}
+
+/** The derived status (0260) and the submitter's name of note `n`, as the register shows them, for its export. */
+export const NOTE_STATUS_SQL = STATUS_SQL;
+export const NOTE_SUBMITTER_SQL = SUBMITTER_SQL;
+
+/**
+ * The notes register (CL-040): every note about the employees in the caller's row scope, the caller's own record left out, newest
+ * note date first, one page at a time with the total of every match (FR-056; BR-026: the filters apply before paging, so the
+ * total reconciles with the pages).
+ */
+export async function listNoteRegister(db: Queryable, grant: AccessGrant, q: RegisterQuery) {
+  const p = new SqlParams();
+  const where = noteRegisterConditions(grant, q, p);
+  const sql = `select ${NOTE_COLUMNS}, e.employee_code as "employeeCode", e.display_name as "employeeName"
+                 from employee_note n join employee e on e.company_id = n.company_id and e.id = n.employee_id
+                where ${where.join(' and ')}`;
   const page = await pageOf(db, sql, p.values, '"noteDate" desc, "createdAt" desc, id', { page: q.page ?? 1, pageSize: q.pageSize ?? 25 }, NOTE_LIST_CAP);
   return {
     ...page,

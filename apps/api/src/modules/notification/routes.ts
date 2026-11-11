@@ -238,7 +238,7 @@ export async function notificationRoutes(app: FastifyInstance, opts: { db: Datab
     const q = request.query as DeliveryFilters & Paging;
     if (q.from && q.to && q.to < q.from) throw new HttpError(422, 'INVALID_PERIOD', 'The period end is before its start');
     const p = new SqlParams([grant.companyId]);
-    return pageOf(db, `${DELIVERY_LIST_SELECT} where ${deliveryCondition('$1', p, q)}`, p.values, `"occurredAt" desc, id`, q, 200);
+    return pageOf(db, `${DELIVERY_LIST_SELECT} where ${deliveryCondition('$1', p, q, grant)}`, p.values, `"occurredAt" desc, id`, q, 200);
   });
 
   // FR-061, BR-034: an event that failed to dispatch has no notification to show in the log above, so it is listed here:

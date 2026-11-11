@@ -142,6 +142,15 @@ describe('several people to one new manager (CL-020; FR-003, FR-009)', () => {
     expect(await managerOn(x, today)).toBe(m1Emp);
   });
 
+  it('BR-026 a caller with a narrower scope learns nothing about people outside it: out of scope reads as not found, before any check', async () => {
+    const x = await world.employee(m2Emp); // already reports to m2: the answer would have been "unchanged"
+    const otherDept = (await h.one<{ id: string }>(`insert into department (company_id, code, name, active) values ($1, 'MB_ELSEWHERE', 'Elsewhere', true) returning id`, [A.id])).id;
+    const narrow = await h.actor(A, 'HR_ADMINISTRATOR', { departmentFilter: otherDept });
+    const res = await bulk(narrow, { employeeIds: [x], managerEmployeeId: m2Emp, effectiveFrom: today, reason: 'Synthetic probe' });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('unchanged');
+  });
+
   it('BR-026 a manager cannot move people between managers', async () => {
     const x = await world.employee(m1Emp);
     const res = await bulk(m1, { employeeIds: [x], managerEmployeeId: m2Emp, effectiveFrom: today, reason: 'Synthetic' });

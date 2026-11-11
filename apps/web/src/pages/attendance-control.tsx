@@ -605,6 +605,25 @@ const ATTENDANCE_REPORTS = [
 ] as const;
 type AttendanceReportCode = (typeof ATTENDANCE_REPORTS)[number]['code'];
 
+/**
+ * CL-047 and CL-049 follow-up: the other layout of a register, generated as a report of its own (its columns differ) with the same
+ * filters, row scope and permission. One row per employee and day stays the default.
+ */
+const REPORT_LAYOUTS: Partial<Record<AttendanceReportCode, { code: string; label: string; title: string; note: string }>> = {
+  SHIFT_PUNCH_REGISTER: {
+    code: 'SHIFT_PUNCH_REGISTER_PUNCHES',
+    label: 'One row per punch',
+    title: 'Shift punch register, one row per punch',
+    note: 'Each punch of the shift’s capture window on its own row: the employee, the work date, the punch time, its direction and source, and the shift of that day. With "All days", a day without a punch is one row with no punch time. Terminal: a biometric device; Import: a punch file.',
+  },
+  SHIFT_PLAN_REGISTER: {
+    code: 'SHIFT_PLAN_MONTH_GRID',
+    label: 'Month grid',
+    title: 'Shift plan register, month grid',
+    note: 'One row per employee and month, one column per day of the month with the planned shift code: W a weekly off, H a holiday, "No shift" when none is assigned. A blank day is outside the period or not one of the employee’s days.',
+  },
+};
+
 interface ReportForm {
   from: string;
   to: string;
@@ -617,9 +636,11 @@ interface ReportForm {
   minimumMinutes: string;
   minimumDays: string;
   sort: string;
+  /** DAY (one row per employee and day, the default) or OTHER (the register's other layout, REPORT_LAYOUTS). */
+  layout: string;
   format: 'CSV' | 'XLSX';
 }
-const blankReport: ReportForm = { from: '', to: '', departmentId: '', shiftId: '', search: '', punchView: 'ALL', punchSource: '', deviation: '', minimumMinutes: '', minimumDays: '', sort: 'employeeCode', format: 'CSV' };
+const blankReport: ReportForm = { from: '', to: '', departmentId: '', shiftId: '', search: '', punchView: 'ALL', punchSource: '', deviation: '', minimumMinutes: '', minimumDays: '', sort: 'employeeCode', layout: 'DAY', format: 'CSV' };
 
 /** The filters sent for a report: only what it takes, only what is filled in. */
 export function attendanceReportFilters(code: AttendanceReportCode, f: ReportForm): Record<string, string | number> {
@@ -645,6 +666,9 @@ function AttendanceReportsPage() {
   const [form, setForm] = useState(blankReport);
   const set = (key: keyof Omit<ReportForm, 'format'>, value: string) => setForm({ ...form, [key]: value });
   const def = ATTENDANCE_REPORTS.find((r) => r.code === code)!;
+  // The register's other layout is a report of its own, with the same filters (CL-047, CL-049 follow-up).
+  const other = REPORT_LAYOUTS[code];
+  const generated = other && form.layout === 'OTHER' ? other : def;
   const departments = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
   const shifts = useQuery({ queryKey: ['control-shifts'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/shifts'), enabled: can('shift.read.operational') });
   const ready = !!form.from && !!form.to && (code !== 'ABSCONDING_REPORT' || /^\d{1,3}$/.test(form.minimumDays));
@@ -653,7 +677,13 @@ function AttendanceReportsPage() {
       <form className="grid-form" onSubmit={keepOnPage}>
         <label>
           Report
-          <select value={code} onChange={(e) => setCode(e.target.value as AttendanceReportCode)}>
+          <select
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value as AttendanceReportCode);
+              setForm({ ...form, layout: 'DAY' });
+            }}
+          >
             {ATTENDANCE_REPORTS.map((r) => (
               <option key={r.code} value={r.code}>
                 {r.title}
@@ -661,6 +691,15 @@ function AttendanceReportsPage() {
             ))}
           </select>
         </label>
+        {other && (
+          <label>
+            Layout
+            <select value={form.layout} onChange={(e) => set('layout', e.target.value)}>
+              <option value="DAY">One row per employee and day</option>
+              <option value="OTHER">{other.label}</option>
+            </select>
+          </label>
+        )}
         <label>
           From
           <input type="date" required value={form.from} onChange={(e) => set('from', e.target.value)} />
@@ -760,9 +799,9 @@ function AttendanceReportsPage() {
           </select>
         </label>
       </form>
-      <p className="hint">{`${def.note} At most ${def.maxDays} days per request.`}</p>
+      <p className="hint">{`${generated.note} At most ${def.maxDays} days per request.`}</p>
       {!ready && <p className="hint">{code === 'ABSCONDING_REPORT' ? 'Choose a period and the number of consecutive absent days.' : 'Choose a period.'}</p>}
-      {ready && <ReportExport key={code} reportCode={code} label={`Generate the ${def.title.toLowerCase()}`} filters={attendanceReportFilters(code, form)} format={form.format} />}
+      {ready && <ReportExport key={generated.code} reportCode={generated.code} label={`Generate the ${generated.title.toLowerCase()}`} filters={attendanceReportFilters(code, form)} format={form.format} />}
     </Section>
   );
 }

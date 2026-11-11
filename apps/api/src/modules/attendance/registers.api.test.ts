@@ -128,6 +128,103 @@ describe('shift plan register (CL-049; FR-023, DF05)', () => {
   });
 });
 
+describe('shift punch register, one row per punch (CL-047 follow-up; FR-019, FR-056)', () => {
+  const period = { from: '2026-03-02', to: '2026-03-03' };
+  const punches = async (filters: object, a: TestActor = s.hr) => pick(await report(a, 'SHIFT_PUNCH_REGISTER_PUNCHES', { ...period, ...filters }), 'Employee code', 'Work date', 'Shift', 'Punch time (company time)', 'Direction', 'Source');
+
+  it('CL-047 FR-019: each punch of the capture window on its own row with the day’s shift; a day without a punch is one row with no punch time', async () => {
+    expect(await punches({ departmentId: A.dept })).toEqual([
+      ['L101', '2026-03-02', 'DAY', '2026-03-02 09:25', 'IN', 'Import'],
+      ['L101', '2026-03-02', 'DAY', '2026-03-02 13:00', 'OUT', 'Import'],
+      ['L101', '2026-03-02', 'DAY', '2026-03-02 14:00', 'IN', 'Import'],
+      ['L101', '2026-03-02', 'DAY', '2026-03-02 17:40', 'OUT', 'Import'],
+      ['L101', '2026-03-03', 'DAY', '2026-03-03 09:00', 'IN', 'Import'],
+      // In the four-hour buffer after the shift's end, so the day's punch, as in the one-row-per-day layout.
+      ['L101', '2026-03-03', 'DAY', '2026-03-03 19:00', 'OUT', 'Import'],
+      ['P101', '2026-03-02', 'DAY', '2026-03-02 09:00', 'IN', 'Terminal'],
+      ['P101', '2026-03-02', 'DAY', '2026-03-02 18:00', 'OUT', 'Import'],
+      ['P101', '2026-03-03', 'DAY', '', '', ''],
+    ]);
+    const rows = await report(s.hr, 'SHIFT_PUNCH_REGISTER_PUNCHES', { ...period, employeeId: s.ids.L101 });
+    expect(Object.keys(rows[0]!)).toEqual(['Employee code', 'Name', 'Department', 'Work date', 'Day', 'Shift', 'Shift in', 'Shift out', 'Punch time (company time)', 'Direction', 'Source']);
+    expect(rows[0]).toMatchObject({ Day: 'Mon', 'Shift in': '09:00', 'Shift out': '18:00' });
+    // The same punches as the one-row-per-day layout counts.
+    const days = await report(s.hr, 'SHIFT_PUNCH_REGISTER', { ...period, departmentId: A.dept });
+    const punched = (await punches({ departmentId: A.dept, punchView: 'PUNCHED' })).length;
+    expect(punched).toBe(days.reduce((n, d) => n + Number(d.Punches), 0));
+  });
+
+  it('CL-047 FR-019: the same views and punch source as the one-row-per-day layout', async () => {
+    const at = (rows: (string | undefined)[][]) => rows.map((r) => `${r[0]} ${r[3]}`.trim());
+    expect(at(await punches({ departmentId: A.dept, punchView: 'FIRST_LAST' }))).toEqual(['L101 2026-03-02 09:25', 'L101 2026-03-02 17:40', 'L101 2026-03-03 09:00', 'L101 2026-03-03 19:00', 'P101 2026-03-02 09:00', 'P101 2026-03-02 18:00']);
+    expect(await punches({ departmentId: A.dept, punchView: 'NOT_PUNCHED' })).toEqual([['P101', '2026-03-03', 'DAY', '', '', '']]);
+    expect(await punches({ punchView: 'PUNCHED', punchSource: 'TERMINAL' })).toEqual([['P101', '2026-03-02', 'DAY', '2026-03-02 09:00', 'IN', 'Terminal']]);
+    expect(await punches({ punchSource: 'IMPORT', employeeId: s.ids.P101 })).toEqual([
+      ['P101', '2026-03-02', 'DAY', '2026-03-02 18:00', 'OUT', 'Import'],
+      ['P101', '2026-03-03', 'DAY', '', '', ''],
+    ]);
+  });
+
+  it('CL-047 BR-026 FR-056: the same row scope, permission, period cap and filters; XLSX is offered', async () => {
+    expect((await punches({}, s.manager)).map((r) => r[0])).toEqual(['TM01', 'TM01']);
+    expect((await requested(s.hr, 'SHIFT_PUNCH_REGISTER_PUNCHES', { from: '2026-03-01', to: '2026-04-01' })).json().error).toBe('PERIOD_TOO_LONG');
+    expect((await requested(s.hr, 'SHIFT_PUNCH_REGISTER_PUNCHES', { ...period, minimumDays: 2 })).json().error).toBe('FILTER_NOT_SUPPORTED');
+    expect((await requested(s.hr, 'SHIFT_PUNCH_REGISTER_PUNCHES', {})).json().error).toBe('PERIOD_REQUIRED');
+    const employee = await h.actor(A, 'EMPLOYEE', { employeeId: s.ids.AB01! });
+    expect([403, 404]).toContain((await requested(employee, 'SHIFT_PUNCH_REGISTER_PUNCHES', period)).statusCode);
+    const xlsx = await requested(s.hr, 'SHIFT_PUNCH_REGISTER_PUNCHES', period, 'XLSX');
+    expect(xlsx.statusCode, xlsx.body).toBe(202);
+  });
+});
+
+describe('shift plan register, month grid (CL-049 follow-up; FR-023, DF05)', () => {
+  const period = { from: '2026-03-07', to: '2026-03-11' };
+  const days = (row: Record<string, string>, from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => row[String(from + i)]);
+
+  it('CL-049 DF05: one row per employee and month, a column per day with the shift code, W for a weekly off and H for a holiday', async () => {
+    const rows = await report(s.hr, 'SHIFT_PLAN_MONTH_GRID', { ...period, departmentId: A.dept });
+    const listed = (await h.call(s.hr, 'GET', '/v1/reports/catalogue')).json().items as { code: string; columns: string[] }[];
+    expect(listed.find((r) => r.code === 'SHIFT_PLAN_MONTH_GRID')!.columns).toEqual(['Employee code', 'Name', 'Department', 'Month', ...Array.from({ length: 31 }, (_, i) => String(i + 1))]);
+    expect(rows.map((r) => [r['Employee code'], r.Month])).toEqual([
+      ['EX01', '2026-03'],
+      ['L101', '2026-03'],
+      ['NS01', '2026-03'],
+      ['P101', '2026-03'],
+    ]);
+    const of = (code: string) => rows.find((r) => r['Employee code'] === code)!;
+    // L101: the weekend, a working day, the holiday, then the night shift from the 11th (as the one-row-per-day layout shows them).
+    expect(days(of('L101'), 7, 11)).toEqual(['W', 'W', 'DAY', 'H', 'NIGHT']);
+    expect(days(of('P101'), 7, 11)).toEqual(['W', 'W', 'DAY', 'H', 'DAY']);
+    // NS01 has no shift: a working day says so.
+    expect(days(of('NS01'), 7, 11)).toEqual(['W', 'W', 'No shift', 'H', 'No shift']);
+    // Days outside the period are blank.
+    expect([...days(of('L101'), 1, 6), ...days(of('L101'), 12, 31)].every((d) => d === '')).toBe(true);
+    expect(of('L101').Department).not.toBe('');
+  });
+
+  it('CL-049 DF05: a period across months gives a row per month; a shorter month leaves its last days blank', async () => {
+    const rows = await report(s.hr, 'SHIFT_PLAN_MONTH_GRID', { from: '2026-02-27', to: '2026-03-02', employeeId: s.ids.P101 });
+    expect(rows.map((r) => r.Month)).toEqual(['2026-02', '2026-03']);
+    expect(days(rows[0]!, 27, 31)).toEqual(['DAY', 'W', '', '', '']);
+    expect(days(rows[1]!, 1, 3)).toEqual(['W', 'DAY', '']);
+  });
+
+  it('CL-049 BR-026 FR-056: the same filters, row scope, permission and period cap as the one-row-per-day layout; XLSX is offered', async () => {
+    expect(pick(await report(s.hr, 'SHIFT_PLAN_MONTH_GRID', { ...period, shiftId: s.night }), 'Employee code', '10', '11')).toEqual([['L101', '', 'NIGHT']]);
+    expect((await report(s.manager, 'SHIFT_PLAN_MONTH_GRID', period)).map((r) => r['Employee code'])).toEqual(['TM01']);
+    expect((await requested(s.hr, 'SHIFT_PLAN_MONTH_GRID', { from: '2026-01-01', to: '2026-04-30' })).json().error).toBe('PERIOD_TOO_LONG');
+    expect((await requested(s.hr, 'SHIFT_PLAN_MONTH_GRID', { ...period, punchView: 'ALL' })).json().error).toBe('FILTER_NOT_SUPPORTED');
+    const employee = await h.actor(A, 'EMPLOYEE', { employeeId: s.ids.SU01! });
+    expect([403, 404]).toContain((await requested(employee, 'SHIFT_PLAN_MONTH_GRID', period)).statusCode);
+    const xlsx = await requested(s.hr, 'SHIFT_PLAN_MONTH_GRID', period, 'XLSX');
+    expect(xlsx.statusCode, xlsx.body).toBe(202);
+    await processReportQueue(h.pool, 10);
+    const file = await h.call(s.hr, 'GET', `/v1/reports/${xlsx.json().id}/download`);
+    expect(file.statusCode).toBe(200);
+    expect(file.headers['content-type']).toContain('spreadsheetml');
+  });
+});
+
 describe('shift deviation register (CL-050; FR-020, FR-021, ZT17)', () => {
   const period = { from: '2026-03-02', to: '2026-03-03' };
 

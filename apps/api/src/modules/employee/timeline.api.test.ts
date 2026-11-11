@@ -16,6 +16,7 @@ interface Event {
   type: string;
   effectiveDate: string;
   actor: string | null;
+  onBehalfOf?: string | null;
   reason: string | null;
   source: { kind: string; id: string; decisionId?: string | null } | null;
   details: Record<string, unknown>;
@@ -145,6 +146,8 @@ describe('employee timeline (FR-089; DF14)', () => {
       expect(eventsOf(t, 'INCREMENT_APPLIED')).toMatchObject([
         { effectiveDate: addDays(today, 5), reason: 'SECRET-INCREMENT-DECISION', source: { kind: 'INCREMENT_CASE', decisionId: expect.any(String) }, details: { beforeAmount: '100000.0000', afterAmount: '110000.0000', changePercent: '10.00' } },
       ]);
+      // access-4 follow-up: every decision here was taken in the decider's own right, so no event names anyone it was taken for.
+      expect(t.events.map((e) => e.onBehalfOf)).toEqual(t.events.map(() => null));
     });
 
     it('names a changed master field and never its value (FR-089 acceptance)', async () => {
@@ -271,6 +274,37 @@ describe('employee timeline (FR-089; DF14)', () => {
       const back = await timeline(hr, stayer.id);
       expect(eventsOf(back, 'EXIT_APPROVED')).toHaveLength(1);
       expect(eventsOf(back, 'EXIT_WITHDRAWN')).toMatchObject([{ source: { kind: 'EXIT_CASE', id: stayer.exitId }, details: { status: 'ACTIVE_CONFIRMED', priorStatus: 'NOTICE' } }]);
+    });
+  });
+
+  // Last: the delegation below routes hr's later confirmation tasks to the delegate.
+  describe('a decision taken under a delegation (access-4 follow-up; C4 "Preserve delegator, delegate and actual actor in history"; I-57 item 7)', () => {
+    it('access-4 FR-089 C4: a confirmation decided by a delegate shows the delegate as its actor and the reviewer it was taken for', async () => {
+      const admin = await h.actor(A, 'SYSTEM_ADMINISTRATOR');
+      const delegateHr = await h.actor(A, 'HR_ADMINISTRATOR');
+      // hr, the first reviewer of confirmations, delegates its confirmation decisions, approved by an independent System Administrator.
+      const iso = (ms: number) => new Date(Date.now() + ms).toISOString();
+      const asked = await h.call(hr, 'POST', '/v1/access/delegations', { delegateUserId: delegateHr.user, permission: 'confirmation.decide.operational', effectiveFrom: iso(-60_000), effectiveTo: iso(5 * 86_400_000) });
+      expect(asked.statusCode, asked.body).toBe(201);
+      const approved = await h.call(admin, 'POST', `/v1/access/delegations/${asked.json().id}/approve`, { expectedVersion: 1 });
+      expect(approved.statusCode, approved.body).toBe(200);
+
+      const e = await create({ displayName: 'Delegated decision (synthetic)' });
+      await h.setStatus(A, e.id, 'ACTIVE_PROBATION');
+      expect((await h.call(hr, 'POST', `/v1/employees/${e.id}/manager`, { managerEmployeeId: managerEmp, effectiveFrom: JOINED })).statusCode).toBe(200);
+      const caseId = (await h.call(hr, 'POST', '/v1/confirmations', { employeeId: e.id })).json().caseId as string;
+      const version = (await h.call(hr, 'GET', `/v1/confirmations/${caseId}`)).json().version as number;
+      const recommended = await h.call(manager, 'POST', `/v1/confirmations/${caseId}/recommendation`, { expectedVersion: version, reason: 'Manager review (synthetic)', recommendation: 'CONFIRM', effectiveDate: '2026-06-01' });
+      expect(recommended.statusCode, recommended.body).toBeLessThan(300);
+      const task = ((await h.call(delegateHr, 'GET', '/v1/confirmations/tasks/mine')).json().items as { taskId: string; ownerEmployeeId: string }[]).find((x) => x.ownerEmployeeId === e.id);
+      expect(task, 'the task went to the delegate').toBeTruthy();
+      const decided = await h.call(delegateHr, 'POST', `/v1/confirmations/tasks/${task!.taskId}/decision`, { decision: 'APPROVE', reason: 'Synthetic delegated decision', idempotencyKey: uniq('conf-key-') });
+      expect(decided.statusCode, decided.body).toBe(200);
+
+      const t = await timeline(hr, e.id);
+      expect(eventsOf(t, 'CONFIRMED')).toMatchObject([{ actor: await accountKey(delegateHr), onBehalfOf: await accountKey(hr), source: { kind: 'CONFIRMATION_CASE', decisionId: expect.any(String) } }]);
+      // Every other event names its actor alone.
+      expect(t.events.filter((x) => x.type !== 'CONFIRMED').map((x) => x.onBehalfOf)).toEqual(t.events.filter((x) => x.type !== 'CONFIRMED').map(() => null));
     });
   });
 });

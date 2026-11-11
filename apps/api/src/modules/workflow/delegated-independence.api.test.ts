@@ -109,8 +109,15 @@ describe('decision histories name the person a delegate decided for (I-57 item 7
     const code = async (id: string) => (await h.one<{ c: string }>(`select employee_code as c from employee where id = $1`, [id])).c;
     expect(entry).toMatchObject({ decision: 'APPROVE', decidedBy: { userId: d.user, employeeCode: await code(dEmp) }, onBehalfOf: { userId: m.user, employeeCode: await code(mEmp) } });
     expect((await decisionTrail(h.pool, A.id, [delegated], { actors: true })).map((x) => [x.actorUserId, x.onBehalfOfUserId])).toEqual([[d.user, m.user]]);
+    // access-4 follow-up: the trail with actors also names both by operational identity, in the hiring history's shape (the settlement
+    // decision table shows "X on behalf of Y"); a decision in one's own right names nobody else.
+    expect(await decisionTrail(h.pool, A.id, [delegated], { actors: true })).toEqual([
+      expect.objectContaining({ decidedBy: { userId: d.user, employeeCode: await code(dEmp), displayName: expect.any(String) }, onBehalfOf: { userId: m.user, employeeCode: await code(mEmp), displayName: expect.any(String) } }),
+    ]);
+    expect(await decisionTrail(h.pool, A.id, [own], { actors: true })).toEqual([expect.objectContaining({ decidedBy: { userId: m.user, employeeCode: await code(mEmp), displayName: expect.any(String) }, onBehalfOf: null })]);
     // Without actors the trail names nobody.
     expect(await decisionTrail(h.pool, A.id, [delegated])).toEqual([expect.not.objectContaining({ onBehalfOfUserId: expect.anything() })]);
+    expect(await decisionTrail(h.pool, A.id, [delegated])).toEqual([expect.not.objectContaining({ decidedBy: expect.anything() })]);
   });
 });
 

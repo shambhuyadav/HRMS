@@ -7,7 +7,7 @@
 //
 // Bulk upload, template EMPLOYEE_NOTES_V1: employeeCode,noteType,noteDate,text, one note per row. The type is a code or the
 // reference screen's label (APPRECIATION or "Appreciation", EXIT_NOTE or "Exit note", OFFER_REJECTION, PIP, REMARK or "Remarks",
-// WARNING, NOTE); the date is YYYY-MM-DD, never after today. Each row is written exactly as a note entered on screen (addNote: row
+// WARNING, NOTE), or "Absconding warning" for a warning of that category (CL-052, 0283); the date is YYYY-MM-DD, never after today. Each row is written exactly as a note entered on screen (addNote: row
 // scope, never one's own record), marked as imported. The batch is all or nothing (DF09). A row repeating an earlier row of the file,
 // or a note already on record (same employee, type, date and text, not voided), is refused, so uploading the same file again under
 // a new idempotency key adds nothing; the same key returns the same batch, and a committed batch commits once. Import rows keep the
@@ -25,7 +25,7 @@ import { canAccessEmployee } from '../access/authorize.js';
 import { isCalendarDate, markRepeats, MAX_BATCH_BYTES, parseTemplate, RowError, type Template } from '../imports/batch.js';
 import { type BatchSpec, cancelBatch, commitBatch, jobView, submitBatch } from '../imports/jobs.js';
 import { batchFollowUpRoutes } from '../imports/routes.js';
-import { addNote, listNoteRegister, MAX_NOTE_TEXT, NOTE_KINDS, NOTE_STATUSES, type NoteKind, noteAttachment, type RegisterQuery, voidNote } from './notes.js';
+import { addNote, listNoteRegister, MAX_NOTE_TEXT, NOTE_KINDS, NOTE_STATUSES, type NoteKind, noteAttachment, type RegisterQuery, voidNote, type WarningCategory } from './notes.js';
 
 const COLUMNS = ['employeeCode', 'noteType', 'noteDate', 'text'] as const;
 type Column = (typeof COLUMNS)[number];
@@ -41,6 +41,13 @@ export function noteKindOf(cell: string): NoteKind | null {
   return KIND_ALIASES[normal] ?? null;
 }
 
+/** CL-052 (0283): a type cell as a note type, where "Absconding warning" (ABSCONDING_WARNING) is a warning of that category. */
+export function noteTypeOf(cell: string): { kind: NoteKind; warningCategory?: WarningCategory } | null {
+  if (cell.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') === 'ABSCONDING_WARNING') return { kind: 'WARNING', warningCategory: 'ABSCONDING' };
+  const kind = noteKindOf(cell);
+  return kind ? { kind } : null;
+}
+
 const repeatKey = (row: Record<Column, string>) => `${row.employeeCode.toUpperCase()}\u0000${noteKindOf(row.noteType) ?? row.noteType}\u0000${row.noteDate}\u0000${row.text.trim()}`;
 
 export const NOTES_IMPORT_SPEC: BatchSpec<Column> = {
@@ -49,8 +56,9 @@ export const NOTES_IMPORT_SPEC: BatchSpec<Column> = {
   parse: (bytes) => markRepeats(parseTemplate(bytes, NOTES_TEMPLATE), repeatKey, 'DUPLICATE_IN_BATCH'),
   keyOf: (row, n) => (row.employeeCode ? `${row.employeeCode.toUpperCase()}/${noteKindOf(row.noteType) ?? row.noteType.toUpperCase()}/${row.noteDate}` : `ROW-${n}`),
   async apply(client, grant, row) {
-    const kind = noteKindOf(row.noteType);
-    if (!kind) throw new RowError('UNKNOWN_NOTE_TYPE');
+    const type = noteTypeOf(row.noteType);
+    if (!type) throw new RowError('UNKNOWN_NOTE_TYPE');
+    const { kind } = type;
     if (!isCalendarDate(row.noteDate)) throw new RowError('INVALID_DATE');
     if (row.noteDate > grant.businessDate) throw new RowError('NOTE_DATE_IN_FUTURE');
     const text = row.text.trim();
@@ -66,7 +74,7 @@ export const NOTES_IMPORT_SPEC: BatchSpec<Column> = {
       [grant.companyId, employee.id, kind, row.noteDate, text],
     );
     if ((same.rowCount ?? 0) > 0) throw new RowError('DUPLICATE_NOTE');
-    await addNote(client, grant, employee.id, { kind, body: text, noteDate: row.noteDate }, { source: 'IMPORT' });
+    await addNote(client, grant, employee.id, { kind, ...(type.warningCategory ? { warningCategory: type.warningCategory } : {}), body: text, noteDate: row.noteDate }, { source: 'IMPORT' });
   },
 };
 

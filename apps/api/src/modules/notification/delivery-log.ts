@@ -2,7 +2,7 @@
 // no secrets or unneeded private message payload"; BR-034), one definition for GET /notifications/delivery,
 // GET /notifications/delivery/failed-events and their export, so a filtered list and its export hold the same records (ZT17).
 // States, attempts and error classes only, never a message body or an event payload.
-import type { SqlParams } from '../access/authorize.js';
+import { type AccessGrant, employeeScopePredicate, type SqlParams } from '../access/authorize.js';
 
 /** Company-local dates (inclusive) of when the record occurred. */
 export interface DeliveryPeriod {
@@ -35,20 +35,30 @@ const inPeriod = (alias: string, column: string, p: SqlParams, f: DeliveryPeriod
 const LAST_FAILURE = `(select a.failure_code from notification_delivery_attempt a where a.company_id = n.company_id and a.notification_id = n.id order by a.attempt_number desc limit 1)`;
 const ATTEMPTS = `(select count(*)::int from notification_delivery_attempt a where a.company_id = n.company_id and a.notification_id = n.id)`;
 
-/** The notifications' condition (alias n, `company` an added parameter). */
-export function deliveryCondition(company: string, p: SqlParams, f: DeliveryFilters): string {
+/**
+ * The notifications' condition (alias n, `company` an added parameter). An HR message (CL-041) names an employee, so its row is listed
+ * only while that employee is in the viewer's row scope; the other rows name accounts and stay as they were.
+ */
+export function deliveryCondition(company: string, p: SqlParams, f: DeliveryFilters, grant: AccessGrant): string {
   return [
     `n.company_id = ${company}::uuid`,
+    `(n.recipient_employee_id is null or ${employeeScopePredicate(grant, { company: 'n.company_id', employee: 'n.recipient_employee_id' }, p)})`,
     ...(f.state ? [`n.state = ${p.add(f.state)}`] : []),
     ...(f.category ? [`n.category = ${p.add(f.category)}`] : []),
     ...inPeriod('n', 'occurred_at', p, f),
   ].join(' and ');
 }
 
+/** The recipient of notification n: a user account, or for an HR message (CL-041, 0282) the employee by code, never their address. */
+const RECIPIENT = {
+  name: `coalesce(u.account_key, re.employee_code)`,
+  from: `left join user_account u on u.id = n.recipient_user_id left join employee re on re.company_id = n.company_id and re.id = n.recipient_employee_id`,
+};
+
 /** The rows of GET /notifications/delivery. */
-export const DELIVERY_LIST_SELECT = `select n.id, n.category, n.channel, n.state, n.recipient_user_id as "recipientUserId", u.account_key as "recipientAccount", n.occurred_at as "occurredAt",
+export const DELIVERY_LIST_SELECT = `select n.id, n.category, n.channel, n.state, n.recipient_user_id as "recipientUserId", ${RECIPIENT.name} as "recipientAccount", n.occurred_at as "occurredAt",
               ${ATTEMPTS} as attempts, ${LAST_FAILURE} as "lastFailureCode"
-         from notification n join user_account u on u.id = n.recipient_user_id`;
+         from notification n ${RECIPIENT.from}`;
 
 /** The condition of an event that failed to dispatch: retrying, or given up on after its last retry (alias e). */
 export function failedEventCondition(company: string, p: SqlParams, f: FailedEventFilters): string {
@@ -71,14 +81,14 @@ export const FAILED_EVENT_LIST_SELECT = `select e.id::text as id, e.topic, case 
  * channel; a failed dispatch has no recipient yet, so it names its topic. `status` is matched against each list's states, and
  * `category`, being an event type, leaves failed dispatches out, as the list of them takes no such filter.
  */
-export function deliveryExportSql(p: SqlParams, company: string, f: DeliveryFilters): string {
-  const notifications = deliveryCondition(company, p, f);
+export function deliveryExportSql(p: SqlParams, company: string, f: DeliveryFilters, grant: AccessGrant): string {
+  const notifications = deliveryCondition(company, p, f, grant);
   const dispatches = f.category || (f.state && !(FAILED_EVENT_STATES as readonly string[]).includes(f.state)) ? null : failedEventCondition(company, p, f);
   const local = (column: string) => `to_char(${column} at time zone c.business_timezone, 'YYYY-MM-DD HH24:MI:SS')`;
   const rows = [
     `select n.id::text as id, n.occurred_at as sort_at, ${local('n.occurred_at')} as occurred_at, 'NOTIFICATION' as source, n.category as event, to_char(ev.occurrence_date, 'YYYY-MM-DD') as occurrence,
-            u.account_key as recipient, n.channel, ${ATTEMPTS} as attempts, n.state as outcome, ${LAST_FAILURE} as failure_code
-       from notification n join user_account u on u.id = n.recipient_user_id join company c on c.id = n.company_id
+            ${RECIPIENT.name} as recipient, n.channel, ${ATTEMPTS} as attempts, n.state as outcome, ${LAST_FAILURE} as failure_code
+       from notification n ${RECIPIENT.from} join company c on c.id = n.company_id
        left join notification_event ev on ev.company_id = n.company_id and ev.id = n.event_id
       where ${notifications}`,
     ...(dispatches

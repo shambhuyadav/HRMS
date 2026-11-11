@@ -60,7 +60,7 @@ const LIST = 'GET /v1/org/departments';
 const ITEM = 'PATCH /v1/org/departments/d-1';
 
 describe('screens', () => {
-  it('are six menu screens, each under the read duty its route checks', () => {
+  it('are seven menu screens, each under the read duty its route checks', () => {
     expect(ORG_SCREENS.map((s) => [s.path, s.title, s.permission, s.nav])).toEqual([
       ['/organisation/company', 'Company', READ, true],
       ['/organisation/chart', 'Organisation chart', 'employee.list.operational', true],
@@ -68,6 +68,8 @@ describe('screens', () => {
       ['/organisation/locations', 'Locations', READ, true],
       ['/organisation/designations', 'Designations', READ, true],
       ['/organisation/grades', 'Grades', READ, true],
+      // CL-006 (0280): org-cities.test.tsx.
+      ['/organisation/cities', 'Cities', READ, true],
     ]);
   });
 

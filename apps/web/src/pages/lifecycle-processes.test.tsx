@@ -644,6 +644,8 @@ describe('exports for the navigation step', () => {
       // CL-040 (0260): the notes register and its bulk upload (lifecycle-notes.test.tsx).
       ['/lifecycle/notes', 'Exit notes, remarks and warnings', NOTE_READ, true],
       ['/lifecycle/notes/upload', 'Notes bulk upload', 'employee_note.import.restricted', true],
+      // CL-052 (0283): the absconding audit report (absconding-audit.test.tsx).
+      ['/lifecycle/absconding-audit', 'Absconding audit', 'employee_note.export.restricted', true],
       ['/me/resignation', 'My resignation', EXIT_SUBMIT, true],
       ['/me/processes', 'My processes', PROCESS_READ, false],
     ]);

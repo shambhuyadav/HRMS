@@ -10,7 +10,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import { type AccessGrant, SqlParams } from '../access/authorize.js';
 import type { ReportDefinition, ReportFilters } from '../report/catalogue.js';
-import { ABSENCE_SQL, type DayFactsFilters, dayFactsSql, PUNCH_SOURCES, type PunchSource } from './day-facts.js';
+import { ABSENCE_SQL, type DayFactsFilters, dayFactsSql, PUNCH_SOURCES, type PunchSource, SOURCE_KIND, SOURCE_LABEL_SQL } from './day-facts.js';
 import { assertMinuteFilter, ATTENDANCE_CONTROL_FROM, attendanceControlConditions } from './service.js';
 
 /**
@@ -54,6 +54,16 @@ const EMPLOYEE_COLUMNS = [
   { key: 'department', header: 'Department' },
 ];
 
+/** The shift punch register's filters, shared by both its layouts. */
+function checkPunchFilters(f: ReportFilters): void {
+  requireOneOf(f.punchView, PUNCH_VIEWS, 'punchView');
+  requireOneOf(f.punchSource, PUNCH_SOURCES, 'punchSource');
+}
+
+/** The month grid's day columns: day 1 to 31 of the month (a shorter month leaves the last ones blank). */
+const GRID_DAYS = Array.from({ length: 31 }, (_, i) => i + 1);
+const gridKey = (day: number) => `day_${String(day).padStart(2, '0')}`;
+
 export const ATTENDANCE_REGISTERS: Record<string, ReportDefinition> = {
   // CL-047: the punches of each employee and day in the shift's capture window, with the shift, the count, the first and last
   // punch and the source of each (Terminal: a biometric device feed; Import: a punch file). The reference's Mobile source does
@@ -69,10 +79,7 @@ export const ATTENDANCE_REGISTERS: Record<string, ReportDefinition> = {
     employeeFilters: ['search', 'departmentId'],
     recordFilters: ['employeeId', 'locationId', 'shiftId', 'punchView', 'punchSource'],
     xlsx: true,
-    checkFilters(f) {
-      requireOneOf(f.punchView, PUNCH_VIEWS, 'punchView');
-      requireOneOf(f.punchSource, PUNCH_SOURCES, 'punchSource');
-    },
+    checkFilters: checkPunchFilters,
     columns: [
       ...EMPLOYEE_COLUMNS,
       { key: 'work_date', header: 'Work date' },
@@ -100,6 +107,70 @@ export const ATTENDANCE_REGISTERS: Record<string, ReportDefinition> = {
                   coalesce(d.sources, '') as sources
              from (${facts}) d ${only}
             order by d.employee_code, d.work_date`,
+          p.values,
+        )
+      ).rows;
+    },
+  },
+
+  // CL-047 follow-up (decided under owner delegation, 6 Nov 2026; built 11 Nov 2026): the same register one row per punch (the
+  // reference's vertical layout), with the same filters, row scope and permission: the employee, the work date, the punch time and
+  // date (company time), its direction and source, and the shift of that day. The punches are those of the day's capture window, as in
+  // the one-row-per-day layout. The view keeps its meaning: ALL lists every punch and a day without one as one row with no punch time;
+  // PUNCHED only the punches; NOT_PUNCHED only the days without one; FIRST_LAST the first and last punch of each punched day. A punch
+  // source counts only that source's punches. Its own report code, since its columns differ (the catalogue's columns are fixed).
+  SHIFT_PUNCH_REGISTER_PUNCHES: {
+    code: 'SHIFT_PUNCH_REGISTER_PUNCHES',
+    title: 'Shift punch register, one row per punch',
+    resource: 'attendance',
+    fieldGroup: 'operational',
+    requiresPeriod: true,
+    maxPeriodDays: PUNCH_MAX_DAYS,
+    employeeFilters: ['search', 'departmentId'],
+    recordFilters: ['employeeId', 'locationId', 'shiftId', 'punchView', 'punchSource'],
+    xlsx: true,
+    checkFilters: checkPunchFilters,
+    columns: [
+      ...EMPLOYEE_COLUMNS,
+      { key: 'work_date', header: 'Work date' },
+      { key: 'weekday', header: 'Day' },
+      { key: 'shift_code', header: 'Shift' },
+      { key: 'shift_in', header: 'Shift in' },
+      { key: 'shift_out', header: 'Shift out' },
+      { key: 'punch_time', header: 'Punch time (company time)' },
+      { key: 'direction', header: 'Direction' },
+      { key: 'source', header: 'Source' },
+    ],
+    async rows(db: Queryable, grant: AccessGrant, f: ReportFilters) {
+      const p = new SqlParams();
+      const view = (f.punchView as PunchView | undefined) ?? 'ALL';
+      const source = f.punchSource as PunchSource | undefined;
+      const facts = dayFactsSql(grant, p, factsFilters(f, { punchSource: source }));
+      const company = `${p.add(grant.companyId)}::uuid`;
+      const onlySource = source ? `and p.source_kind = ${p.add(SOURCE_KIND[source])}::text` : '';
+      const only: Record<PunchView, string> = {
+        ALL: '',
+        PUNCHED: 'where pp.id is not null',
+        NOT_PUNCHED: 'where d.punch_count = 0',
+        FIRST_LAST: 'where pp.id is not null and (pp.n = 1 or pp.n = pp.total)',
+      };
+      return (
+        await db.query(
+          `select d.employee_code, d.display_name, coalesce(d.department_name, '') as department, to_char(d.work_date, 'YYYY-MM-DD') as work_date, d.weekday,
+                  coalesce(d.shift_code, '') as shift_code, coalesce(d.shift_in, '') as shift_in, coalesce(d.shift_out, '') as shift_out,
+                  coalesce(to_char(pp.occurred_at at time zone c.business_timezone, 'YYYY-MM-DD HH24:MI'), '') as punch_time,
+                  coalesce(pp.direction, '') as direction, coalesce(pp.source, '') as source
+             from (${facts}) d
+             cross join (select business_timezone from company where id = ${company}) c
+             left join lateral (
+               select p.id, p.occurred_at, p.direction, ${SOURCE_LABEL_SQL('p')} as source,
+                      row_number() over (order by p.occurred_at, p.id) as n, count(*) over () as total
+                 from attendance_punch p
+                where p.company_id = ${company} and p.employee_id = d.employee_id
+                  and p.occurred_at >= d.punch_window_from and p.occurred_at < d.punch_window_to ${onlySource}
+             ) pp on true
+             ${only[view]}
+            order by d.employee_code, d.work_date, pp.occurred_at, pp.id`,
           p.values,
         )
       ).rows;
@@ -139,6 +210,44 @@ export const ATTENDANCE_REGISTERS: Record<string, ReportDefinition> = {
                   case when d.holiday then 'Holiday' when d.weekly_off then 'Weekly off' when d.half_off then 'Half weekly off' else 'Working day' end as day_type
              from (${facts}) d
             order by d.employee_code, d.work_date`,
+          p.values,
+        )
+      ).rows;
+    },
+  },
+
+  // CL-049 follow-up (decided under owner delegation, 6 Nov 2026; built 11 Nov 2026): the same plan as a month grid, with the same
+  // filters, row scope and permission: one row per employee and calendar month of the period, one column per day of the month (1 to
+  // 31). A day holds the planned shift's code, H for a holiday or W for a weekly off (as the one-row-per-day layout ranks them: a
+  // holiday first), or "No shift" when none is assigned (not "-", which the files' formula guard would prefix); a half weekly off is a
+  // working day and holds its shift. A day outside the period, or one the employee is not employed on or that the filters leave out,
+  // is blank. The department is the one of the employee's last listed day in the month. Its own report code, since its columns differ
+  // (the catalogue's columns are fixed).
+  SHIFT_PLAN_MONTH_GRID: {
+    code: 'SHIFT_PLAN_MONTH_GRID',
+    title: 'Shift plan register, month grid',
+    resource: 'attendance',
+    fieldGroup: 'operational',
+    requiresPeriod: true,
+    maxPeriodDays: PLAN_MAX_DAYS,
+    employeeFilters: ['search', 'departmentId'],
+    recordFilters: ['employeeId', 'locationId', 'shiftId'],
+    xlsx: true,
+    columns: [...EMPLOYEE_COLUMNS, { key: 'month', header: 'Month' }, ...GRID_DAYS.map((day) => ({ key: gridKey(day), header: String(day) }))],
+    async rows(db: Queryable, grant: AccessGrant, f: ReportFilters) {
+      const p = new SqlParams();
+      const facts = dayFactsSql(grant, p, factsFilters(f, { withoutPunches: true }));
+      const cell = `case when d.holiday then 'H' when d.weekly_off then 'W' else coalesce(d.shift_code, 'No shift') end`;
+      const days = GRID_DAYS.map((day) => `coalesce(max(${cell}) filter (where extract(day from d.work_date) = ${day}), '') as ${gridKey(day)}`).join(',\n                  ');
+      return (
+        await db.query(
+          `select d.employee_code, min(d.display_name) as display_name,
+                  coalesce((array_agg(d.department_name order by d.work_date desc) filter (where d.department_name is not null))[1], '') as department,
+                  to_char(date_trunc('month', d.work_date), 'YYYY-MM') as month,
+                  ${days}
+             from (${facts}) d
+            group by d.employee_id, d.employee_code, date_trunc('month', d.work_date)
+            order by d.employee_code, date_trunc('month', d.work_date)`,
           p.values,
         )
       ).rows;

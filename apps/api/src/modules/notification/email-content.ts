@@ -43,17 +43,40 @@ const NOT_IN_BODY = charClass([[0x00, 0x08], [0x0b, 0x1f], ...INVISIBLE_RANGES])
  * Short numbers stay possible in the wording, but no placeholder carries a number.
  */
 const NOT_IN_EMAIL: readonly { pattern: RegExp; code: string }[] = [
-  { pattern: /\d{5,}/, code: 'LONG_NUMBER' },
-  { pattern: /\d[.,]\d/, code: 'FORMATTED_NUMBER' },
+  // Digits of any script (\p{Nd}: Devanagari and others; full-width ones are folded to ASCII by NFKC first).
+  { pattern: /\p{Nd}{5,}/u, code: 'LONG_NUMBER' },
+  { pattern: /\p{Nd}[.,]\p{Nd}/u, code: 'FORMATTED_NUMBER' },
   { pattern: /%|\bper\s?cent\b/i, code: 'PERCENTAGE' },
   { pattern: new RegExp(`[${String.fromCharCode(0x20b9, 0x24, 0x20ac, 0xa3, 0xa5)}]|\\b(?:INR|USD|EUR|GBP|Rs)\\b`, 'i'), code: 'CURRENCY' },
   { pattern: /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/, code: 'ACCOUNT_IDENTIFIER' },
   { pattern: /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\bmailto:/i, code: 'LINK' },
 ];
 
-/** The first reason an email text is refused, or null when it may be sent. */
-export function emailContentRefusal(text: string): string | null {
-  for (const rule of NOT_IN_EMAIL) if (rule.pattern.test(text)) return rule.code;
+/**
+ * More for free text a person writes (HR mail, CL-041; security review, 11 Nov 2026): a template's values are the system's own, but a
+ * message can carry anything, so what a mail client turns into a link, an address, and identifiers or amounts written to slip the
+ * plain rules are refused too.
+ */
+const NOT_IN_FREE_TEXT: readonly { pattern: RegExp; code: string }[] = [
+  // An identifier or amount written in groups: 1234 5678 9012, 1234-5678-9012, 45 000. A date's short groups (2026-11-30) stay allowed.
+  { pattern: /\p{Nd}+(?:[\s-]\p{Nd}{3,})+/u, code: 'GROUPED_NUMBER' },
+  { pattern: /\b(?:rupees?|lakhs?|lacs?|crores?|paise)\b|\p{Nd}\s?(?:k|lakh|lac|cr)\b/iu, code: 'AMOUNT_WORDS' },
+  // India's tax number shape (PAN).
+  { pattern: /\b[A-Z]{5}\d{4}[A-Z]\b/, code: 'TAX_IDENTIFIER' },
+  // A bare host name (mail clients turn hrstop-login.com/reset into a link) and any email address.
+  { pattern: /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}\b/i, code: 'LINK' },
+  { pattern: /@/, code: 'EMAIL_ADDRESS' },
+];
+
+/**
+ * The first reason an email text is refused, or null when it may be sent; `freeText` for words a person wrote rather than a template.
+ * The text is folded first (NFKC: full-width and other compatibility forms of digits, letters and signs become their plain forms), so
+ * a look-alike character cannot slip a rule.
+ */
+export function emailContentRefusal(text: string, options: { freeText?: boolean } = {}): string | null {
+  const folded = text.normalize('NFKC');
+  for (const rule of NOT_IN_EMAIL) if (rule.pattern.test(folded)) return rule.code;
+  if (options.freeText) for (const rule of NOT_IN_FREE_TEXT) if (rule.pattern.test(folded)) return rule.code;
   return null;
 }
 
@@ -95,6 +118,18 @@ export function emailData(data: Record<string, string>): Record<string, string> 
 /** A subject line: one line, never empty, at most 150 characters. */
 export const emailSubjectLine = (subject: string | null): string =>
   (subject ?? '').replace(NOT_IN_VALUE, ' ').replace(/\s+/g, ' ').trim().slice(0, 150) || DEFAULT_EMAIL_SUBJECT;
+
+/** The notification category of a message HR wrote to employees (CL-041, hr-mail.ts): the delivery log's event. */
+export const HR_MAIL_CATEGORY = 'HR_MESSAGE';
+
+/**
+ * The plain-text body of an HR message (CL-041) as sent: HR's text, then the application's address and a fixed footer. The text was
+ * checked against the same content rule when it was queued and is checked again before sending.
+ */
+export function hrMessageBodyText(body: string, appUrl: string): string {
+  const text = body.replace(/\r\n?/g, '\n').replace(NOT_IN_BODY, ' ').trim();
+  return [text, '', `Sent by HR through HRMS: ${appUrl}`, '', 'Replies to this address are not read.'].join('\n');
+}
 
 /** The plain-text body as sent: the rendered notice, the application's address and a fixed footer. */
 export function emailBodyText(body: string, appUrl: string): string {

@@ -893,6 +893,8 @@ describe('registry exports', () => {
       ['/documents/bulk-mapping', UPLOAD, true],
       // CL-150 (0261): the mandatory document types and the compliance report (document-compliance.test.tsx).
       ['/documents/mandatory-types', 'document_requirement.read.operational', true],
+      // CL-027 (0281): employee documents exported to a ZIP (document-export.test.tsx).
+      ['/documents/export', 'document.export.document', true],
     ]);
     expect(DOCUMENTS_ESS_PANELS).toEqual([]);
     expect(DOCUMENTS_TASK_QUEUES).toEqual([]);

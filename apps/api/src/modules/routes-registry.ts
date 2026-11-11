@@ -4,17 +4,21 @@ import type { FastifyInstance } from 'fastify';
 import type { Database } from '../db/transaction.js';
 import type { FileStore } from '../storage/files.js';
 import type { ScanProvider } from '../storage/scan.js';
+import { announcementRoutes } from './announcements/routes.js';
 import { appraisalRoutes } from './appraisal/routes.js';
 import { assetsRoutes } from './assets/routes.js';
 import { documentsRoutes } from './documents/routes.js';
 import { hiringRoutes } from './hiring/routes.js';
 import { lifecycleRoutes } from './lifecycle/routes.js';
+import { hrMailRoutes } from './notification/hr-mail.js';
+import { cityRoutes } from './org/cities.js';
 import { payrollRoutes } from './payroll/routes.js';
 import { payrollAdjustmentRoutes } from './payroll-adjustments/routes.js';
 import { payrollOutputsRoutes } from './payroll-outputs/routes.js';
 import { isModuleActive } from './registry.js';
 import { reportingRoutes } from './reporting/routes.js';
 import { sensitiveChangeRoutes } from './sensitive-change/routes.js';
+import { statutoryFileRoutes } from './statutory-files/routes.js';
 import { taxDeclarationRoutes } from './tax-declarations/routes.js';
 import { timesheetRoutes } from './timesheet/routes.js';
 import { trainingRoutes } from './training/routes.js';
@@ -36,6 +40,12 @@ const ALL_ROUTES: readonly { key: string; routes: ModuleRoutes }[] = [
   { key: 'assets', routes: assetsRoutes },
   { key: 'documents', routes: documentsRoutes },
   { key: 'reporting', routes: reportingRoutes },
+  // CL-006 (0280): the city master and its bulk upload.
+  { key: 'org-masters', routes: cityRoutes },
+  // CL-041 (0282): HR sends one message to chosen employees by email.
+  { key: 'hr-mail', routes: hrMailRoutes },
+  { key: 'announcements', routes: announcementRoutes },
+  { key: 'statutory-files', routes: statutoryFileRoutes },
 ];
 
 export const MODULE_ROUTES: readonly { key: string; routes: ModuleRoutes }[] = ALL_ROUTES.filter((r) => isModuleActive(r.key));

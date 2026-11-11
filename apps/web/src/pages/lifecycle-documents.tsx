@@ -372,6 +372,23 @@ interface SettlementDecision {
   decidedAt: string;
   /** The deciding user (settlement trails name them so independence can be checked). */
   actorUserId?: string;
+  /** The decider by operational identity, and the delegator a delegated decision was taken for (null otherwise; I-57 item 7). */
+  decidedBy?: DeciderRef;
+  onBehalfOf?: DeciderRef | null;
+}
+
+/** A decider as the trail names them (the hiring history's shape); the names are null for a user without an employee record. */
+interface DeciderRef {
+  userId: string;
+  employeeCode: string | null;
+  displayName: string | null;
+}
+
+/** A decider in words, as the appraisal and requisition histories show them: "You" for the signed-in user. */
+function deciderLabel(u: DeciderRef, myUserId: string | null): string {
+  if (myUserId !== null && u.userId === myUserId) return 'You';
+  if (u.displayName) return u.employeeCode ? `${u.displayName} (${u.employeeCode})` : u.displayName;
+  return 'A user without an employee record';
 }
 
 interface SettlementSummary {
@@ -3746,6 +3763,8 @@ function RemainingBalances({ s }: { s: SettlementDetail }) {
 }
 
 function DecisionTrail({ s }: { s: SettlementDetail }) {
+  const { me } = useSession();
+  const myUserId = me?.userId ?? null;
   return (
     <Section title="Decisions">
       {s.decisions.length === 0 ? (
@@ -3757,6 +3776,7 @@ function DecisionTrail({ s }: { s: SettlementDetail }) {
               <tr>
                 <th scope="col">Step</th>
                 <th scope="col">Decision</th>
+                <th scope="col">Decided by</th>
                 <th scope="col">Decided</th>
               </tr>
             </thead>
@@ -3765,6 +3785,10 @@ function DecisionTrail({ s }: { s: SettlementDetail }) {
                 <tr key={`${d.transactionId}-${d.step}-${i}`}>
                   <td>{labelOf(STEP_LABEL, d.action)}</td>
                   <td>{labelOf(DECISION_LABEL, d.decision)}</td>
+                  <td>
+                    {d.decidedBy ? deciderLabel(d.decidedBy, myUserId) : '—'}
+                    {d.onBehalfOf && <span className="hint">{` on behalf of ${deciderLabel(d.onBehalfOf, myUserId)}`}</span>}
+                  </td>
                   <td>
                     <time dateTime={d.decidedAt}>{when(d.decidedAt)}</time>
                   </td>

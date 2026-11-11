@@ -40,7 +40,7 @@ export const NOTIFICATION_REPORTS: Record<string, ReportDefinition> = {
     ],
     async rows(db, grant, f) {
       const p = new SqlParams([grant.companyId]);
-      return (await db.query(deliveryExportSql(p, '$1', { from: f.from, to: f.to, state: f.status, category: f.category }), p.values)).rows;
+      return (await db.query(deliveryExportSql(p, '$1', { from: f.from, to: f.to, state: f.status, category: f.category }, grant), p.values)).rows;
     },
   },
 

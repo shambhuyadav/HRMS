@@ -113,22 +113,25 @@ describe('F2 dashboards of the wave-2 roles', () => {
     expect(d.byCode.UNRESOLVED_EXCEPTIONS).toMatchObject({ status: 'OK', value: 0 });
   });
 
-  it('Finance Reviewer: assigned expense review tasks counted; sources outside the role’s grants are unavailable, not zero', async () => {
+  it('Finance Reviewer: assigned expense review tasks, reconciliation figures and operational states counted in scope (I-92)', async () => {
     const d = await dashboard('FINANCE_REVIEWER');
     expectCatalogue(d, 'FINANCE_REVIEWER');
     expect(d.title).toBe('Financial review');
     expect(d.byCode.EXPENSE_REVIEW_TASKS).toMatchObject({ status: 'OK', value: 0 });
-    for (const code of ['RECONCILIATION_TASKS', 'UNRECONCILED_OUTCOMES', 'EXPENSE_STATES']) expect(d.byCode[code], code).toMatchObject({ status: 'NOT_AVAILABLE' });
+    // I-92 (0245): these figures now count the claims in scope (no claim exists here); the states read '<returned>/<awaiting payment>'.
+    for (const code of ['RECONCILIATION_TASKS', 'UNRECONCILED_OUTCOMES']) expect(d.byCode[code], code).toMatchObject({ status: 'OK', value: 0 });
+    expect(d.byCode.EXPENSE_STATES).toMatchObject({ status: 'OK', value: '0/0' });
   });
 
-  it('Expense Finance Approver: final decisions, late/receipt exceptions and returned claims counted; decision due is unavailable', async () => {
+  it('Expense Finance Approver: final decisions, late/receipt exceptions, returned claims and decisions due counted (I-92)', async () => {
     const d = await dashboard('EXPENSE_FINANCE_APPROVER');
     expectCatalogue(d, 'EXPENSE_FINANCE_APPROVER');
     expect(d.title).toBe('Expense final decisions');
     expect(d.byCode.FINAL_DECISIONS).toMatchObject({ status: 'OK', value: 0 });
     expect(d.byCode.LATE_RECEIPT).toMatchObject({ status: 'OK', value: 0 });
     expect(d.byCode.RETURNED).toMatchObject({ status: 'OK', value: 0 });
-    expect(d.byCode.DECISIONS_DUE).toMatchObject({ status: 'NOT_AVAILABLE' });
+    // I-92 (0245): "Decision due" is now counted under the dated due period (no claim exists here).
+    expect(d.byCode.DECISIONS_DUE).toMatchObject({ status: 'OK', value: 0 });
   });
 
   it('Treasury Approver: independent releases, overdue releases, confirmed/reversed and awaiting outcome counted in scope', async () => {

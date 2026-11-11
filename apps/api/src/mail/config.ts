@@ -44,6 +44,12 @@ export type EmailChannel =
 
 const SMTP_KEYS = ['SMTP_PORT', 'SMTP_SECURITY', 'SMTP_USER', 'SMTP_PASSWORD_FILE', 'SMTP_FROM', 'SMTP_TIMEOUT_MS'] as const;
 
+/**
+ * Whether these settings turn the email channel on (SMTP_HOST set), for the API to say plainly when email is off and to queue nothing
+ * then (CL-041 send mail). The API and the worker read the same settings file; the worker checks the full settings when it starts.
+ */
+export const emailConfigured = (env: NodeJS.ProcessEnv = process.env): boolean => Boolean(env.SMTP_HOST?.trim());
+
 const positive = (env: NodeJS.ProcessEnv, name: string, fallback: number, max: number): number => {
   const v = env[name]?.trim();
   if (!v) return fallback;

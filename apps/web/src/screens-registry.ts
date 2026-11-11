@@ -11,6 +11,8 @@ import { CONFIRMATION_SCREENS } from './pages/confirmation';
 import { DELEGATION_SCREENS } from './pages/delegations';
 import { DOCUMENTS_ESS_PANELS, DOCUMENTS_SCREENS, DOCUMENTS_TASK_QUEUES } from './pages/documents';
 import { EMPLOYEE_SCREENS } from './pages/employee';
+import { MANAGER_CHANGE_SCREENS } from './pages/manager-change';
+import { ANNOUNCEMENT_SCREENS } from './pages/announcements';
 import { EMPLOYEE_HISTORY_SCREENS } from './pages/employee-history';
 import { EXIT_FINANCE_SCREENS, EXIT_FINANCE_TASK_QUEUES } from './pages/exit-finance';
 import { EXPENSE_ADMIN_SCREENS } from './pages/expense-admin';
@@ -26,12 +28,15 @@ import { ORG_ADMIN_SCREENS } from './pages/org-admin';
 import { PAYROLL_ESS_PANELS, PAYROLL_SCREENS, PAYROLL_TASK_QUEUES } from './pages/payroll';
 import { GRADE_STRUCTURE_SCREENS } from './pages/grade-structures';
 import { PAYROLL_ADJUSTMENT_SCREENS, PAYROLL_ADJUSTMENT_TASK_QUEUES } from './pages/payroll-adjustments';
+import { PAYROLL_EXTRAS_SCREENS } from './pages/payroll-extras';
 import { REPORTING_SCREENS } from './pages/reporting';
 import { ROLE_PERMISSION_SCREENS } from './pages/role-permissions';
 import { SALARY_SCREENS } from './pages/salary';
+import { SEND_MAIL_SCREENS } from './pages/send-mail';
 import { SETTLEMENT_SETTINGS_SCREENS } from './pages/settlement-settings';
 import { STATUTORY_PACK_SCREENS } from './pages/statutory-packs';
 import { STATUTORY_SETTINGS_SCREENS } from './pages/statutory-settings';
+import { STATUTORY_FILE_SCREENS } from './pages/statutory-files';
 import { TAX_ESS_PANELS, TAX_SCREENS, TAX_TASK_QUEUES } from './pages/tax-declarations';
 import { TIMESHEET_ESS_PANELS, TIMESHEET_SCREENS, TIMESHEET_TASK_QUEUES } from './pages/timesheet';
 import { TRAINING_ESS_PANELS, TRAINING_SCREENS, TRAINING_TASK_QUEUES } from './pages/training';
@@ -71,6 +76,9 @@ export const MODULE_SCREENS: readonly ScreenRoute[] = [
   ...PAYROLL_ADJUSTMENT_SCREENS,
   // FR-028/029 grade salary structures and CTC categories (I-80).
   ...GRADE_STRUCTURE_SCREENS,
+  // CL-074 to CL-119 (batch R3): challans, perquisites and past salary, medical claims, provisions, GL mapping and JV, EDOC export.
+  ...PAYROLL_EXTRAS_SCREENS,
+  ...STATUTORY_FILE_SCREENS,
   ...TAX_SCREENS,
   // FR-029 salary master: no My ESS panel and no decision queue (the upload records initial salaries without a separate approval).
   ...SALARY_SCREENS,
@@ -78,6 +86,8 @@ export const MODULE_SCREENS: readonly ScreenRoute[] = [
   ...ADMIN_SCREENS,
   // FR-085 delivery log: the user's own preferences are a panel on the inbox.
   ...NOTIFICATION_SCREENS,
+  // CL-041 (0282): HR sends one message to chosen employees by email (send-mail.tsx).
+  ...SEND_MAIL_SCREENS,
   // §5 user accounts and links; FR-004 reference values: no My ESS panel and no decision queue.
   ...ORG_ADMIN_SCREENS,
   // FR-003, FR-068 delegation: decision tasks show their "delegated" mark in the inbox and each module's queue.
@@ -99,6 +109,10 @@ export const MODULE_SCREENS: readonly ScreenRoute[] = [
   // FR-004 organisation masters; FR-006, FR-008 one employee's record and changes: the same.
   ...ORG_SCREENS,
   ...EMPLOYEE_SCREENS,
+  // CL-020: several people to one new manager (manager-change.tsx); the file route is the employee update import.
+  ...MANAGER_CHANGE_SCREENS,
+  // CL-021, CL-022: company events and ticker messages kept by HR; the dashboard shows them (announcements.tsx).
+  ...ANNOUNCEMENT_SCREENS,
   // FR-078 expense policies: the same; claims and their decisions stay on the core /expenses and /tasks pages.
   ...EXPENSE_ADMIN_SCREENS,
   // FR-034 loan early settlement and the employee's documents received in-app (I-81).

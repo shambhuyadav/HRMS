@@ -32,12 +32,8 @@ const range = (prefix: string, first: number, last: number, width: number) =>
 const REPORT_ROWS = ['FR-007', 'FR-029', 'FR-038', 'FR-044', 'FR-048', 'FR-054', 'FR-056', 'FR-058', 'FR-079', 'FR-090', 'FR-093', 'BR-026', 'BR-039'];
 
 export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
-  { item: 'A11a', kind: 'permission', affects: ['FR-055'], stillSays: 'offboarding policy you approve' },
-  { item: 'A12a', kind: 'calculation', affects: ['FR-052'], stillSays: 'worked settlement examples A to F' },
-  { item: 'A16a', kind: 'output', affects: ['FR-007'], stillSays: 'approve the export columns before release' },
-  { item: 'A23a', kind: 'calculation', affects: ['FR-020', 'FR-005', 'BR-008'], stillSays: 'midnight and threshold test cases' },
-  { item: 'A28b', kind: 'calculation', affects: ['FR-042', 'BR-014'], stillSays: 'worked appraisal examples A to E' },
-  { item: 'A29', kind: 'output', affects: REPORT_ROWS, stillSays: "Every report's columns need your approval" },
+  // A11a, A12a, A16a, A23a and A28b: signed off by the owner on 11 Nov 2026 (docs/10 says Decided), so no longer open.
+  // A29 (report columns, signed off 11 Nov 2026), D8 and E6 (decided 11 Nov 2026) are no longer open.
   { item: 'A33', kind: 'schema', affects: ['ZT20', 'BR-028'], stillSays: 'What counts as "delivered"', decidedIn: 'I-84' },
   { item: 'A35', kind: 'schema', affects: [...range('DQ-', 1, 15, 2), 'ZT19'], stillSays: 'Data migration needs authorised extracts' },
   { item: 'B1', kind: 'permission', affects: ['ZT02', 'FR-060'], stillSays: 'rerouting a stuck task', decidedIn: 'I-84' },
@@ -53,15 +49,9 @@ export const OPEN_QUESTIONS: readonly OpenQuestion[] = [
   { item: 'D3', kind: 'calculation', affects: ['FR-028', 'FR-039'], stillSays: 'professional tax slabs' },
   { item: 'D4', kind: 'output', affects: ['FR-038'], stillSays: 'NPS, EDOC and liability-provision' },
   { item: 'D5', kind: 'schema', affects: ['FR-019'], stillSays: 'biometric device export format' },
-  { item: 'D6', kind: 'output', affects: ['FR-013'], stillSays: 'text-extraction component' },
   { item: 'D7', kind: 'environment', affects: range('ZT', 31, 35, 2), stillSays: 'capacity test environment' },
-  { item: 'D8', kind: 'environment', affects: ['FR-001', 'FR-061', 'FR-106'], stillSays: 'production identity provider, malware scanner' },
-  { item: 'E1', kind: 'handover', affects: [], stillSays: 'Apply migrations 0144 and 0160', why: 'A go-live step, no rule: the gate reads the pre-go-live check itself' },
   { item: 'E2', kind: 'handover', affects: [], stillSays: 'The development database', why: 'The development database only; nothing shipped depends on it' },
-  { item: 'E4', kind: 'handover', affects: [], stillSays: 'confirm where the code should live', why: 'Where the code is kept, not how it behaves' },
   { item: 'E5', kind: 'schema', affects: ['FR-106'], stillSays: 'malware scan keeps failing', decidedIn: 'I-84' },
-  { item: 'E6', kind: 'schema', affects: ['FR-057', 'ZT12'], stillSays: '`NOT NULL` on `created_by`' },
-  { item: 'E7', kind: 'handover', affects: [], stillSays: 'need fresh assignments at go-live', why: 'A go-live step for existing companies; the rule itself is decided (I-81)' },
 ];
 
 export interface OwnerItem {

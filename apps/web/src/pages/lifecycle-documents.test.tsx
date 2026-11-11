@@ -300,8 +300,25 @@ const APPROVED = settlement(S_APPROVED, {
   reviewedAt: '2026-10-25T10:00:00.000Z',
   approvedAt: '2026-10-26T04:00:00.000Z',
   decisions: [
-    { transactionId: 'd1000000-0000-4000-8000-000000000001', step: 1, action: 'review', decision: 'APPROVE', decidedAt: '2026-10-25T10:00:00.000Z' },
-    { transactionId: 'd1000000-0000-4000-8000-000000000002', step: 1, action: 'approve', decision: 'APPROVE', decidedAt: '2026-10-26T04:00:00.000Z' },
+    // access-4 follow-up: the review was decided by a delegate for the reviewer; the approver has no employee record.
+    {
+      transactionId: 'd1000000-0000-4000-8000-000000000001',
+      step: 1,
+      action: 'review',
+      decision: 'APPROVE',
+      decidedAt: '2026-10-25T10:00:00.000Z',
+      decidedBy: { userId: 'b0000000-0000-4000-8000-000000000010', employeeCode: 'SYN-010', displayName: 'Dev Delegate' },
+      onBehalfOf: { userId: 'b0000000-0000-4000-8000-000000000009', employeeCode: 'SYN-009', displayName: 'Mira Manager' },
+    },
+    {
+      transactionId: 'd1000000-0000-4000-8000-000000000002',
+      step: 1,
+      action: 'approve',
+      decision: 'APPROVE',
+      decidedAt: '2026-10-26T04:00:00.000Z',
+      decidedBy: { userId: 'b0000000-0000-4000-8000-000000000011', employeeCode: null, displayName: null },
+      onBehalfOf: null,
+    },
   ],
   version: 7,
 });
@@ -1406,10 +1423,12 @@ describe('one settlement revision (FR-052 to FR-054, BR-016)', () => {
     expect(term(facts, 'Prepared by')).toBe(U_OTHER);
     expect(facts.textContent).toContain('It is not yet eligible for release');
     expect(await within(facts).findByText(CALCULATION.reason, { exact: false })).toBeTruthy();
+    // access-4 follow-up: the decider, and the person a delegated decision was taken for, as the other decision histories show them.
     const decisions = screen.getByRole('table', { name: 'Decisions' });
+    expect(headers(decisions)).toEqual(['Step', 'Decision', 'Decided by', 'Decided']);
     expect(rows(decisions).map(cells)).toEqual([
-      ['Review', 'Approved', localTime('2026-10-25T10:00:00.000Z')],
-      ['Approval', 'Approved', localTime('2026-10-26T04:00:00.000Z')],
+      ['Review', 'Approved', 'Dev Delegate (SYN-010) on behalf of Mira Manager (SYN-009)', localTime('2026-10-25T10:00:00.000Z')],
+      ['Approval', 'Approved', 'A user without an employee record', localTime('2026-10-26T04:00:00.000Z')],
     ]);
   });
 

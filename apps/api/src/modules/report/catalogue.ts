@@ -15,7 +15,10 @@ import { EMPLOYEE_DETAIL_REPORTS } from '../employee/detail-reports.js';
 import { type EmployeeFilters, employeeFilterConditions, employeeOrderBy } from '../employee/service.js';
 import { claimsInScope, EXPENSE_REPORTS } from '../expense/reports.js';
 import { requireDayOrMonth, SALARY_MASTER_ORDER, salaryMasterSelect } from '../increment/salary-master.js';
+import { ABSCONDING_AUDIT_REPORTS } from '../lifecycle/absconding-audit.js';
+import { NOTES_REGISTER_REPORTS } from '../lifecycle/notes-export.js';
 import { comparisonRows, disbursementRows, payrollRegisterRows, payrollRunRevision, reimbursementRegisterRows, requirePayrollRun, requireWholePayrollRun } from '../payroll-outputs/reports.js';
+import { PAYROLL_EXTRAS_REPORTS } from '../payroll-extras/reports.js';
 import { NOTIFICATION_REPORTS } from '../notification/reports.js';
 import { isModuleActive } from '../registry.js';
 import { CURRENT_MEMBER_STATUSES, TEAM_SORTS, teamExportRows } from '../team/service.js';
@@ -131,6 +134,12 @@ export interface ReportDefinition {
   sourceRevision?: ((db: Queryable, grant: AccessGrant, f: ReportFilters) => Promise<string>) | undefined;
   /** C4 "Historical financial views require an explicit history grant": also needed, always or when `when` says the filters reach back. */
   historyGrant?: { resource: string; fieldGroup: string; when?: (f: ReportFilters, today: string) => boolean } | undefined;
+  /**
+   * The read grants of the records a report's figures are worked from (the liability provisions from salaries: salary.read.salary),
+   * also needed in the same assignment wherever the export grant is checked: the catalogue, the request, the generation, the status and
+   * the download.
+   */
+  sourceGrants?: readonly { resource: string; action: string; fieldGroup: string }[] | undefined;
   /** `numeric`: an XLSX number cell when the value is a plain decimal (CSV is unchanged). */
   columns: { key: string; header: string; numeric?: boolean }[];
   rows(db: Queryable, grant: AccessGrant, f: ReportFilters): Promise<Record<string, unknown>[]>;
@@ -481,8 +490,11 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
   ...ATTRITION_REPORTS,
   // Employees missing mandatory document types (coverage CL-150; FR-056, FR-058; 0261), while the documents module is active.
   ...DOCUMENT_COMPLIANCE_REPORTS,
+  ...ABSCONDING_AUDIT_REPORTS,
+  ...NOTES_REGISTER_REPORTS,
   // Shift punch, shift plan and shift deviation registers and the absconding report (coverage CL-047, CL-049 to CL-051; FR-019 to FR-027, FR-056).
   ...ATTENDANCE_REGISTERS,
+  ...PAYROLL_EXTRAS_REPORTS,
 
   INCREMENT_HISTORY: {
     code: 'INCREMENT_HISTORY',

@@ -100,7 +100,8 @@ describe('the menu', () => {
 
   it('lists the organisation masters under their read duty and a new employee under its create duty; the record is reached by links only', () => {
     const titles = (label: string, permission: string) => visibleModuleGroups(holds(permission)).find((g) => g.label === label)?.screens.map((s) => s.title);
-    expect(titles('Organisation', 'org_master.read.operational')).toEqual(['Company', 'Departments', 'Locations', 'Designations', 'Grades']);
+    // CL-006 (0280): the city master sits with the other organisation masters.
+    expect(titles('Organisation', 'org_master.read.operational')).toEqual(['Company', 'Departments', 'Locations', 'Designations', 'Grades', 'Cities']);
     expect(titles('Organisation', 'employee.read.operational')).toBeUndefined();
     expect(titles('Employees', 'employee.create.operational')).toEqual(['New employee']);
     expect(titles('Employees', 'employee.read.operational')).toBeUndefined();

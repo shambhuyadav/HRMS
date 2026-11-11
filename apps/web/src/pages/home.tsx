@@ -4,7 +4,9 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, formatDate, formatUnits } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, nextSort, Section, SortHeader, type SortState, sortParams, StateBadge } from '../ui';
+import { Icon, type IconName } from '../icons';
+import { Badge, Empty, ErrorNote, nextSort, scopeWords, Section, SortHeader, type SortState, sortParams, StateBadge } from '../ui';
+import { AnnouncementsPanel } from './announcements';
 
 interface SourceList {
   label?: string;
@@ -173,48 +175,127 @@ function RecentActivity() {
   );
 }
 
+/** A figure's icon, from what its title is about (decoration only: the title says what it is). */
+function widgetIcon(title: string): IconName {
+  const t = title.toLowerCase();
+  if (/leave|holiday|absence/.test(t)) return 'calendar';
+  if (/attendance|late|punch|present|absent|shift|overtime/.test(t)) return 'clock';
+  if (/payroll|salary|pay |payment|amount|expense|claim|reimburse|loan/.test(t)) return 'wallet';
+  if (/confirm|probation/.test(t)) return 'badgeCheck';
+  if (/task|decision|approv|review|pending/.test(t)) return 'checkSquare';
+  if (/hiring|requisition|candidate|offer|interview|vacanc/.test(t)) return 'userPlus';
+  if (/appraisal|goal|rating|kra/.test(t)) return 'target';
+  if (/training|course/.test(t)) return 'graduation';
+  if (/document|letter|policy/.test(t)) return 'fileText';
+  if (/access|grant|role|security/.test(t)) return 'shield';
+  if (/employee|people|headcount|team|member|draft/.test(t)) return 'users';
+  return 'barChart';
+}
+
+/** A shortcut's icon, from where it leads. */
+function shortcutIcon(to: string): IconName {
+  if (to.startsWith('/team')) return 'users';
+  if (to.startsWith('/employees')) return 'idCard';
+  if (to.startsWith('/leave')) return 'calendar';
+  if (to.startsWith('/tasks')) return 'checkSquare';
+  if (to.startsWith('/confirmations')) return 'badgeCheck';
+  if (to.startsWith('/payroll') || to.startsWith('/payments') || to.startsWith('/expenses')) return 'wallet';
+  if (to.startsWith('/reports')) return 'barChart';
+  if (to.startsWith('/me') || to.startsWith('/profile')) return 'user';
+  return 'sparkles';
+}
+
+const greetingAt = (hour: number) => (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/** The company's business date (YYYY-MM-DD) as a person reads it, e.g. "Wednesday, 11 November 2026". */
+function longDate(day: string): string {
+  const [y, m, d] = day.split('-').map(Number);
+  if (!y || !m || !d) return day;
+  const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${weekday}, ${d} ${MONTHS[m - 1]} ${y}`;
+}
+
 /** DF17: role-labelled dashboard; refresh at most every 60 s with jitter, paused while the tab is hidden. */
 export function DashboardPage() {
+  const { me } = useSession();
   const [jitter] = useState(() => 60_000 + Math.floor(Math.random() * 15_000));
   const dashboard = useDashboard(jitter);
   const d = dashboard.data;
+  const firstName = (me?.displayName ?? '').trim().split(/\s+/)[0];
+  const role = me?.roleName ?? (d ? words(d.role) : '');
   return (
     <>
-      <h1>{d?.title ?? 'Home'}</h1>
-      {d && (
-        <p className="hint">
-          {words(d.role)} · {d.company ? `${d.company} · ` : ''}scope {d.scope.toLowerCase()} · today {d.businessDate} · month from {d.period.from} · refreshed {new Date(d.refreshedAt).toLocaleTimeString()}
-        </p>
-      )}
+      <h1 className="sr-only">{d?.title ?? 'Home'}</h1>
+      <header className="dash-hero">
+        <div className="dash-hero-text">
+          <p className="page-eyebrow">{d ? `${d.title ?? 'Home'} · ${longDate(d.businessDate)}` : 'Home'}</p>
+          <p className="dash-greeting">
+            {greetingAt(new Date().getHours())}
+            {firstName ? `, ${firstName}` : ''}
+          </p>
+          {d && (
+            // FR-096: the acting role, its company and scope, and the period the figures cover are always visible.
+            <p className="dash-context">
+              {role.charAt(0).toUpperCase() + role.slice(1)} · {d.company ? `${d.company} · ` : ''}
+              {scopeWords(d.scope)} · figures for the month from {d.period.from}
+            </p>
+          )}
+        </div>
+        {d && <span className="dash-refreshed">Updated {new Date(d.refreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>}
+      </header>
       {d?.state === 'NO_DASHBOARD' && <Empty>No dashboard is available for this role.</Empty>}
-      <div className="widgets">
-        {d?.widgets.map((w) => (
-          <div key={w.code} className="widget">
-            <div className="widget-title">{w.title}</div>
-            {w.status === 'OK' && <div className="widget-value">{w.source ? <Link to={w.source.href}>{widgetText(w.value)}</Link> : widgetText(w.value)}</div>}
-            {w.status === 'NOT_CONFIGURED' && <div className="widget-note">{w.message}</div>}
-            {w.status === 'NOT_AVAILABLE' && <div className="widget-note">Not available yet</div>}
-            {w.status === 'SUPPRESSED' && (
-              <>
-                <div className="widget-value">Fewer than {w.threshold}</div>
-                <div className="widget-note">Small counts are not shown where the records cannot be opened here.</div>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-      {d?.state === 'OK' && <PendingTasks />}
-      {d?.state === 'OK' && <RecentActivity />}
+      <AnnouncementsPanel />
+      {!!d?.widgets.length && (
+        <div className="widgets">
+          {d.widgets.map((w) => (
+            <div key={w.code} className="widget">
+              <div className="widget-head">
+                <div className="widget-title">{w.title}</div>
+                <span className="widget-icon" aria-hidden="true">
+                  <Icon name={widgetIcon(w.title)} size={18} />
+                </span>
+              </div>
+              {w.status === 'OK' && <div className="widget-value">{w.source ? <Link to={w.source.href}>{widgetText(w.value)}</Link> : widgetText(w.value)}</div>}
+              {w.status === 'NOT_CONFIGURED' && <div className="widget-note">{w.message}</div>}
+              {w.status === 'NOT_AVAILABLE' && <div className="widget-note">Not available yet</div>}
+              {w.status === 'SUPPRESSED' && (
+                <>
+                  <div className="widget-value">Fewer than {w.threshold}</div>
+                  <div className="widget-note">Small counts are not shown where the records cannot be opened here.</div>
+                </>
+              )}
+              {w.status === 'OK' && w.source && (
+                <span className="widget-foot" aria-hidden="true">
+                  View records
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {!!d?.shortcuts?.length && (
-        <Section title="Shortcuts">
-          <ul>
+        <Section title="Quick actions">
+          <ul className="quick-actions">
             {d.shortcuts.map((s) => (
               <li key={s.to}>
-                <Link to={s.to}>{s.label}</Link>
+                <Link to={s.to} className="quick-action">
+                  <span className="quick-action-icon" aria-hidden="true">
+                    <Icon name={shortcutIcon(s.to)} size={18} />
+                  </span>
+                  <span className="quick-action-label">{s.label}</span>
+                  <Icon name="chevron" size={16} className="quick-action-go" />
+                </Link>
               </li>
             ))}
           </ul>
         </Section>
+      )}
+      {d?.state === 'OK' && (
+        <div className="dash-columns">
+          <PendingTasks />
+          <RecentActivity />
+        </div>
       )}
       <ErrorNote error={dashboard.error} />
     </>

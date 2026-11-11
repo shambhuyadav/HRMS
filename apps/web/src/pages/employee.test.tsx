@@ -442,6 +442,24 @@ describe('record sections (FR-008, I-82 item 2: family, qualifications, prior em
     expect(within(row).queryByRole('button')).toBeNull();
   });
 
+  it('CL-007 the qualification is offered from the qualification master as suggestions, and any other text may still be typed', async () => {
+    const calls = await openRecord([READ, READ_PRIVATE, MANAGE_PRIVATE], {
+      [SECTIONS]: [200, ALL],
+      'GET /v1/reference-values?category=QUALIFICATION_LEVEL': [200, LEVELS],
+      'GET /v1/reference-values?category=QUALIFICATION': [200, { category: 'QUALIFICATION', items: [{ code: 'BTECH', label: 'B.Tech' }, { code: 'MBA', label: 'MBA' }] }],
+      'PUT /v1/employees/e-1/record-sections/qualifications/q-1': [200, { id: 'q-1', section: 'qualifications', version: 3 }],
+    });
+    click(button(SHOW));
+    click(within(await screen.findByRole('table', { name: 'Qualifications' })).getByRole('button', { name: 'Edit' }));
+    const form = screen.getByRole('form', { name: 'Edit qualification' });
+    const field = within(form).getByLabelText('Qualification') as HTMLInputElement;
+    await waitFor(() => expect([...(document.getElementById(field.getAttribute('list')!)?.querySelectorAll('option') ?? [])].map((o) => o.getAttribute('value'))).toEqual(['B.Tech', 'MBA']));
+    type(field, 'Synthetic Diploma not in the list');
+    click(within(form).getByRole('button', { name: 'Save qualification' }));
+    expect(await screen.findByText('Qualification saved.')).toBeTruthy();
+    expect(writes(calls)[0]!.body).toMatchObject({ qualification: 'Synthetic Diploma not in the list' });
+  });
+
   it('FR-008 a stale entry reloads the sections and keeps what was typed; the next save names the version now read', async () => {
     let current = ALL;
     const calls = await openRecord([READ, READ_PRIVATE, MANAGE_PRIVATE], {

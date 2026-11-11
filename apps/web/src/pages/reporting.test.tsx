@@ -143,8 +143,9 @@ describe('salary progression chart (FR-038; I-83 item 6)', () => {
 describe('reporting settings (I-83)', () => {
   const SETTINGS = {
     businessDate: '2026-11-06',
-    inForce: { id: 's-1', effectiveFrom: '2000-01-01', effectiveTo: null, smallCountThreshold: 5, recentActivityDays: 14, salaryProgressionYears: 5, reason: 'Initial' },
-    items: [{ id: 's-1', effectiveFrom: '2000-01-01', effectiveTo: null, smallCountThreshold: 5, recentActivityDays: 14, salaryProgressionYears: 5, reason: 'Initial' }],
+    // expenseDecisionDueDays: the setting added with the expense decision due date (the form requires every value in force).
+    inForce: { id: 's-1', effectiveFrom: '2000-01-01', effectiveTo: null, smallCountThreshold: 5, recentActivityDays: 14, salaryProgressionYears: 5, expenseDecisionDueDays: 5, reason: 'Initial' },
+    items: [{ id: 's-1', effectiveFrom: '2000-01-01', effectiveTo: null, smallCountThreshold: 5, recentActivityDays: 14, salaryProgressionYears: 5, expenseDecisionDueDays: 5, reason: 'Initial' }],
   };
 
   it('shows the values in force and starts a new revision from the date given, with its reason', async () => {
@@ -160,6 +161,7 @@ describe('reporting settings (I-83)', () => {
       smallCountThreshold: 3,
       recentActivityDays: 14,
       salaryProgressionYears: 5,
+      expenseDecisionDueDays: 5,
       reason: 'Synthetic: smaller teams',
     });
   });

@@ -35,6 +35,11 @@ const MAINTAINABLE_LISTS: Readonly<Record<string, MaintainableList>> = {
   // An exit clearance process depends on this type (lifecycle/processes.ts).
   LIFECYCLE_PROCESS_TYPE: { module: 'lifecycle', protectedCodes: ['EXIT'] },
   LETTER_TYPE: { module: 'lifecycle' },
+  // CL-005, CL-007, CL-010 (0280, decided under owner delegation, 6 Nov 2026): the state, qualification and bank masters. A state that
+  // cities name can be deactivated or end-dated: its cities stay on record, and no new city is added under it (org/cities.ts).
+  STATE_IN: { module: 'org-masters' },
+  BANK: { module: 'org-masters' },
+  QUALIFICATION: { module: 'employee-record' },
 };
 
 function maintainable(category: string): MaintainableList | null {

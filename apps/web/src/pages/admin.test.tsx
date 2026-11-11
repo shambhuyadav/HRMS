@@ -505,6 +505,44 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
     });
   });
 
+  it('FR-085 DF12: proposes email beside an in-app rule, with only what was typed; a rule that has its email rule is not offered it again', async () => {
+    session.permissions = [MANAGE_RULES];
+    const calls = mockApi({
+      'GET /v1/notifications/rules': { items: [...RULES, rule('BIRTHDAY_EMAIL', 1, { channel: 'EMAIL', status: 'PROPOSED' })] },
+      'POST /v1/notifications/rules/ACCESS_GRANT_APPROVED/email': new Reply((c) => [201, { code: 'ACCESS_GRANT_APPROVED_EMAIL', effectiveFrom: (c.body as { effectiveFrom: string }).effectiveFrom }]),
+    });
+    renderPage(<NotificationRulesPage />);
+    const birthday = await screen.findByRole('listitem', { name: 'Rule BIRTHDAY' });
+    expect(within(birthday).queryByRole('button', { name: 'Propose email for BIRTHDAY' })).toBeNull();
+    expect(within(screen.getByRole('listitem', { name: 'Rule BIRTHDAY_EMAIL' })).queryByRole('button', { name: /Propose email/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Propose email for ACCESS_GRANT_APPROVED' }));
+    const form = screen.getByRole('form', { name: 'Propose email for ACCESS_GRANT_APPROVED' });
+    const submit = within(form).getByRole('button', { name: 'Propose email' }) as HTMLButtonElement;
+    fireEvent.change(within(form).getByLabelText('Takes effect from'), { target: { value: AT } });
+    expect(submit.disabled).toBe(true); // a reason is required
+    fireEvent.change(within(form).getByLabelText('Reason'), { target: { value: 'Synthetic: email for access' } });
+    fireEvent.change(within(form).getByLabelText('Email subject (optional)'), { target: { value: '  Access approved  ' } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1));
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ effectiveFrom: new Date(AT).toISOString(), reason: 'Synthetic: email for access', subjectTemplate: 'Access approved' });
+    expect(await screen.findByText(/Email for ACCESS_GRANT_APPROVED is waiting for approval as ACCESS_GRANT_APPROVED_EMAIL/)).toBeTruthy();
+  });
+
+  it('reads the server’s refusal of an email proposal in plain words', async () => {
+    session.permissions = [MANAGE_RULES];
+    mockApi({
+      'GET /v1/notifications/rules': { items: RULES },
+      'POST /v1/notifications/rules/ACCESS_GRANT_APPROVED/email': new Reply(() => [409, { error: 'EMAIL_RULE_EXISTS', message: 'exists' }]),
+    });
+    renderPage(<NotificationRulesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Propose email for ACCESS_GRANT_APPROVED' }));
+    const form = screen.getByRole('form', { name: 'Propose email for ACCESS_GRANT_APPROVED' });
+    fireEvent.change(within(form).getByLabelText('Takes effect from'), { target: { value: AT } });
+    fireEvent.change(within(form).getByLabelText('Reason'), { target: { value: 'Synthetic' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Propose email' }));
+    expect((await within(form).findByRole('alert')).textContent).toBe('This notification already has an email rule. Change that rule instead.');
+  });
+
   it('needs the rule-management grant', async () => {
     const calls = mockApi({ 'GET /v1/notifications/rules': { items: RULES } });
     renderPage(<NotificationRulesPage />);

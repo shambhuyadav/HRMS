@@ -842,6 +842,8 @@ export function NotificationRulesPage() {
     for (const r of rules.data?.items ?? []) byCode.set(r.code, [...(byCode.get(r.code) ?? []), r]);
     return [...byCode.entries()].map(([code, revisions]) => ({ code, revisions: [...revisions].sort((a, b) => a.revision - b.revision) }));
   }, [rules.data]);
+  // An in-app rule whose email rule (CODE_EMAIL) exists in any state, proposed or rejected included, is not offered email again.
+  const codes = useMemo(() => new Set(groups.map((g) => g.code)), [groups]);
 
   if (!allowed) {
     return (
@@ -940,22 +942,51 @@ export function NotificationRulesPage() {
                     void qc.invalidateQueries({ queryKey: key });
                   }}
                 />
-              ) : pending ? (
-                <p className="hint">A change is waiting for approval; it has to be decided before another can be proposed.</p>
+              ) : editing === `${code}:email` ? (
+                <EmailRuleForm
+                  source={latest}
+                  onCancel={() => setEditing(null)}
+                  onProposed={(text) => {
+                    setEditing(null);
+                    setScheduled(text);
+                    void qc.invalidateQueries({ queryKey: key });
+                  }}
+                />
               ) : (
-                <div className="row">
-                  <button
-                    type="button"
-                    className="secondary"
-                    aria-label={`Change ${code}`}
-                    onClick={() => {
-                      setScheduled(null);
-                      setEditing(code);
-                    }}
-                  >
-                    Change
-                  </button>
-                </div>
+                <>
+                  {pending ? (
+                    <p className="hint">A change is waiting for approval; it has to be decided before another can be proposed.</p>
+                  ) : (
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="secondary"
+                        aria-label={`Change ${code}`}
+                        onClick={() => {
+                          setScheduled(null);
+                          setEditing(code);
+                        }}
+                      >
+                        Change
+                      </button>
+                    </div>
+                  )}
+                  {latest.channel === 'IN_APP' && !codes.has(`${code}_EMAIL`) && (
+                    <div className="row">
+                      <button
+                        type="button"
+                        className="secondary"
+                        aria-label={`Propose email for ${code}`}
+                        onClick={() => {
+                          setScheduled(null);
+                          setEditing(`${code}:email`);
+                        }}
+                      >
+                        Propose email
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </li>
           );
@@ -1037,6 +1068,100 @@ function RuleRevisionForm({ latest, onScheduled, onStale, onCancel }: { latest: 
       <div className="row wide">
         <button type="submit" disabled={!ready}>
           Propose change
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      {save.error ? (
+        refusal ? (
+          <p role="alert" className="error wide">
+            {refusal}
+          </p>
+        ) : (
+          <div className="wide">
+            <ErrorNote error={save.error} />
+          </div>
+        )
+      ) : null}
+    </form>
+  );
+}
+
+/** The API's refusals of an email proposal (rules.ts proposeEmailRule) in plain words; the revision refusals cover the rest. */
+function emailRefusal(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null;
+  switch (error.code) {
+    case 'EMAIL_RULE_EXISTS':
+      return 'This notification already has an email rule. Change that rule instead.';
+    case 'NOT_AN_IN_APP_RULE':
+      return 'Email is proposed from an in-app notification only.';
+    case 'CODE_TOO_LONG':
+      return 'This notification’s code is too long to take an email rule.';
+    default:
+      return revisionRefusal(error);
+  }
+}
+
+/**
+ * FR-085 "configurable supported channels"; DF12: email for one event, proposed beside its in-app rule (POST
+ * /v1/notifications/rules/:code/email). Like any rule change it waits for someone else to approve it, and nothing is sent until the
+ * server also has email (SMTP) settings. Blank wording lets the server derive a safe subject and message from the in-app one.
+ */
+function EmailRuleForm({ source, onProposed, onCancel }: { source: RuleRevision; onProposed: (text: string) => void; onCancel: () => void }) {
+  const [effectiveFrom, setEffectiveFrom] = useState('');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [reason, setReason] = useState('');
+  const instant = effectiveFrom ? new Date(effectiveFrom) : null;
+  const validInstant = instant !== null && !Number.isNaN(instant.getTime());
+  const save = useMutation({
+    mutationFn: () =>
+      api<{ code: string; effectiveFrom: string }>(`/v1/notifications/rules/${encodeURIComponent(source.code)}/email`, {
+        body: {
+          effectiveFrom: instant!.toISOString(),
+          reason: reason.trim(),
+          ...(subject.trim() ? { subjectTemplate: subject.trim() } : {}),
+          ...(body.trim() ? { bodyTemplate: body.trim() } : {}),
+        },
+      }),
+    onSuccess: (r) => onProposed(`Email for ${source.code} is waiting for approval as ${r.code}. Once approved it applies from ${localDateTime(r.effectiveFrom)}; nothing is sent until email is set up on the server.`),
+  });
+  const ready = validInstant && reason.trim() !== '' && !save.isPending;
+  const refusal = emailRefusal(save.error);
+  return (
+    <form
+      className="grid-form"
+      aria-label={`Propose email for ${source.code}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready) save.mutate();
+      }}
+    >
+      <label>
+        Takes effect from
+        <input type="datetime-local" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </label>
+      <label className="wide">
+        Email subject (optional)
+        <input maxLength={150} value={subject} onChange={(e) => setSubject(e.target.value)} />
+      </label>
+      <label className="wide">
+        Email message (optional)
+        <textarea rows={3} maxLength={1000} style={TEXTAREA} value={body} onChange={(e) => setBody(e.target.value)} />
+      </label>
+      <p className="hint wide">
+        Left blank, the email takes a safe subject and message from the in-app notification. Recipients, timing and retries are the in-app
+        notification’s.{' '}
+        {source.approvedPlaceholders.length > 0 && `Approved placeholders: ${source.approvedPlaceholders.map((p) => `{{${p}}}`).join(', ')}.`}
+      </p>
+      <label className="wide">
+        Reason
+        <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      <div className="row wide">
+        <button type="submit" disabled={!ready}>
+          Propose email
         </button>
         <button type="button" className="secondary" onClick={onCancel}>
           Cancel
