@@ -13,6 +13,11 @@ export interface ScreenRoute {
   /** The menu shows the entry only when the session holds this permission key. */
   permission?: string;
   nav: boolean;
+  /**
+   * A staff register or tool (all employees' exit cases, bulk mapping): left out of the menu when the role covers only the
+   * person's own record, whose own items have their own screens. The route itself still answers, and the server decides.
+   */
+  staffOnly?: boolean;
   component: ComponentType;
 }
 

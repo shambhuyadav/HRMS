@@ -150,8 +150,8 @@ describe('employee documents', () => {
       renderDocuments();
       const row = (await screen.findByText('synthetic-contract.pdf')).closest('tr')!;
       const cells = within(row).getAllByRole('cell').map((c) => c.textContent?.trim());
-      expect(cells[2]).toBe('2027-01-31');
-      expect(cells[3]).toBe('2026-10-25');
+      expect(cells[2]).toBe('31 Jan 2027');
+      expect(cells[3]).toBe('25 Oct 2026');
     });
   });
 });
@@ -573,7 +573,7 @@ describe('employee update import (FR-009, I-20)', () => {
     expect(screen.getByRole('columnheader', { name: 'Proposed changes' })).toBeTruthy();
     // In template order whatever order the server used; a value that was empty before shows as an em dash.
     expect(changesOf('SYN-1')).toEqual(['displayName: Synthetic One -> Synthetic Renamed', 'workEmail: — -> renamed@synthetic.example']);
-    expect(changesOf('SYN-2')).toEqual(['department: ENG -> FIN', 'manager: — -> SYN-9', 'effectiveFrom: — -> 2026-11-01']);
+    expect(changesOf('SYN-2')).toEqual(['department: ENG -> FIN', 'manager: — -> SYN-9', 'effectiveFrom: — -> 1 Nov 2026']);
     expect(cellsOf('SYN-1')[4]!.textContent).toBe('—');
     expect(screen.getByText('Cancel import')).toBeTruthy();
   });
@@ -669,7 +669,7 @@ describe('employee update import (FR-009, I-20)', () => {
     expect(calls.some((c) => c.url.endsWith('/cancel'))).toBe(false);
     expect(screen.queryByText('Update 2 employees')).toBeNull();
     expect(screen.queryByText('Cancel import')).toBeNull();
-    expect(changesOf('SYN-2')).toEqual(['department: ENG -> FIN', 'manager: — -> SYN-9', 'effectiveFrom: — -> 2026-11-01']);
+    expect(changesOf('SYN-2')).toEqual(['department: ENG -> FIN', 'manager: — -> SYN-9', 'effectiveFrom: — -> 1 Nov 2026']);
   });
 
   it('a row that became invalid since the preview rejects the whole batch at commit, explained in plain words', async () => {

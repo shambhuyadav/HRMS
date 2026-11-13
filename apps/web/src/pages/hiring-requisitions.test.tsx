@@ -733,10 +733,11 @@ const KEY = (prefix: string) => expect.stringMatching(new RegExp(`^${prefix}-[0-
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
 
 /** An instant as the screens show it: the viewer's local date and time. */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function localTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** Fills the requisition form; every field the API requires. */
@@ -809,7 +810,7 @@ describe('requisition register (FR-012 HR view within scope)', () => {
       'Developer',
       '1',
       '1',
-      '2026-11-15',
+      '15 Nov 2026',
       'Meera Synthetic (SYN-003)',
       'Asha Synthetic (SYN-001)',
       'approved',
@@ -1070,7 +1071,7 @@ describe('one requisition', () => {
       ['1', 'Step 2: Budget and headcount approval', 'Approved', 'A user without an employee record', localTime(DECIDED_AT), 'Synthetic: covered by the client budget'],
     ]);
     const revisions = screen.getByRole('table', { name: 'Submitted revisions' });
-    expect(bodyRows(revisions).map(cells)).toEqual([['1', '1', '2026-11-15', 'Exceeds budget', '3', '3', EXCEPTION_REASON, localTime(SUBMITTED_AT)]]);
+    expect(bodyRows(revisions).map(cells)).toEqual([['1', '1', '15 Nov 2026', 'Exceeds budget', '3', '3', EXCEPTION_REASON, localTime(SUBMITTED_AT)]]);
 
     // A decided requisition has no budget check now: its exception and approval are shown, no check is invented.
     const budget = await findSection('Budget');
@@ -1162,7 +1163,7 @@ describe('one requisition', () => {
     expect(await within(await findSection('Actions')).findByRole('button', { name: 'Withdraw' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Edit draft' })).toBeNull();
     expect(bodyRows(screen.getByRole('table', { name: 'Submitted revisions' })).map(cells)).toEqual([
-      ['1', '2', '2026-12-01', 'Exceeds budget', '3', '2', EXCEPTION_REASON, localTime(SUBMITTED_AT)],
+      ['1', '2', '1 Dec 2026', 'Exceeds budget', '3', '2', EXCEPTION_REASON, localTime(SUBMITTED_AT)],
     ]);
   });
 
@@ -1593,9 +1594,9 @@ describe('manpower budgets (FR-011)', () => {
     renderAt('/hiring/budgets', [BUDGET_READ, ORG_READ]);
     const table = await screen.findByRole('table', { name: 'Budget lines' });
     expect(headers(table)).toEqual(['Department', 'Location', 'Designation', 'Period', 'Headcount in force', 'Committed', 'Revision in progress', 'Budget line']);
-    expect(cells(rowWith(table, 'Developer'))).toEqual(['Engineering', 'Head office', 'Developer', '2026-04-01 to 2027-03-31', '3', '2', '—', 'Open']);
-    expect(cells(rowWith(table, 'Tester'))).toEqual(['Engineering', 'Head office', 'Tester', '2026-04-01 to 2027-03-31', 'None approved yet', '0', 'Revision 1: headcount 2 (draft)', 'Open']);
-    expect(within(table).getByRole('link', { name: 'Open the budget line Engineering, Head office, Developer (2026-04-01 to 2027-03-31)' }).getAttribute('href')).toBe(`/hiring/budgets/${B_DEV}`);
+    expect(cells(rowWith(table, 'Developer'))).toEqual(['Engineering', 'Head office', 'Developer', '1 Apr 2026 to 31 Mar 2027', '3', '2', '—', 'Open']);
+    expect(cells(rowWith(table, 'Tester'))).toEqual(['Engineering', 'Head office', 'Tester', '1 Apr 2026 to 31 Mar 2027', 'None approved yet', '0', 'Revision 1: headcount 2 (draft)', 'Open']);
+    expect(within(table).getByRole('link', { name: 'Open the budget line Engineering, Head office, Developer (1 Apr 2026 to 31 Mar 2027)' }).getAttribute('href')).toBe(`/hiring/budgets/${B_DEV}`);
     expect(lastParams('/v1/hiring/budgets')).toEqual({});
 
     const register = await findSection('Budget lines');
@@ -1703,7 +1704,7 @@ describe('one budget line and its revisions', () => {
     serve();
     renderAt(`/hiring/budgets/${B_DEV}`, [BUDGET_READ]);
     const summary = await findSection('Engineering, Head office, Developer');
-    expect(valueIn(summary, 'Period')).toBe('2026-04-01 to 2027-03-31');
+    expect(valueIn(summary, 'Period')).toBe('1 Apr 2026 to 31 Mar 2027');
     expect(valueIn(summary, 'Headcount in force')).toBe('3');
     expect(valueIn(summary, 'Committed')).toBe('2');
     const history = screen.getByRole('table', { name: 'Revision history' });
@@ -1796,7 +1797,7 @@ describe('manpower budget decision queue (independent HR approval)', () => {
     serve();
     renderQueue('Manpower budget approvals', [BUDGET_APPROVE, BUDGET_READ]);
     const fin = await queueItem('Revision 2: Finance, Pune office, Developer');
-    expect(valueIn(fin, 'Period')).toBe('2026-04-01 to 2027-03-31');
+    expect(valueIn(fin, 'Period')).toBe('1 Apr 2026 to 31 Mar 2027');
     expect(valueIn(fin, 'Proposed headcount')).toBe('4');
     expect(valueIn(fin, 'Headcount in force')).toBe('1');
     expect(valueIn(fin, 'Committed')).toBe('0');

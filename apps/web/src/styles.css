@@ -141,7 +141,9 @@ a.icon-button.active { color: var(--accent); background: var(--accent-soft); }
 .scrim { display: none; }
 
 .content { flex: 1; min-height: 0; overflow-y: auto; padding: 1.75rem 2rem 3rem; display: flex; flex-direction: column; gap: 1.25rem; }
-.content > * { width: 100%; max-width: 1320px; }
+/* Every block keeps its own height: the page scrolls, never the card (a card with overflow-x would otherwise shrink to fit the
+   column and clip its content behind an inner scrollbar). */
+.content > * { width: 100%; max-width: 1320px; flex: none; }
 
 /* ---- Signed-out pages: the product beside the card --------------------------------------------------------------------------- */
 .auth { min-height: 100vh; display: grid; grid-template-columns: minmax(340px, 1fr) minmax(380px, 1fr); background: var(--bg); }
@@ -171,13 +173,35 @@ a.icon-button.active { color: var(--accent); background: var(--accent-soft); }
 .narrow { max-width: 440px; margin: 10vh auto; padding: 2.25rem 2rem; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 0.9rem; }
 .narrow h1 { font-size: 1.6rem; }
 .stack { display: flex; flex-direction: column; gap: 0.75rem; }
+/* In a one-column form a field keeps a readable width; a date never needs the whole card. */
+.stack > label > input:not([type='checkbox']):not([type='radio']):not([type='file']), .stack > label > select, .stack > label > textarea { max-width: 560px; }
+.stack > label > input[type='date'], .stack > label > input[type='datetime-local'] { max-width: 260px; }
 .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
-.grid-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0.9rem 1rem; align-items: end; border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem; background: var(--surface-soft); }
+.grid-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.9rem 1rem; align-items: end; border: 1px solid var(--line); border-radius: var(--radius); padding: 1.1rem; background: var(--surface-soft); }
 .grid-form .wide { grid-column: 1 / -1; }
+/* An optional part of a form, folded until it is needed ("Rehiring a former employee?"). */
+details.form-more > summary { cursor: pointer; width: max-content; font-size: 0.86rem; font-weight: 600; color: var(--accent); }
+details.form-more[open] > summary { margin-bottom: 0.6rem; }
 /* A control never outgrows its cell: a long option or a date picker used to run under the next field. Its label wraps above it instead. */
 .grid-form > * { min-width: 0; }
 .grid-form label.inline { flex-wrap: wrap; margin-bottom: 0; }
-.grid-form label.inline > input, .grid-form label.inline > select { flex: 1 1 9rem; min-width: 0; max-width: 100%; }
+.grid-form label.inline > input:not([type='checkbox']):not([type='radio']), .grid-form label.inline > select { flex: 1 1 9rem; min-width: 0; max-width: 100%; }
+/* A checkbox or radio sits beside its words (a plain label stacks its children, which left the box floating above the text). */
+label:has(> input[type='checkbox']), label:has(> input[type='radio']) { flex-direction: row; align-items: flex-start; gap: 0.5rem; }
+label:has(> input[type='checkbox']) > input, label:has(> input[type='radio']) > input { flex: none; margin: 0.15rem 0 0; }
+/* Fields grouped under a legend: a quiet frame, full width in a form grid. */
+fieldset { margin: 0; padding: 0.75rem 1rem 0.9rem; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 0.55rem; }
+legend { padding: 0 0.35rem; font-size: 0.82rem; font-weight: 600; color: var(--text); }
+.grid-form > fieldset { grid-column: 1 / -1; }
+/* A form or filter row: fields keep their label above them, and buttons line up with the fields' bottom edge. */
+div.inline, form.inline { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem 1rem; margin-bottom: 0.75rem; }
+td form.inline { margin: 0.4rem 0 0; }
+.row:has(> label.inline) { align-items: flex-end; }
+.row > label.inline, .inline > label.inline, .filters label.inline { margin-bottom: 0; }
+.row > label.inline:has(> input:not([type='checkbox']):not([type='radio'])), .row > label.inline:has(> select),
+.inline > label.inline:has(> input:not([type='checkbox']):not([type='radio'])), .inline > label.inline:has(> select),
+.filters label.inline:has(> input:not([type='checkbox']):not([type='radio'])), .filters label.inline:has(> select) { flex-direction: column; align-items: stretch; gap: 0.3rem; }
+.row > label.inline:has(> input[type='checkbox']), .inline > label.inline:has(> input[type='checkbox']) { margin-bottom: 0.6rem; }
 /* Inside a card the form needs no box of its own: the card is the box. A field's label sits above it (a filter's too), and a form's
    buttons keep their own width. A form after other content in the card is set apart by a rule. */
 .card .grid-form { background: transparent; border: 0; padding: 0; border-radius: 0; }
@@ -191,9 +215,40 @@ a.icon-button.active { color: var(--accent); background: var(--accent-soft); }
 .grid-form label.inline:has(> input:not([type='checkbox']):not([type='radio'])) > input,
 .grid-form label.inline:has(> select) > select { flex: none; width: 100%; }
 .grid-form > button, .grid-form > .row { justify-self: start; }
+/* Two or more buttons together (Show + Clear filters) get a line of their own, side by side, rather than wrapping in one column. */
+.grid-form > .row:has(> button + button) { grid-column: 1 / -1; flex-wrap: nowrap; }
+/* A heading, sentence or note in a form grid is not a field: it spans the row (in one cell it squeezed into a narrow column beside
+   the fields). A file field needs room for its button and the file name. */
+.grid-form > h2, .grid-form > h3, .grid-form > h4, .grid-form > p, .grid-form > [role='note'], .grid-form > [role='alert'], .grid-form > .error { grid-column: 1 / -1; }
+.grid-form > h3, .grid-form > h4 { margin: 0; }
+.grid-form > label:has(> input[type='file']) { grid-column: 1 / -1; max-width: 560px; }
+/* A field with help text under it is taller than its neighbours: such a form lines its fields up along the top (bottom alignment
+   would lift that field's input above the others). Its buttons stay on the bottom line. */
+.grid-form:has(> div > label + p.hint) { align-items: start; }
+.grid-form:has(> div > label + p.hint) > button, .grid-form:has(> div > label + p.hint) > .row { align-self: end; }
+input[type='file'] { font: inherit; font-size: 0.88rem; color: var(--muted); }
+input[type='file']::file-selector-button {
+  margin-right: 0.75rem;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+}
+input[type='file']::file-selector-button:hover { background: var(--surface-soft); border-color: #b4bbc3; }
 .grid-form > button { min-width: 8rem; }
 label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.82rem; font-weight: 500; color: #3b4250; }
 label.inline { flex-direction: row; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+/* A field's name sits above it on every screen, as in the filter rows and forms; only a checkbox or radio keeps its text beside it,
+   and the pager's "Rows per page" stays one line. */
+label.inline:not(.pager label):has(> select),
+label.inline:not(.pager label):has(> input:not([type='checkbox']):not([type='radio'])),
+label.inline:not(.pager label):has(> textarea) { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
 label.check { flex-direction: row; align-items: center; }
 input:not([type='checkbox']):not([type='radio']):not([type='file']), select { min-height: 40px; }
 input, select, textarea { font: inherit; font-size: 0.92rem; padding: 0.5rem 0.75rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--text); background: #fff; transition: border-color 0.15s, box-shadow 0.15s; }
@@ -204,6 +259,8 @@ input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); paddi
 button { font: inherit; font-weight: 600; font-size: 0.9rem; padding: 0.55rem 1.05rem; border-radius: var(--radius-sm); border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; transition: background 0.15s, border-color 0.15s, box-shadow 0.15s, color 0.15s; }
 button:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 4px 12px -2px rgba(209, 64, 47, 0.35); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+/* A disabled main button is grey, not a washed-out red that reads as an error. */
+button:disabled:not(.secondary):not(.ghost):not(.danger):not(.link) { opacity: 1; background: #eceef2; border-color: #e0e3e8; color: #8e96a3; box-shadow: none; }
 button.block { width: 100%; padding-block: 0.7rem; }
 button.secondary { background: #fff; color: var(--text); border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
 button.secondary:hover:not(:disabled) { background: var(--surface-soft); border-color: #b4bbc3; color: var(--text); box-shadow: var(--shadow-sm); }
@@ -213,6 +270,10 @@ button.danger { background: #fff; color: var(--bad); border-color: #e9b4b4; }
 button.danger:hover:not(:disabled) { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); box-shadow: none; }
 button.link { background: none; border: none; color: var(--accent); padding: 0; font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
 button.link:hover:not(:disabled) { background: none; box-shadow: none; color: var(--accent-hover); }
+/* Tabs and view toggles choose what is shown; they are not actions, so they never look like the red main button. */
+button[role='tab'], .toggle-group > button[aria-pressed] { padding: 0.36rem 0.85rem; border-radius: 999px; font-size: 0.84rem; font-weight: 500; background: #fff; color: var(--body); border: 1px solid var(--line); box-shadow: none; }
+button[role='tab']:hover:not(:disabled), .toggle-group > button[aria-pressed]:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--line-strong); color: var(--text); box-shadow: none; }
+button[role='tab'][aria-selected='true'], .toggle-group > button[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent-bright); color: var(--accent); font-weight: 600; }
 :focus-visible { outline: 3px solid rgba(231, 76, 60, 0.4); outline-offset: 2px; }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.35rem; box-shadow: var(--shadow-sm); overflow-x: auto; }
@@ -221,6 +282,36 @@ button.link:hover:not(:disabled) { background: none; box-shadow: none; color: va
 .card-header-plain { border-bottom: 0; padding-bottom: 0; margin-bottom: 0.85rem; min-height: 0; }
 .card-header-plain:has(> .card-count:empty) { justify-content: flex-end; }
 .card-count { font-size: 0.85rem; font-weight: 500; color: var(--muted); }
+/* A link in a card's header is the card's action (New requisition, Documents): it looks like a button, not body text. */
+.card-header > a, .card-header > .row > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: none;
+  padding: 0.42rem 0.9rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s, border-color 0.15s;
+}
+.card-header > a:hover, .card-header > .row > a:hover { background: var(--surface-soft); border-color: #b4bbc3; color: var(--accent); }
+/* The card's main action (New requisition): filled, like a primary button. */
+.card-header > a.primary, .card-header > .row > a.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.card-header > a.primary:hover, .card-header > .row > a.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+/* "← Employees": a quiet way back above the page, not a red underlined sentence. */
+a.back-link { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.86rem; font-weight: 500; color: var(--muted); text-decoration: none; }
+a.back-link:hover { color: var(--accent); }
+/* It sits above the page title, where a way back is expected. */
+.content > a.back-link, .content > p:has(> a.back-link) { order: -1; width: auto; align-self: flex-start; margin: 0 0 -0.85rem; }
+/* Links in running text: the brand colour with a light underline that firms up on hover (colour alone would not mark them). */
+.card a:not(.back-link) { text-decoration-color: rgba(209, 64, 47, 0.35); text-underline-offset: 3px; }
+.card a:not(.back-link):hover { text-decoration-color: currentColor; }
 table { width: 100%; border-collapse: collapse; font-size: 0.89rem; }
 th, td { text-align: left; padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; background: var(--surface-soft); white-space: nowrap; }
@@ -229,13 +320,56 @@ th:last-child { border-top-right-radius: 8px; }
 th button.link { color: var(--muted); text-decoration: none; font-weight: 600; font-size: inherit; text-transform: inherit; letter-spacing: inherit; }
 th button.link:hover:not(:disabled) { color: var(--text); }
 tbody tr:hover td { background: #f9fbfd; }
-td a, td button.link { color: var(--text); font-weight: 600; text-decoration: none; }
-td a:hover, td button.link:hover:not(:disabled) { color: var(--accent); text-decoration: underline; }
+td a { color: var(--text); font-weight: 600; text-decoration: none; }
+td a:hover { color: var(--accent); text-decoration: underline; }
+/* A button in a row is one of the row's actions: a small outlined button, kept whole, with room between neighbours. One that takes
+   something out of use (Deactivate, End) is outlined in red, apart from Edit beside it (the brand colour is red too, so colour
+   alone would not tell them apart). */
+td button.link { display: inline-block; margin: 0.1rem 0.35rem 0.1rem 0; padding: 0.22rem 0.6rem; border: 1px solid var(--line-strong); border-radius: 6px; background: #fff; color: var(--text); font-weight: 500; font-size: 0.8rem; line-height: 1.4; text-decoration: none; white-space: nowrap; }
+td button.link:last-child { margin-right: 0; }
+td button.link:hover:not(:disabled) { background: var(--surface-soft); border-color: #b4bbc3; color: var(--text); text-decoration: none; }
+button.link.danger { background: none; border: none; padding: 0; color: var(--bad); }
+button.link.danger:hover:not(:disabled) { background: none; color: #9b1c1c; }
+td button.link.danger { padding: 0.22rem 0.6rem; border: 1px solid #efc4c4; background: #fff; color: var(--bad); }
+td button.link.danger:hover:not(:disabled) { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 tbody tr:last-child td { border-bottom: none; }
+/* The row actions take the room they need and no more, so the data columns beside them are not squeezed into wrapping. */
+td:last-child:has(> button.link):not(:has(> :not(button):not(.sr-only))) { width: 1%; white-space: nowrap; }
+/* A list in a cell starts on the row's first line, without the paragraph margins of a list in text. */
+td ul, td ol { margin: 0; padding-left: 1.1rem; }
+td li + li { margin-top: 0.15rem; }
+/* A row's own heading in the body (a Total row) reads as a bold cell of that row, not as a grey column header. */
+tbody th[scope='row'] { background: none; color: var(--text); font-size: inherit; font-weight: 700; text-transform: none; letter-spacing: 0; white-space: normal; border-radius: 0; }
+/* A table with many columns lets its headings wrap rather than run past the card. */
+table.wrap-head th { white-space: normal; vertical-align: bottom; }
+/* On a phone a table reads as a list of cards, one per row, each value beside its column's name (App.tsx gives each cell the name),
+   instead of a grid that runs past the screen and scrolls sideways inside its card. */
+@media (max-width: 560px) {
+  .content table:has(> thead) { display: block; }
+  .content table:has(> thead) > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+  .content table:has(> thead) > tbody { display: flex; flex-direction: column; gap: 0.6rem; }
+  .content table:has(> thead) > tbody > tr { display: block; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0.2rem 0.8rem; background: var(--surface); }
+  .content table:has(> thead) > tbody > tr > td,
+  .content table:has(> thead) > tbody > tr > th { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.2rem 0.75rem; padding: 0.45rem 0; border-bottom: 1px solid var(--line); text-align: right; white-space: normal; width: auto; }
+  .content table:has(> thead) > tbody > tr > :last-child { border-bottom: 0; }
+  .content table:has(> thead) > tbody > tr > [data-label]::before { content: attr(data-label); flex: none; max-width: 48%; text-align: left; color: var(--muted); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .content table:has(> thead) > tbody > tr:hover > td { background: none; }
+  /* The row's first value (its name, code or date) heads its card. */
+  .content table:has(> thead) > tbody > tr > :first-child { justify-content: flex-start; text-align: left; font-weight: 600; }
+  .content table:has(> thead) > tbody > tr > :first-child::before { content: none; }
+  .content table:has(> thead) > tbody > tr > td > .empty { width: 100%; }
+}
 .pager { display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end; margin-top: 1rem; font-size: 0.86rem; color: var(--muted); }
+/* Paging is never the page's main action: every pager's buttons look secondary, whichever page drew them. */
+.pager button:not(.link) { background: #fff; color: var(--text); border-color: var(--line-strong); box-shadow: var(--shadow-sm); padding: 0.42rem 0.9rem; font-size: 0.86rem; }
+.pager button:not(.link):hover:not(:disabled) { background: var(--surface-soft); border-color: #b4bbc3; color: var(--text); box-shadow: var(--shadow-sm); }
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem 1.5rem; margin: 0; }
 .kv dt { color: var(--muted); font-size: 0.76rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
 .kv dd { margin: 0.1rem 0 0; color: var(--text); font-weight: 500; }
+/* A value that holds a table (slabs, bands) takes the whole row, so the table is never squeezed into one column and scrolled sideways. */
+.kv > div:has(table), .kv > .kv-wide { grid-column: 1 / -1; }
+/* A paragraph across the row stays at a readable line length. */
+.kv > .kv-wide > dd { max-width: 110ch; line-height: 1.55; }
 
 /* ---- Page header: every page names itself the same way ----------------------------------------------------------------------- */
 .page-header { display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: -0.25rem; }
@@ -243,6 +377,10 @@ tbody tr:last-child td { border-bottom: none; }
 .page-title, .content > h1 { margin: 0; font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text); line-height: 1.25; }
 /* A page with its own title and introduction: the introduction reads as the page's subtitle. */
 .content > h1 + .hint { margin-top: -0.75rem; max-width: 72ch; font-size: 0.9rem; }
+/* Notes between cards read at a comfortable line length, like the introduction under the title. */
+.content > p.hint { max-width: 90ch; }
+/* Two notes in a row read as one block, not as two sections. */
+.content > p.hint + p.hint { margin-top: -0.75rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* ---- Dashboard ------------------------------------------------------------------------------------------------------------- */
@@ -263,12 +401,18 @@ tbody tr:last-child td { border-bottom: none; }
 .dash-hero > * { position: relative; z-index: 1; }
 .dash-hero .page-eyebrow { color: rgba(255, 255, 255, 0.62); }
 .dash-greeting { margin: 0.35rem 0 0.4rem; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; color: #fff; }
-.dash-context { margin: 0; font-size: 0.88rem; color: rgba(255, 255, 255, 0.72); }
+/* Role, company, scope and period as separate items with a quiet dot between them; on a narrow screen they wrap whole. */
+.dash-context { margin: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 0; font-size: 0.88rem; color: rgba(255, 255, 255, 0.72); }
+.dash-context > span { white-space: nowrap; }
+.dash-context > span + span::before { content: '·'; margin: 0 0.5rem; color: rgba(255, 255, 255, 0.4); }
 .dash-refreshed { flex: none; font-size: 0.78rem; color: rgba(255, 255, 255, 0.6); padding: 0.3rem 0.7rem; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 999px; background: rgba(255, 255, 255, 0.06); }
 .dash-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 1.25rem; align-items: start; }
 @media (max-width: 560px) {
   .dash-hero { flex-direction: column; align-items: flex-start; padding: 1.25rem; }
   .dash-greeting { font-size: 1.4rem; }
+  /* On a phone the context line wraps: no separator dot is left at the start of a line, the items are spaced apart instead. */
+  .dash-context { gap: 0.2rem 0.9rem; }
+  .dash-context > span + span::before { content: none; }
 }
 
 .widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
@@ -282,9 +426,12 @@ tbody tr:last-child td { border-bottom: none; }
 .widget:nth-child(4n + 4) .widget-icon { color: #9a6a00; background: #fdf3dc; }
 .widget-value { font-size: 1.95rem; font-weight: 700; overflow-wrap: anywhere; color: var(--text); letter-spacing: -0.02em; line-height: 1.15; }
 .widget-value button.link, .widget-value a { color: var(--text); text-decoration: none; }
+/* A state ("Not processed"), not a count: set as a label, not as a large figure. */
+.widget-value.widget-value-text { font-size: 1.2rem; font-weight: 650; letter-spacing: -0.01em; padding: 0.35rem 0; }
 .widget-value button.link:hover:not(:disabled), .widget-value a:hover { color: var(--accent); }
 .widget-note { color: var(--muted); font-size: 0.82rem; }
-.widget-foot { margin-top: auto; padding-top: 0.35rem; font-size: 0.78rem; font-weight: 600; color: var(--accent); }
+.widget-foot { margin-top: auto; padding-top: 0.35rem; font-size: 0.78rem; font-weight: 600; color: var(--accent); text-decoration: none; align-self: flex-start; }
+.widget-foot:hover { text-decoration: underline; }
 
 .quick-actions { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; }
 .quick-action { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 0.9rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); text-decoration: none; font-weight: 600; font-size: 0.9rem; transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
@@ -294,11 +441,29 @@ tbody tr:last-child td { border-bottom: none; }
 .quick-action-go { color: var(--muted); }
 
 /* Badges always carry text; colour is a secondary cue only. */
-.badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.12rem 0.6rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; border: 1px solid var(--line); background: var(--surface-soft); color: var(--body); text-transform: capitalize; white-space: nowrap; }
-.badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.65; }
-.badge-good { color: var(--good); border-color: #cfe5dc; background: var(--good-soft); }
-.badge-warn { color: var(--warn); border-color: #f3e3a6; background: var(--warn-soft); }
-.badge-bad { color: var(--bad); border-color: #fbdcdc; background: var(--bad-soft); }
+/* Sentence case ("Active confirmed", "Not set"): the first letter is raised, the rest stays as written. The dot is drawn in the
+   padding so the badge can be a block container (::first-letter does not apply to a flex box). */
+.badge {
+  display: inline-block;
+  padding: 0.12rem 0.6rem 0.12rem 1.3rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  background-color: var(--surface-soft);
+  background-image: radial-gradient(circle, currentColor 0 2.5px, transparent 3px);
+  background-repeat: no-repeat;
+  background-size: 8px 8px;
+  background-position: 0.55rem 50%;
+  color: var(--body);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.badge::first-letter { text-transform: uppercase; }
+.badge-good { color: var(--good); border-color: #cfe5dc; background-color: var(--good-soft); }
+.badge-warn { color: var(--warn); border-color: #f3e3a6; background-color: var(--warn-soft); }
+.badge-bad { color: var(--bad); border-color: #fbdcdc; background-color: var(--bad-soft); }
 
 .tasks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.65rem; }
 .tasks li { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; background: var(--surface); transition: border-color 0.15s, box-shadow 0.15s; }
@@ -306,6 +471,23 @@ tbody tr:last-child td { border-bottom: none; }
 .tasks li.unread { border-left: 3px solid var(--accent-bright); }
 /* A list item stacks its children at full width; a state badge or a plain link keeps its own size. */
 .tasks li > .badge, .tasks li > button.link { align-self: flex-start; }
+/* A list still loading (or with nothing in it, which its empty note says) takes no room. */
+.tasks:empty { display: none; }
+
+/* Decisions: the queues with something waiting come first; a queue with nothing waiting is one quiet line (its title and "nothing
+   waiting"), its explanations left out, so an empty inbox is a short list rather than a column of large blank cards. */
+/* (A module's queue may wrap its card in a region of its own: the rules hold for the card at any depth.) */
+.decision-queues { display: flex; flex-direction: column; gap: 0.75rem; }
+.decision-queues > * { flex: none; }
+.decision-queues > :has(p.empty.compact) { order: 1; }
+.decision-queues .card:has(p.empty.compact) { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.85rem; padding: 0.7rem 1.1rem; background: var(--surface-soft); box-shadow: none; }
+.decision-queues .card:has(p.empty.compact) > .card-header { margin: 0; padding: 0; border: 0; }
+.decision-queues .card:has(p.empty.compact) > .card-header h2 { font-size: 0.92rem; font-weight: 600; color: var(--text); }
+.decision-queues .card:has(p.empty.compact) p.hint,
+.decision-queues .card:has(p.empty.compact) [role='note'],
+.decision-queues .card:has(p.empty.compact) .tasks { display: none; }
+.decision-queues .card:has(p.empty.compact) p.empty.compact { padding: 0; font-size: 0.86rem; }
+.card > .card-header:has(+ .tasks:empty:last-child) { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
 .choices { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .choices button { width: 100%; display: flex; align-items: center; gap: 0.85rem; text-align: left; background: #fff; color: var(--text); border-color: var(--line-strong); font-weight: 500; padding: 0.8rem 1rem; }
 .choices button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-bright); color: var(--text); box-shadow: none; }
@@ -314,16 +496,24 @@ tbody tr:last-child td { border-bottom: none; }
 .choice-go { color: var(--muted); }
 .hint { color: var(--muted); font-size: 0.84rem; }
 /* Help text under a card's content reads as a quiet note, not as body copy. */
-.card > p.hint { display: flex; align-items: flex-start; gap: 0.6rem; margin: 1rem 0 0; padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); line-height: 1.5; max-width: none; }
+/* A block, not a flex row: a link or code inside the note stays in the sentence (as a flex row each became its own column). The
+   icon sits in the left padding. A note followed by more content keeps a gap below it. */
+.card > p.hint { position: relative; display: block; margin: 1rem 0 0; padding: 0.7rem 0.9rem 0.7rem 2.3rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); line-height: 1.5; max-width: none; }
+.card > p.hint:not(:last-child) { margin-bottom: 1rem; }
+.card > p.hint + p.hint { margin-top: -0.4rem; }
 .card > p.hint::before {
   content: '';
-  flex: none;
+  position: absolute;
+  left: 0.8rem;
+  top: 0.82rem;
   width: 16px;
   height: 16px;
-  margin-top: 2px;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235f6878' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v5M12 8h.01'/%3E%3C/svg%3E") no-repeat center / contain;
 }
 .card > p.hint:first-child, .card > header + p.hint { margin: 0 0 1rem; }
+/* "Loading…" is a passing state, not a note: quiet text, no box or note mark. */
+.card > p.hint.loading, p.hint.loading { padding: 0.25rem 0; border: 0; background: none; color: var(--muted); }
+.card > p.hint.loading::before { content: none; }
 /* An empty list says so in the middle of its card, with a quiet mark above. */
 .empty { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; margin: 0; padding: 1.6rem 1rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
 .empty::before {
@@ -336,8 +526,39 @@ tbody tr:last-child td { border-bottom: none; }
 }
 td .empty, li .empty { flex-direction: row; justify-content: center; padding: 0.75rem; }
 td .empty::before, li .empty::before { display: none; }
+.empty.compact { flex-direction: row; justify-content: flex-start; gap: 0.5rem; padding: 0.15rem 0; font-size: 0.87rem; }
+.empty.compact::before { display: none; }
 .error { border: 1px solid #f6caca; color: var(--bad); background: var(--bad-soft); border-radius: var(--radius-sm); padding: 0.75rem 0.9rem; }
+.error > div { margin-top: 0.25rem; font-size: 0.88rem; color: var(--text); }
+/* A step that asks "are you sure?" before something hard to undo. */
+.confirm-box { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.85rem 1rem; border: 1px solid #f3d3cf; border-left: 3px solid var(--accent-bright); border-radius: var(--radius-sm); background: #fff8f7; }
+.confirm-box p { margin: 0; color: var(--text); }
+.error-code { margin-left: 0.35rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
 .ok { color: var(--good); }
+
+/* ---- Action bars: a row of buttons; an opened form takes the full width below all of them ------------------------------------ */
+.action-bar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; }
+.action-bar > div { display: contents; }
+.action-bar > div > button[aria-expanded='true'] { background: var(--accent-soft); border-color: var(--accent-bright); color: var(--accent); }
+.action-bar > div > :not(button) { flex: 0 0 100%; order: 1; margin-top: 0.5rem; }
+
+/* ---- My ESS: tab groups, one row per group with its name in a fixed column ---------------------------------------------------- */
+.ess-tabs { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.6rem 1.1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.ess-tabs > [role='tablist'] { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0; }
+.ess-tabs > [role='tablist'] + [role='tablist'] { border-top: 1px solid var(--line); }
+.ess-tabs > [role='tablist'] > strong { flex: 0 0 10rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.ess-tabs [role='tab'] { padding: 0.36rem 0.85rem; border-radius: 999px; font-size: 0.84rem; font-weight: 500; background: #fff; color: var(--body); border: 1px solid var(--line); box-shadow: none; }
+.ess-tabs [role='tab']:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--line-strong); color: var(--text); box-shadow: none; }
+.ess-tabs [role='tab'][aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent-bright); color: var(--accent); font-weight: 600; }
+.content > [role='tabpanel'] { display: flex; flex-direction: column; gap: 1.25rem; }
+/* The ESS items not yet offered (Form 16 before the year closes) are listed once, folded, with their reasons. */
+.content > details.hint { margin: 0; }
+details.hint > summary { cursor: pointer; width: max-content; font-weight: 600; }
+/* An expense line is its own bordered block, named "Line N". */
+.stack > fieldset > legend { font-size: 0.9rem; font-weight: 600; }
+@media (max-width: 560px) {
+  .ess-tabs > [role='tablist'] > strong { flex-basis: 100%; }
+}
 
 /* ---- Filter bars ------------------------------------------------------------------------------------------------------------- */
 .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem 1rem; margin-bottom: 1rem; }
@@ -383,7 +604,8 @@ td .empty::before, li .empty::before { display: none; }
 .org-card-code { font-weight: 500; font-size: 0.78rem; color: var(--muted); margin-left: 0.25rem; }
 .org-card-role { font-size: 0.86rem; color: var(--text); }
 .org-card-place { font-size: 0.8rem; color: var(--muted); }
-.org-card-team { flex: none; font-size: 0.76rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 0.2rem 0.6rem; white-space: nowrap; }
+/* Team size is information, not an alert: a neutral pill, not the brand red. */
+.org-card-team { flex: none; font-size: 0.76rem; font-weight: 600; color: var(--info); background: var(--info-soft); border-radius: 999px; padding: 0.2rem 0.6rem; white-space: nowrap; }
 @media (max-width: 560px) {
   .org-children { margin-left: 6px; padding-left: 14px; }
   .org-children > .org-item::before { left: -14px; width: 14px; }
@@ -405,11 +627,21 @@ td .empty::before, li .empty::before { display: none; }
   .topbar { padding: 0.5rem 1rem; gap: 0.5rem; }
   .topbar-actions button.ghost span { display: none; }
   .content { padding: 1.25rem 1rem 2rem; }
-  .auth { grid-template-columns: 1fr; }
+  /* One column: the brand bar keeps its own height (a stretched row left a third of a phone screen dark and empty), the card follows. */
+  .auth { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .auth-brand { padding: 1.25rem 1.5rem; }
+  .auth-panel { align-items: flex-start; padding-top: 2.5rem; }
   .auth-pitch, .auth-foot { display: none; }
 }
 @media (max-width: 560px) {
-  .crumbs .crumb:not(.current), .crumbs .crumb-sep { display: none; }
+  /* The page title sits just below; a cut-off copy of it ("Emplo…") in the bar adds nothing. */
+  .crumbs .crumb, .crumbs .crumb-sep { display: none; }
   .user-chip { display: none; }
+  /* Two figures a row, so quick actions are not two screens down; a card's title and its actions may wrap. */
+  .widgets { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+  .widget-value { font-size: 1.5rem; }
+  .card-header { flex-wrap: wrap; }
+  /* Bigger targets for a finger. */
+  input[type='checkbox'], input[type='radio'] { width: 18px; height: 18px; }
+  .ess-tabs [role='tab'], button[role='tab'] { padding: 0.5rem 0.9rem; }
 }

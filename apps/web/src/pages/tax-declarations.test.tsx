@@ -179,7 +179,7 @@ describe('TN08 own tax declaration', () => {
   it('shows a passed cutoff instead of the form', async () => {
     serve({ 'GET /v1/me/tax-declarations': [200, { items: [], total: 0, configuration: { status: 'ACTIVE' }, openPeriods: [{ ...PERIOD, cutoffPassed: true }], calculation: CALCULATION }] });
     panel('TN08', OWN);
-    await waitFor(() => expect(document.body.textContent).toContain('The cutoff for FY-SYNTH passed on 2099-12-31.'));
+    await waitFor(() => expect(document.body.textContent).toContain('The cutoff for FY-SYNTH passed on 31 Dec 2099.'));
     expect(screen.queryByRole('form')).toBeNull();
   });
 });

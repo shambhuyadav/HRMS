@@ -68,6 +68,33 @@ const MANAGE = 'leave_policy.manage.operational';
 const ACTIVATE = 'leave_policy.activate.operational';
 
 const mappingText = (m: Mapping) => [m.employmentType && `employment type ${m.employmentType}`, m.grade && `grade ${m.grade}`, m.location && `location ${m.location}`].filter(Boolean).join(', ');
+/** A code as words for reading ("FIXED_TERM" reads "fixed term"). */
+const codeWords = (code: string) => code.replace(/_/g, ' ').toLowerCase();
+/** Names of the codes a policy carries, from the mapping form's choices; a code it cannot name reads as words. */
+const nameIn = (items: Option[] | undefined, code: string) => items?.find((o) => o.code === code)?.name;
+/** The same mapping as a sentence for the policy list (the remove buttons' names keep the codes they act on). */
+const mappingWords = (m: Mapping, options?: PolicyOptions) => {
+  const type = m.employmentType && (nameIn(options?.employmentTypes, m.employmentType)?.toLowerCase() ?? codeWords(m.employmentType));
+  const text = [type && `${type} employees`, m.grade && `grade ${m.grade}`, m.location && `at ${nameIn(options?.locations, m.location) ?? m.location}`].filter(Boolean).join(', ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
+/**
+ * An eligibility code as the employment types it names, joined with commas ("PERMANENT_FIXED_TERM" reads "permanent, fixed
+ * term"): the longest known employment type code is taken first, so a code with an underscore of its own stays whole. A code
+ * that is not a run of employment types reads as words.
+ */
+const eligibilityWords = (code: string, types: Option[] | undefined) => {
+  const known = [...(types ?? [])].sort((a, b) => b.code.length - a.code.length);
+  const names: string[] = [];
+  let rest = code;
+  while (rest) {
+    const hit = known.find((t) => rest === t.code || rest.startsWith(`${t.code}_`));
+    if (!hit) return codeWords(code);
+    names.push(hit.name.toLowerCase());
+    rest = rest.slice(hit.code.length + 1);
+  }
+  return names.join(', ');
+};
 const periodText = (p: Pick<PolicyRevision, 'effectiveFrom' | 'effectiveTo'>) => `${formatDate(p.effectiveFrom)} – ${p.effectiveTo ? `before ${formatDate(p.effectiveTo)}` : 'no end date'}`;
 /** A filter form applies as it changes: Enter in one of its fields does not reload the page. */
 export const keepOnPage = (e: FormEvent) => e.preventDefault();
@@ -76,7 +103,20 @@ export const keepOnPage = (e: FormEvent) => e.preventDefault();
  * Requests a report for the shown filters and offers its download when it is ready: reports are generated in the
  * background and the download re-checks access (FR-056).
  */
-export function ReportExport({ reportCode, filters, label, format }: { reportCode: string; filters: Record<string, unknown>; label: string; format?: 'CSV' | 'XLSX' | undefined }) {
+export function ReportExport({
+  reportCode,
+  filters,
+  label,
+  format,
+  disabled = false,
+}: {
+  reportCode: string;
+  filters: Record<string, unknown>;
+  label: string;
+  format?: 'CSV' | 'XLSX' | undefined;
+  /** Shown but not offered yet (the filters it needs are not filled in): the page says what is missing. */
+  disabled?: boolean;
+}) {
   // FR-046: XLSX only where the report offers it; without a format the report is CSV.
   const request = useMutation({ mutationFn: () => api<{ id: string }>('/v1/reports', { body: { reportCode, filters, ...(format && format !== 'CSV' ? { format } : {}) } }) });
   const id = request.data?.id;
@@ -89,7 +129,7 @@ export function ReportExport({ reportCode, filters, label, format }: { reportCod
   const save = useMutation({ mutationFn: () => download(`/v1/reports/${id}/download`) });
   return (
     <div className="inline">
-      <button type="button" className="secondary" disabled={request.isPending} onClick={() => request.mutate()}>
+      <button type="button" className="secondary" disabled={disabled || request.isPending} onClick={() => request.mutate()}>
         {label}
       </button>
       {status.data && <StateBadge state={status.data.state} />}
@@ -145,11 +185,11 @@ function LeaveTypes({ canManage }: { canManage: boolean }) {
               <td>{t.code}</td>
               <td>{t.name}</td>
               <td>{t.paid ? 'Paid' : 'Unpaid'}</td>
-              <td>{t.active ? 'Active' : 'Inactive'}</td>
+              <td>{t.active ? <Badge tone="good">Active</Badge> : <Badge>Inactive</Badge>}</td>
               <td>
                 {canManage && (
-                  <button type="button" className="link" onClick={() => toggle.mutate(t)}>
-                    {t.active ? `Deactivate ${t.code}` : `Reactivate ${t.code}`}
+                  <button type="button" className={t.active ? 'link danger' : 'link'} aria-label={t.active ? `Deactivate ${t.code}` : `Reactivate ${t.code}`} onClick={() => toggle.mutate(t)}>
+                    {t.active ? 'Deactivate' : 'Reactivate'}
                   </button>
                 )}
               </td>
@@ -239,7 +279,7 @@ function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: 
         Accrual rule
         <select {...field('accrualRule')}>
           <option value="NONE">No accrual</option>
-          <option value="MONTHLY_PRORATED">Monthly, prorated (DF05)</option>
+          <option value="MONTHLY_PRORATED">Monthly, prorated</option>
         </select>
       </label>
       <label>
@@ -297,7 +337,7 @@ function NewRevision({ types }: { types: LeaveType[] }) {
               .filter((t) => t.active)
               .map((t) => (
                 <option key={t.id} value={t.code}>
-                  {t.code}
+                  {t.name}
                 </option>
               ))}
           </select>
@@ -307,7 +347,7 @@ function NewRevision({ types }: { types: LeaveType[] }) {
           Create draft
         </button>
       </form>
-      <p className="hint">The revision stays a draft until someone other than its author activates it. Policy values need the owner’s approval before activation (FR-024).</p>
+      <p className="hint">The revision stays a draft until someone other than its author activates it. Policy values need the owner’s approval before activation.</p>
       <ErrorNote error={create.error} />
     </Section>
   );
@@ -338,7 +378,7 @@ function AddMapping({ policy, onDone }: { policy: PolicyRevision; onDone: () => 
         <option value="">Any</option>
         {items?.map((o) => (
           <option key={o.id} value={o.id}>
-            {o.code}
+            {key === 'gradeId' ? `${o.name} (${o.code})` : o.name}
           </option>
         ))}
       </select>
@@ -347,6 +387,7 @@ function AddMapping({ policy, onDone }: { policy: PolicyRevision; onDone: () => 
   return (
     <form
       className="grid-form"
+      aria-label={`Map ${policy.leaveType} revision ${policy.revision}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         add.mutate();
@@ -389,7 +430,6 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     onChanged();
   };
   const edit = useMutation({ mutationFn: () => api(`/v1/leave/policies/${policy.id}`, { method: 'PATCH', body: { expectedVersion: policy.version, ...draftBody(values) } }), onSuccess: done });
-  const remove = useMutation({ mutationFn: (mappingId: string) => api(`/v1/leave/policies/${policy.id}/mappings/${mappingId}/remove`, { body: { expectedVersion: policy.version } }), onSuccess: onChanged });
   const activate = useMutation({
     mutationFn: () => api(`/v1/leave/policies/${policy.id}/activate`, { body: { expectedVersion: policy.version, ...(closePredecessors ? { closePredecessors } : {}) } }),
     onSuccess: done,
@@ -401,33 +441,28 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     <>
       {policy.state === 'DRAFT' && canManage && (
         <>
-          <button type="button" className="link" onClick={() => setOpen(open === 'edit' ? null : 'edit')}>
-            Edit {name}
+          <button type="button" className="link" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => setOpen(open === 'edit' ? null : 'edit')}>
+            Edit
           </button>{' '}
-          <button type="button" className="link" onClick={() => setOpen(open === 'map' ? null : 'map')}>
-            Map {name}
+          <button type="button" className="link" aria-label={`Map ${name}`} aria-expanded={open === 'map'} onClick={() => setOpen(open === 'map' ? null : 'map')}>
+            Map
           </button>{' '}
-          {policy.mappings.map((m) => (
-            <button key={m.id} type="button" className="link" onClick={() => remove.mutate(m.id)}>
-              Remove {mappingText(m)}
-            </button>
-          ))}
         </>
       )}
       {policy.state === 'DRAFT' && canActivate && (
-        <button type="button" className="link" onClick={() => setOpen(open === 'activate' ? null : 'activate')}>
-          Activate {name}
+        <button type="button" className="link" aria-label={`Activate ${name}`} aria-expanded={open === 'activate'} onClick={() => setOpen(open === 'activate' ? null : 'activate')}>
+          Activate
         </button>
       )}
       {policy.state === 'ACTIVE' && canActivate && (
-        <button type="button" className="link" onClick={() => setOpen(open === 'retire' ? null : 'retire')}>
-          Retire {name}
+        <button type="button" className="link danger" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => setOpen(open === 'retire' ? null : 'retire')}>
+          Retire
         </button>
       )}
-      <ErrorNote error={remove.error} />
       {open === 'edit' && (
         <form
           className="grid-form"
+          aria-label={`Edit ${name}`}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             edit.mutate();
@@ -490,6 +525,32 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
   );
 }
 
+/** A revision's mappings in words; on a draft its maintainer can take one out from beside it. */
+function MappingList({ policy, options, canRemove, onChanged }: { policy: PolicyRevision; options: PolicyOptions | undefined; canRemove: boolean; onChanged: () => void }) {
+  const remove = useMutation({ mutationFn: (mappingId: string) => api(`/v1/leave/policies/${policy.id}/mappings/${mappingId}/remove`, { body: { expectedVersion: policy.version } }), onSuccess: onChanged });
+  if (policy.mappings.length === 0) return null;
+  return (
+    <>
+      <ul>
+        {policy.mappings.map((m) => (
+          <li key={m.id}>
+            {mappingWords(m, options)}
+            {canRemove && (
+              <>
+                {' '}
+                <button type="button" className="link" aria-label={`Remove ${mappingText(m)}`} disabled={remove.isPending} onClick={() => remove.mutate(m.id)}>
+                  Remove
+                </button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <ErrorNote error={remove.error} />
+    </>
+  );
+}
+
 function LeavePoliciesPage() {
   const { can } = useSession();
   const qc = useQueryClient();
@@ -499,6 +560,12 @@ function LeavePoliciesPage() {
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v !== '')).toString();
   const types = useQuery({ queryKey: ['leave-types'], queryFn: () => api<{ items: LeaveType[] }>('/v1/leave/types') });
   const revisions = useQuery({ queryKey: ['leave-policies', query], queryFn: () => api<{ items: PolicyRevision[] }>(`/v1/leave/policies${query ? `?${query}` : ''}`) });
+  // Mappings and eligibility carry codes; the mapping form's choices give their names.
+  const options = useQuery({ queryKey: ['leave-policy-options'], enabled: canManage || canActivate, queryFn: () => api<PolicyOptions>('/v1/leave/policy-options') });
+  const eligibleTypes = (p: PolicyRevision): Option[] => [
+    ...(options.data?.employmentTypes ?? []),
+    ...p.mappings.flatMap((m) => (m.employmentType ? [{ id: m.id, code: m.employmentType, name: codeWords(m.employmentType) }] : [])),
+  ];
   const refresh = () => void qc.invalidateQueries({ queryKey: ['leave-policies'] });
   const items = revisions.data?.items ?? [];
   const unmapped = items.filter((p) => p.unmapped).length;
@@ -513,7 +580,7 @@ function LeavePoliciesPage() {
               <option value="">All</option>
               {types.data?.items.map((t) => (
                 <option key={t.id} value={t.code}>
-                  {t.code}
+                  {t.name}
                 </option>
               ))}
             </select>
@@ -561,10 +628,10 @@ function LeavePoliciesPage() {
                   <td>{periodText(p)}</td>
                   <td>
                     {`${p.accrualRule === 'NONE' ? 'No accrual' : 'Monthly accrual'}, ${Number(p.annualEntitlement)} days a year, ${p.minServiceDays} days of service, carry cap ${Number(p.carryCap)}, ${leaveYearText(p.leaveYearStartMonth)}`}{' '}
-                    <span className="hint">({p.eligibility})</span>
+                    <span className="hint">(eligible: {eligibilityWords(p.eligibility, eligibleTypes(p))})</span>
                   </td>
                   <td>
-                    {p.mappings.length > 0 && <ul>{p.mappings.map((m) => <li key={m.id}>{mappingText(m)}</li>)}</ul>}
+                    <MappingList key={p.version} policy={p} options={options.data} canRemove={p.state === 'DRAFT' && canManage} onChanged={refresh} />
                     {p.warnings.map((w) => (
                       <p key={w.code} role="note">
                         <Badge tone="warn">{w.code === 'UNMAPPED' ? 'unmapped' : 'overlap'}</Badge> {w.text}
@@ -740,6 +807,7 @@ function WithoutPolicyList() {
       </form>
       <p className="hint">Employees the month’s accrual would cover, in your scope, for whom a paid leave type resolves to no policy or to a tie. A group with no paid type by policy (for example contractors) appears here too: check it is meant.</p>
       <ErrorNote error={list.error} />
+      {!/^\d{4}-\d{2}$/.test(month) && <Empty>Choose an accrual month to list the employees it would leave without a policy.</Empty>}
       {list.isSuccess && list.data.total === 0 && <Empty>Every employee in your scope resolves to one policy for every paid leave type.</Empty>}
       {list.isSuccess && list.data.items.length > 0 && (
         <>
@@ -837,7 +905,7 @@ function LeaveLedgerPage() {
             <option value="">{me?.employeeId ? 'Myself' : 'Choose'}</option>
             {employees.data?.items.map((e) => (
               <option key={e.id} value={e.id}>
-                {`${e.employeeCode} ${e.displayName}`}
+                {`${e.displayName} (${e.employeeCode})`}
               </option>
             ))}
           </select>
@@ -852,6 +920,11 @@ function LeaveLedgerPage() {
         </label>
       </form>
       <ErrorNote error={employees.error ?? ledger.error} />
+      {!employeeId ? (
+        <Empty>Choose an employee and a period to see their leave ledger.</Empty>
+      ) : (
+        (!period.from || !period.to) && <Empty>Choose the period (From and To) to see the leave ledger.</Empty>
+      )}
       {ledger.data?.items.length === 0 && <Empty>No leave types to show.</Empty>}
       {ledger.data?.items.map((t) => (
         <section key={t.leaveType} aria-label={`${t.leaveType} ledger`}>

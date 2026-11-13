@@ -5,6 +5,7 @@
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
+import { ACCESS_REPORTS } from '../access/reports.js';
 import { ATTENDANCE_REGISTERS } from '../attendance/registers.js';
 import { assertMinuteFilter, ATTENDANCE_CONTROL_FROM, attendanceControlConditions, type AttendanceControlFilters } from '../attendance/service.js';
 import { auditEventQuery } from '../audit-trail/service.js';
@@ -484,6 +485,8 @@ const ALL_REPORTS: Record<string, ReportDefinition> = {
   // FR-093, section 11.2: the notification delivery log, upcoming celebrations, and the biometric sync and exception reports.
   ...NOTIFICATION_REPORTS,
   ...BIOMETRIC_REPORTS,
+  // The System Administrator's access reviews: every role assignment with its scope, state and approver (access.export, 0310).
+  ...ACCESS_REPORTS,
   // FR-007 family, qualification and prior-employment exports (I-82 item 2).
   ...EMPLOYEE_DETAIL_REPORTS,
   // Attrition register and summaries (coverage CL-147, CL-148; FR-056, FR-058).

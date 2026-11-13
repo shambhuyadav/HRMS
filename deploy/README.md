@@ -56,6 +56,7 @@ deploy/
   scripts/verify-sign-in.mjs   (server, root) the sign-in end to end with a temporary synthetic user
   scripts/backup.sh            (server, timer) nightly backup
   keycloak/hrms-realm.json.template, keycloak/configure-realm.sh
+  keycloak/configure-user-admin.sh (server, root) the HRMS's own Keycloak login for the User accounts screen (once per server)
   nginx/*.conf*, systemd/*.service|timer
 ```
 
@@ -143,12 +144,28 @@ without showing them.
 
 ## Adding people
 
-1. In the HRMS, an administrator creates or invites the person and grants a role (access administration; a second person approves).
-2. The System Administrator, in Keycloak's console for the HRMS (`https://<server>/kc/admin/hrms/console/`, the same sign-in with the
-   authenticator app) → Users → Add user: email = the HRMS account's email, **Email verified on**, required actions *Update Password*
-   and *Configure OTP*; Credentials → set a temporary password and give it to the person directly (not by email).
+The System Administrator does it in the HRMS, under Administration → User accounts:
 
-Removing someone: deactivate them in the HRMS (their sessions end) and disable the Keycloak user.
+1. **New account**: the person's email, first and last name. The HRMS creates the account and its Keycloak sign-in and shows a
+   one-time temporary password: give it to the person directly (not by email). At their first sign-in they choose their own password
+   and set up an authenticator app.
+2. Link the account to the person's employee record (same screen), and grant a role under User access (a second person approves).
+
+The same screen changes a person's name and sign-in email, gives a new temporary password (they are signed out; their authenticator
+app stays), deactivates an account (it can no longer sign in, here or at Keycloak) and deletes one that was never used (anything used is
+kept for the record and deactivated instead).
+
+This needs the HRMS's own Keycloak client, set up once per server after the release that carries the screen (and harmless to run again):
+
+```bash
+sudo bash /var/www/html/HRMS/deploy/keycloak/configure-user-admin.sh
+```
+
+It creates the login `hrms-user-admin` in Keycloak's master realm (owner-approved, 14 Nov 2026) holding only the hrms realm's user
+roles (manage, view, query users): it cannot touch the master realm or the HRMS realm's clients and settings. It gives the login a
+new random password, writes it into `/etc/hrms/hrms.env` (never shown) and restarts the API. (A login, not a service-account client:
+Keycloak 26.8 refuses service-account tokens on its admin API.) Without it the screen says the sign-in provider is unavailable.
+Keycloak's own console (`https://<server>/kc/admin/hrms/console/`) still works for anything else.
 
 ## Operations
 

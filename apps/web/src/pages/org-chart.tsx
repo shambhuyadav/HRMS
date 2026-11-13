@@ -220,7 +220,7 @@ export function OrgChartPage() {
       }
     >
       <ErrorNote error={chart.error} />
-      {chart.isPending && <p className="hint">Loading the chart…</p>}
+      {chart.isPending && <p className="hint loading">Loading the chart…</p>}
       {chart.isSuccess && people === 0 && <Empty>No one employed today is visible to you.</Empty>}
       {chart.isSuccess && people > 0 && (
         <>

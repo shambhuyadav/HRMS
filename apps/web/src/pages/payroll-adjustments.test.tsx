@@ -177,7 +177,7 @@ describe('TN13 own later-payroll adjustments', () => {
     serve({ 'GET /v1/me/payroll-adjustments': [200, { items: [{ id: 'a1', serviceStart: '2026-09-07', serviceEnd: '2026-09-13', originPeriodCode: '2026-09', adjustmentKind: 'LATE_TIMESHEET', state: 'SUBMITTED' }], notice: 'These corrections are recorded and held.' }] });
     render(tree(OwnLaterAdjustments));
     const list = await screen.findByRole('list', { name: 'My later-payroll adjustments' });
-    expect(list.textContent).toContain('2026-09-07 to 2026-09-13, payroll 2026-09');
+    expect(list.textContent).toContain('7 Sep 2026 to 13 Sep 2026, payroll 2026-09');
     expect(document.body.textContent).toContain('These corrections are recorded and held.');
   });
 
@@ -217,7 +217,7 @@ describe('arrears (FR-035)', () => {
     screenOf('/payroll/arrears', [READ]);
     const table = await screen.findByRole('table', { name: 'Arrear register' });
     const row = within(table).getAllByRole('row')[1]!;
-    expect(row.textContent).toContain('2026-03-01');
+    expect(row.textContent).toContain('1 Mar 2026');
     expect(row.textContent).toContain('2026-03');
     expect(row.textContent).toContain('BASIC INR 6,000.00');
     expect(row.textContent).toContain('2026-05');

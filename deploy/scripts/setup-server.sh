@@ -274,6 +274,10 @@ if [ -n "${SMTP_HOST:-}" ]; then
 elif [ -f /etc/hrms/hrms.env ]; then
   grep -E '^(SMTP_[A-Z_]+|APP_PUBLIC_URL|EMAIL_TEST_RECIPIENTS)=' /etc/hrms/hrms.env >> /etc/hrms/hrms.env.new || true
 fi
+# The provider's user administration for the User accounts screen (deploy/keycloak/configure-user-admin.sh): kept across runs.
+if [ -f /etc/hrms/hrms.env ]; then
+  grep -E '^KEYCLOAK_(ADMIN_URL|REALM|ADMIN_TOKEN_REALM|ADMIN_CLIENT_ID|ADMIN_CLIENT_SECRET|ADMIN_USERNAME|ADMIN_PASSWORD)=' /etc/hrms/hrms.env >> /etc/hrms/hrms.env.new || true
+fi
 mv /etc/hrms/hrms.env.new /etc/hrms/hrms.env
 chown root:hrms /etc/hrms/hrms.env
 chmod 0640 /etc/hrms/hrms.env

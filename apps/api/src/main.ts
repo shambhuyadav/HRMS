@@ -9,8 +9,12 @@
 //   FILE_STORE_DIR               where uploads are kept (a directory on this server, backed up with the database)
 //   CLAMD_SOCKET or CLAMD_HOST/CLAMD_PORT  the malware scanner (ADR-12)
 //   HOST, PORT                   where to listen (127.0.0.1:3000 behind the reverse proxy unless given)
+//   KEYCLOAK_ADMIN_URL, KEYCLOAK_ADMIN_TOKEN_REALM, KEYCLOAK_ADMIN_USERNAME, KEYCLOAK_ADMIN_PASSWORD (or a client id and secret;
+//                                KEYCLOAK_REALM, default hrms) the provider's user administration for the User accounts screen
+//                                (optional; auth/identity-admin.ts; written by deploy/keycloak/configure-user-admin.sh)
 // The development sign-in, the synthetic scanner and the in-request scan are refused in production by buildApp.
 import { buildApp } from './app.js';
+import { keycloakAdminConfigFromEnv, keycloakIdentityAdmin } from './auth/identity-admin.js';
 import { type OidcProvider, oidcConfigFromEnv, oidcProvider } from './auth/oidc.js';
 import { sessionTokenVerifier } from './auth/tokens.js';
 import { createPool } from './db/pool.js';
@@ -43,11 +47,17 @@ for (let attempt = 1; !provider; attempt++) {
   }
 }
 
+// The provider's user administration for the User accounts screen (deploy/keycloak/configure-user-admin.sh writes these settings).
+// Without them the API still serves everything else; creating accounts and resetting passwords answer that the provider is unavailable.
+const identityConfig = keycloakAdminConfigFromEnv();
+if (!identityConfig) console.error('The sign-in provider user administration is not configured (KEYCLOAK_ADMIN_*): account creation and password resets are unavailable');
+
 const db = createPool(databaseUrl);
 const app = buildApp({
   db,
   verifier: sessionTokenVerifier(tokens),
   oidc: { provider, tokens },
+  identity: identityConfig ? keycloakIdentityAdmin(identityConfig) : null,
   files: localFileStore(required('FILE_STORE_DIR')),
   scanner: clamavScannerFromEnv(),
   logger: true,

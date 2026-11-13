@@ -257,12 +257,13 @@ const taskItem = (name: string) => screen.findByRole('listitem', { name });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
 
 /** An instant as the page shows it: the viewer's local date and time. */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function localTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-const localDay = (iso: string) => localTime(iso).slice(0, 10);
+const localDay = (iso: string) => localTime(iso).replace(/ \d{2}:\d{2}$/, '');
 
 const KEY = /^[a-z-]+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -1020,10 +1021,10 @@ describe('employee processes (FR-016)', () => {
     expect(await screen.findByRole('heading', { name: 'Asha Synthetic (SYN-101): processes and exit' })).toBeTruthy();
     const processTable = await screen.findByRole('table', { name: 'Processes' });
     expect(headers(processTable)).toEqual(['Process', 'Type', 'Revision', 'State', 'Effective date', 'Open tasks', 'Required still open', 'Overdue']);
-    expect(cells(rowWith(processTable, 'Standard onboarding (ONBOARD_STD)'))).toEqual(['Standard onboarding (ONBOARD_STD)', 'Onboarding', '1', 'open', '2026-11-02', '4 of 5', '3', '1 overdue']);
+    expect(cells(rowWith(processTable, 'Standard onboarding (ONBOARD_STD)'))).toEqual(['Standard onboarding (ONBOARD_STD)', 'Onboarding', '1', 'open', '2 Nov 2026', '4 of 5', '3', '1 overdue']);
     const exits = screen.getByRole('table', { name: 'Exit cases of the employee' });
     expect(headers(exits)[0]).toBe('Resignation date');
-    expect(within(exits).getByRole('link', { name: '2026-10-20' }).getAttribute('href')).toBe(`/lifecycle/exits/${X_ASHA}`);
+    expect(within(exits).getByRole('link', { name: '20 Oct 2026' }).getAttribute('href')).toBe(`/lifecycle/exits/${X_ASHA}`);
 
     const start = screen.getByRole('form', { name: 'Start a process' });
     const template = within(start).getByLabelText('Process template') as HTMLSelectElement;
@@ -1059,7 +1060,7 @@ describe('employee processes (FR-016)', () => {
     await waitFor(() => expect(template.options).toHaveLength(3));
     fireEvent.change(template, { target: { value: 'EXIT_STD' } });
     const exit = within(start).getByLabelText('Exit case') as HTMLSelectElement;
-    await waitFor(() => expect(Array.from(exit.options).map((o) => o.textContent)).toEqual(['Choose the exit…', 'Resigned 2026-10-20, last working date 2026-12-20 (approved)']));
+    await waitFor(() => expect(Array.from(exit.options).map((o) => o.textContent)).toEqual(['Choose the exit…', 'Resigned 20 Oct 2026, last working date 20 Dec 2026 (approved)']));
     fireEvent.click(button(start, 'Start process'));
     expect(await within(start).findByText('Choose the approved exit this clearance checklist belongs to.')).toBeTruthy();
     await settle();
@@ -1129,7 +1130,7 @@ describe('employee processes (FR-016)', () => {
     expect(valueIn(intro, 'Status')).toBe('open overdue');
     expect(valueIn(intro, 'Required')).toBe('Required');
     expect(valueIn(intro, 'Owner')).toBe('Reporting manager (role)');
-    expect(valueIn(intro, 'Due')).toBe('2026-10-20');
+    expect(valueIn(intro, 'Due')).toBe('20 Oct 2026');
     expect(hasTerm(intro, 'Completed')).toBe(false);
     const lunch = await taskItem('3. Welcome lunch (LUNCH)');
     expect(valueIn(lunch, 'Required')).toBe('Optional');
@@ -1137,7 +1138,7 @@ describe('employee processes (FR-016)', () => {
     const buddy = await taskItem('5. Buddy check-in (BUDDY)');
     expect(valueIn(buddy, 'Owner')).toBe('Ravi Synthetic');
     expect(valueIn(buddy, 'Status')).toBe('completed');
-    expect(valueIn(buddy, 'Completed')).toBe(`2026-10-25 by User ${U_RAVI}`);
+    expect(valueIn(buddy, 'Completed')).toBe(`25 Oct 2026 by User ${U_RAVI}`);
     expect(valueIn(await taskItem('1. Collect joining documents (DOCS)'), 'Evidence')).toBe('Required');
     expect(valueIn(await taskItem('4. Acknowledge the handbook (ACK)'), 'Owner')).toBe('Employee (role)');
     // A reader acts on nothing.
@@ -1147,9 +1148,9 @@ describe('employee processes (FR-016)', () => {
     const history = screen.getByRole('table', { name: 'Process history' });
     expect(headers(history)).toEqual(['Business date', 'Recorded', 'Action', 'Task', 'Change', 'Evidence', 'Remark or reason', 'By']);
     expect(bodyRows(history).map(cells)).toEqual([
-      ['2026-10-20', localTime('2026-10-20T09:00:00.000Z'), 'Process started', '—', 'Open', '—', '—', 'You'],
-      ['2026-10-21', localTime('2026-10-21T09:00:00.000Z'), 'Task reassigned', 'BUDDY', `Owner: HR Administrator (role) → User ${U_RAVI}`, '—', 'Recorded (restricted)', 'You'],
-      ['2026-10-25', localTime(BUDDY_DONE_AT), 'Task completed', 'BUDDY', 'Open → Completed', '—', 'Recorded (restricted)', `User ${U_RAVI}`],
+      ['20 Oct 2026', localTime('2026-10-20T09:00:00.000Z'), 'Process started', '—', 'Open', '—', '—', 'You'],
+      ['21 Oct 2026', localTime('2026-10-21T09:00:00.000Z'), 'Task reassigned', 'BUDDY', `Owner: HR Administrator (role) → User ${U_RAVI}`, '—', 'Recorded (restricted)', 'You'],
+      ['25 Oct 2026', localTime(BUDDY_DONE_AT), 'Task completed', 'BUDDY', 'Open → Completed', '—', 'Recorded (restricted)', `User ${U_RAVI}`],
     ]);
     // FR-018: the remarks themselves never arrived, so they are nowhere on the page.
     expect(document.body.textContent).not.toContain(COMPLETE_REMARK);
@@ -1201,7 +1202,7 @@ describe('employee processes (FR-016)', () => {
     expect(sent).toEqual({ expectedVersion: 1, remark: 'Originals sighted (synthetic)', evidence: { fileName: 'joining.pdf', contentBase64: expect.any(String) } });
     expect(atob(sent!.evidence.contentBase64)).toBe(PDF_TEXT);
     // The reloaded task: completed by the signed-in user on the business date, its evidence not yet released.
-    await waitFor(() => expect(valueIn(docs, 'Completed')).toBe('2026-10-26 by You'));
+    await waitFor(() => expect(valueIn(docs, 'Completed')).toBe('26 Oct 2026 by You'));
     expect(valueIn(docs, 'Evidence')).toBe('waiting for the malware scan');
     expect(within(docs).queryByRole('button', { name: 'Download evidence' })).toBeNull();
     expect(within(docs).queryByRole('form')).toBeNull();
@@ -1313,7 +1314,7 @@ describe('employee processes (FR-016)', () => {
     fireEvent.click(button(form, 'Skip task'));
     expect(await screen.findByText('Skipped Welcome lunch.')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/employee-process-tasks/${K_LUNCH}/skip`)).toEqual([{ expectedVersion: 1, reason: 'The team works remotely (synthetic)' }]);
-    await waitFor(() => expect(valueIn(lunch, 'Skipped')).toBe('2026-10-26 by You'));
+    await waitFor(() => expect(valueIn(lunch, 'Skipped')).toBe('26 Oct 2026 by You'));
     expect(valueIn(lunch, 'Status')).toBe('skipped');
   });
 
@@ -1533,7 +1534,7 @@ describe('employee processes (FR-016)', () => {
     fireEvent.click(button(form, 'Complete task'));
     expect(await screen.findByText('This task is no longer open.')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/employee-process-tasks/${K_INTRO}/complete`)).toEqual([{ expectedVersion: 1 }]);
-    await waitFor(() => expect(valueIn(intro, 'Completed')).toBe(`2026-10-26 by User ${U_RAVI}`));
+    await waitFor(() => expect(valueIn(intro, 'Completed')).toBe(`26 Oct 2026 by User ${U_RAVI}`));
     expect(within(intro).queryByRole('form')).toBeNull();
     expect(within(intro).queryByRole('button')).toBeNull();
   });
@@ -1732,8 +1733,8 @@ describe('exit cases (FR-051, F1)', () => {
     renderAt('/lifecycle/exits', hr([EXIT_READ]));
     const table = await screen.findByRole('table', { name: 'Exit cases' });
     expect(headers(table)).toEqual(['Employee', 'Resignation date', 'State', 'Proposed last working date', 'Recommended', 'Approved', 'Contractual notice period', 'Final release']);
-    expect(cells(rowWith(table, 'Asha Synthetic (SYN-101)'))).toEqual(['Asha Synthetic (SYN-101)', '2026-10-20', 'submitted', '2026-12-31', '—', '—', 'Not recorded', 'Not released']);
-    expect(cells(rowWith(table, 'Meera Synthetic (SYN-103)'))).toEqual(['Meera Synthetic (SYN-103)', '2026-08-01', 'separated', '2026-09-30', '2026-09-30', '2026-09-30', '30 days (contractual)', 'Released']);
+    expect(cells(rowWith(table, 'Asha Synthetic (SYN-101)'))).toEqual(['Asha Synthetic (SYN-101)', '20 Oct 2026', 'submitted', '31 Dec 2026', '—', '—', 'Not recorded', 'Not released']);
+    expect(cells(rowWith(table, 'Meera Synthetic (SYN-103)'))).toEqual(['Meera Synthetic (SYN-103)', '1 Aug 2026', 'separated', '30 Sep 2026', '30 Sep 2026', '30 Sep 2026', '30 days (contractual)', 'Released']);
     expect(within(table).getByRole('link', { name: 'Asha Synthetic (SYN-101)' }).getAttribute('href')).toBe(`/lifecycle/exits/${X_ASHA}`);
     fireEvent.change(screen.getByLabelText('State'), { target: { value: 'SEPARATED' } });
     await waitFor(() => expect(bodyRows(screen.getByRole('table', { name: 'Exit cases' }))).toHaveLength(1));
@@ -1755,11 +1756,11 @@ describe('exit cases (FR-051, F1)', () => {
     const facts = await findSection('Exit');
     expect(valueIn(facts, 'State')).toBe('approved Approved; the employee separates after the inclusive last working date');
     expect(valueIn(facts, 'Separation type')).toBe('Resignation');
-    expect(valueIn(facts, 'Resignation date')).toBe('2026-10-20');
-    expect(valueIn(facts, 'Proposed last working date')).toBe('2026-12-31');
-    expect(valueIn(facts, 'Recommended last working date')).toBe('2026-12-15');
-    expect(valueIn(facts, 'Approved last working date')).toBe('2026-12-20');
-    expect(valueIn(facts, 'Last working date (inclusive)')).toBe('2026-12-20');
+    expect(valueIn(facts, 'Resignation date')).toBe('20 Oct 2026');
+    expect(valueIn(facts, 'Proposed last working date')).toBe('31 Dec 2026');
+    expect(valueIn(facts, 'Recommended last working date')).toBe('15 Dec 2026');
+    expect(valueIn(facts, 'Approved last working date')).toBe('20 Dec 2026');
+    expect(valueIn(facts, 'Last working date (inclusive)')).toBe('20 Dec 2026');
     expect(valueIn(facts, 'Contractual notice period')).toBe('Not recorded');
     expect(valueIn(facts, 'Final release')).toBe('Not released');
     // The exit reason group was not granted: no reason, and no reason of the withdrawal request.
@@ -1777,9 +1778,9 @@ describe('exit cases (FR-051, F1)', () => {
     const history = screen.getByRole('table', { name: 'Exit history' });
     expect(headers(history)).toEqual(['Business date', 'Recorded', 'Step', 'State', 'Last working date', 'Employee status', 'By']);
     expect(bodyRows(history).map(cells)).toEqual([
-      ['2026-10-20', localTime('2026-10-20T06:00:00.000Z'), 'Resignation submitted', 'New → Submitted', '2026-12-31', '—', `User ${U_ASHA}`],
-      ['2026-10-21', localTime('2026-10-21T06:00:00.000Z'), 'Last working date recommended', 'Submitted → Recommended', '2026-12-15', '—', `User ${U_MANAGER}`],
-      ['2026-10-22', localTime('2026-10-22T06:00:00.000Z'), 'Resignation approved', 'Recommended → Approved', '2026-12-20', 'Active (confirmed) → Notice', `User ${U_RAVI}`],
+      ['20 Oct 2026', localTime('2026-10-20T06:00:00.000Z'), 'Resignation submitted', 'New → Submitted', '31 Dec 2026', '—', `User ${U_ASHA}`],
+      ['21 Oct 2026', localTime('2026-10-21T06:00:00.000Z'), 'Last working date recommended', 'Submitted → Recommended', '15 Dec 2026', '—', `User ${U_MANAGER}`],
+      ['22 Oct 2026', localTime('2026-10-22T06:00:00.000Z'), 'Resignation approved', 'Recommended → Approved', '20 Dec 2026', 'Active (confirmed) → Notice', `User ${U_RAVI}`],
     ]);
     // Without the HR management duties: nothing to record here.
     expect(screen.queryByRole('form', { name: 'Contractual notice period' })).toBeNull();
@@ -1813,7 +1814,7 @@ describe('exit cases (FR-051, F1)', () => {
     const facts = await findSection('Exit');
     expect(valueIn(facts, 'State')).toBe('separated Separated after the last working date');
     const last = bodyRows(screen.getByRole('table', { name: 'Exit history' })).at(-1)!;
-    expect(cells(last)).toEqual(['2026-12-21', localTime('2026-12-21T00:05:00.000Z'), 'Separated', 'Approved → Separated', '2026-12-20', 'Notice → Inactive (separated)', `User ${U_SYSTEM}`]);
+    expect(cells(last)).toEqual(['21 Dec 2026', localTime('2026-12-21T00:05:00.000Z'), 'Separated', 'Approved → Separated', '20 Dec 2026', 'Notice → Inactive (separated)', `User ${U_SYSTEM}`]);
   });
 
   it('records the contractual notice period against the exit version, keeping the typed value after a refusal', async () => {
@@ -1900,7 +1901,7 @@ describe('exit cases (FR-051, F1)', () => {
     });
     renderAt(`/lifecycle/exits/${X_ASHA}`, hr([EXIT_READ, EXIT_MANAGE, PROCESS_READ]));
     const release = await findSection('Final release');
-    expect(within(release).getByText(/The final release is recorded on or after the last working date \(2026-12-20\)/)).toBeTruthy();
+    expect(within(release).getByText(/The final release is recorded on or after the last working date \(20 Dec 2026\)/)).toBeTruthy();
     expect(within(await findSection('Clearance checklist')).getByText('Every required clearance task is complete.')).toBeTruthy();
     fireEvent.click(button(release, 'Record final release'));
     expect(await within(release).findByText('The final release is recorded on or after the last working date.')).toBeTruthy();
@@ -1963,8 +1964,8 @@ describe('exit decision queues (F1; ZT07)', () => {
     renderPart(queueNamed('Resignation recommendations'), manager([EXIT_READ, EXIT_RECOMMEND]));
     expect(await screen.findByRole('heading', { name: 'Resignation recommendations (1)' })).toBeTruthy();
     const item = await taskItem('Asha Synthetic (SYN-101)');
-    expect(valueIn(item, 'Resignation date')).toBe('2026-10-20');
-    expect(valueIn(item, 'Proposed last working date')).toBe('2026-12-31');
+    expect(valueIn(item, 'Resignation date')).toBe('20 Oct 2026');
+    expect(valueIn(item, 'Proposed last working date')).toBe('31 Dec 2026');
     expect(valueIn(item, 'Contractual notice period')).toBe('Not recorded');
     // The reason group is not granted to this manager: no reason is shown.
     expect(hasTerm(item, 'Employee’s reason')).toBe(false);
@@ -1977,7 +1978,7 @@ describe('exit decision queues (F1; ZT07)', () => {
     await waitFor(() => expect(callsTo('POST', `/v1/exit-cases/tasks/${TK_RECOMMEND}/recommend`)).toHaveLength(1));
     expect(button(form, 'Recommend this date').disabled).toBe(true);
     release();
-    expect(await screen.findByText('Recommended 2026-12-15 as the last working date of Asha Synthetic (SYN-101). The resignation now waits for the HR decision.')).toBeTruthy();
+    expect(await screen.findByText('Recommended 15 Dec 2026 as the last working date of Asha Synthetic (SYN-101). The resignation now waits for the HR decision.')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/exit-cases/tasks/${TK_RECOMMEND}/recommend`)).toEqual([{ recommendedLastWorkingDate: '2026-12-15', idempotencyKey: expect.stringMatching(/^exit-recommend-/) }]);
     expect((bodiesTo('POST', `/v1/exit-cases/tasks/${TK_RECOMMEND}/recommend`)[0] as { idempotencyKey: string }).idempotencyKey).toMatch(KEY);
     expect(await screen.findByText('No resignations are waiting for your recommendation.')).toBeTruthy();
@@ -2026,7 +2027,7 @@ describe('exit decision queues (F1; ZT07)', () => {
     });
     renderPart(queueNamed('Resignation approvals'), hr([EXIT_READ, EXIT_APPROVE]));
     const item = await taskItem('Asha Synthetic (SYN-101)');
-    expect(valueIn(item, 'Recommended last working date')).toBe('2026-12-15');
+    expect(valueIn(item, 'Recommended last working date')).toBe('15 Dec 2026');
     const group = within(item).getByRole('group', { name: 'Decide the resignation of Asha Synthetic (SYN-101)' });
     expect(input(group, 'Approved last working date (inclusive)').value).toBe('2026-12-15');
     // Not approving needs both the private reason and the message.
@@ -2043,7 +2044,7 @@ describe('exit decision queues (F1; ZT07)', () => {
     expect(button(group, 'Approve').disabled).toBe(true);
     expect(button(group, 'Do not approve').disabled).toBe(true);
     release();
-    expect(await screen.findByText('Approved the resignation of Asha Synthetic (SYN-101): the last working date is 2026-12-20 (inclusive).')).toBeTruthy();
+    expect(await screen.findByText('Approved the resignation of Asha Synthetic (SYN-101): the last working date is 20 Dec 2026 (inclusive).')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/exit-cases/tasks/${TK_APPROVE}/decision`)).toEqual([
       { decision: 'APPROVE', approvedLastWorkingDate: '2026-12-20', reason: 'Handover needs one more week (synthetic)', idempotencyKey: expect.stringMatching(/^exit-decision-/) },
     ]);
@@ -2108,7 +2109,7 @@ describe('exit decision queues (F1; ZT07)', () => {
     });
     renderPart(queueNamed('Resignation withdrawal requests'), hr([EXIT_READ, EXIT_APPROVE]));
     const item = await taskItem('Asha Synthetic (SYN-101)');
-    expect(valueIn(item, 'Approved last working date')).toBe('2026-12-20');
+    expect(valueIn(item, 'Approved last working date')).toBe('20 Dec 2026');
     const group = within(item).getByRole('group', { name: 'Decide the withdrawal request of Asha Synthetic (SYN-101)' });
     // The request as the exit case shows it; its reason was not returned to this role.
     await waitFor(() => expect(group.textContent).toContain(`Withdrawal requested ${localTime(REQUESTED_AT)}`));
@@ -2171,7 +2172,7 @@ describe('exit decision queues (F1; ZT07)', () => {
     // On the exit case itself the item does not link to it again.
     expect(within(waiting).queryByRole('link', { name: 'Open the exit case' })).toBeNull();
     fireEvent.click(button(within(waiting).getByRole('group', { name: 'Decide the resignation of Asha Synthetic (SYN-101)' }), 'Approve'));
-    expect(await screen.findByText('Approved the resignation of Asha Synthetic (SYN-101): the last working date is 2026-12-15 (inclusive).')).toBeTruthy();
+    expect(await screen.findByText('Approved the resignation of Asha Synthetic (SYN-101): the last working date is 15 Dec 2026 (inclusive).')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/exit-cases/tasks/${TK_APPROVE}/decision`)).toEqual([{ decision: 'APPROVE', approvedLastWorkingDate: '2026-12-15', idempotencyKey: expect.stringMatching(KEY) }]);
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Waiting for your decision' })).toBeNull());
   });
@@ -2196,40 +2197,49 @@ describe('my resignation (Employee OWN context; H3)', () => {
   it('submits a resignation with the proposed inclusive last working date, keeping what was typed after a refusal', async () => {
     const rejected = detailOf(own(exitCase({ id: X_OLD, state: 'REJECTED', requestDate: '2026-09-01', proposedLastWorkingDate: '2026-10-31', lastWorkingDate: '2026-10-31', employeeMessage: 'Please talk to HR first (synthetic)' })));
     let exits: ExitDetail[] = [rejected];
+    let posts = 0;
     mockApi({
       'GET /v1/me/exit-cases': () => [200, { items: exits }],
       'POST /v1/me/resignation': (c) => {
-        const body = c.body as { proposedLastWorkingDate: string; reasonCode?: string };
-        if (body.reasonCode) return [422, { error: 'INVALID_REFERENCE', message: 'Unknown exit reason code' }];
+        const body = c.body as { proposedLastWorkingDate: string };
+        if (++posts === 1) return [422, { error: 'INVALID_LAST_WORKING_DATE', message: 'Synthetic refusal' }];
         exits = [detailOf(own(exitCase())), rejected];
         return [201, { exitCaseId: X_ASHA, state: 'SUBMITTED', requestDate: '2026-10-26', proposedLastWorkingDate: body.proposedLastWorkingDate }];
       },
     });
     renderPart(panelFor('RESIGNATION'), asha([EXIT_SUBMIT, EXIT_READ]));
-    expect(await screen.findByText('You have no open resignation.')).toBeTruthy();
-    const earlier = screen.getByRole('list', { name: 'Earlier resignations' });
-    expect(earlier.textContent).toContain('rejected resigned 2026-09-01, last working date 2026-10-31');
+    const earlier = await screen.findByRole('list', { name: 'Earlier resignations' });
+    expect(earlier.textContent).toContain('rejected resigned 1 Sep 2026, last working date 31 Oct 2026');
     expect(earlier.textContent).toContain('Message from HR: Please talk to HR first (synthetic)');
 
+    // With the form shown, no "no open resignation" note, no second heading and no reason-code field.
     const form = screen.getByRole('form', { name: 'Submit your resignation' });
+    expect(screen.queryByText('You have no open resignation.')).toBeNull();
+    expect(within(form).queryByRole('heading')).toBeNull();
+    expect(within(form).queryByLabelText(/Reason code/)).toBeNull();
+    expect(form.textContent).toContain('Choose your proposed last working day. Your manager and HR review it; you can withdraw until HR decides.');
     fireEvent.click(button(form, 'Submit resignation'));
-    expect(await within(form).findByText('Enter your proposed last working date.')).toBeTruthy();
+    expect(await within(form).findByText('Choose your proposed last working day.')).toBeTruthy();
     await settle();
     expect(callsTo('POST', '/v1/me/resignation')).toHaveLength(0);
-    type(form, 'Proposed last working date (inclusive)', '2026-12-31');
+    type(form, 'Proposed last working day (you work on this day)', '2026-12-31');
     type(form, 'Reason (optional; seen by you and authorised reviewers only)', OWN_REASON);
-    type(form, 'Reason code (optional, if your company uses them)', 'relocation');
     fireEvent.click(button(form, 'Submit resignation'));
-    expect(await within(form).findByText('That reason code is not one your company uses. Leave it empty, or ask HR which codes apply.')).toBeTruthy();
-    expect(input(form, 'Proposed last working date (inclusive)').value).toBe('2026-12-31');
-    expect(input(form, 'Reason code (optional, if your company uses them)').value).toBe('RELOCATION');
-    type(form, 'Reason code (optional, if your company uses them)', '');
+    // Nothing is sent until the employee confirms the date they are resigning with.
+    const confirmation = within(form).getByRole('group', { name: 'Confirm your resignation' });
+    expect(confirmation.textContent).toContain('You are resigning with 31 Dec 2026 as your last working day.');
+    await settle();
+    expect(callsTo('POST', '/v1/me/resignation')).toHaveLength(0);
+    fireEvent.click(button(form, 'Yes, submit my resignation'));
+    expect(await within(form).findByText('The proposed last working date must be a valid date, today or later.')).toBeTruthy();
+    expect(input(form, 'Proposed last working day (you work on this day)').value).toBe('2026-12-31');
     fireEvent.click(button(form, 'Submit resignation'));
+    fireEvent.click(button(form, 'Yes, submit my resignation'));
     expect(
-      await screen.findByText('Your resignation was submitted on 2026-10-26 with the proposed last working date 2026-12-31. Your manager recommends the last working date, then HR decides.'),
+      await screen.findByText('Your resignation was submitted on 26 Oct 2026 with the proposed last working date 31 Dec 2026. Your manager recommends the last working date, then HR decides.'),
     ).toBeTruthy();
     expect(bodiesTo('POST', '/v1/me/resignation')).toEqual([
-      { proposedLastWorkingDate: '2026-12-31', reasonCode: 'RELOCATION', reason: OWN_REASON },
+      { proposedLastWorkingDate: '2026-12-31', reason: OWN_REASON },
       { proposedLastWorkingDate: '2026-12-31', reason: OWN_REASON },
     ]);
     const card = await screen.findByRole('article', { name: 'Your resignation' });
@@ -2262,8 +2272,7 @@ describe('my resignation (Employee OWN context; H3)', () => {
     release();
     expect(await screen.findByText('Your resignation is withdrawn. The request and its history are kept.')).toBeTruthy();
     expect(callsTo('POST', `/v1/me/exit-cases/${X_ASHA}/withdraw`)[0]!.body).toBeUndefined();
-    expect(await screen.findByText('You have no open resignation.')).toBeTruthy();
-    expect(screen.getByRole('list', { name: 'Earlier resignations' }).textContent).toContain('withdrawn resigned 2026-10-20, last working date 2026-12-15');
+    expect((await screen.findByRole('list', { name: 'Earlier resignations' })).textContent).toContain('withdrawn resigned 20 Oct 2026, last working date 15 Dec 2026');
     expect(screen.getByRole('form', { name: 'Submit your resignation' })).toBeTruthy();
   });
 
@@ -2299,15 +2308,15 @@ describe('my resignation (Employee OWN context; H3)', () => {
     });
     renderPart(panelFor('RESIGNATION'), asha([EXIT_SUBMIT, EXIT_READ]));
     const card = await screen.findByRole('article', { name: 'Your resignation' });
-    expect(valueIn(card, 'Last working date (inclusive)')).toBe('2026-12-20');
+    expect(valueIn(card, 'Last working date (inclusive)')).toBe('20 Dec 2026');
     expect(within(card).queryByRole('button', { name: 'Withdraw my resignation' })).toBeNull();
     // The NOTICE status change is part of the own history.
     expect(cells(bodyRows(within(card).getByRole('table', { name: 'Exit history' })).at(-1)!)).toEqual([
-      '2026-10-22',
+      '22 Oct 2026',
       localTime('2026-10-22T06:00:00.000Z'),
       'Resignation approved',
       'Recommended → Approved',
-      '2026-12-20',
+      '20 Dec 2026',
       'Active (confirmed) → Notice',
     ]);
     const form = within(card).getByRole('form', { name: 'Request to withdraw your resignation' });
@@ -2347,7 +2356,7 @@ describe('my processes (Employee OWN context; H3)', () => {
     renderPart(panelFor('MY_PROCESSES'), asha([PROCESS_READ, TASK_COMPLETE, EVIDENCE_READ]));
     const table = await screen.findByRole('table', { name: 'My processes' });
     expect(headers(table)).toEqual(['Process', 'Type', 'State', 'Effective date', 'Open tasks', 'Overdue', 'Tasks']);
-    expect(cells(bodyRows(table)[0]!)).toEqual(['Standard onboarding', 'Onboarding', 'open', '2026-11-02', '4 of 5', '1 overdue', 'Show tasks']);
+    expect(cells(bodyRows(table)[0]!)).toEqual(['Standard onboarding', 'Onboarding', 'open', '2 Nov 2026', '4 of 5', '1 overdue', 'Show tasks']);
     fireEvent.click(within(table).getByRole('button', { name: 'Show tasks' }));
     expect(await screen.findByRole('heading', { name: 'Standard onboarding (ONBOARD_STD)' })).toBeTruthy();
     const ack = await taskItem('4. Acknowledge the handbook (ACK)');
@@ -2362,7 +2371,7 @@ describe('my processes (Employee OWN context; H3)', () => {
     fireEvent.click(button(within(ack).getByRole('form', { name: 'Complete Acknowledge the handbook' }), 'Complete task'));
     expect(await screen.findByText('Completed Acknowledge the handbook.')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/employee-process-tasks/${K_ACK}/complete`)).toEqual([{ expectedVersion: 1 }]);
-    await waitFor(() => expect(valueIn(ack, 'Completed')).toBe('2026-10-26 by You'));
+    await waitFor(() => expect(valueIn(ack, 'Completed')).toBe('26 Oct 2026 by You'));
   });
 });
 
@@ -2459,6 +2468,6 @@ describe('exit decisions under owner delegation (I-81)', () => {
     expect(valueIn(facts, 'Entered by')).toBe('HR, from a resignation given outside the system (with its evidence)');
     const kept = await findSection('Approved for days after the last working date');
     expect(kept.textContent).toContain('These are kept, not cancelled by the exit.');
-    expect(kept.textContent).toContain('Leave: 2026-12-22 to 2026-12-23');
+    expect(kept.textContent).toContain('Leave: 22 Dec 2026 to 23 Dec 2026');
   });
 });

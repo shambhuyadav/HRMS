@@ -31,18 +31,34 @@ const TONES: Record<string, 'good' | 'warn' | 'bad'> = {
   FAILED: 'bad',
 };
 
+/** States whose code does not read as words: an employee's employment status, and a day attendance has not yet worked out. */
+const STATE_WORDS: Readonly<Record<string, string>> = {
+  ACTIVE_CONFIRMED: 'confirmed',
+  ACTIVE_PROBATION: 'on probation',
+  NOTICE: 'serving notice',
+  INACTIVE_SEPARATED: 'separated',
+  NOT_PROCESSED: 'not yet calculated',
+};
+
 export function StateBadge({ state }: { state: string | null | undefined }) {
   if (!state) return <Badge>—</Badge>;
-  return <Badge tone={TONES[state] ?? 'neutral'}>{state.replace(/_/g, ' ').toLowerCase()}</Badge>;
+  return <Badge tone={TONES[state] ?? 'neutral'}>{STATE_WORDS[state] ?? state.replace(/_/g, ' ').toLowerCase()}</Badge>;
 }
 
 export function ErrorNote({ error }: { error: unknown }) {
   if (!error) return null;
   const e = error instanceof ApiError ? error : null;
   const details = e?.details as { missing?: string[]; errors?: { line: number; code: string }[]; lines?: { line: number; flags: string[] }[] } | undefined;
+  // The server's bare refusal says nothing a person can act on: say what it means and what to do; the code stays for support.
+  const bareRefusal = e?.code === 'FORBIDDEN' && e.message === 'Not permitted';
   return (
     <div role="alert" className="error">
-      <strong>{e ? `${e.message} (${e.code})` : 'Something went wrong'}</strong>
+      <strong>{e ? (bareRefusal ? 'Not permitted' : `${e.message} (${e.code})`) : 'Something went wrong'}</strong>
+      {bareRefusal && (
+        <div>
+          The selected role does not allow this. Switch to a role that does, or ask your administrator for access. <span className="error-code">FORBIDDEN</span>
+        </div>
+      )}
       {details?.missing && <div>Missing: {details.missing.join(', ')}</div>}
       {details?.errors && <div>{details.errors.map((x) => `line ${x.line}: ${x.code}`).join('; ')}</div>}
       {details?.lines && <div>{details.lines.map((x) => `line ${x.line} needs a reason (${x.flags.join(', ')})`).join('; ')}</div>}
@@ -50,8 +66,12 @@ export function ErrorNote({ error }: { error: unknown }) {
   );
 }
 
+/** Inside it, an empty state is one quiet line: a page of many lists (the decision inbox) is not a column of large blanks. */
+export const CompactEmptyContext = createContext(false);
+
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="empty">{children}</p>;
+  const compact = useContext(CompactEmptyContext);
+  return <p className={compact ? 'empty compact' : 'empty'}>{children}</p>;
 }
 
 /** The page size the paged lists ask for (the API accepts 25, 50 or 100). */

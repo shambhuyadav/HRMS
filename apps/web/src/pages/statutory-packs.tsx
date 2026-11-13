@@ -11,7 +11,7 @@
 // server returned and says its refusals in plain words (the conventions of lifecycle-documents.tsx, whose helpers it shares).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, type FormEvent, useId, useMemo, useState } from 'react';
-import { api, ApiError, formatDate } from '../api';
+import { api, ApiError, formatAmount, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, Section } from '../ui';
@@ -91,6 +91,11 @@ const text = (v: unknown): string | null => (typeof v === 'string' ? v : typeof 
 const ROUNDING: Record<string, string> = { HALF_UP_WHOLE: 'to the nearest whole unit, half up', UP_WHOLE: 'up to the next whole unit' };
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const monthName = (m: unknown) => MONTHS[Number(m) - 1] ?? String(m);
+/** An amount of a pack as money ("INR 15,000.00"), as everywhere else in the app; a dash when the pack holds none. */
+const money = (v: unknown, currency: string) => {
+  const t = text(v);
+  return t === null ? '—' : formatAmount(t, currency);
+};
 
 function Slabs({ slabs, currency }: { slabs: unknown[]; currency: string }) {
   return (
@@ -109,9 +114,9 @@ function Slabs({ slabs, currency }: { slabs: unknown[]; currency: string }) {
             const months = s.monthAmounts && typeof s.monthAmounts === 'object' ? Object.entries(s.monthAmounts) : [];
             return (
               <tr key={i}>
-                <td>{text(s.upTo) ? `${text(s.upTo)} ${currency}` : 'No upper limit'}</td>
-                <td>{`${text(s.amount) ?? '—'} ${currency}`}</td>
-                <td>{months.length === 0 ? '—' : months.map(([m, a]) => `${monthName(m)}: ${text(a) ?? '—'} ${currency}`).join(', ')}</td>
+                <td>{text(s.upTo) ? money(s.upTo, currency) : 'No upper limit'}</td>
+                <td>{money(s.amount, currency)}</td>
+                <td>{months.length === 0 ? '—' : months.map(([m, a]) => `${monthName(m)}: ${money(a, currency)}`).join(', ')}</td>
               </tr>
             );
           })}
@@ -137,9 +142,9 @@ function LwfSlabs({ slabs, currency }: { slabs: unknown[]; currency: string }) {
             const s = (raw ?? {}) as { upTo?: unknown; employee?: unknown; employer?: unknown };
             return (
               <tr key={i}>
-                <td>{text(s.upTo) ? `${text(s.upTo)} ${currency}` : 'No upper limit'}</td>
-                <td>{`${text(s.employee) ?? '—'} ${currency}`}</td>
-                <td>{`${text(s.employer) ?? '—'} ${currency}`}</td>
+                <td>{text(s.upTo) ? money(s.upTo, currency) : 'No upper limit'}</td>
+                <td>{money(s.employee, currency)}</td>
+                <td>{money(s.employer, currency)}</td>
               </tr>
             );
           })}
@@ -161,7 +166,7 @@ function TaxRegime({ code, regime: r, currency: c }: { code: string; regime: Rec
   return (
     <div>
       <p>
-        {`${name}: standard deduction ${text(r.standardDeduction) ?? '—'} ${c}; rebate of up to ${text(rebate.maxAmount) ?? '—'} ${c} on taxable income up to ${text(rebate.incomeUpTo) ?? '—'} ${c}${rebate.marginalRelief === true ? ', with marginal relief just above it' : ''}; ${bands.length > 0 ? `surcharge ${bands.map((b) => `${text(b.ratePercent)}% above ${text(b.incomeAbove)} ${c}`).join(', ')} (with marginal relief)` : 'no surcharge'}; cess ${text(r.cessPercent) ?? '—'}%; the year's tax rounded ${labelOf(TAX_ROUNDING, String(r.rounding))}.`}
+        {`${name}: standard deduction ${money(r.standardDeduction, c)}; rebate of up to ${money(rebate.maxAmount, c)} on taxable income up to ${money(rebate.incomeUpTo, c)}${rebate.marginalRelief === true ? ', with marginal relief just above it' : ''}; ${bands.length > 0 ? `surcharge ${bands.map((b) => `${text(b.ratePercent)}% above ${money(b.incomeAbove, c)}`).join(', ')} (with marginal relief)` : 'no surcharge'}; cess ${text(r.cessPercent) ?? '—'}%; the year's tax rounded ${labelOf(TAX_ROUNDING, String(r.rounding))}.`}
         {hra ? ` House rent allowance exempt: the least of the allowance, rent less ${text(hra.rentAboveSalaryPercent)}% of salary, and ${text(hra.metroPercent)}% of salary (four metro cities) or ${text(hra.otherPercent)}% elsewhere.` : ' No house rent allowance exemption.'}
         {text(r.employerNpsLimitPercent) ? ` Employer NPS contribution deductible up to ${text(r.employerNpsLimitPercent)}% of salary.` : ''}
       </p>
@@ -176,7 +181,7 @@ function TaxRegime({ code, regime: r, currency: c }: { code: string; regime: Rec
           <tbody>
             {slabs.map((s, i) => (
               <tr key={i}>
-                <td>{text(s.upTo) ? `${text(s.upTo)} ${c}` : 'No upper limit'}</td>
+                <td>{text(s.upTo) ? money(s.upTo, c) : 'No upper limit'}</td>
                 <td>{`${text(s.ratePercent) ?? '—'}%`}</td>
               </tr>
             ))}
@@ -190,6 +195,7 @@ function TaxRegime({ code, regime: r, currency: c }: { code: string; regime: Rec
 function ParametersText({ pack: p }: { pack: PackRevision }) {
   const q = p.parameters ?? {};
   const c = p.currencyCode;
+  const m = (v: unknown) => money(v, c);
   if (/^LWF_[A-Z]{2}$/.test(p.code) && Array.isArray(q.slabs)) {
     const months = Array.isArray(q.contributionMonths) ? q.contributionMonths.map(monthName).join(' and ') : '—';
     return (
@@ -215,7 +221,7 @@ function ParametersText({ pack: p }: { pack: PackRevision }) {
   if (p.code === 'PF' && text(q.employeeRatePercent) && text(q.wageCeiling)) {
     return (
       <>
-        {`Employee ${text(q.employeeRatePercent)}% and employer ${text(q.employerRatePercent)}% of PF wages up to ${text(q.wageCeiling)} ${c} (all wages under the employee's higher-wage option); of the employer's share, pension ${text(q.pensionRatePercent)}% of wages up to ${text(q.pensionWageCeiling)} ${c}; EDLI ${text(q.edliRatePercent)}% of wages up to ${text(q.edliWageCeiling)} ${c}; administration charges ${text(q.adminChargesRatePercent)}%; each figure rounded ${labelOf(ROUNDING, String(q.rounding))}.`}
+        {`Employee ${text(q.employeeRatePercent)}% and employer ${text(q.employerRatePercent)}% of PF wages up to ${m(q.wageCeiling)} (all wages under the employee's higher-wage option); of the employer's share, pension ${text(q.pensionRatePercent)}% of wages up to ${m(q.pensionWageCeiling)}; EDLI ${text(q.edliRatePercent)}% of wages up to ${m(q.edliWageCeiling)}; administration charges ${text(q.adminChargesRatePercent)}%; each figure rounded ${labelOf(ROUNDING, String(q.rounding))}.`}
       </>
     );
   }
@@ -223,7 +229,7 @@ function ParametersText({ pack: p }: { pack: PackRevision }) {
     const starts = Array.isArray(q.contributionPeriodStartMonths) ? q.contributionPeriodStartMonths.map(monthName).join(' and ') : '—';
     return (
       <>
-        {`Employee ${text(q.employeeRatePercent)}% and employer ${text(q.employerRatePercent)}% of wages, for monthly wages up to ${text(q.wageCeiling)} ${c}; contribution periods start in ${starts}, and an employee covered at a period's start stays covered to its end; rounded ${labelOf(ROUNDING, String(q.rounding))}.`}
+        {`Employee ${text(q.employeeRatePercent)}% and employer ${text(q.employerRatePercent)}% of wages, for monthly wages up to ${m(q.wageCeiling)}; contribution periods start in ${starts}, and an employee covered at a period's start stays covered to its end; rounded ${labelOf(ROUNDING, String(q.rounding))}.`}
       </>
     );
   }
@@ -236,10 +242,11 @@ function ParametersText({ pack: p }: { pack: PackRevision }) {
     );
   }
   if (p.code === 'GRATUITY' && text(q.wageDays) && text(q.wageDivisor)) {
-    const exempt = Array.isArray(q.exemptSeparationTypes) ? q.exemptSeparationTypes.join(', ') : '';
+    // Separation types in words ("death, disablement"), not their codes.
+    const exempt = Array.isArray(q.exemptSeparationTypes) ? q.exemptSeparationTypes.map((t) => String(t).replace(/_/g, ' ').toLowerCase()).join(', ') : '';
     return (
       <>
-        {`${text(q.wageDays)} days' wages per counted year, a month's wages / ${text(q.wageDivisor)}, ${text(q.minimumServiceYears)} years' continuous service${exempt ? ` (none on ${exempt})` : ''}, a final part-year of more than ${text(q.partYearMonthsOver)} months counts, ceiling ${text(q.ceilingAmount)} ${c}`}
+        {`${text(q.wageDays)} days' wages per counted year, a month's wages / ${text(q.wageDivisor)}, ${text(q.minimumServiceYears)} years' continuous service${exempt ? ` (none on ${exempt})` : ''}, a final part-year of more than ${text(q.partYearMonthsOver)} months counts, ceiling ${m(q.ceilingAmount)}`}
       </>
     );
   }
@@ -264,26 +271,23 @@ function StatutoryPacksScreen() {
         Gratuity, provident fund, employees’ state insurance and each state’s professional tax are valued in payroll and settlements from these packs only. Every rate,
         ceiling and slab is a value of a dated revision, and the revision in force for the period is the one used.
       </p>
-      <p role="note">
-        <Badge tone="warn">two people</Badge> A revision values nothing until one authorised person has validated it against the law in force and another, who neither
-        wrote nor validated it, has activated it. Until then an employee a statutory head applies to is blocked with RULE_PACK_NOT_CONFIGURED. The seeded drafts are
-        starting points to check, not advice.
+      <p className="hint" role="note">
+        A revision is used only after one authorised person has validated it against the law in force and a second person, who neither wrote nor validated it, has
+        activated it. Until then, payroll and settlements stop for any employee that statutory head applies to. The drafts supplied are starting points to check, not
+        advice.
       </p>
       {notice && (
         <p className="ok" role="status">
           {notice}
         </p>
       )}
-      {list.isPending && <p className="hint">Loading the statutory packs…</p>}
+      {list.isPending && <p className="hint loading">Loading the statutory packs…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view the statutory packs: that needs the statutory pack read duty." />
       {data && codes.length === 0 && <Empty>No statutory pack is known.</Empty>}
       {codes.map((code) => {
         const revisions = (data?.items ?? []).filter((p) => p.code === code);
         return (
           <Section key={code} title={titleOf(code)}>
-            <h3 style={H3} className="hint">
-              {code}
-            </h3>
             {revisions.length === 0 ? (
               <Empty>No revision yet.</Empty>
             ) : (
@@ -328,12 +332,18 @@ function PackItem({ p, onNotice }: { p: PackRevision; onNotice: (text: string) =
           <Badge tone={TONE[p.state] ?? 'neutral'}>{labelOf(PACK_STATE_LABEL, p.state)}</Badge>
         </Item>
         <Item term="Currency">{p.currencyCode}</Item>
-        <Item term="Values">
+        <Item term="Values" wide>
           <ParametersText pack={p} />
         </Item>
-        <Item term="Statute reference">{p.statuteReference}</Item>
-        <Item term="Source reference">{p.sourceReference ?? '—'}</Item>
-        <Item term="Validation reference">{p.validationReference ?? '—'}</Item>
+        <Item term="Statute reference" wide>
+          {p.statuteReference}
+        </Item>
+        <Item term="Source reference" wide={!!p.sourceReference}>
+          {p.sourceReference ?? '—'}
+        </Item>
+        <Item term="Validation reference" wide={!!p.validationReference}>
+          {p.validationReference ?? '—'}
+        </Item>
         <Item term="Written by">{p.createdBy ? <UserRef userId={p.createdBy} /> : '—'}</Item>
         <Item term="Validated">
           <Who at={p.validatedAt} by={p.validatedBy} />
@@ -431,8 +441,8 @@ function ActivatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: strin
         </p>
       )}
       <div className="row">
-        <button type="button" disabled={activate.isPending || involved} aria-describedby={involved ? hintId : undefined} onClick={() => activate.mutate()}>
-          {`Activate ${p.code} revision ${p.revision}`}
+        <button type="button" aria-label={`Activate ${p.code} revision ${p.revision}`} disabled={activate.isPending || involved} aria-describedby={involved ? hintId : undefined} onClick={() => activate.mutate()}>
+          Activate
         </button>
       </div>
       <Refusal error={activate.error} words={ACTIVATE_WORDS} noAnswer="No answer came back, so the revision may or may not have been activated. Reload the page to check." />
@@ -480,8 +490,8 @@ function RetirePack({ p, onNotice }: { p: PackRevision; onNotice: (text: string)
         </p>
       )}
       <div className="row">
-        <button type="submit" disabled={retire.isPending}>
-          {`Retire ${p.code} revision ${p.revision}`}
+        <button type="submit" className="danger" aria-label={`Retire ${p.code} revision ${p.revision}`} disabled={retire.isPending}>
+          Retire
         </button>
       </div>
       <Refusal error={retire.error} words={RETIRE_WORDS} noAnswer="No answer came back, so the revision may or may not have been retired. Reload the page to check." />

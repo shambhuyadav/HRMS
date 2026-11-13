@@ -9,8 +9,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage, EmployeesPage, MyTeamPage, TeamMemberPage, WidgetSourcePage } from './home';
 
-const session = vi.hoisted(() => ({ granted: new Set<string>() }));
-vi.mock('../session', () => ({ useSession: () => ({ can: (k: string) => session.granted.has(k), stored: { assignmentId: 'a-1', companyId: 'c-1' } }) }));
+const session = vi.hoisted(() => ({ granted: new Set<string>(), me: undefined as { employeeId: string | null; scopeKind: string; displayName: string | null } | undefined }));
+vi.mock('../session', () => ({ useSession: () => ({ me: session.me, can: (k: string) => session.granted.has(k), stored: { assignmentId: 'a-1', companyId: 'c-1' } }) }));
 
 const urls: string[] = [];
 const ITEM = { id: 'e-1', employeeCode: 'SYN-1', displayName: 'Synthetic Person', status: 'DRAFT', assignment: { departmentName: 'Engineering' }, joiningDate: '2026-01-05' };
@@ -60,6 +60,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   session.granted.clear();
+  session.me = undefined;
 });
 
 const DASHBOARD = {
@@ -103,10 +104,11 @@ describe('role dashboard (FR-096, FR-097, DF17)', () => {
     expect(screen.getByText('7')).toBeTruthy();
     expect(screen.getByText('Policy not active')).toBeTruthy();
     expect(screen.getByText('Not available yet')).toBeTruthy();
-    const context = screen.getByText(/Synthetic Company/).textContent!;
+    // Role, company, scope and the period's month, each its own item on the banner's context line.
+    const context = screen.getByText(/Synthetic Company/).closest('p')!.textContent!;
     expect(context).toContain('Reporting manager');
     expect(context).toContain('My team');
-    expect(context).toContain('2026-11-01');
+    expect(context).toContain('Figures for November 2026');
   });
 
   it('a code reads in words and a decimal loses only its padding zeros; nothing is rounded', async () => {
@@ -116,7 +118,7 @@ describe('role dashboard (FR-096, FR-097, DF17)', () => {
       '/v1/dashboard': { ...DASHBOARD, widgets: [figure('A', 'NOT_PROCESSED'), figure('B', '12.0000'), figure('C', '12.5000'), figure('D', '100.0000'), figure('E', '1/1'), figure('F', 'PRESENT')] },
     });
     renderAt('/', '/', <DashboardPage />);
-    for (const text of ['Not processed', '12', '12.5', '100', '1/1', 'Present']) expect(await screen.findByText(text)).toBeTruthy();
+    for (const text of ['Not yet calculated', '12', '12.5', '100', '1/1', 'Present']) expect(await screen.findByText(text)).toBeTruthy();
     expect(screen.queryByText('NOT_PROCESSED')).toBeNull();
     expect(screen.queryByText('12.0000')).toBeNull();
   });
@@ -134,6 +136,30 @@ describe('role dashboard (FR-096, FR-097, DF17)', () => {
     await screen.findByRole('link', { name: '2' });
     expect(screen.queryByRole('link', { name: 'My team' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Quick actions' })).toBeNull();
+  });
+
+  it('names where each figure’s foot link goes: the filtered screen, or the module screen beside a records page', async () => {
+    mockRoutes({ '/v1/dashboard/tasks': { items: [], total: 0 }, '/v1/dashboard': DASHBOARD });
+    renderAt('/', '/', <DashboardPage />);
+    await screen.findByRole('link', { name: '3' });
+    // The records page's figure keeps its records link; its foot goes to the screen where the reader acts.
+    expect(screen.getByRole('link', { name: 'See payments' }).getAttribute('href')).toBe('/payments');
+    expect(screen.queryByText('View records')).toBeNull();
+    // A foot leading where its figure leads names the place too.
+    expect(screen.getAllByText('See the list').map((l) => l.getAttribute('href'))).toEqual(['/team?todayAttendance=EXCEPTION', '/dashboard/sources/PARTS']);
+  });
+
+  it('offers the role’s everyday tasks as quick actions, before the server’s shortcuts and without repeating a screen', async () => {
+    session.me = { employeeId: 'emp-1', scopeKind: 'OWN', displayName: 'Synthetic Person' };
+    for (const key of ['leave.read.operational', 'leave.submit.operational', 'expense.draft.operational']) session.granted.add(key);
+    mockRoutes({ '/v1/dashboard/tasks': { items: [], total: 0 }, '/v1/dashboard': { ...DASHBOARD, shortcuts: [{ to: '/leave', label: 'Leave' }, { to: '/team', label: 'My team' }] } });
+    renderAt('/', '/', <DashboardPage />);
+    const section = (await screen.findByRole('heading', { name: 'Quick actions' })).closest('section')!;
+    expect(within(section).getAllByRole('link').map((l) => [l.textContent, l.getAttribute('href')])).toEqual([
+      ['Apply for leave', '/leave'],
+      ['Claim an expense', '/expenses'],
+      ['My team', '/team'],
+    ]);
   });
 
   it('lists pending tasks, each leading to the decisions, says when nothing is waiting, and marks delegated and overdue', async () => {

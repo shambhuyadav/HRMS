@@ -146,20 +146,20 @@ describe('statutory packs: reading', () => {
   it('shows each revision with its state, statute and values in words, and no action without the duties', async () => {
     serve({ 'GET /v1/statutory-rule-packs': [200, PACKS] });
     renderScreen([READ]);
-    const pf = await revision('PF revision 1, from 2018-06-01');
+    const pf = await revision('PF revision 1, from 1 Jun 2018');
     expect(term(pf, 'State')).toBe('Inactive draft');
-    expect(term(pf, 'Values')).toContain('Employee 12% and employer 12% of PF wages up to 15000.00 INR');
-    expect(term(pf, 'Values')).toContain('pension 8.33% of wages up to 15000.00 INR');
+    expect(term(pf, 'Values')).toContain('Employee 12% and employer 12% of PF wages up to INR 15,000.00');
+    expect(term(pf, 'Values')).toContain('pension 8.33% of wages up to INR 15,000.00');
     expect(term(pf, 'Values')).toContain('rounded to the nearest whole unit, half up');
     expect(term(pf, 'Statute reference')).toContain('Code on Social Security, 2020');
-    const esic = await revision('ESIC revision 1, from 2019-07-01');
-    expect(term(esic, 'Values')).toContain('for monthly wages up to 21000.00 INR; contribution periods start in April and October');
-    const mh = await revision('PT_MH revision 1, from 2023-04-01');
+    const esic = await revision('ESIC revision 1, from 1 Jul 2019');
+    expect(term(esic, 'Values')).toContain('for monthly wages up to INR 21,000.00; contribution periods start in April and October');
+    const mh = await revision('PT_MH revision 1, from 1 Apr 2023');
     const slabs = within(mh).getByRole('table', { name: 'Monthly slabs' });
     expect(within(slabs).getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
-      ['7500.00 INR', '0.00 INR', '—'],
-      ['10000.00 INR', '175.00 INR', '—'],
-      ['No upper limit', '200.00 INR', 'February: 300.00 INR'],
+      ['INR 7,500.00', 'INR 0.00', '—'],
+      ['INR 10,000.00', 'INR 175.00', '—'],
+      ['No upper limit', 'INR 200.00', 'February: INR 300.00'],
     ]);
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByRole('form')).toBeNull();
@@ -208,17 +208,17 @@ describe('statutory packs: reading', () => {
       ],
     });
     renderScreen([READ]);
-    const lwf = await revision('LWF_MH revision 1, from 2023-04-01');
+    const lwf = await revision('LWF_MH revision 1, from 1 Apr 2023');
     expect(term(lwf, 'Values')).toContain('State MH; contributions with the wages of June and December');
     expect(within(lwf).getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
-      ['3000.00 INR', '6.00 INR', '18.00 INR'],
-      ['No upper limit', '12.00 INR', '36.00 INR'],
+      ['INR 3,000.00', 'INR 6.00', 'INR 18.00'],
+      ['No upper limit', 'INR 12.00', 'INR 36.00'],
     ]);
-    const tax = await revision('INCOME_TAX revision 1, from 2026-04-01');
+    const tax = await revision('INCOME_TAX revision 1, from 1 Apr 2026');
     const values = term(tax, 'Values')!;
     expect(values).toContain('Financial year 2026-27; an employee who chooses no regime is taxed under the new regime.');
-    expect(values).toContain('New regime: standard deduction 75000.00 INR; rebate of up to 60000.00 INR on taxable income up to 1200000.00 INR, with marginal relief just above it');
-    expect(values).toContain("surcharge 10% above 5000000.00 INR (with marginal relief); cess 4%; the year's tax rounded to the nearest ten.");
+    expect(values).toContain('New regime: standard deduction INR 75,000.00; rebate of up to INR 60,000.00 on taxable income up to INR 12,00,000.00, with marginal relief just above it');
+    expect(values).toContain("surcharge 10% above INR 50,00,000.00 (with marginal relief); cess 4%; the year's tax rounded to the nearest ten.");
     expect(values).toContain('Employer NPS contribution deductible up to 14% of salary.');
     expect(values).toContain('House rent allowance exempt: the least of the allowance, rent less 10% of salary, and 50% of salary (four metro cities) or 40% elsewhere.');
     expect(within(tax).getByRole('table', { name: 'Old regime slabs' }).textContent).toContain('No upper limit30%');
@@ -256,10 +256,10 @@ describe('statutory packs: two people, and retirement', () => {
       [`POST /v1/statutory-rule-packs/${K_KA}/activate`]: [403, { error: 'SELF_APPROVAL', message: 'no' }],
     });
     renderScreen([READ, ACTIVATE]);
-    const esic = await revision('ESIC revision 1, from 2019-07-01');
+    const esic = await revision('ESIC revision 1, from 1 Jul 2019');
     expect((within(esic).getByRole('button', { name: 'Activate ESIC revision 1' }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(esic).getByText('You wrote or validated this revision, so someone else activates it.')).toBeTruthy();
-    const ka = await revision('PT_KA revision 1, from 2023-04-01');
+    const ka = await revision('PT_KA revision 1, from 1 Apr 2023');
     fireEvent.click(within(ka).getByRole('button', { name: 'Activate PT_KA revision 1' }));
     expect(await within(ka).findByText('Activated by someone other than the person who wrote or validated it.')).toBeTruthy();
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ expectedVersion: 2 });

@@ -161,7 +161,7 @@ export interface Holiday {
   closedReason: string | null;
 }
 
-const locationLabel = (l: LocationOption) => `${l.code} ${l.name}${l.active ? '' : ' (inactive)'}`;
+const locationLabel = (l: LocationOption) => `${l.name}${l.active ? '' : ' (inactive)'}`;
 
 function NewHoliday({ options, locationId, onDone }: { options: HolidayOptions; locationId: string; onDone: (r: ReprocessList) => void }) {
   const [form, setForm] = useState({ holidayDate: '', name: '', holidayType: '' });
@@ -250,11 +250,11 @@ function HolidayActions({ holiday, options, onChanged, onSaved }: { holiday: Hol
   );
   return (
     <>
-      <button type="button" className="link" onClick={() => toggle('correct')}>
-        Correct {label}
+      <button type="button" className="link" aria-label={`Correct ${label}`} aria-expanded={open === 'correct'} onClick={() => toggle('correct')}>
+        Correct
       </button>{' '}
-      <button type="button" className="link" onClick={() => toggle('withdraw')}>
-        Withdraw {label}
+      <button type="button" className="link danger" aria-label={`Withdraw ${label}`} aria-expanded={open === 'withdraw'} onClick={() => toggle('withdraw')}>
+        Withdraw
       </button>
       {open === 'correct' && (
         <form
@@ -346,6 +346,12 @@ export function HolidayCalendarPage() {
   });
   const refresh = () => void qc.invalidateQueries({ queryKey: ['holidays'] });
   const items = list.data?.items ?? [];
+  // The years a calendar is kept for: a few back for the record, two ahead for planning.
+  const thisYear = new Date().getFullYear();
+  const years = Array.from({ length: 6 }, (_, i) => String(thisYear - 3 + i));
+  // A Note column only when some entry has something to say (in force entries usually have none).
+  const notes = items.map(closedNote);
+  const hasNotes = notes.some((n) => n !== '');
   return (
     <>
       <Section title="Holiday calendar">
@@ -362,7 +368,13 @@ export function HolidayCalendarPage() {
           </label>
           <label>
             Year
-            <input inputMode="numeric" maxLength={4} value={year} onChange={(e) => setYear(e.target.value)} />
+            <select value={year} onChange={(e) => setYear(e.target.value)}>
+              {years.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Show
@@ -385,20 +397,22 @@ export function HolidayCalendarPage() {
                 <th scope="col">Name</th>
                 <th scope="col">Type</th>
                 <th scope="col">State</th>
-                <th scope="col">Note</th>
-                <th scope="col" />
+                {hasNotes && <th scope="col">Note</th>}
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {items.map((h) => (
+              {items.map((h, i) => (
                 <tr key={h.id}>
-                  <td>{h.holidayDate}</td>
+                  <td>{formatDate(h.holidayDate)}</td>
                   <td>{h.name}</td>
-                  <td>{h.holidayType}</td>
+                  <td>{options.data?.types.find((t) => t.code === h.holidayType)?.label ?? h.holidayType}</td>
                   <td>
                     <StateBadge state={h.state === 'SUPERSEDED' ? 'REPLACED' : h.state} />
                   </td>
-                  <td>{closedNote(h)}</td>
+                  {hasNotes && <td>{notes[i]}</td>}
                   <td>{canManage && h.state === 'ACTIVE' && options.data && <HolidayActions key={h.version} holiday={h} options={options.data} onChanged={refresh} onSaved={show} />}</td>
                 </tr>
               ))}
@@ -624,14 +638,20 @@ function ShiftActions({ shift, onChanged, onSaved }: { shift: Shift; onChanged: 
   });
   return (
     <>
-      <button type="button" className="link" onClick={() => setOpen(open === 'times' ? null : 'times')}>
-        Change times of {shift.code}
+      <button type="button" className="link" aria-label={`Change times of ${shift.code}`} aria-expanded={open === 'times'} onClick={() => setOpen(open === 'times' ? null : 'times')}>
+        Change times
       </button>{' '}
-      <button type="button" className="link" onClick={() => setOpen(open === 'name' ? null : 'name')}>
-        Rename {shift.code}
+      <button type="button" className="link" aria-label={`Rename ${shift.code}`} aria-expanded={open === 'name'} onClick={() => setOpen(open === 'name' ? null : 'name')}>
+        Rename
       </button>{' '}
-      <button type="button" className="link" disabled={patch.isPending} onClick={() => patch.mutate({ active: !shift.active })}>
-        {shift.active ? 'Deactivate' : 'Activate'} {shift.code}
+      <button
+        type="button"
+        className={shift.active ? 'link danger' : 'link'}
+        aria-label={`${shift.active ? 'Deactivate' : 'Activate'} ${shift.code}`}
+        disabled={patch.isPending}
+        onClick={() => patch.mutate({ active: !shift.active })}
+      >
+        {shift.active ? 'Deactivate' : 'Activate'}
       </button>
       <Refusal error={open === null ? patch.error : null} />
       {open === 'times' && (
@@ -722,7 +742,9 @@ export function ShiftMasterPage() {
                 <th scope="col">Name</th>
                 <th scope="col">In force today</th>
                 <th scope="col">Active</th>
-                <th scope="col" />
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -827,8 +849,8 @@ function PatternActions({ calendar, onChanged, onSaved }: { calendar: WeeklyOffC
   const name = calendar.locationCode;
   return (
     <>
-      <button type="button" className="link" onClick={() => setOpen(!open)}>
-        Change pattern of {name}
+      <button type="button" className="link" aria-label={`Change pattern of ${name}`} aria-expanded={open} onClick={() => setOpen(!open)}>
+        Change pattern
       </button>
       {open && (
         <form
@@ -917,12 +939,12 @@ export function WeeklyOffPage() {
             {items.map((c) => (
               <tr key={c.locationId}>
                 <td>
-                  {c.locationCode} {c.locationName}
+                  {c.locationName}
                   {c.active ? '' : ' (inactive)'}
                 </td>
                 <td>
                   {offText(c.inForce)}
-                  <div className="hint">{c.inForce.isDefault ? 'The Monday to Friday default: no pattern is in force' : `Entry ${c.inForce.revision}, from ${c.inForce.effectiveFrom}`}</div>
+                  <div className="hint">{c.inForce.isDefault ? 'Company default (a Monday to Friday week): this location has no pattern of its own' : `Entry ${c.inForce.revision}, from ${formatDate(c.inForce.effectiveFrom)}`}</div>
                 </td>
                 <td>
                   {c.entries.length === 0 ? (
@@ -931,7 +953,7 @@ export function WeeklyOffPage() {
                     <ul>
                       {c.entries.map((e) => (
                         <li key={e.id}>
-                          Entry {e.revision}, from {e.effectiveFrom}: {offText(e)}. {e.reason}
+                          Entry {e.revision}, from {formatDate(e.effectiveFrom)}: {offText(e)}. {e.reason}
                         </li>
                       ))}
                     </ul>

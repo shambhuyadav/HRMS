@@ -155,6 +155,9 @@ function EventForm({ initial, label, pending, onSubmit }: { initial: EventValues
   const departments = useQuery({ queryKey: ['org-master', 'departments', false], queryFn: () => api<{ items: Master[] }>('/v1/org/departments'), enabled: masters && v.audience === 'DEPARTMENT' });
   const locations = useQuery({ queryKey: ['org-master', 'locations', false], queryFn: () => api<{ items: Master[] }>('/v1/org/locations'), enabled: masters && v.audience === 'LOCATION' });
   const set = (k: keyof EventValues) => (e: { target: { value: string } }) => setV((p) => ({ ...p, [k]: e.target.value }));
+  // Save is offered once what the form requires is filled in: a name, a date and, for one department or location, which one.
+  const complete =
+    v.name.trim() !== '' && v.eventDate !== '' && (v.audience !== 'DEPARTMENT' || v.departmentId !== '') && (v.audience !== 'LOCATION' || v.locationId !== '');
   const submit = (e: FormEvent) => {
     e.preventDefault();
     onSubmit(v);
@@ -203,11 +206,11 @@ function EventForm({ initial, label, pending, onSubmit }: { initial: EventValues
           </select>
         </label>
       )}
-      <label>
+      <label className="wide">
         Description
-        <input value={v.description} onChange={set('description')} maxLength={1000} />
+        <textarea rows={3} value={v.description} onChange={set('description')} maxLength={1000} />
       </label>
-      <button type="submit" disabled={pending}>
+      <button type="submit" disabled={pending || !complete}>
         {pending ? 'Saving…' : 'Save'}
       </button>
     </form>
@@ -236,10 +239,10 @@ function EventRow({ event, onDone }: { event: CompanyEvent; onDone: (message: st
         <td>{event.description ?? '—'}</td>
         <td>{event.active ? <Badge tone="good">Active</Badge> : <Badge>Off</Badge>}</td>
         <td>
-          <button type="button" className="secondary" onClick={() => setEditing((x) => !x)} aria-label={`Edit ${event.name}`}>
+          <button type="button" className="link" onClick={() => setEditing((x) => !x)} aria-label={`Edit ${event.name}`} aria-expanded={editing}>
             Edit
           </button>{' '}
-          <button type="button" className="secondary" disabled={change.isPending} onClick={() => change.mutate({ active: !event.active })} aria-label={`${event.active ? 'Switch off' : 'Switch on'} ${event.name}`}>
+          <button type="button" className={event.active ? 'link danger' : 'link'} disabled={change.isPending} onClick={() => change.mutate({ active: !event.active })} aria-label={`${event.active ? 'Switch off' : 'Switch on'} ${event.name}`}>
             {event.active ? 'Switch off' : 'Switch on'}
           </button>
         </td>
@@ -341,9 +344,9 @@ function TickerForm({ initial, label, pending, onSubmit }: { initial: TickerValu
         onSubmit({ ...v, message: v.message.trim() });
       }}
     >
-      <label>
+      <label className="wide">
         Message
-        <input value={v.message} onChange={set('message')} maxLength={280} required />
+        <textarea rows={2} value={v.message} onChange={set('message')} maxLength={280} required />
       </label>
       <label>
         First day
@@ -353,7 +356,7 @@ function TickerForm({ initial, label, pending, onSubmit }: { initial: TickerValu
         Last day
         <input type="date" value={v.endsOn} onChange={set('endsOn')} required />
       </label>
-      <button type="submit" disabled={pending}>
+      <button type="submit" disabled={pending || v.message.trim() === '' || v.startsOn === '' || v.endsOn === ''}>
         {pending ? 'Saving…' : 'Save'}
       </button>
     </form>
@@ -380,10 +383,10 @@ function TickerRow({ item, onDone }: { item: TickerMessage; onDone: (message: st
         <td>{formatDate(item.endsOn)}</td>
         <td>{item.active ? <Badge tone="good">Active</Badge> : <Badge>Off</Badge>}</td>
         <td>
-          <button type="button" className="secondary" onClick={() => setEditing((x) => !x)} aria-label={`Edit message: ${item.message}`}>
+          <button type="button" className="link" onClick={() => setEditing((x) => !x)} aria-label={`Edit message: ${item.message}`} aria-expanded={editing}>
             Edit
           </button>{' '}
-          <button type="button" className="secondary" disabled={change.isPending} onClick={() => change.mutate({ active: !item.active })} aria-label={`${item.active ? 'Switch off' : 'Switch on'} message: ${item.message}`}>
+          <button type="button" className={item.active ? 'link danger' : 'link'} disabled={change.isPending} onClick={() => change.mutate({ active: !item.active })} aria-label={`${item.active ? 'Switch off' : 'Switch on'} message: ${item.message}`}>
             {item.active ? 'Switch off' : 'Switch on'}
           </button>
         </td>

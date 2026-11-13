@@ -18,9 +18,22 @@ interface Preference {
   receiveEmail?: boolean;
 }
 
-const OCCASIONS: Record<string, { publish: string; receive: string; name: string }> = {
-  BIRTHDAY: { name: 'Birthday', publish: 'Publish my birthday to colleagues', receive: 'Receive colleagues’ birthdays' },
-  WORK_ANNIVERSARY: { name: 'Work anniversary', publish: 'Publish my work anniversary to colleagues', receive: 'Receive colleagues’ work anniversaries' },
+/** What each choice does, in the reader's words; each choice is its own labelled checkbox. */
+const OCCASIONS: Record<string, { name: string; share: string; see: string; email: string }> = {
+  BIRTHDAY: { name: 'Birthday', share: 'Share my birthday with colleagues', see: 'See colleagues’ birthdays', email: 'Also email me about colleagues’ birthdays' },
+  WORK_ANNIVERSARY: {
+    name: 'Work anniversary',
+    share: 'Share my work anniversary with colleagues',
+    see: 'See colleagues’ work anniversaries',
+    email: 'Also email me about colleagues’ work anniversaries',
+  },
+};
+
+const occasionOf = (eventType: string) => {
+  const known = OCCASIONS[eventType];
+  if (known) return known;
+  const name = eventType.replace(/_/g, ' ').toLowerCase();
+  return { name: name.charAt(0).toUpperCase() + name.slice(1), share: `Share my ${name} with colleagues`, see: `See colleagues’ ${name}`, email: `Also email me about colleagues’ ${name}` };
 };
 
 /** GET and PUT /v1/me/notification-preferences: the user's own choices, with or without a selected role. */
@@ -38,59 +51,35 @@ export function NotificationPreferencesPanel() {
   return (
     <Section title="Notification preferences">
       <p className="hint">
-        Publication is off until you turn it on. Colleagues then see your name, your department and the occasion, never your birth date, year or age. Task, decision and security notices
-        are mandatory and cannot be switched off.
+        Your occasions are hidden unless you share them. Colleagues then see your name, department and the occasion, never your birth date, year or age. Notices about your tasks,
+        decisions and account security always reach you and cannot be switched off.
       </p>
       <p className="hint">Email is sent only for notices your company has enabled for email. It says what happened and links here, never confidential details.</p>
-      {preferences.isPending && <p className="hint">Loading preferences…</p>}
+      {preferences.isPending && <p className="hint loading">Loading preferences…</p>}
+      {/* One block per occasion, each choice a labelled checkbox: it fits a phone screen, where a four-column table would not. */}
       {preferences.data && (
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Occasion</th>
-              <th scope="col">Publish mine</th>
-              <th scope="col">Receive others’</th>
-              <th scope="col">By email</th>
-            </tr>
-          </thead>
-          <tbody>
-            {preferences.data.items.map((p) => {
-              const occasion = OCCASIONS[p.eventType] ?? { name: p.eventType, publish: `Publish ${p.eventType}`, receive: `Receive ${p.eventType}` };
-              return (
-                <tr key={p.eventType}>
-                  <td>{occasion.name}</td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={occasion.publish}
-                      checked={p.publishCelebration}
-                      disabled={save.isPending}
-                      onChange={(e) => save.mutate({ eventType: p.eventType, publishCelebration: e.target.checked })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={occasion.receive}
-                      checked={p.receiveOptional}
-                      disabled={save.isPending}
-                      onChange={(e) => save.mutate({ eventType: p.eventType, receiveOptional: e.target.checked })}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={`${occasion.receive} by email`}
-                      checked={p.receiveEmail ?? true}
-                      disabled={save.isPending}
-                      onChange={(e) => save.mutate({ eventType: p.eventType, receiveEmail: e.target.checked })}
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="stack">
+          {preferences.data.items.map((p) => {
+            const occasion = occasionOf(p.eventType);
+            return (
+              <fieldset key={p.eventType}>
+                <legend>{occasion.name}</legend>
+                <label className="check">
+                  <input type="checkbox" checked={p.publishCelebration} disabled={save.isPending} onChange={(e) => save.mutate({ eventType: p.eventType, publishCelebration: e.target.checked })} />{' '}
+                  {occasion.share}
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={p.receiveOptional} disabled={save.isPending} onChange={(e) => save.mutate({ eventType: p.eventType, receiveOptional: e.target.checked })} />{' '}
+                  {occasion.see}
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={p.receiveEmail ?? true} disabled={save.isPending} onChange={(e) => save.mutate({ eventType: p.eventType, receiveEmail: e.target.checked })} />{' '}
+                  {occasion.email}
+                </label>
+              </fieldset>
+            );
+          })}
+        </div>
       )}
       <ErrorNote error={preferences.error} />
       <ErrorNote error={save.error} />
@@ -230,7 +219,7 @@ export function DeliveryLogPage() {
     <>
       <Section title={`Delivery log${log.data ? ` (${log.data.total})` : ''}`}>
         <p className="hint">The state of each notification, its attempts and the code of its last failure. Message content is never shown here. A failed or suppressed notice does not change the decision it was about.</p>
-        <div>
+        <div className="inline">
           <label className="inline">
             State{' '}
             <select
@@ -291,7 +280,7 @@ export function DeliveryLogPage() {
         {exportLog.isSuccess && <p className="ok">Export requested. Download it from Reports when it is ready.</p>}
         <ErrorNote error={exportLog.error} />
         {categoryInvalid && <p className="hint">An event code has letters, digits and underscores and starts with a letter.</p>}
-        {log.isFetching && !log.data && <p className="hint">Loading the log…</p>}
+        {log.isFetching && !log.data && <p className="hint loading">Loading the log…</p>}
         {log.data?.items.length === 0 && <Empty>No notifications match.</Empty>}
         {log.data && log.data.items.length > 0 && (
           <table aria-label="Delivery log">

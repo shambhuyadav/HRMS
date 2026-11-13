@@ -6,7 +6,7 @@
 // own note on how it is made, and "Not available" where the server makes none.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, type FormEvent, type ReactNode, useRef, useState } from 'react';
-import { api, ApiError, download, fileToBase64, formatAmount, formatDate, idempotencyKey, localDate, pinSession } from '../api';
+import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatMonth, idempotencyKey, localDate, pinSession } from '../api';
 import { isReportRefusal, reportProblem } from '../report-failures';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -103,7 +103,7 @@ const periodOf = (f: Filters) => (f.view === 'month' ? { from: `${f.month}-01`, 
 
 function SalaryMasterScreen() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint">Loading…</p>;
+  if (!me) return <p className="hint loading">Loading…</p>;
   const read = can(SALARY_READ);
   const exporting = can(SALARY_EXPORT);
   return (
@@ -209,7 +209,7 @@ function SalaryList({ filters, page, onPage }: { filters: Filters; page: number;
   const period = data ? (data.period.month ? `in ${data.period.month}` : `on ${formatDate(data.period.from)}`) : '';
   return (
     <Section title={data ? `Salaries ${period} (${data.total})` : 'Salaries'}>
-      {list.isPending && <p className="hint">Loading salaries…</p>}
+      {list.isPending && <p className="hint loading">Loading salaries…</p>}
       {needsHistoryGrant(list.error) ? <NotPermitted>{HISTORY_GRANT_NOTE}</NotPermitted> : isForbidden(list.error) ? <NotPermitted>The selected role cannot view salaries.</NotPermitted> : <ErrorNote error={list.error} />}
       {data && data.items.length === 0 && <Empty>{page === 1 ? 'No salary arrangement matches these filters.' : 'No arrangements on this page.'}</Empty>}
       {data && data.items.length > 0 && (
@@ -289,7 +289,7 @@ function SalaryExports({ filters }: { filters: Filters }) {
   const period = periodOf(filters);
   const fy = Number(year);
   const validYear = /^\d{4}$/.test(year) && fy >= 2000 && fy <= 2100;
-  const shown = filters.view === 'month' ? `for ${filters.month}` : `on ${formatDate(period.from)}`;
+  const shown = filters.view === 'month' ? `for ${formatMonth(filters.month)}` : `on ${formatDate(period.from)}`;
   return (
     <Section title="Exports">
       <div className="row">
@@ -383,7 +383,7 @@ const SALARY_TEMPLATE: ImportTemplate = {
 
 function SalaryUploadScreen() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint">Loading…</p>;
+  if (!me) return <p className="hint loading">Loading…</p>;
   return (
     <>
       <h1>Salary master upload</h1>

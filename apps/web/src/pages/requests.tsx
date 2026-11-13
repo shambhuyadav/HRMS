@@ -220,7 +220,7 @@ export function EvidenceChoice({ chosen, onChange, earlier = [] }: { chosen: rea
   if (!documents.data) return null;
   const offered = documents.data.items.filter((d) => !unusable(d) || chosen.includes(d.id));
   if (offered.length === 0) {
-    return <p className="hint wide">None of your documents can be attached as supporting evidence. Upload the document first; a file that failed the malware scan or was rejected cannot be attached.</p>;
+    return <p className="hint wide">To attach a supporting document, upload it in My documents first.</p>;
   }
   const full = chosen.length >= MAX_EVIDENCE;
   return (
@@ -314,7 +314,8 @@ function WindowFields({ kind, draft, onChange }: { kind: Kind; draft: Draft; onC
           <input type="date" required value={draft.endDate} onChange={(e) => onChange({ ...draft, endDate: e.target.value })} />
         </label>
       )}
-      <label className="check">
+      {/* Its own row under the dates, as "Half day" is on the leave form. */}
+      <label className="check wide">
         <input type="checkbox" checked={draft.timed} onChange={(e) => onChange({ ...draft, timed: e.target.checked })} /> Part of the day
       </label>
       {draft.timed && (
@@ -521,6 +522,7 @@ export function WorkRequestsPage() {
     <>
       {employeeId && can('work_request.submit.operational') && (
         <Section title="New outdoor duty or holiday work request">
+          <p className="hint">Outdoor duty covers working days. Holiday work is for one weekly off or holiday and does not create leave.</p>
           {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
           <form
             className="grid-form"
@@ -530,7 +532,7 @@ export function WorkRequestsPage() {
             }}
           >
             <label>
-              Kind
+              Type
               <select
                 value={kind}
                 onChange={(e) => {
@@ -550,7 +552,6 @@ export function WorkRequestsPage() {
               Submit request
             </button>
           </form>
-          <p className="hint">Outdoor duty covers working days. Holiday work is for one weekly off or holiday and does not create leave.</p>
           {submit.isSuccess && <p className="ok">Request submitted for review.</p>}
           <EvidenceError error={submit.error} />
         </Section>
@@ -558,12 +559,14 @@ export function WorkRequestsPage() {
 
       {ownInScope && !ownHidden && (
         <Section title="My work requests">
-          {mine.data?.items.length === 0 && <Empty>No requests yet.</Empty>}
+          {mine.data?.items.length === 0 && (
+            <Empty>{can('work_request.submit.operational') ? 'No requests yet. Use the form above to request outdoor duty or holiday work.' : 'No requests yet.'}</Empty>
+          )}
           {!!mine.data?.items.length && (
             <table>
               <thead>
                 <tr>
-                  <th>Kind</th>
+                  <th>Type</th>
                   <th>When</th>
                   <th>Purpose</th>
                   <th>State</th>
@@ -627,7 +630,8 @@ export function WorkRequestsPage() {
         </Section>
       )}
 
-      {can('work_request.read.operational') && <WorkRequestRegister />}
+      {/* An own-scope role would see only its own requests again: the register is for team and company scopes. */}
+      {can('work_request.read.operational') && me?.scopeKind !== 'OWN' && <WorkRequestRegister />}
     </>
   );
 }
@@ -710,7 +714,7 @@ function WorkRequestRegister() {
     <Section title="Requests in my scope">
       <div className="row">
         <label className="inline">
-          Kind{' '}
+          Type{' '}
           <select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
             <option value="outdoor_duty">{KIND_LABEL.outdoor_duty}</option>
             <option value="holiday_work">{KIND_LABEL.holiday_work}</option>

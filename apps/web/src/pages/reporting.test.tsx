@@ -112,9 +112,9 @@ describe('salary progression chart (FR-038; I-83 item 6)', () => {
     expect(calls.map((c) => c.url)).toContain('/v1/employees/e-1/salary-progression?basis=MONTHLY_GROSS&years=3');
     const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
     expect(rows.map((r) => within(r).getAllByRole('cell').map((cell) => cell.textContent))).toEqual([
-      ['FY 2024-25', '2025-03-31', 'INR 30,000.00', 'No salary the year before'],
-      ['FY 2025-26', '2026-03-31', 'USD 400.00', 'Paid in another currency the year before'],
-      ['FY 2026-27', '2026-11-06', 'USD 440.00', '10.00%'],
+      ['FY 2024-25', '31 Mar 2025', 'INR 30,000.00', 'No salary the year before'],
+      ['FY 2025-26', '31 Mar 2026', 'USD 400.00', 'Paid in another currency the year before'],
+      ['FY 2026-27', '6 Nov 2026', 'USD 440.00', '10.00%'],
     ]);
     // Hover (or focus) a year's marker for its figure.
     fireEvent.mouseEnter(screen.getByLabelText('FY 2026-27: 440.0000'));

@@ -76,8 +76,8 @@ describe('statutory settings', () => {
     renderScreen([READ]);
     const table = await screen.findByRole('table', { name: 'Work location states' });
     expect(within(table).getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
-      ['MUM', '2026-01-01', 'MH'],
-      ['MUM', '2026-06-01', 'KA'],
+      ['MUM', '1 Jan 2026', 'MH'],
+      ['MUM', '1 Jun 2026', 'KA'],
     ]);
     expect(screen.queryByRole('form', { name: 'Record a work location state' })).toBeNull();
     expect(screen.queryByRole('form', { name: 'Find an employee' })).toBeNull();
@@ -101,7 +101,7 @@ describe('statutory settings', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('No work location has that code');
     fireEvent.change(within(form).getByLabelText('Location code'), { target: { value: 'PUN' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Record the state' }));
-    expect((await screen.findByRole('status')).textContent).toBe('Recorded: PUN is in MH from 2026-07-01.');
+    expect((await screen.findByRole('status')).textContent).toBe('Recorded: PUN is in MH from 1 Jul 2026.');
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.body)).toEqual([
       { locationCode: 'XYZ', effectiveFrom: '2026-07-01', stateCode: 'MH' },
       { locationCode: 'PUN', effectiveFrom: '2026-07-01', stateCode: 'MH' },
@@ -128,7 +128,7 @@ describe('statutory settings', () => {
     fireEvent.change(within(form).getByLabelText('From'), { target: { value: '2026-04-01' } });
     fireEvent.change(within(form).getByLabelText('Reference (the option form)'), { target: { value: 'Form 26(6)-001' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Record the option' }));
-    expect((await screen.findByRole('status')).textContent).toBe('Recorded: On higher wages (joint option, para 26(6)) from 2026-04-01.');
+    expect((await screen.findByRole('status')).textContent).toBe('Recorded: On higher wages (joint option, para 26(6)) from 1 Apr 2026.');
     const options = await screen.findByRole('table', { name: 'PF options' });
     expect(options.textContent).toContain('Form 26(6)-001');
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ employeeId: E1, effectiveFrom: '2026-04-01', contributionBasis: 'HIGHER_WAGES', reference: 'Form 26(6)-001' });

@@ -65,7 +65,10 @@ describe('routes', () => {
 describe('the menu', () => {
   it('shows a core entry only with its permission, and an any-of entry with any one of its permissions', () => {
     const labels = (can: (p: string) => boolean) => visibleNav(can, COMPANY).map((n) => n.label);
-    expect(labels(holds())).toEqual(['Decisions', 'Reports', 'Notifications']);
+    expect(labels(holds())).toEqual(['Reports', 'Notifications']);
+    // Decisions only for a role that decides something.
+    expect(labels(holds('leave.approve.operational'))).toContain('Decisions');
+    expect(labels(holds('access.approve_role_grant.operational'))).toContain('Decisions');
     expect(labels(holds('confirmation.read.operational'))).toContain('Confirmations');
     expect(labels(holds('salary.read.salary'))).toContain('Increments and salary');
     expect(labels(holds('increment_cycle.manage.operational'))).toContain('Increments and salary');
@@ -98,13 +101,23 @@ describe('the menu', () => {
     expect(onlyPayroll.every((g) => g.screens.every((s) => !s.permission || s.permission === payroll!.permission))).toBe(true);
   });
 
+  it('leaves staff registers out of the menu of a role that covers only the person’s own record', () => {
+    const paths = (scopeKind: string) => visibleModuleGroups(() => true, { scopeKind }).flatMap((g) => g.screens.map((s) => s.path));
+    for (const staff of ['/lifecycle/exits', '/lifecycle/processes', '/payroll/medical-claims', '/documents/bulk-mapping']) {
+      expect(paths('COMPANY')).toContain(staff);
+      expect(paths('OWN')).not.toContain(staff);
+    }
+    // The person's own screens stay.
+    expect(paths('OWN')).toContain('/me/resignation');
+  });
+
   it('lists the organisation masters under their read duty and a new employee under its create duty; the record is reached by links only', () => {
     const titles = (label: string, permission: string) => visibleModuleGroups(holds(permission)).find((g) => g.label === label)?.screens.map((s) => s.title);
     // CL-006 (0280): the city master sits with the other organisation masters.
     expect(titles('Organisation', 'org_master.read.operational')).toEqual(['Company', 'Departments', 'Locations', 'Designations', 'Grades', 'Cities']);
     expect(titles('Organisation', 'employee.read.operational')).toBeUndefined();
-    expect(titles('Employees', 'employee.create.operational')).toEqual(['New employee']);
-    expect(titles('Employees', 'employee.read.operational')).toBeUndefined();
+    expect(titles('Employee administration', 'employee.create.operational')).toEqual(['New employee']);
+    expect(titles('Employee administration', 'employee.read.operational')).toBeUndefined();
     expect(visibleModuleGroups(() => true).flatMap((g) => g.screens.map((s) => s.path))).not.toContain('/employees/:id');
     expect(APP_ROUTE_PATHS).toEqual(expect.arrayContaining(['/organisation/departments', '/employees/new', '/employees/:id']));
   });
@@ -145,9 +158,11 @@ describe('the menu', () => {
 
   it('renders the groups in the sidebar for a context that holds their permissions', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [], widgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })));
-    const payroll = MODULE_SCREENS.find((s) => s.nav && s.path.startsWith('/payroll') && s.permission)!;
+    const payrollScreens = MODULE_SCREENS.filter((s) => s.nav && s.path.startsWith('/payroll') && s.permission);
+    const payroll = payrollScreens[0]!;
+    const other = payrollScreens.find((s) => s.permission !== payroll.permission)!;
     session.value.me = { displayName: 'Asha Synthetic', accountKey: 'asha', companyName: 'Synthetic Co', roleName: 'Payroll Operator', scopeKind: 'COMPANY', employeeId: null };
-    session.value.granted = new Set([payroll.permission!]);
+    session.value.granted = new Set([payroll.permission!, other.permission!]);
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter initialEntries={['/tasks']}>
@@ -167,5 +182,22 @@ describe('the menu', () => {
     expect(within(nav).queryByRole('group', { name: 'Hiring' })).toBeNull();
     // The breadcrumb names the page.
     expect(within(screen.getByRole('navigation', { name: 'Breadcrumb' })).getByText('Decisions')).toBeTruthy();
+  });
+
+  it('shows a group of one screen as that screen’s link, with nothing to open first', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ items: [], widgets: [] }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    const payroll = MODULE_SCREENS.find((s) => s.nav && s.path.startsWith('/payroll') && s.permission)!;
+    session.value.me = { displayName: 'Asha Synthetic', accountKey: 'asha', companyName: 'Synthetic Co', roleName: 'Payroll Operator', scopeKind: 'COMPANY', employeeId: null };
+    session.value.granted = new Set([payroll.permission!]);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/tasks']}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(within(nav).queryByRole('group', { name: 'Payroll' })).toBeNull();
+    expect(within(nav).getByRole('link', { name: payroll.title }).getAttribute('href')).toBe(payroll.path);
   });
 });

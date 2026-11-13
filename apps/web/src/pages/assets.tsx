@@ -256,7 +256,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 function localDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function When({ at }: { at: string | null | undefined }) {
   return at ? <time dateTime={at}>{localDateTime(at)}</time> : <>—</>;
@@ -634,7 +634,7 @@ function RegisterScreen() {
           </label>
           <button type="submit">Search</button>
         </form>
-        {list.isPending && <p className="hint">Loading the register…</p>}
+        {list.isPending && <p className="hint loading">Loading the register…</p>}
         <QueryProblem error={list.error} forbidden="The asset register needs an unrestricted company-scope Admin assignment." />
         {data && data.items.length === 0 && <Empty>No items match these filters.</Empty>}
         {data && data.items.length > 0 && (
@@ -781,7 +781,7 @@ function AssetDetailScreen() {
         <Link to={PATHS.register}>Back to the register</Link>
       </p>
       <h1>{a ? `${a.assetCode}: ${a.description}` : 'Asset'}</h1>
-      {detail.isPending && <p className="hint">Loading the item…</p>}
+      {detail.isPending && <p className="hint loading">Loading the item…</p>}
       <QueryProblem error={detail.error} forbidden="The asset register needs an unrestricted company-scope Admin assignment." />
       {a && <AssetBody a={a} />}
     </div>
@@ -1148,7 +1148,7 @@ function EmployeeAssetsScreen() {
             <option value="RETURNED">Returned</option>
           </select>
         </label>
-        {items.isPending && <p className="hint">Loading the items…</p>}
+        {items.isPending && <p className="hint loading">Loading the items…</p>}
         <QueryProblem error={items.error} forbidden="The selected role cannot read this employee’s items." />
         {data && <CustodyTable items={data.items} label="The employee’s items" empty="No items match." />}
       </Section>
@@ -1332,7 +1332,7 @@ function RequestList() {
           ))}
         </select>
       </label>
-      {list.isPending && <p className="hint">Loading the requests…</p>}
+      {list.isPending && <p className="hint loading">Loading the requests…</p>}
       <QueryProblem error={list.error} forbidden="The selected role cannot read custody requests." />
       {data && <RequestHistory requests={data.items} label="Custody requests" empty="No custody requests match." showEmployee />}
       {data && data.items.length > 0 && (
@@ -1374,7 +1374,7 @@ function CustodyRequestQueue() {
     <div ref={region} role="region" aria-label="Custody requests to decide" tabIndex={-1}>
       <Section title={`Custody requests to decide${data ? ` (${items.length})` : ''}`}>
         <p className="hint">Approve a request, or reject it with a note. Approval issues nothing: the item is issued separately from the register.</p>
-        {tasks.isPending && <p className="hint">Loading the requests waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the requests waiting for you…</p>}
         <QueryProblem error={tasks.error} forbidden="The selected role cannot decide custody requests." action="decide" />
         <Notice notice={notice} />
         {data && items.length === 0 && <Empty>No custody requests are waiting for your decision.</Empty>}
@@ -1524,7 +1524,7 @@ function MyItems({ employeeId }: { employeeId: string }) {
     <>
       <Section title="Items I hold">
         <p className="hint">Acknowledge each item you have received, once per issue. Returns are recorded by an administrator.</p>
-        {items.isPending && <p className="hint">Loading your items…</p>}
+        {items.isPending && <p className="hint loading">Loading your items…</p>}
         <QueryProblem error={items.error} forbidden="Your Employee role cannot read your items." />
         <Refusal error={acknowledge.error} action="acknowledge" />
         {acknowledge.isSuccess && (
@@ -1644,7 +1644,7 @@ function MyRequests({ employeeId, onRaiseAgain }: { employeeId: string; onRaiseA
     );
   return (
     <Section title="My custody requests">
-      {requests.isPending && <p className="hint">Loading your requests…</p>}
+      {requests.isPending && <p className="hint loading">Loading your requests…</p>}
       <QueryProblem error={requests.error} forbidden="Your Employee role cannot read your custody requests." />
       <Refusal error={withdraw.error} action="withdraw" />
       {withdraw.isSuccess && (

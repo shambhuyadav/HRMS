@@ -81,8 +81,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODE = /^[A-Z][A-Z0-9_]{0,39}$/;
 /** Process types and owner role codes. */
 const LONG_CODE = /^[A-Z][A-Z0-9_]{0,59}$/;
-/** Exit reason codes (exit-routes.ts). */
-const REASON_CODE = /^[A-Z0-9][A-Z0-9_]{0,59}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** Upload file names: no path separators, reserved characters or control characters (storage/files.ts). */
 // eslint-disable-next-line no-control-regex
@@ -473,7 +471,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 function localDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function When({ at }: { at: string | null | undefined }) {
@@ -1112,7 +1110,7 @@ function TemplateDetailScreen() {
   return (
     <>
       <p>
-        <Link to={PATHS.templates}>← Process templates</Link>
+        <Link className="back-link" to={PATHS.templates}>← Process templates</Link>
       </p>
       {!UUID.test(id) ? (
         <Empty>This process template does not exist.</Empty>
@@ -1697,7 +1695,7 @@ function EmployeeLifecycleScreen() {
   return (
     <>
       <p>
-        <Link to={PATHS.processes}>← Employee processes</Link>
+        <Link className="back-link" to={PATHS.processes}>← Employee processes</Link>
       </p>
       {UUID.test(id) ? (
         <RoleReady>
@@ -2040,7 +2038,7 @@ function ProcessDetailScreen() {
   return (
     <>
       <p>
-        <Link to={PATHS.processes}>← Employee processes</Link>
+        <Link className="back-link" to={PATHS.processes}>← Employee processes</Link>
       </p>
       {!UUID.test(id) ? (
         <Empty>This process does not exist.</Empty>
@@ -2964,7 +2962,7 @@ function ExitDetailScreen() {
   return (
     <>
       <p>
-        <Link to={PATHS.exits}>← Exit cases</Link>
+        <Link className="back-link" to={PATHS.exits}>← Exit cases</Link>
       </p>
       {!UUID.test(id) ? (
         <Empty>This exit case does not exist.</Empty>
@@ -3845,15 +3843,11 @@ function OwnResignation() {
   const loading = canRead && exits.isPending;
   return (
     <Section title="Resignation">
-      <p className="hint">Your own record only.</p>
       <Notice notice={notice} />
       {loading && <Loading>Loading your resignations…</Loading>}
       {canRead && <QueryProblem error={exits.error} forbidden="Your Employee role cannot view resignations." />}
-      {current ? (
-        <OwnExitCard exit={current} canAct={canSubmit} onDone={done} />
-      ) : (
-        items && <Empty>You have no open resignation.</Empty>
-      )}
+      {/* With no open resignation the form says what to do; the empty note is only for a role that cannot resign. */}
+      {current ? <OwnExitCard exit={current} canAct={canSubmit} onDone={done} /> : items && !canSubmit && <Empty>You have no open resignation.</Empty>}
       {canSubmit && !current && !loading && <ResignationForm onDone={done} />}
       {earlier.length > 0 && (
         <div className="stack">
@@ -3988,58 +3982,81 @@ function ResignationForm({ onDone }: { onDone: Done }) {
   const refused = useOwnExitRefusal('resign', onDone);
   const [date, setDate] = useState('');
   const [reason, setReason] = useState('');
-  const [reasonCode, setReasonCode] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
+  // Resigning is not a click to make by accident: the checked form first asks for a confirmation that names the date.
+  const [confirming, setConfirming] = useState(false);
+  // The optional reason code is not asked of the employee (HR codes are internal): none is sent.
   const submit = useMutation({
-    mutationFn: (body: { proposedLastWorkingDate: string; reasonCode?: string; reason?: string }) => api<ResignationResult>('/v1/me/resignation', { body }),
+    mutationFn: (body: { proposedLastWorkingDate: string; reason?: string }) => api<ResignationResult>('/v1/me/resignation', { body }),
     onSuccess: (r) => {
+      setConfirming(false);
       setDate('');
       setReason('');
-      setReasonCode('');
       onDone(
         `Your resignation was submitted on ${formatDate(r.requestDate)} with the proposed last working date ${formatDate(r.proposedLastWorkingDate)}. Your manager recommends the last working date, then HR decides.`,
       );
     },
-    // An open resignation recorded meanwhile (another tab): it shows once the list reloads, in place of this form.
-    onError: refused,
+    // An open resignation recorded meanwhile (another tab): it shows once the list reloads, in place of this form. A refusal
+    // returns to the form, so what it says can be corrected.
+    onError: (error) => {
+      setConfirming(false);
+      refused(error);
+    },
   });
+  const check = (): boolean => {
+    const issue: string | null = ISO_DATE.test(date) ? null : 'Choose your proposed last working day.';
+    setProblem(issue);
+    if (issue) submit.reset();
+    return !issue;
+  };
   const send = (e: FormEvent) => {
     e.preventDefault();
     if (submit.isPending) return;
-    const code = reasonCode.trim();
+    if (check()) setConfirming(true);
+  };
+  const confirm = () => {
+    if (submit.isPending || !check()) return;
     const text = reason.trim();
-    let issue: string | null = null;
-    if (!ISO_DATE.test(date)) issue = 'Enter your proposed last working date.';
-    else if (code && !REASON_CODE.test(code)) issue = 'A reason code has capital letters, digits and underscores only.';
-    setProblem(issue);
-    if (issue) {
-      submit.reset();
-      return;
-    }
-    submit.mutate({ proposedLastWorkingDate: date, ...(code ? { reasonCode: code } : {}), ...(text ? { reason: text } : {}) });
+    submit.mutate({ proposedLastWorkingDate: date, ...(text ? { reason: text } : {}) });
+  };
+  // Any change to what was confirmed asks again.
+  const edit = <T,>(set: (v: T) => void) => (v: T) => {
+    setConfirming(false);
+    set(v);
   };
   return (
     <form aria-label="Submit your resignation" className="stack" onSubmit={send}>
-      <h3 style={H3}>Resign</h3>
+      {/* The card's "Resignation" heading is the form's heading: no second one. */}
       <p className="hint" style={FLUSH}>
-        Propose your last working date; it is inclusive, so you work on that day. Your manager recommends the date, then an HR Administrator decides. Until that decision you can withdraw the
-        resignation yourself.
+        Choose your proposed last working day. Your manager and HR review it; you can withdraw until HR decides.
       </p>
       <label>
-        Proposed last working date (inclusive)
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        Proposed last working day (you work on this day)
+        <input type="date" value={date} onChange={(e) => edit(setDate)(e.target.value)} />
       </label>
-      <ReasonField label="Reason (optional; seen by you and authorised reviewers only)" value={reason} onChange={setReason} />
-      <label>
-        Reason code (optional, if your company uses them)
-        <input value={reasonCode} maxLength={60} onChange={(e) => setReasonCode(e.target.value.toUpperCase())} />
-      </label>
+      <ReasonField label="Reason (optional; seen by you and authorised reviewers only)" value={reason} onChange={edit(setReason)} />
       <Problem text={problem} />
-      <div>
-        <button type="submit" disabled={submit.isPending}>
-          Submit resignation
-        </button>
-      </div>
+      {confirming ? (
+        <div className="confirm-box" role="group" aria-label="Confirm your resignation">
+          <p>
+            You are resigning with <strong>{formatDate(date)}</strong> as your last working day. You can withdraw it yourself until HR decides.
+          </p>
+          <div className="row">
+            <button type="button" className="danger" disabled={submit.isPending} onClick={confirm}>
+              Yes, submit my resignation
+            </button>
+            <button type="button" className="secondary" disabled={submit.isPending} onClick={() => setConfirming(false)}>
+              Go back
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <button type="submit" disabled={submit.isPending}>
+            Submit resignation
+          </button>
+        </div>
+      )}
       <Refusal error={submit.error} action="resign" except={OWN_EXIT_GONE} />
     </form>
   );
@@ -4071,7 +4088,7 @@ function OwnProcesses() {
       <p className="hint">Your own record only: processes about you, such as onboarding or exit clearance. Tasks owned by the Employee role are yours to complete.</p>
       {list.isPending && <Loading>Loading your processes…</Loading>}
       <QueryProblem error={list.error} forbidden="Your Employee role cannot view processes." />
-      {data && data.items.length === 0 && <Empty>No processes about you.</Empty>}
+      {data && data.items.length === 0 && <Empty>No processes about you right now. HR starts one, such as onboarding, when it applies to you.</Empty>}
       {data && data.items.length > 0 && (
         <div style={SCROLL}>
           <table aria-label="My processes">
@@ -4807,10 +4824,10 @@ function AbscondingAuditScreen() {
 export const LIFECYCLE_PROCESSES_SCREENS: ScreenRoute[] = [
   { path: PATHS.templates, title: 'Process templates', permission: TEMPLATE_READ, nav: true, component: TemplatesScreen },
   { path: '/lifecycle/process-templates/:id', title: 'Process template', permission: TEMPLATE_READ, nav: false, component: TemplateDetailScreen },
-  { path: PATHS.processes, title: 'Employee processes', permission: PROCESS_READ, nav: true, component: ProcessesScreen },
+  { path: PATHS.processes, title: 'Employee processes', permission: PROCESS_READ, nav: true, staffOnly: true, component: ProcessesScreen },
   { path: '/lifecycle/processes/:id', title: 'Employee process', permission: PROCESS_READ, nav: false, component: ProcessDetailScreen },
   { path: '/lifecycle/employees/:id', title: 'Employee processes and exit', permission: PROCESS_READ, nav: false, component: EmployeeLifecycleScreen },
-  { path: PATHS.exits, title: 'Exit cases', permission: EXIT_READ, nav: true, component: ExitsScreen },
+  { path: PATHS.exits, title: 'Exit cases', permission: EXIT_READ, nav: true, staffOnly: true, component: ExitsScreen },
   { path: '/lifecycle/exits/:id', title: 'Exit case', permission: EXIT_READ, nav: false, component: ExitDetailScreen },
   // CL-040 (0260): the restricted notes register and its bulk upload.
   { path: PATHS.notes, title: 'Exit notes, remarks and warnings', permission: NOTE_READ, nav: true, component: NotesRegisterScreen },

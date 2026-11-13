@@ -283,6 +283,12 @@ function readable(code: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** A cycle occurrence ("ANNUAL:2027") as a person reads it ("Annual 2027"). */
+function occurrenceText(occurrence: string): string {
+  const [code = '', year] = occurrence.split(':');
+  return year ? `${readable(code)} ${year}` : readable(occurrence);
+}
+
 const basisLabel = (basis: string) => BASES.find((b) => b.value === basis)?.label ?? readable(basis);
 const outcomeLabel = (outcome: string) => OUTCOMES.find((o) => o.value === outcome)?.label ?? readable(outcome);
 const employeeLabel = (e: PickedEmployee) => (e.displayName ? `${e.displayName} (${e.employeeCode})` : e.employeeCode);
@@ -343,10 +349,10 @@ function Item({ term, children }: { term: string; children: ReactNode }) {
   );
 }
 
-/** Decisions happen only in the Decision inbox; the link is offered to roles that decide increments. */
+/** Decisions happen only on the Decisions page (the menu's name for /tasks); the link is offered to roles that decide increments. */
 function DecisionInboxLink() {
   const { can } = useSession();
-  return can(APPROVE) ? <Link to="/tasks">Decision inbox</Link> : <>Decision inbox</>;
+  return can(APPROVE) ? <Link to="/tasks">Decisions</Link> : <>Decisions</>;
 }
 
 export function IncrementsPage() {
@@ -358,7 +364,7 @@ export function IncrementsPage() {
     return (
       <>
         <h1>Increments and salary</h1>
-        <p className="hint">Loading…</p>
+        <p className="hint loading">Loading…</p>
       </>
     );
   }
@@ -460,7 +466,7 @@ function CyclesSection({ companyWide }: { companyWide: boolean }) {
     <Section title="Increment cycles">
       <p className="hint">A cycle is a review schedule, not an entitlement: opening a review creates draft cases for the eligible employees and changes no salary.</p>
       {companyWide && <p className="hint">Type the review year: the cases take effect on the cycle’s review date in that year.</p>}
-      {cycles.isPending && <p className="hint">Loading cycles…</p>}
+      {cycles.isPending && <p className="hint loading">Loading cycles…</p>}
       <LoadProblem error={cycles.error} forbidden="The selected role cannot manage increment cycles." />
       {data && items.length === 0 && <Empty>No increment cycles are configured for this company.</Empty>}
       {items.length > 0 && (
@@ -479,7 +485,7 @@ function CyclesSection({ companyWide }: { companyWide: boolean }) {
             <tbody>
               {items.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.code}</td>
+                  <td>{readable(c.code)}</td>
                   <td>{c.revision}</td>
                   <td>{RECURRENCE_LABEL[c.recurrenceBasis] ?? readable(c.recurrenceBasis)}</td>
                   <td>{basisLabel(c.compensationBasis)}</td>
@@ -587,7 +593,7 @@ function OpenedCases({ jobId, total }: { jobId: string; total: number | null }) 
       <h3 id={`${ids}-title`} style={H3}>
         Draft cases created
       </h3>
-      {query.isPending && <p className="hint">Loading the cases…</p>}
+      {query.isPending && <p className="hint loading">Loading the cases…</p>}
       <LoadProblem error={query.error} forbidden="The selected role cannot read this review’s cases." />
       {query.isSuccess && items.length === 0 && <Empty>The opening created no draft case.</Empty>}
       {items.length > 0 && (
@@ -630,7 +636,7 @@ function OpeningExclusions({ jobId, total }: { jobId: string; total: number | nu
         Excluded employees
       </h3>
       <p className="hint">Each employee of the cycle without a new case is listed with the reason and what repairs it.</p>
-      {query.isPending && <p className="hint">Loading the exclusions…</p>}
+      {query.isPending && <p className="hint loading">Loading the exclusions…</p>}
       <LoadProblem error={query.error} forbidden="The selected role cannot read this review’s exclusions." />
       {query.isSuccess && items.length === 0 && <Empty>The opening excluded no employee.</Empty>}
       {items.length > 0 && (
@@ -704,8 +710,7 @@ function CasesSection({ onShowSalary }: { onShowSalary: ((employee: PickedEmploy
   return (
     <Section title={`Increment cases${data ? ` (${items.length})` : ''}`}>
       <p className="hint">
-        Submitted cases are decided by an independent Admin in the <DecisionInboxLink />; nothing is decided on this screen. A case changes no salary until it is
-        approved.
+        Submitted cases are decided by another administrator on the <DecisionInboxLink /> page, not here. A case changes no salary until it is approved.
       </p>
       {can(PROPOSE) && <p className="hint">Cycle outcomes are proposed by the employee’s current direct manager.</p>}
       <label className="inline">
@@ -735,7 +740,7 @@ function CasesSection({ onShowSalary }: { onShowSalary: ((employee: PickedEmploy
           <ErrorNote error={conflict.error} />
         </div>
       )}
-      {cases.isPending && <p className="hint">Loading cases…</p>}
+      {cases.isPending && <p className="hint loading">Loading cases…</p>}
       <LoadProblem error={cases.error} forbidden="The selected role cannot view increment cases." />
       {data && items.length === 0 && (
         <Empty>{state ? `No increment cases are in the state “${filterLabel}”.` : 'No increment cases yet. Cases appear when a review is opened or an off-cycle change is proposed.'}</Empty>
@@ -772,7 +777,7 @@ function CasesSection({ onShowSalary }: { onShowSalary: ((employee: PickedEmploy
                   <Fragment key={c.id}>
                     <tr aria-current={open ? 'true' : undefined}>
                       <td>{c.employeeCode}</td>
-                      <td>{c.correctsHistoryId ? 'Correction' : c.offCycle ? 'Off-cycle' : c.occurrence}</td>
+                      <td>{c.correctsHistoryId ? 'Correction' : c.offCycle ? 'Off-cycle' : occurrenceText(c.occurrence)}</td>
                       <td>{formatDate(c.effectiveDate)}</td>
                       <td>
                         <StateBadge state={c.state} />
@@ -1294,7 +1299,7 @@ function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
           <h3 id={`${ids}-salary`} style={H3}>
             Salary arrangements
           </h3>
-          {salary.isPending && <p className="hint">Loading salary…</p>}
+          {salary.isPending && <p className="hint loading">Loading salary…</p>}
           <LoadProblem error={salary.error} forbidden="The selected role cannot read this employee’s salary." notFound={scopeNote} />
           {salaryData && arrangements.length === 0 && <Empty>No salary arrangement is recorded for this employee.</Empty>}
           {arrangements.length > 0 && (
@@ -1338,7 +1343,7 @@ function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
           <h3 id={`${ids}-history`} style={H3}>
             Increment history
           </h3>
-          {history.isPending && <p className="hint">Loading increment history…</p>}
+          {history.isPending && <p className="hint loading">Loading increment history…</p>}
           <LoadProblem error={history.error} forbidden="The selected role cannot read this employee’s increment history." notFound={scopeNote} />
           {historyData && historyItems.length === 0 && <Empty>No increments have been applied for this employee.</Empty>}
           {historyItems.length > 0 && (
@@ -1540,7 +1545,7 @@ function AnnualGrowthPanel({ employeeId }: { employeeId: string }) {
           {problem}
         </p>
       )}
-      {requested && growth.isPending && <p className="hint">Loading annual growth…</p>}
+      {requested && growth.isPending && <p className="hint loading">Loading annual growth…</p>}
       <LoadProblem error={growth.error} forbidden="The selected role cannot read this employee’s annual growth." notFound="This employee is not in the selected role’s scope." />
       {g && (
         <div className="stack" style={PANEL}>

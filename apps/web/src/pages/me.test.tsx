@@ -112,7 +112,7 @@ describe('My attendance (FR-059, FR-021)', () => {
       'POST /v1/me/attendance-corrections': { requestId: 'c-2', state: 'SUBMITTED' },
     });
     renderPage(<MyAttendancePage />);
-    expect(await screen.findByText('2026-03-02')).toBeTruthy();
+    expect(await screen.findByText('2 Mar 2026')).toBeTruthy();
     // ABSENT: offered; LEAVE: never; HALF_DAY with a pending request: waiting.
     expect(screen.getAllByText('Request correction')).toHaveLength(1);
     expect(await screen.findByText('correction waiting for review')).toBeTruthy();
@@ -149,7 +149,7 @@ describe('My attendance (FR-059, FR-021)', () => {
   it('offers no correction without the duty', async () => {
     mockApi({ 'GET /v1/employees/emp-1/attendance-corrections': { items: [] }, 'GET /v1/employees/emp-1/attendance': days });
     renderPage(<MyAttendancePage />);
-    expect(await screen.findByText('2026-03-02')).toBeTruthy();
+    expect(await screen.findByText('2 Mar 2026')).toBeTruthy();
     expect(screen.queryByText('Request correction')).toBeNull();
   });
 });

@@ -116,11 +116,11 @@ describe('my background jobs (NFR-S09)', () => {
     expect(within(review).getByText('400')).toBeTruthy();
     expect(within(table).getByRole('link', { name: 'Increment review opening' }).getAttribute('href')).toBe(`/bulk-jobs/${J_REVIEW}`);
     const attendance = within(table).getByRole('link', { name: 'Attendance processing' }).closest('tr') as HTMLElement;
-    expect(within(attendance).getByText('Work date 2026-10-28')).toBeTruthy();
+    expect(within(attendance).getByText('Work date 28 Oct 2026')).toBeTruthy();
     expect(within(attendance).getByText('Failed')).toBeTruthy();
     expect(within(attendance).getByText(/no longer holds the permission/)).toBeTruthy();
     const accrual = within(table).getByRole('link', { name: 'Monthly leave accrual' }).closest('tr') as HTMLElement;
-    expect(within(accrual).getByText('Month 2026-09')).toBeTruthy();
+    expect(within(accrual).getByText('Month Sep 2026')).toBeTruthy();
     // Nothing is running, so the list is not asked for again.
     expect(callsTo('/v1/bulk-jobs')).toHaveLength(1);
   });
@@ -128,7 +128,7 @@ describe('my background jobs (NFR-S09)', () => {
   it('says so when the selected role has started no job', async () => {
     serve({ 'GET /v1/bulk-jobs': [200, { items: [] }] });
     renderAt('/bulk-jobs');
-    expect(await screen.findByText('You have started no background jobs under the selected role.')).toBeTruthy();
+    expect(await screen.findByText('You haven’t started any background jobs in this role.')).toBeTruthy();
     expect(screen.queryByRole('table')).toBeNull();
   });
 

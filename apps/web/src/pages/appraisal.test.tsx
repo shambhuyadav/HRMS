@@ -846,7 +846,7 @@ describe('one appraisal (staff view)', () => {
     await waitFor(() => expect(alertText(x)).toContain('An exception is valid through today or a later date.'));
     change(x, 'Valid through', '2026-11-30');
     fireEvent.click(button(x, 'Record the exception'));
-    await screen.findByText('Recorded an exception: self-entry entries are accepted through 2026-11-30.');
+    await screen.findByText('Recorded an exception: self-entry entries are accepted through 30 Nov 2026.');
     expect(bodiesTo('POST', `/v1/appraisals/${A_DRAFT}/window-exceptions`)[1]).toEqual({ stage: 'SELF_ENTRY', validUntil: '2026-11-30', reason: 'Synthetic medical leave' });
     expect((within(x).getByLabelText('Reason (confidential)') as HTMLTextAreaElement).value).toBe('');
     await within(await screen.findByRole('table', { name: 'Window exceptions' })).findByText('Synthetic medical leave');
@@ -1213,7 +1213,7 @@ describe('My ESS TN18 (Employee OWN context)', () => {
     );
     renderPanel(EMPLOYEE);
     await screen.findByText(/Synthetic: add evidence/);
-    expect(document.body.textContent).toContain('The self-entry window is not open today (2026-05-01 to 2026-06-30)');
+    expect(document.body.textContent).toContain('The self-entry window is not open today (1 May 2026 to 30 Jun 2026)');
     expect(screen.queryByRole('form', { name: 'My self-assessment' })).toBeNull();
     expect(screen.getByRole('table', { name: 'My self-entry of revision 1' })).toBeTruthy();
     cleanup();
@@ -1273,7 +1273,7 @@ describe('process rules decided under owner delegation (I-77)', () => {
     renderAt(`/appraisal/cycles/${C_OPEN}`, [CYCLE_READ, CYCLE_MANAGE]);
     await screen.findByRole('heading', { name: 'Cycle FY2026' });
     const text = document.body.textContent!;
-    expect(text).toContain('Review due date2027-02-28');
+    expect(text).toContain('Review due date28 Feb 2027');
     expect(text).toContain('Goal reviewNone: goals take effect when set');
     expect(text).toContain('Rating modeFormula (the weighted manager result is the final rating)');
     const f = form('Change the cycle');
@@ -1347,7 +1347,7 @@ describe('process rules decided under owner delegation (I-77)', () => {
     Object.assign(db.tasks[0]!, { appraisal: manual, dueOn: '2026-10-01', overdue: true });
     renderQueue('Appraisal ratings', [READ, RATE]);
     const item = await screen.findByRole('listitem', { name: 'Ravi Synthetic (SYN-002) · FY2026' });
-    expect(item.textContent).toContain('due 2026-10-01');
+    expect(item.textContent).toContain('due 1 Oct 2026');
     expect(within(item).getByText('overdue')).toBeTruthy();
     const f = within(item).getByRole('form', { name: 'Rating of Ravi Synthetic (SYN-002)' });
     change(f, 'Overall rating (1 to 5)', '5');

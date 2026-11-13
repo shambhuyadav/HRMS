@@ -102,9 +102,14 @@ describe('attendance dashboard (CL-053)', () => {
       'Not punched yet',
       'Late',
     ]);
-    expect(rows[1]!.textContent).toContain('ABS ABS department');
+    // The department by name; a count shows its number, with what it counts for a screen reader only.
+    expect(within(rows[1]!).getAllByRole('cell')[0]!.textContent).toBe('ABS department');
+    const absent = within(rows[1]!).getByRole('button', { name: '2 Absent in ABS department' });
+    expect(absent.querySelector('.sr-only')!.textContent).toBe(' Absent in ABS department');
     expect(within(rows[3]!).getByText('Total')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('Processed for all 7 employees');
+    // The date shown is the day the counts are for, without choosing one.
+    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe('2026-03-05');
   });
 
   it('FR-022: a date not processed yet says so; a count opens its employees with the same date, departments and department row', async () => {
@@ -153,6 +158,8 @@ describe('attendance reports (CL-047, CL-049 to CL-051; FR-056)', () => {
     expect(screenOf('/attendance/reports')).toMatchObject({ nav: true, permission: 'attendance.export.operational' });
     const calls = mockApi({ 'POST /v1/reports': [202, { id: 'x-1', state: 'QUEUED' }], 'GET /v1/reports/x-1': [200, { state: 'QUEUED', rowCount: null, failureCode: null }] });
     open('/attendance/reports');
+    expect((screen.getByRole('button', { name: /^Generate the / }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('Choose a period (From and To) to generate the report.')).toBeTruthy();
     choosePeriod();
     fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'FIRST_LAST' } });
     fireEvent.change(screen.getByLabelText('Punch source'), { target: { value: 'TERMINAL' } });
@@ -171,7 +178,8 @@ describe('attendance reports (CL-047, CL-049 to CL-051; FR-056)', () => {
     expect(await generate(calls)).toEqual({ reportCode: 'SHIFT_DEVIATION_REGISTER', filters: { from: '2026-03-01', to: '2026-03-31', minuteField: 'LATE', minuteOp: 'GTE', minuteValue: 15 } });
 
     fireEvent.change(screen.getByLabelText('Report'), { target: { value: 'ABSCONDING_REPORT' } });
-    expect(screen.queryByRole('button', { name: /^Generate the / })).toBeNull();
+    // The button stays in view, not offered until the run length is filled in, and the page says what is missing.
+    expect((screen.getByRole('button', { name: /^Generate the / }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('Choose a period and the number of consecutive absent days.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Consecutive absent days, at least'), { target: { value: '3' } });
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'fromDate' } });

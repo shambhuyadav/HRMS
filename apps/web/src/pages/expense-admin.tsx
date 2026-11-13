@@ -5,7 +5,7 @@
 // rule; this page only offers what the role can do.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
-import { api, ApiError, formatDate } from '../api';
+import { api, ApiError, formatAmount, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
@@ -67,10 +67,18 @@ const draftBody = (v: DraftValues) => ({
   highValueThreshold: v.highValueThreshold,
 });
 
-const appliesTo = (r: Pick<Rule, 'grade' | 'location'>) => (r.grade || r.location ? [r.grade && `grade ${r.grade}`, r.location && `location ${r.location}`].filter(Boolean).join(', ') : 'the whole company');
-const periodText = (p: ExpensePolicy) => (p.effectiveTo ? `from ${p.effectiveFrom}, until before ${p.effectiveTo}` : `from ${p.effectiveFrom}`);
+/** Names for the codes a rule carries, where the page knows them; a code nobody can name (an inactive one) shows as itself. */
+interface Names {
+  category: (code: string) => string;
+  location: (code: string) => string;
+}
+const CODES: Names = { category: (code) => code, location: (code) => code };
+const appliesTo = (r: Pick<Rule, 'grade' | 'location'>, names: Names = CODES) =>
+  r.grade || r.location ? [r.grade && `grade ${r.grade}`, r.location && `location ${names.location(r.location)}`].filter(Boolean).join(', ') : 'the whole company';
+const periodText = (p: ExpensePolicy) => (p.effectiveTo ? `from ${formatDate(p.effectiveFrom)}, until before ${formatDate(p.effectiveTo)}` : `from ${formatDate(p.effectiveFrom)}`);
 const nameOf = (p: ExpensePolicy) => `${p.code} revision ${p.revision}`;
-const money = (v: string, currency: string) => `${currency} ${Number(v).toFixed(2)}`;
+// Digit grouping as everywhere else in the app ("INR 50,000.00").
+const money = (v: string, currency: string) => formatAmount(v, currency);
 
 /** Refusals of a policy change in plain words; any other is shown as the server sent it. */
 function refusalText(error: unknown): string | null {
@@ -79,7 +87,7 @@ function refusalText(error: unknown): string | null {
   if (error.code === 'POLICY_OVERLAP') {
     return `This revision's period overlaps ${(details?.revisions ?? []).map((r) => `${r.code} revision ${r.revision}`).join(', ')}, and a claim on those dates would be ambiguous. Change the dates, or retire the other revision.`;
   }
-  if (error.code === 'POLICY_IN_USE') return `A submitted claim used the revision this would end for ${details?.lastUsedOn ?? 'a later date'}, so it cannot end on or before that date. Choose a later date.`;
+  if (error.code === 'POLICY_IN_USE') return `A submitted claim used the revision this would end for ${details?.lastUsedOn ? formatDate(details.lastUsedOn) : 'a later date'}, so it cannot end on or before that date. Choose a later date.`;
   if (error.code === 'POLICY_AMBIGUOUS') {
     return `A grade rule and a location rule tie for an employee with both: ${(details?.ties ?? []).map((t) => `${t.category} for grade ${t.grade} at location ${t.location}`).join('; ')}. Add a rule naming that grade and location.`;
   }
@@ -181,7 +189,7 @@ function AddRule({ policy, onDone }: { policy: ExpensePolicy; onDone: () => void
         <option value="">Any</option>
         {items?.map((o) => (
           <option key={o.id} value={o.id}>
-            {o.code}
+            {key === 'gradeId' ? `${o.name} (${o.code})` : o.name}
           </option>
         ))}
       </select>
@@ -202,7 +210,7 @@ function AddRule({ policy, onDone }: { policy: ExpensePolicy; onDone: () => void
           <option value="">Choose</option>
           {options.data?.categories.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.code}
+              {c.name}
             </option>
           ))}
         </select>
@@ -238,7 +246,6 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     if (err instanceof ApiError && err.code === 'STALE_VERSION') onChanged();
   };
   const edit = useMutation({ mutationFn: () => api(`/v1/expense/policies/${policy.id}`, { method: 'PATCH', body: { expectedVersion: policy.version, ...draftBody(values) } }), onSuccess: done, onError: refreshOnError });
-  const remove = useMutation({ mutationFn: (ruleId: string) => api(`/v1/expense/policies/${policy.id}/rules/${ruleId}/remove`, { body: { expectedVersion: policy.version } }), onSuccess: onChanged, onError: refreshOnError });
   const activate = useMutation({ mutationFn: () => api(`/v1/expense/policies/${policy.id}/activate`, { body: { expectedVersion: policy.version } }), onSuccess: done, onError: refreshOnError });
   const retireIt = useMutation({ mutationFn: () => api(`/v1/expense/policies/${policy.id}/retire`, { body: { expectedVersion: policy.version, effectiveTo: retire.effectiveTo, reason: retire.reason.trim() } }), onSuccess: done, onError: refreshOnError });
   const name = nameOf(policy);
@@ -247,30 +254,25 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     <>
       {policy.state === 'DRAFT' && canManage && (
         <>
-          <button type="button" className="link" onClick={() => toggle('edit')}>
-            Edit {name}
+          <button type="button" className="link" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => toggle('edit')}>
+            Edit
           </button>{' '}
-          <button type="button" className="link" onClick={() => toggle('rule')}>
-            Add a rule to {name}
+          <button type="button" className="link" aria-label={`Add a rule to ${name}`} aria-expanded={open === 'rule'} onClick={() => toggle('rule')}>
+            Add a rule
           </button>{' '}
-          {policy.rules.map((r) => (
-            <button key={r.id} type="button" className="link" disabled={remove.isPending} onClick={() => remove.mutate(r.id)}>
-              Remove {r.category} for {appliesTo(r)}
-            </button>
-          ))}
         </>
       )}
       {policy.state === 'DRAFT' && canActivate && (
-        <button type="button" className="link" disabled={activate.isPending} onClick={() => activate.mutate()}>
-          Activate {name}
+        <button type="button" className="link" aria-label={`Activate ${name}`} disabled={activate.isPending} onClick={() => activate.mutate()}>
+          Activate
         </button>
       )}
       {policy.state === 'ACTIVE' && canActivate && (
-        <button type="button" className="link" onClick={() => toggle('retire')}>
-          Retire {name}
+        <button type="button" className="link danger" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => toggle('retire')}>
+          Retire
         </button>
       )}
-      <Refusal error={remove.error ?? activate.error} />
+      <Refusal error={activate.error} />
       {open === 'edit' && (
         <form
           className="grid-form"
@@ -315,6 +317,38 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
   );
 }
 
+/** A revision's rules in words; on a draft its maintainer can take one out from beside it. */
+function RuleList({ policy, names, canRemove, onChanged }: { policy: ExpensePolicy; names: Names; canRemove: boolean; onChanged: () => void }) {
+  const remove = useMutation({
+    mutationFn: (ruleId: string) => api(`/v1/expense/policies/${policy.id}/rules/${ruleId}/remove`, { body: { expectedVersion: policy.version } }),
+    onSuccess: onChanged,
+    onError: (err: unknown) => {
+      if (err instanceof ApiError && err.code === 'STALE_VERSION') onChanged();
+    },
+  });
+  if (policy.rules.length === 0) return null;
+  return (
+    <>
+      <ul>
+        {policy.rules.map((r) => (
+          <li key={r.id}>
+            {`${names.category(r.category)} for ${appliesTo(r, names)}: ${money(r.limitAmount, policy.currency)} ${BASIS_TEXT[r.limitBasis] ?? r.limitBasis}, receipt ${r.receiptRequired ? 'required' : 'not required'}`}
+            {canRemove && (
+              <>
+                {' '}
+                <button type="button" className="link" aria-label={`Remove ${r.category} for ${appliesTo(r)}`} disabled={remove.isPending} onClick={() => remove.mutate(r.id)}>
+                  Remove
+                </button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <Refusal error={remove.error} />
+    </>
+  );
+}
+
 function CategoriesSection() {
   const qc = useQueryClient();
   const categories = useQuery({ queryKey: ['expense-category-maintenance'], queryFn: () => api<{ items: Category[] }>('/v1/expense/category-maintenance') });
@@ -347,7 +381,7 @@ function CategoriesSection() {
               <th scope="col">Code</th>
               <th scope="col">Name</th>
               <th scope="col">Limit counts per</th>
-              <th scope="col">Active</th>
+              <th scope="col">Status</th>
               <th scope="col" />
             </tr>
           </thead>
@@ -357,10 +391,16 @@ function CategoriesSection() {
                 <td>{c.code}</td>
                 <td>{c.name}</td>
                 <td>{(BASIS_TEXT[c.limitBasis] ?? c.limitBasis).replace(/^a /, '')}</td>
-                <td>{c.active ? 'yes' : 'no'}</td>
+                <td>{c.active ? <Badge tone="good">Active</Badge> : <Badge>Inactive</Badge>}</td>
                 <td>
-                  <button type="button" className="link" disabled={setActive.isPending} onClick={() => setActive.mutate(c)}>
-                    {c.active ? `Deactivate ${c.code}` : `Reactivate ${c.code}`}
+                  <button
+                    type="button"
+                    className={c.active ? 'link danger' : 'link'}
+                    aria-label={c.active ? `Deactivate ${c.code}` : `Reactivate ${c.code}`}
+                    disabled={setActive.isPending}
+                    onClick={() => setActive.mutate(c)}
+                  >
+                    {c.active ? 'Deactivate' : 'Reactivate'}
                   </button>
                 </td>
               </tr>
@@ -409,6 +449,13 @@ export function ExpensePoliciesPage() {
   const canManage = can(MANAGE);
   const canActivate = can(ACTIVATE);
   const revisions = useQuery({ queryKey: ['expense-policies'], queryFn: () => api<{ items: ExpensePolicy[] }>('/v1/expense/policies') });
+  // Rules carry codes; the categories (inactive ones too) and the locations give their names.
+  const categories = useQuery({ queryKey: ['expense-category-maintenance'], enabled: canManage || canActivate, queryFn: () => api<{ items: Category[] }>('/v1/expense/category-maintenance') });
+  const options = useQuery({ queryKey: ['expense-policy-options'], enabled: canManage || canActivate, queryFn: () => api<{ categories: CategoryOption[]; grades: Option[]; locations: Option[] }>('/v1/expense/policy-options') });
+  const names: Names = {
+    category: (code) => categories.data?.items.find((c) => c.code === code)?.name ?? options.data?.categories.find((c) => c.code === code)?.name ?? code,
+    location: (code) => options.data?.locations.find((l) => l.code === code)?.name ?? code,
+  };
   const refresh = () => void qc.invalidateQueries({ queryKey: ['expense-policies'] });
   const items = revisions.data?.items ?? [];
   return (
@@ -441,13 +488,7 @@ export function ExpensePoliciesPage() {
                   </td>
                   <td>{`Submission within ${p.submissionWindowDays} days; high-value approval above ${money(p.highValueThreshold, p.currency)}`}</td>
                   <td>
-                    {p.rules.length > 0 && (
-                      <ul>
-                        {p.rules.map((r) => (
-                          <li key={r.id}>{`${r.category} for ${appliesTo(r)}: ${money(r.limitAmount, p.currency)} ${BASIS_TEXT[r.limitBasis] ?? r.limitBasis}, receipt ${r.receiptRequired ? 'required' : 'not required'}`}</li>
-                        ))}
-                      </ul>
-                    )}
+                    <RuleList key={p.version} policy={p} names={names} canRemove={p.state === 'DRAFT' && canManage} onChanged={refresh} />
                     {p.warnings.map((w) => (
                       <p key={w.code} role="note">
                         <Badge tone="warn">{WARNING_BADGE[w.code] ?? w.code}</Badge> {w.text}
@@ -490,6 +531,12 @@ function RatesSection({ canActivate }: { canActivate: boolean }) {
   const { me } = useSession();
   const qc = useQueryClient();
   const rates = useQuery({ queryKey: ['expense-rates'], queryFn: () => api<{ companyCurrency: string; items: ExchangeRate[] }>('/v1/expense/exchange-rates') });
+  // A rate is entered only for a currency enabled for claims: those are the choices (the same list the section above shows).
+  const currencies = useQuery({
+    queryKey: ['expense-currencies'],
+    queryFn: () => api<{ companyCurrency: string; reference: { code: string; minorUnit: number }[]; items: EnabledCurrency[] }>('/v1/expense/currencies'),
+  });
+  const enabled = (currencies.data?.items ?? []).filter((c) => c.state === 'ACTIVE').map((c) => c.currencyCode);
   const refresh = () => void qc.invalidateQueries({ queryKey: ['expense-rates'] });
   const [currency, setCurrency] = useState('');
   const [from, setFrom] = useState('');
@@ -541,7 +588,14 @@ function RatesSection({ canActivate }: { canActivate: boolean }) {
       >
         <label>
           Currency
-          <input maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value)} />
+          <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            <option value="">{currencies.isSuccess && enabled.length === 0 ? 'None enabled yet' : 'Choose'}</option>
+            {enabled.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           From

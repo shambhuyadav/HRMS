@@ -124,7 +124,7 @@ describe('external deduction codes (FR-028, I-91)', () => {
     });
     show([READ, MANAGE, ACTIVATE]);
     const list = await screen.findByRole('list', { name: 'External deduction codes' });
-    expect(list.textContent).toContain('CANTEEN (Canteen) → CANTEEN_DED from 2026-01-01');
+    expect(list.textContent).toContain('CANTEEN (Canteen) → CANTEEN_DED from 1 Jan 2026');
     expect(within(list).getAllByRole('button', { name: 'Activate' })).toHaveLength(1);
     expect(within(list).getAllByRole('button', { name: 'Retire' })).toHaveLength(1);
     fireEvent.click(within(list).getByRole('button', { name: 'Activate' }));

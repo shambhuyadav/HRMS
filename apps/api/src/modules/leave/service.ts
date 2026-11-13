@@ -667,6 +667,8 @@ export async function listLeaveRequests(db: Queryable, grant: AccessGrant, emplo
 
 export interface LeaveBalanceRow {
   leaveType: string;
+  /** The type's name as HR set it ("Casual leave"), for display; the code stays the key. */
+  leaveTypeName: string;
   paid: boolean;
   available: string;
   pending: string;
@@ -680,7 +682,7 @@ export interface LeaveBalanceRow {
  */
 export async function ledgerBalances(db: Queryable, companyId: string, employeeId: string, opts: { asOf?: string | null; paidOnly?: boolean } = {}): Promise<LeaveBalanceRow[]> {
   const rows = await db.query<LeaveBalanceRow>(
-    `select t.code as "leaveType", t.paid,
+    `select t.code as "leaveType", t.name as "leaveTypeName", t.paid,
             coalesce(sum(m.units), 0)::numeric(12,4)::text as available,
             coalesce(-sum(m.units) filter (where m.movement_kind in ('RESERVATION', 'RESERVATION_RELEASE')), 0)::numeric(12,4)::text as pending,
             coalesce(-sum(m.units) filter (where m.movement_kind in ('CONSUMPTION', 'REVERSAL')), 0)::numeric(12,4)::text as taken
@@ -688,7 +690,7 @@ export async function ledgerBalances(db: Queryable, companyId: string, employeeI
        left join leave_movement m on m.company_id = t.company_id and m.leave_type_id = t.id and m.employee_id = $2
                                   and ($3::date is null or m.effective_date <= $3::date)
       where t.company_id = $1 and t.active and (t.paid or not $4::boolean)
-      group by t.code, t.paid order by t.code`,
+      group by t.code, t.name, t.paid order by t.code`,
     [companyId, employeeId, opts.asOf ?? null, opts.paidOnly === true],
   );
   return rows.rows;

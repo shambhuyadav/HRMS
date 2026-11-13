@@ -31,6 +31,9 @@ interface Stored {
 interface SessionValue {
   stored: Stored | null;
   me: MeContext | null;
+  /** The selected role's context or permissions could not be loaded (the shell offers to try again). */
+  contextFailed: boolean;
+  retryContext(): void;
   permissions: Set<string>;
   can(permission: string): boolean;
   signIn(token: string, companies: Company[]): void;
@@ -80,6 +83,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const storedRef = useRef(stored);
   const [me, setMe] = useState<MeContext | null>(null);
   const [permissions, setPermissions] = useState<Set<string>>(() => new Set());
+  const [contextFailed, setContextFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   const persist = useCallback(
     (next: Stored | null) => {
@@ -105,22 +110,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!stored?.assignmentId) return;
     let cancelled = false;
+    setContextFailed(false);
     Promise.all([api<MeContext>('/v1/me/context'), api<{ permissions: string[] }>('/v1/me/permissions')])
       .then(([context, perms]) => {
         if (cancelled) return;
         setMe(context);
         setPermissions(new Set(perms.permissions));
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // (A 401 has already ended the session through the unauthenticated handler.)
+        if (!cancelled) setContextFailed(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [stored?.token, stored?.companyId, stored?.assignmentId]);
+  }, [stored?.token, stored?.companyId, stored?.assignmentId, attempt]);
 
   const value = useMemo<SessionValue>(
     () => ({
       stored,
       me,
+      contextFailed,
+      retryContext: () => setAttempt((n) => n + 1),
       permissions,
       can: (p) => permissions.has(p),
       signIn: (token, companies) => persist({ token, companies, companyId: companies.length === 1 ? companies[0]!.id : null, assignmentId: null }),
@@ -139,7 +150,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       },
     }),
-    [stored, me, permissions, persist],
+    [stored, me, contextFailed, permissions, persist],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

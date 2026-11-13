@@ -62,7 +62,7 @@ export function VerifiedEvidencePicker({ employeeId, chosen, onChange, legend }:
   return (
     <fieldset>
       <legend>{legend}</legend>
-      {docs.isPending && <p className="hint">Loading the employee’s documents…</p>}
+      {docs.isPending && <p className="hint loading">Loading the employee’s documents…</p>}
       <ErrorNote error={docs.error} />
       {docs.data && docs.data.items.length === 0 && <p className="hint">The employee has no documents yet: add the evidence to their record and have it verified first.</p>}
       {docs.data?.items.map((d) => {

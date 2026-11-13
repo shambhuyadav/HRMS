@@ -2,7 +2,7 @@
 // text-bearing status badges (DF10), and dates: calendar dates as given, instants as the local day (web-12).
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, ApiError, downloadName, formatAmount, formatDate, localDate, pinSession, setSession, setUnauthenticatedHandler } from './api';
+import { api, ApiError, downloadName, formatAmount, formatDate, formatMonth, localDate, pinSession, setSession, setUnauthenticatedHandler } from './api';
 import { ErrorNote, StateBadge } from './ui';
 
 afterEach(() => {
@@ -112,17 +112,25 @@ describe('dates (web-12)', () => {
 
   it('keeps calendar dates exactly as given, even west of UTC', () => {
     process.env.TZ = 'America/Los_Angeles';
-    expect(formatDate('2026-10-24')).toBe('2026-10-24');
+    expect(formatDate('2026-10-24')).toBe('24 Oct 2026');
+    expect(formatDate('2026-03-05')).toBe('5 Mar 2026');
     expect(formatDate(null)).toBe('—');
     expect(formatDate(undefined)).toBe('—');
   });
 
   it('shows an instant as the browser’s local calendar day', () => {
     process.env.TZ = 'Asia/Tokyo';
-    expect(formatDate('2026-10-24T20:00:00Z')).toBe('2026-10-25');
-    expect(formatDate('2026-10-24T20:00:00.000Z')).toBe('2026-10-25');
+    expect(formatDate('2026-10-24T20:00:00Z')).toBe('25 Oct 2026');
+    expect(formatDate('2026-10-24T20:00:00.000Z')).toBe('25 Oct 2026');
     process.env.TZ = 'America/Los_Angeles';
-    expect(formatDate('2026-10-24T03:00:00Z')).toBe('2026-10-23');
+    expect(formatDate('2026-10-24T03:00:00Z')).toBe('23 Oct 2026');
+  });
+
+  it('shows a month as its short name and year', () => {
+    expect(formatMonth('2026-02')).toBe('Feb 2026');
+    expect(formatMonth('2026-12')).toBe('Dec 2026');
+    expect(formatMonth(null)).toBe('—');
+    expect(formatMonth('FY 2026-27')).toBe('FY 2026-27');
   });
 
   it('gives "today" as the local calendar day, for default date fields', () => {

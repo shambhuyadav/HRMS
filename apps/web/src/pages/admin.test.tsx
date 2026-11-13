@@ -225,6 +225,29 @@ describe('reviewer routing (DF03)', () => {
       ],
     });
   });
+
+  it('names the listed reviewers; one who can no longer decide keeps the account key', async () => {
+    mockApi({
+      'GET /v1/workflows/profile_change/candidates': { kind: 'profile_change', items: [{ userId: 'u-a', accountKey: 'syn.a', employeeCode: null, displayName: 'Reviewer A' }] },
+      'GET /v1/workflows': {
+        items: [
+          {
+            kind: 'profile_change',
+            routingKind: null,
+            steps: [{ sequence: 1, permission: 'employee.update.operational', selectionRule: 'HR_FALLBACK_LIST', conditionCode: null }],
+            fallbackReviewers: [
+              { userId: 'u-a', accountKey: 'syn.a', priority: 1, eligible: true },
+              { userId: 'u-c', accountKey: 'syn.c', priority: 2, eligible: false },
+            ],
+          },
+        ],
+      },
+    });
+    renderPage(<RoutingPage />);
+    expect(await screen.findByText('Reviewer A')).toBeTruthy();
+    expect(screen.queryByText('syn.a')).toBeNull();
+    expect(screen.getByText('syn.c').parentElement!.textContent).toBe('2. syn.c (no longer eligible)');
+  });
 });
 
 describe('stranded tasks (C4, DF03, I-84 item 1)', () => {
@@ -601,7 +624,7 @@ describe('notification rules (FR-085, FR-061, I-35)', () => {
       reason: 'Wording review (synthetic)',
       bodyTemplate: 'Your {{roleCode}} access is approved.',
     });
-    expect(await screen.findByText('Revision 3 of ACCESS_GRANT_APPROVED is waiting for approval. Once approved it takes effect from 2026-12-01 09:30.')).toBeTruthy();
+    expect(await screen.findByText('Revision 3 of ACCESS_GRANT_APPROVED is waiting for approval. Once approved it takes effect from 1 Dec 2026 09:30.')).toBeTruthy();
     expect(screen.queryByRole('form')).toBeNull();
     await waitFor(() => expect(reads(calls)).toHaveLength(2));
   });

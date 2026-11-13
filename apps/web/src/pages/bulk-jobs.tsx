@@ -8,7 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError } from '../api';
+import { api, ApiError, formatDate, formatMonth } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section } from '../ui';
@@ -162,9 +162,9 @@ function Item({ term, children }: { term: string; children: ReactNode }) {
 function subject(job: BulkJob): string | null {
   const p = job.parameters;
   const r = job.result;
-  if (job.kind === 'ATTENDANCE_PROCESSING' && typeof p.workDate === 'string') return `Work date ${p.workDate}`;
-  if (job.kind === 'LEAVE_ACCRUAL' && typeof p.month === 'string') return `Month ${p.month}`;
-  if (job.kind === 'LEAVE_YEAR_END' && typeof p.yearEnd === 'string') return `Leave year ending ${p.yearEnd}`;
+  if (job.kind === 'ATTENDANCE_PROCESSING' && typeof p.workDate === 'string') return `Work date ${formatDate(p.workDate)}`;
+  if (job.kind === 'LEAVE_ACCRUAL' && typeof p.month === 'string') return `Month ${formatMonth(p.month)}`;
+  if (job.kind === 'LEAVE_YEAR_END' && typeof p.yearEnd === 'string') return `Leave year ending ${formatDate(p.yearEnd)}`;
   if (job.kind === 'INCREMENT_REVIEW_OPENING') {
     const period = typeof r.period === 'string' ? r.period : typeof p.year === 'number' ? String(p.year) : null;
     const cycle = typeof r.cycleCode === 'string' ? `cycle ${r.cycleCode}, ` : '';
@@ -275,7 +275,7 @@ export function BulkJobStatus({ jobId }: { jobId: string }) {
   const data = job.isSuccess ? job.data : undefined;
   return (
     <div role="region" aria-label="Background job status" aria-live="polite">
-      {job.isPending && <p className="hint">Loading the job…</p>}
+      {job.isPending && <p className="hint loading">Loading the job…</p>}
       {isStatus(job.error, 404) && (
         <p role="note" className="hint">
           This job does not exist, or it was started by someone else or under another role.
@@ -322,13 +322,10 @@ function BulkJobsScreen() {
     <>
       <h1>My background jobs</h1>
       <Section title="Jobs you started">
-        <p className="hint">
-          Company-wide tasks such as attendance processing, monthly leave accrual and increment review openings run in the background. Only the person who started
-          a job sees it, under the role it was started with.
-        </p>
-        {jobs.isPending && <p className="hint">Loading jobs…</p>}
+        <p className="hint">Long tasks you start, such as processing attendance, run in the background and appear here. Only you see them, in the role you started them in.</p>
+        {jobs.isPending && <p className="hint loading">Loading jobs…</p>}
         <ErrorNote error={jobs.error} />
-        {jobs.isSuccess && items.length === 0 && <Empty>You have started no background jobs under the selected role.</Empty>}
+        {jobs.isSuccess && items.length === 0 && <Empty>You haven’t started any background jobs in this role.</Empty>}
         {items.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table>

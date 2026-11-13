@@ -375,9 +375,9 @@ describe('weekly-off patterns (FR-005, DF05)', () => {
     const table = await screen.findByRole('table', { name: 'Weekly-off patterns' });
     const [, hq, plant] = within(table).getAllByRole('row');
     expect(hq!.textContent).toContain('Saturday, Sunday off');
-    expect(hq!.textContent).toContain('The Monday to Friday default');
-    expect(plant!.textContent).toContain('Entry 2, from 2026-03-01');
-    expect(plant!.textContent).toContain('Entry 1, from 2026-01-01: Friday, Saturday off. Old roster');
+    expect(hq!.textContent).toContain('Company default (a Monday to Friday week)');
+    expect(plant!.textContent).toContain('Entry 2, from 1 Mar 2026');
+    expect(plant!.textContent).toContain('Entry 1, from 1 Jan 2026: Friday, Saturday off. Old roster');
     expect(screen.queryByRole('button', { name: 'Change pattern of HQ' })).toBeNull();
   });
 

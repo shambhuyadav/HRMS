@@ -148,7 +148,9 @@ export function MyProfilePage() {
 
       {changes.data && (
         <Section title="My change requests">
-          {changes.data.items.length === 0 && <Empty>No change requests yet.</Empty>}
+          {changes.data.items.length === 0 && (
+            <Empty>{can('profile_change.submit.operational') ? 'No change requests yet. Use Ask for a change above if a detail is wrong.' : 'No change requests yet.'}</Empty>
+          )}
           <ul className="tasks">
             {changes.data.items.map((c) => (
               <li key={c.id}>
@@ -316,7 +318,12 @@ export function MyAttendancePage() {
             To <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
           </label>
         </div>
-        {days.data?.items.length === 0 && <Empty>No processed attendance in this period.</Empty>}
+        {/* Said before the list, so the way to correct a day is known before scanning the rows. */}
+        <p className="hint">
+          {can('attendance.request_correction.operational') ? 'To correct a day to present, half day or absent, choose Request correction on its row. ' : ''}
+          Leave, holidays and outdoor duty are requested on their own pages.
+        </p>
+        {days.data?.items.length === 0 && <Empty>No attendance recorded for these dates yet.</Empty>}
         {!!days.data?.items.length && (
           <table>
             <thead>
@@ -359,12 +366,13 @@ export function MyAttendancePage() {
             </tbody>
           </table>
         )}
-        <p className="hint">Leave, holidays and outdoor duty are requested separately; a correction can set present, half day or absent.</p>
         <ErrorNote error={days.error} />
       </Section>
 
       <Section title="My correction requests">
-        {corrections.data?.items.length === 0 && <Empty>No correction requests yet.</Empty>}
+        {corrections.data?.items.length === 0 && (
+          <Empty>{can('attendance.request_correction.operational') ? 'No correction requests yet. Use Request correction on a day above.' : 'No correction requests yet.'}</Empty>
+        )}
         <ul className="tasks">
           {corrections.data?.items.map((c) => (
             <li key={c.id}>

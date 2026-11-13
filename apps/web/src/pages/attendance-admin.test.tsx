@@ -204,7 +204,7 @@ describe('attendance policies (FR-020, BR-009)', () => {
     open('/attendance/policies');
     const table = await screen.findByRole('table', { name: 'Attendance policy revisions' });
     const row = (name: string) => within(table).getByText(name).closest('tr')!;
-    expect(row('DEFAULT revision 1').textContent).toContain('from 2026-01-01, until before 2026-06-01');
+    expect(row('DEFAULT revision 1').textContent).toContain('from 1 Jan 2026, until before 1 Jun 2026');
     expect(row('DEFAULT revision 1').textContent).toContain('Grace 10 minutes; present from 75%; half day from 50%; overtime off');
     expect(row('DEFAULT revision 1').textContent).toContain('the whole company');
     expect(row('NIGHT revision 1').textContent).toContain('unmapped');
@@ -293,7 +293,8 @@ describe('attendance policies (FR-020, BR-009)', () => {
     open('/attendance/policies');
     click(await screen.findByRole('button', { name: 'Map NIGHT revision 1' }));
     const form = screen.getByRole('form', { name: 'Map NIGHT revision 1' });
-    await within(form).findByRole('option', { name: 'G1' });
+    await within(form).findByRole('option', { name: 'Grade one (G1)' });
+    expect(within(form).getByRole('option', { name: 'Head office' })).toBeTruthy();
     type(within(form).getByLabelText('Grade'), 'g-1');
     click(within(form).getByRole('button', { name: 'Add mapping' }));
     await waitFor(() => expect(calls.some((c) => c.url === `${POLICIES}/p-2/mappings`)).toBe(true));

@@ -719,7 +719,7 @@ export function ImportBatches({ base, title, openedId, busy, onOpen, error }: { 
   return (
     <Section title={title}>
       <p className="hint">Only you see the files you uploaded here. Open a batch to see its rows; one still waiting for its scan can be checked again and then committed or cancelled.</p>
-      {list.isPending && <p className="hint">Loading your batches…</p>}
+      {list.isPending && <p className="hint loading">Loading your batches…</p>}
       {list.error instanceof ApiError && list.error.status === 403 ? (
         <p role="note">
           <Badge tone="warn">not permitted</Badge> The selected role cannot list these batches.
@@ -858,7 +858,7 @@ export function EmployeeDocumentsPage() {
   return (
     <>
       <p>
-        <Link to="/employees">← Employees</Link>
+        <Link className="back-link" to="/employees">← Employees</Link>
       </p>
       {canRead && (
         <Section title="Documents">

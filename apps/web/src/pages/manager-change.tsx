@@ -120,7 +120,7 @@ export function ManagerChangePage() {
         </p>
         {done && <p role="status">{done}</p>}
         <ErrorNote error={chart.error} />
-        {chart.isPending && <p className="hint">Loading people…</p>}
+        {chart.isPending && <p className="hint loading">Loading people…</p>}
         {chart.isSuccess && people.length === 0 && <Empty>No one employed today is visible to you.</Empty>}
         {people.length > 0 && (
           <>
@@ -196,7 +196,7 @@ export function ManagerChangePage() {
         )}
       </Section>
       {people.length > 0 && (
-        <Section title={`New manager for ${plural(chosen.size, 'person', 'people')}`}>
+        <Section title={chosen.size === 0 ? 'New manager: select people above' : `New manager for ${plural(chosen.size, 'person', 'people')}`}>
           <form className="grid-form" onSubmit={submit} aria-label="New manager">
             <label>
               New manager
@@ -220,7 +220,8 @@ export function ManagerChangePage() {
               <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} required />
             </label>
             {can(REROUTE) && (
-              <label className="inline">
+              // The box beside its words, on a row of its own (in a narrow cell the words wrapped under the box).
+              <label className="check wide">
                 <input type="checkbox" checked={moveApprovals} onChange={(e) => setMoveApprovals(e.target.checked)} /> Also move their open approvals to the new manager
               </label>
             )}

@@ -505,11 +505,17 @@ export function NewEmployeePage() {
             </label>
           </>
         )}
-        <EmployeePicker label="Follows the ended employment of" value={prior} onChange={setPrior} filter={{ status: 'INACTIVE_SEPARATED' }} />
-        <button type="submit" disabled={create.isPending}>
-          Create employee
-        </button>
+        {/* Most new employees are new to the company: the link to an earlier employment is asked only when needed. */}
+        <details className="wide form-more">
+          <summary>Rehiring a former employee?</summary>
+          <EmployeePicker label="Follows the ended employment of" value={prior} onChange={setPrior} filter={{ status: 'INACTIVE_SEPARATED' }} />
+        </details>
         <p className="hint wide">A new employee starts as a draft. Activation, the manager and the shift are on their record, which opens once this is saved.</p>
+        <div className="wide row">
+          <button type="submit" disabled={create.isPending}>
+            Create employee
+          </button>
+        </div>
         <div className="wide">
           <Refusal error={create.error} />
         </div>
@@ -900,12 +906,14 @@ function Changes(props: FormProps) {
   if (!edit && !update && !assign && !closeDraft) return null;
   return (
     <Section title="Change this record">
-      {edit && <Action label="Edit details">{(close) => <EditForm {...props} close={close} />}</Action>}
-      {update && <Action label="Change manager">{(close) => <ManagerForm {...props} close={close} />}</Action>}
-      {update && <Action label="Transfer">{(close) => <TransferForm {...props} close={close} />}</Action>}
-      {assign && <Action label="Change shift">{(close) => <ShiftForm {...props} close={close} />}</Action>}
-      {draft && update && <Action label="Correct joining date">{(close) => <JoiningDateForm {...props} close={close} />}</Action>}
-      {closeDraft && <Action label="Close draft">{(close) => <CloseDraftForm {...props} close={close} />}</Action>}
+      <div className="action-bar">
+        {edit && <Action label="Edit details">{(close) => <EditForm {...props} close={close} />}</Action>}
+        {update && <Action label="Change manager">{(close) => <ManagerForm {...props} close={close} />}</Action>}
+        {update && <Action label="Transfer">{(close) => <TransferForm {...props} close={close} />}</Action>}
+        {assign && <Action label="Change shift">{(close) => <ShiftForm {...props} close={close} />}</Action>}
+        {draft && update && <Action label="Correct joining date">{(close) => <JoiningDateForm {...props} close={close} />}</Action>}
+        {closeDraft && <Action label="Close draft">{(close) => <CloseDraftForm {...props} close={close} />}</Action>}
+      </div>
       {(update || assign) && <p className="hint">Manager, transfer and shift changes are dated: the current period closes on that date, and a new change must start after the latest one.</p>}
     </Section>
   );
@@ -1705,7 +1713,7 @@ function EmployeeRecordView({ id }: { id: string }) {
   const documents = can('document.read.document') || can('document.upload.document');
   return (
     <>
-      {can(EMPLOYEE_LIST) && <Link to="/employees">← Employees</Link>}
+      {can(EMPLOYEE_LIST) && <Link className="back-link" to="/employees">← Employees</Link>}
       {record.error ? <ReadProblem error={record.error} /> : null}
       {employee && (
         <>

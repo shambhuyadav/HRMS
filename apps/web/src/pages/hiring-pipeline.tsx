@@ -1073,7 +1073,7 @@ function TrackerBody() {
           <input type="checkbox" checked={mine} disabled={userId === null} onChange={(e) => setMine(e.target.checked)} /> Only applications I own
         </label>
       </div>
-      {tracker.isPending && <p className="hint">Loading the tracker…</p>}
+      {tracker.isPending && <p className="hint loading">Loading the tracker…</p>}
       <LoadProblem error={tracker.error} forbidden="The selected role cannot view the hiring pipeline." />
       {data && (
         <>
@@ -1245,14 +1245,16 @@ function VendorList() {
       <label className="inline check">
         <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} /> Show inactive vendors
       </label>
-      {list.isPending && <p className="hint">Loading vendors…</p>}
+      {list.isPending && <p className="hint loading">Loading vendors…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view recruitment vendors." />
       {notice && (
         <p className="ok" role="status">
           {notice}
         </p>
       )}
-      {list.data && items.length === 0 && <Empty>{includeInactive ? 'No vendors yet.' : 'No active vendors.'}</Empty>}
+      {list.data && items.length === 0 && (
+        <Empty>{`${includeInactive ? 'No vendors yet.' : 'No active vendors.'}${canManage ? ' Add one with the form below.' : ''}`}</Empty>
+      )}
       {items.length > 0 && (
         <div style={SCROLL}>
           <table aria-label="Vendors">
@@ -1512,8 +1514,7 @@ function CandidateRegister() {
           Search
         </button>
       </form>
-      <p className="hint">The search covers candidate codes, names and skills, never private contacts.</p>
-      {list.isPending && <p className="hint">Loading candidates…</p>}
+      {list.isPending && <p className="hint loading">Loading candidates…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view the candidate register." />
       {data && data.items.length === 0 && <Empty>{query.term ? `No candidates match “${query.term}”.` : 'No candidates in the register.'}</Empty>}
       {data && data.items.length > 0 && (
@@ -1820,10 +1821,10 @@ function CandidateDetail({ id }: { id: string }) {
   return (
     <>
       <p>
-        <Link to={PATHS.candidates}>← Candidates</Link>
+        <Link className="back-link" to={PATHS.candidates}>← Candidates</Link>
       </p>
       <h1>{c ? `${c.fullName} (${c.candidateCode})` : 'Candidate'}</h1>
-      {detail.isPending && <p className="hint">Loading the candidate…</p>}
+      {detail.isPending && <p className="hint loading">Loading the candidate…</p>}
       <LoadProblem error={detail.error} forbidden="The selected role cannot view this candidate." missing="This candidate is not available in the selected role’s scope." />
       {c && (
         <>
@@ -1999,7 +2000,7 @@ function FlagQueue() {
           ))}
         </select>
       </label>
-      {flags.isPending && <p className="hint">Loading flags…</p>}
+      {flags.isPending && <p className="hint loading">Loading flags…</p>}
       <LoadProblem error={flags.error} forbidden="The selected role cannot view duplicate flags." />
       <Notice text={notice} />
       {flags.data && items.length === 0 && <Empty>{state === 'OPEN' ? 'No flags are waiting for review.' : 'No flags to show.'}</Empty>}
@@ -2333,7 +2334,7 @@ function PrivateContact({ candidate: c }: { candidate: CandidateView }) {
             )}
           </div>
           <p className="hint">Each look at the private contact is recorded in the audit trail.</p>
-          {shown && contact.isPending && <p className="hint">Loading the private contact…</p>}
+          {shown && contact.isPending && <p className="hint loading">Loading the private contact…</p>}
           {shown && <Refusal error={contact.error} words={CONTACT_WORDS} />}
           {data && (
             <dl className="kv" aria-label="Private contact">
@@ -2478,7 +2479,7 @@ function CandidateDocuments({ candidate: c }: { candidate: CandidateView }) {
       <p className="hint">Every file is scanned for malware and can be opened only once the scan releases it; each opening is recorded in the audit trail.</p>
       {canRead ? (
         <>
-          {docs.isPending && <p className="hint">Loading documents…</p>}
+          {docs.isPending && <p className="hint loading">Loading documents…</p>}
           <LoadProblem error={docs.error} forbidden="The selected role cannot read this candidate’s documents." missing="This candidate is not available in the selected role’s scope." />
           {docs.data && docs.data.items.length === 0 && <Empty>No documents on record.</Empty>}
           {docs.data && docs.data.items.length > 0 && <DocumentTable items={docs.data.items} showCandidate={false} busy={open.isPending} onOpen={(d) => open.mutate(d)} label="Candidate documents" />}
@@ -2630,7 +2631,7 @@ function CvTextPanel({ document: d }: { document: CandidateDocument }) {
         )}
       </div>
       <Notice text={notice} />
-      {shown && text.isPending && <p className="hint">Loading the searchable text…</p>}
+      {shown && text.isPending && <p className="hint loading">Loading the searchable text…</p>}
       {shown && <Refusal error={text.error} words={CV_TEXT_WORDS} />}
       {data && (
         <>
@@ -2948,14 +2949,14 @@ function RequisitionApplications({ id }: { id: string }) {
   return (
     <>
       <p>
-        <Link to={PATHS.tracker}>← Hiring tracker</Link>
+        <Link className="back-link" to={PATHS.tracker}>← Hiring tracker</Link>
       </p>
       <h1>{code ? `Applications for ${code}` : 'Applications for the requisition'}</h1>
       {r && <RequisitionSummary r={r} />}
       <LoadProblem error={requisition.error} forbidden="The selected role cannot view this requisition." missing="This requisition is not available in the selected role’s scope." />
       <Section title={`Applications${list.data ? ` (${items.length})` : ''}`}>
         <p className="hint">One application per candidate and requisition. Each application is decided on its own: ending one never changes the candidate’s other applications.</p>
-        {list.isPending && <p className="hint">Loading applications…</p>}
+        {list.isPending && <p className="hint loading">Loading applications…</p>}
         <LoadProblem error={list.error} forbidden="The selected role cannot view applications." />
         {list.data && items.length === 0 && <Empty>No candidates have applied to this requisition yet.</Empty>}
         {items.length > 0 && <ApplicationTable items={items} showRequisition={false} label="Applications" />}
@@ -3114,11 +3115,11 @@ function ApplicationDetail({ id }: { id: string }) {
     <>
       {a && (
         <p>
-          <Link to={PATHS.requisitionApplications(a.requisition.id)}>← Applications for {a.requisition.code}</Link>
+          <Link className="back-link" to={PATHS.requisitionApplications(a.requisition.id)}>← Applications for {a.requisition.code}</Link>
         </p>
       )}
       <h1>{a ? `Application of ${a.candidate.fullName} (${a.candidate.candidateCode}) for ${a.requisition.code}` : 'Application'}</h1>
-      {detail.isPending && <p className="hint">Loading the application…</p>}
+      {detail.isPending && <p className="hint loading">Loading the application…</p>}
       <LoadProblem error={detail.error} forbidden="The selected role cannot view this application." missing="This application is not available in the selected role’s scope." />
       {a && (
         <>
@@ -3508,9 +3509,9 @@ function OfferList() {
           ))}
         </select>
       </label>
-      {list.isPending && <p className="hint">Loading offers…</p>}
+      {list.isPending && <p className="hint loading">Loading offers…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot list offers." />
-      {list.data && items.length === 0 && <Empty>No offers to show.</Empty>}
+      {list.data && items.length === 0 && <Empty>No offers to show. An offer is prepared from a candidate’s application in the hiring tracker.</Empty>}
       {items.length > 0 && (
         <div style={SCROLL}>
           <table aria-label="Offers">
@@ -3586,11 +3587,11 @@ function OfferDetail({ id }: { id: string }) {
     <>
       {o && (
         <p>
-          <Link to={PATHS.offers}>← Offers</Link>
+          <Link className="back-link" to={PATHS.offers}>← Offers</Link>
         </p>
       )}
       <h1>{o ? `Offer to ${o.candidate.fullName} (${o.candidate.candidateCode}) for ${o.requisition.code}` : 'Offer'}</h1>
-      {detail.isPending && <p className="hint">Loading the offer…</p>}
+      {detail.isPending && <p className="hint loading">Loading the offer…</p>}
       <LoadProblem error={detail.error} forbidden="The selected role cannot view this offer." missing="This offer is not available in the selected role’s scope." />
       {o && (
         <>
@@ -4089,7 +4090,7 @@ function OfferLettersSection({ offer: o }: { offer: OfferView }) {
       </p>
       {canRead ? (
         <>
-          {letters.isPending && <p className="hint">Loading the offer letters…</p>}
+          {letters.isPending && <p className="hint loading">Loading the offer letters…</p>}
           <LoadProblem error={letters.error} forbidden="The selected role cannot read this offer’s letters." missing="This offer’s letters are not available in the selected role’s scope." />
           {letters.data && items.length === 0 && <Empty>No offer letter has been generated for this offer.</Empty>}
           {items.length > 0 && <OfferLetterTable items={items} busy={open.isPending} onOpen={(l) => open.mutate(l)} />}
@@ -4352,7 +4353,7 @@ function DeliveryForms({ letters, offer: o, onFinished }: { letters: OfferLetter
   const choices = methods.data?.items ?? [];
   return (
     <>
-      {methods.isPending && <p className="hint">Loading the delivery methods…</p>}
+      {methods.isPending && <p className="hint loading">Loading the delivery methods…</p>}
       <LoadProblem error={methods.error} forbidden="The selected role cannot list the delivery methods of offer letters." />
       {methods.data && choices.length === 0 && <p className="hint">No delivery method of offer letters is active in this company. Ask HR to set one up.</p>}
       {choices.length > 0 && letters.map((l) => <DeliveryForm key={l.id} letter={l} offer={o} methods={choices} onFinished={onFinished} />)}
@@ -4560,7 +4561,7 @@ function HandoverForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
       {withDocuments ? (
         <fieldset className="wide" style={GROUP}>
           <legend>Candidate documents to transfer (optional)</legend>
-          {docs.isPending && <p className="hint">Loading the candidate’s documents…</p>}
+          {docs.isPending && <p className="hint loading">Loading the candidate’s documents…</p>}
           <LoadProblem error={docs.error} forbidden="The selected role cannot read this candidate’s documents." />
           {docs.data && items.length === 0 && <Empty>The candidate has no documents.</Empty>}
           {items.length > 0 && (
@@ -4657,7 +4658,7 @@ function EmployeeOrigin({ employeeId }: { employeeId: string }) {
       <h1>{e ? `Hiring origin of ${e.displayName} (${e.employeeCode})` : 'Hiring origin'}</h1>
       {can(EMPLOYEE_READ) && (
         <Section title="Employee record">
-          {employee.isPending && <p className="hint">Loading the employee…</p>}
+          {employee.isPending && <p className="hint loading">Loading the employee…</p>}
           <LoadProblem error={employee.error} forbidden="The selected role cannot view this employee." missing="This employee is not available in the selected role’s scope." />
           {e && (
             <>
@@ -4682,7 +4683,7 @@ function EmployeeOrigin({ employeeId }: { employeeId: string }) {
         </Section>
       )}
       <Section title="Recruitment history">
-        {origin.isPending && <p className="hint">Loading the hiring origin…</p>}
+        {origin.isPending && <p className="hint loading">Loading the hiring origin…</p>}
         <LoadProblem error={origin.error} forbidden="The selected role cannot view the hiring origin." missing="No hiring origin is recorded for this employee in the selected role’s scope." />
         {h && (
           <dl className="kv">
@@ -4745,7 +4746,7 @@ function OfferApprovalList() {
           Offers whose confidential compensation waits for your independent approval. An offer never reaches the person who prepared it, recorded its compensation
           or submitted it. Returning or rejecting needs a reason; a returned offer becomes a draft again and its next submission is a new revision.
         </p>
-        {tasks.isPending && <p className="hint">Loading the offers waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the offers waiting for you…</p>}
         <LoadProblem error={tasks.error} forbidden="The selected role cannot approve offers." />
         {notice && (
           <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>

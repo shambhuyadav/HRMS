@@ -1,6 +1,7 @@
 ﻿import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { DevTokenConfig, TokenVerifier } from './auth/tokens.js';
+import type { IdentityAdmin } from './auth/identity-admin.js';
 import type { OidcProvider } from './auth/oidc.js';
 import { signInRoutes } from './auth/sign-in-routes.js';
 import { devLoginRoutes, meRoutes } from './modules/access/me.js';
@@ -80,6 +81,11 @@ export interface AppDependencies {
    * verifies (auth/sign-in-routes.ts). Without it the API offers no sign-in of its own besides the development one.
    */
   oidc?: { provider: OidcProvider; tokens: DevTokenConfig };
+  /**
+   * The sign-in provider's user administration (auth/identity-admin.ts): account creation, password resets and the like from the
+   * User accounts screen. Without it (the development server) accounts are created alone and no temporary password is given.
+   */
+  identity?: IdentityAdmin | null;
   /** Request deadlines and transaction budgets per serving class (http/deadline.ts); else the environment, else the defaults. */
   serving?: ServingBudgetOverrides;
   /**
@@ -140,7 +146,7 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
     return { signedOut: true };
   });
 
-  app.register(accessRoutes, { prefix: '/v1', db: deps.db });
+  app.register(accessRoutes, { prefix: '/v1', db: deps.db, identity: deps.identity ?? null });
   app.register(delegationRoutes, { prefix: '/v1', db: deps.db });
   app.register(orgRoutes, { prefix: '/v1', db: deps.db });
   app.register(referenceValueRoutes, { prefix: '/v1', db: deps.db });

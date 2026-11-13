@@ -1,5 +1,7 @@
-import { type ComponentType, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { NavLink, Navigate, Route, Routes, matchPath, useLocation } from 'react-router-dom';
+import { Component, type ComponentType, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Link, NavLink, Navigate, Route, Routes, matchPath, useLocation } from 'react-router-dom';
+import { api } from './api';
 import { groupIcon, Icon, navIcon } from './icons';
 import { useSession } from './session';
 import { AccessAdminPage } from './pages/access';
@@ -12,7 +14,7 @@ import { IncrementsPage } from './pages/increments';
 import { MyAttendancePage, MyProfilePage } from './pages/me';
 import { EmployeeDocumentsPage, ImportsPage } from './pages/records';
 import { WorkRequestsPage } from './pages/requests';
-import { ExpensesPage, InboxPage, LeavePage, PaymentsPage, ReportsPage, TasksPage } from './pages/work';
+import { ExpensesPage, hasDecisionQueues, InboxPage, LeavePage, PaymentsPage, ReportsPage, TasksPage } from './pages/work';
 import type { ScreenRoute } from './screens';
 import { MODULE_SCREENS } from './screens-registry';
 import { PageTitleContext, scopeWords } from './ui';
@@ -26,6 +28,8 @@ interface NavEntry {
   anyOf?: readonly string[];
   /** Employee own-record screens (H3, BR-055): shown only in an OWN-scope context linked to an employee. */
   own?: boolean;
+  /** Shown only when this holds for the selected assignment's permissions. */
+  when?: (can: (permission: string) => boolean) => boolean;
 }
 
 /** Navigation entries appear only when the selected assignment holds the permission (server still enforces). */
@@ -46,7 +50,7 @@ const NAV: readonly NavEntry[] = [
     anyOf: ['increment.read.operational', 'increment_cycle.manage.operational', 'increment.propose.salary', 'increment.approve.salary', 'salary.read.salary'],
   },
   { to: '/expenses', label: 'Expenses', permission: 'expense.draft.operational' },
-  { to: '/tasks', label: 'Decisions' },
+  { to: '/tasks', label: 'Decisions', when: hasDecisionQueues },
   { to: '/sensitive-changes', label: 'Private detail reviews', permission: 'sensitive_change.review.private' },
   { to: '/payments', label: 'Payments', permission: 'payment.read.operational' },
   { to: '/reports', label: 'Reports' },
@@ -105,6 +109,11 @@ const GROUP_LABELS: Readonly<Record<string, string>> = {
   documents: 'Documents and policies',
   policies: 'Documents and policies',
   admin: 'Administration',
+  // Confirmation policies are set-up, and a second "Confirmations" heading beside the core page of that name reads as a duplicate.
+  confirmations: 'Administration',
+  // Likewise the set-up screens under /leave and /employees: named apart from the Leave and Employees pages in Workspace.
+  leave: 'Leave administration',
+  employees: 'Employee administration',
   'bulk-jobs': 'Background jobs',
 };
 
@@ -119,15 +128,18 @@ export function visibleNav(can: (permission: string) => boolean, context: { scop
     if (n.own && !(context && context.scopeKind === 'OWN' && context.employeeId)) return false;
     if (n.permission && !can(n.permission)) return false;
     if (n.anyOf && !n.anyOf.some((p) => can(p))) return false;
+    if (n.when && !n.when(can)) return false;
     return true;
   });
 }
 
 /** The module menu screens this context may see, grouped in registry order. */
-export function visibleModuleGroups(can: (permission: string) => boolean): { label: string; screens: ScreenRoute[] }[] {
+export function visibleModuleGroups(can: (permission: string) => boolean, context?: { scopeKind: string } | null): { label: string; screens: ScreenRoute[] }[] {
   const groups = new Map<string, ScreenRoute[]>();
+  const ownOnly = context?.scopeKind === 'OWN';
   for (const s of MODULE_SCREENS) {
     if (!s.nav || (s.permission && !can(s.permission))) continue;
+    if (s.staffOnly && ownOnly) continue;
     const label = moduleGroupOf(s.path);
     groups.set(label, [...(groups.get(label) ?? []), s]);
   }
@@ -138,8 +150,13 @@ export function visibleModuleGroups(can: (permission: string) => boolean): { lab
 export function pageOf(pathname: string): { group: string | null; title: string } {
   const core = NAV.find((n) => n.to === pathname);
   if (core) return { group: null, title: core.label };
-  const screen = MODULE_SCREENS.find((s) => matchPath({ path: s.path, end: true }, pathname));
-  if (screen) return { group: moduleGroupOf(screen.path), title: screen.title };
+  // A fixed path wins over a pattern (/employees/manager-change is not the record /employees/:id), as in the router.
+  const matches = MODULE_SCREENS.filter((s) => matchPath({ path: s.path, end: true }, pathname));
+  const screen = matches.find((s) => !s.path.includes(':')) ?? matches[0];
+  if (screen) {
+    const group = moduleGroupOf(screen.path);
+    return { group: group === screen.title ? null : group, title: screen.title };
+  }
   if (matchPath('/team/:id', pathname)) return { group: 'My team', title: 'Team member' };
   if (matchPath('/employees/:id/documents', pathname)) return { group: 'Employees', title: 'Documents' };
   return { group: null, title: 'HRMS' };
@@ -160,9 +177,15 @@ function loadGroupChoices(): Record<string, boolean> {
  */
 function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () => void }) {
   const { me, can } = useSession();
-  const entries = visibleNav(can, me ?? null);
-  const groups = visibleModuleGroups(can);
+  // Reports appears once the role's catalogue offers at least one report (the Reports page reads the same cached catalogue);
+  // if the catalogue cannot be read the entry stays, and the page says why.
+  const catalogue = useQuery({ queryKey: ['catalogue'], queryFn: () => api<{ items: unknown[] }>('/v1/reports/catalogue') });
+  const offered = catalogue.data?.items;
+  const hasReports = !catalogue.isPending && (catalogue.isError || !Array.isArray(offered) || offered.length > 0);
+  const entries = visibleNav(can, me ?? null).filter((n) => n.to !== '/reports' || hasReports);
+  const groups = visibleModuleGroups(can, me ?? null);
   const activeGroup = groups.find((g) => g.screens.some((s) => matchPath({ path: s.path, end: true }, pathname)))?.label ?? null;
+  const inModuleScreen = MODULE_SCREENS.some((s) => s.nav && !s.path.includes(':') && matchPath({ path: s.path, end: true }, pathname));
   const [choices, setChoices] = useState<Record<string, boolean>>(loadGroupChoices);
   const isOpen = (label: string) => choices[label] ?? label === activeGroup;
   const toggle = (label: string) => {
@@ -180,7 +203,14 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () =>
         <div className="nav-section">
           <p className="nav-section-title">Workspace</p>
           {entries.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.to === '/' || n.to === '/me'} onClick={onNavigate}>
+            // Active on its own page and on the pages under it (an employee's record keeps Employees lit), but not on a module
+            // screen under its path (/confirmations/policies lights its own entry, not Confirmations as well).
+            <NavLink
+              key={n.to}
+              to={n.to}
+              end={n.to === '/' || n.to === '/me' || inModuleScreen}
+              onClick={onNavigate}
+            >
               <Icon name={navIcon(n.to)} />
               <span>{n.label}</span>
             </NavLink>
@@ -191,6 +221,16 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () =>
         <div className="nav-section">
           <p className="nav-section-title">Modules</p>
           {groups.map((g) => {
+            // A group of one screen is that screen's link, not a heading to open first.
+            const only = g.screens.length === 1 ? g.screens[0]! : null;
+            if (only) {
+              return (
+                <NavLink key={g.label} to={only.path} end onClick={onNavigate} title={only.title === g.label ? undefined : g.label}>
+                  <Icon name={groupIcon(g.label)} />
+                  <span>{only.title}</span>
+                </NavLink>
+              );
+            }
             const open = isOpen(g.label);
             return (
               <div key={g.label} className={`nav-group${open ? ' open' : ''}${g.label === activeGroup ? ' current' : ''}`} role="group" aria-label={g.label}>
@@ -217,6 +257,48 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () =>
   );
 }
 
+/**
+ * A page that fails while rendering shows a message inside the shell, instead of taking the whole application (menu and header)
+ * down with it. Moving to another page clears it.
+ */
+class PageErrorBoundary extends Component<{ resetKey: string; children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  override componentDidUpdate(previous: { resetKey: string }) {
+    if (previous.resetKey !== this.props.resetKey && this.state.failed) this.setState({ failed: false });
+  }
+  override render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <section className="card" role="alert">
+        <h2>This page could not be shown</h2>
+        <p>Something went wrong while showing this page. Reload to try again; if it keeps happening, tell your administrator.</p>
+        <div className="row">
+          <button type="button" onClick={() => window.location.reload()}>
+            Reload
+          </button>
+          <Link to="/">Go to Home</Link>
+        </div>
+      </section>
+    );
+  }
+}
+
+/** A staff register opened by its address in a role that covers only the person's own record: say so, and where their own items are. */
+function StaffOnlyNotice() {
+  return (
+    <section className="card" role="note">
+      <h2>This page is for HR staff</h2>
+      <p>Your selected role covers only your own record. Your own requests and records are under My ESS.</p>
+      <div className="row">
+        <Link to="/me">Go to My ESS</Link>
+      </div>
+    </section>
+  );
+}
+
 const initialsOf = (name: string) =>
   name
     .replace(/@.*/, '')
@@ -227,7 +309,7 @@ const initialsOf = (name: string) =>
     .join('') || '?';
 
 export function App() {
-  const { stored, me, switchRole, signOut } = useSession();
+  const { stored, me, contextFailed, retryContext, switchRole, signOut } = useSession();
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const page = pageOf(pathname);
@@ -247,10 +329,46 @@ export function App() {
     watcher.observe(main, { childList: true });
     return () => watcher.disconnect();
   }, [pathname, stored?.assignmentId]);
+  // On a phone a table's rows read as stacked cards, each value under its column's name (styles.css, max-width 560px): every body
+  // cell carries the name of its column, kept up to date as pages render.
+  useEffect(() => {
+    const main = mainRef.current;
+    if (!main || typeof MutationObserver === 'undefined') return undefined;
+    let frame = 0;
+    const label = () => {
+      frame = 0;
+      for (const table of Array.from(main.querySelectorAll('table'))) {
+        const head = table.tHead?.rows[0];
+        if (!head) continue;
+        const names: string[] = [];
+        for (const cell of Array.from(head.cells)) for (let i = 0; i < cell.colSpan; i++) names.push(cell.textContent?.trim() ?? '');
+        for (const body of Array.from(table.tBodies)) {
+          for (const row of Array.from(body.rows)) {
+            let column = 0;
+            for (const cell of Array.from(row.cells)) {
+              const name = names[column] ?? '';
+              if (name && cell.getAttribute('data-label') !== name) cell.setAttribute('data-label', name);
+              column += cell.colSpan;
+            }
+          }
+        }
+      }
+    };
+    const watcher = new MutationObserver(() => {
+      if (!frame) frame = requestAnimationFrame(label);
+    });
+    watcher.observe(main, { childList: true, subtree: true });
+    label();
+    return () => {
+      watcher.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [me, stored?.assignmentId]);
   if (!stored) return <SignInPage />;
   if (!stored.companyId || !stored.assignmentId) return <SelectRolePage />;
 
-  const name = me ? (me.displayName ?? me.accountKey) : '';
+  // A sign-in name without a display name shows its part before the "@" (the whole address is in the tooltip), not a cut-off address.
+  const name = me ? (me.displayName ?? me.accountKey.replace(/@.*$/, '')) : '';
   return (
     <div className={`shell${menuOpen ? ' menu-open' : ''}`}>
       <aside className="side">
@@ -261,7 +379,8 @@ export function App() {
             <span className="brand-company">{me?.companyName ?? ''}</span>
           </div>
         </div>
-        <Sidebar pathname={pathname} onNavigate={() => setMenuOpen(false)} />
+        {/* The menu waits for the role's permissions: entries are never shown and then taken away. */}
+        {me && <Sidebar pathname={pathname} onNavigate={() => setMenuOpen(false)} />}
       </aside>
       {menuOpen && <div className="scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
       <div className="main-col">
@@ -315,23 +434,44 @@ export function App() {
         </header>
         <main className="content" ref={mainRef}>
           {!ownTitle && page.title !== 'HRMS' && (
+            // The module's name is in the breadcrumb above; the header is the title alone, as on pages that title themselves.
             <header className="page-header">
-              {page.group && <p className="page-eyebrow">{page.group}</p>}
               <h1 className="page-title">{page.title}</h1>
             </header>
           )}
-          <PageTitleContext.Provider value={!ownTitle && page.title !== 'HRMS' ? page.title : null}>
-          <Routes>
-            {CORE_ROUTES.map((r) => (
-              <Route key={r.path} path={r.path} element={<r.component />} />
-            ))}
-            {/* Wave-2 module screens (screens-registry.ts); each screen re-checks its permissions and the server re-checks every call. */}
-            {MODULE_SCREENS.map((s) => (
-              <Route key={s.path} path={s.path} element={<s.component />} />
-            ))}
-            <Route path="*" element={<Navigate to="/" />} />
-          </Routes>
-          </PageTitleContext.Provider>
+          {/* Pages wait for the role's context and permissions, so none says "not permitted" while they are still loading. */}
+          {!me ? (
+            contextFailed ? (
+              <section className="card" role="alert">
+                <h2>Your workspace could not be loaded</h2>
+                <p>Check your connection and try again.</p>
+                <div className="row">
+                  <button type="button" onClick={retryContext}>
+                    Try again
+                  </button>
+                </div>
+              </section>
+            ) : (
+              <p className="hint" role="status">
+                Loading your workspace…
+              </p>
+            )
+          ) : (
+            <PageTitleContext.Provider value={!ownTitle && page.title !== 'HRMS' ? page.title : null}>
+              <PageErrorBoundary resetKey={pathname}>
+                <Routes>
+                  {CORE_ROUTES.map((r) => (
+                    <Route key={r.path} path={r.path} element={<r.component />} />
+                  ))}
+                  {/* Wave-2 module screens (screens-registry.ts); each screen re-checks its permissions and the server re-checks every call. */}
+                  {MODULE_SCREENS.map((s) => (
+                    <Route key={s.path} path={s.path} element={s.staffOnly && me.scopeKind === 'OWN' ? <StaffOnlyNotice /> : <s.component />} />
+                  ))}
+                  <Route path="*" element={<Navigate to="/" />} />
+                </Routes>
+              </PageErrorBoundary>
+            </PageTitleContext.Provider>
+          )}
         </main>
       </div>
     </div>

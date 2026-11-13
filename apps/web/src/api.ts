@@ -142,16 +142,32 @@ export function localDate(at: Date = new Date()): string {
   return `${at.getFullYear()}-${pad2(at.getMonth() + 1)}-${pad2(at.getDate())}`;
 }
 
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** A calendar day (YYYY-MM-DD) as people read it: "3 Nov 2026"; anything else unchanged. */
+export function dayText(day: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  const month = m ? MONTHS_SHORT[Number(m[2]) - 1] : undefined;
+  return m && month ? `${Number(m[3])} ${month} ${m[1]}` : day;
+}
+
+/** A month (YYYY-MM, e.g. a payroll month) as people read it: "Feb 2026"; anything else unchanged. */
+export function formatMonth(month: string | null | undefined): string {
+  if (!month) return '—';
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  const name = m ? MONTHS_SHORT[Number(m[2]) - 1] : undefined;
+  return m && name ? `${name} ${m[1]}` : month;
+}
+
 /**
- * A calendar date (YYYY-MM-DD, e.g. a leave or expiry date) is shown exactly as given. An instant (an ISO
- * timestamp such as an upload or assignment time) is shown as the browser's local calendar day, not the UTC one.
+ * A calendar date (YYYY-MM-DD, e.g. a leave or expiry date) is shown as that day ("3 Nov 2026"), never shifted by the time zone.
+ * An instant (an ISO timestamp such as an upload or assignment time) is shown as the browser's local calendar day, not the UTC one.
  */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return dayText(value);
   const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) ? new Date(value) : null;
-  if (!instant || Number.isNaN(instant.getTime())) return value.slice(0, 10);
-  return localDate(instant);
+  if (!instant || Number.isNaN(instant.getTime())) return dayText(value.slice(0, 10));
+  return dayText(localDate(instant));
 }
 /** A quantity such as days as a person reads it: padding zeros gone, nothing rounded ("12.0000" reads 12, "1.6667" stays). */
 export const formatUnits = (value: string | number | null | undefined) => {

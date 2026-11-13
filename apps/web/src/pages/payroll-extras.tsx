@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey, localDate } from '../api';
+import { api, ApiError, download, fileToBase64, formatDate, formatMonth, idempotencyKey, localDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Empty, ErrorNote, Section } from '../ui';
@@ -428,7 +428,7 @@ export function TdsChallansPage() {
             <tbody>
               {challans.data.items.map((c) => (
                 <tr key={c.id}>
-                  <td>{c.month}</td>
+                  <td>{formatMonth(c.month)}</td>
                   <td>{c.section}</td>
                   <td>{c.bsrCode}</td>
                   <td>{c.challanSerial}</td>
@@ -481,7 +481,7 @@ export function TdsChallansPage() {
                   <tbody>
                     {reconciliation.data.months.map((m) => (
                       <tr key={m.month}>
-                        <td>{m.month}</td>
+                        <td>{formatMonth(m.month)}</td>
                         <td>{amount(m.deducted)}</td>
                         <td>{amount(m.deposited)}</td>
                         <td>{amount(m.difference)}</td>
@@ -603,8 +603,8 @@ export function TaxInputsPage() {
                     <td>
                       {i.employeeName} ({i.employeeCode})
                     </td>
-                    <td>{i.perquisites.map((p) => `${p.month} ${plain(p.perquisiteType)} ${amount(p.value)}`).join('; ') || '—'}</td>
-                    <td>{i.pastSalary.map((s) => `${plain(s.source)} ${s.fromMonth} to ${s.toMonth}: salary ${amount(s.taxableSalary)}, TDS ${amount(s.tdsDeducted)}`).join('; ') || '—'}</td>
+                    <td>{i.perquisites.map((p) => `${formatMonth(p.month)} ${plain(p.perquisiteType)} ${amount(p.value)}`).join('; ') || '—'}</td>
+                    <td>{i.pastSalary.map((s) => `${plain(s.source)} ${formatMonth(s.fromMonth)} to ${formatMonth(s.toMonth)}: salary ${amount(s.taxableSalary)}, TDS ${amount(s.tdsDeducted)}`).join('; ') || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -654,7 +654,7 @@ export function MedicalClaimsPage() {
   if (!can(MEDICAL_READ)) return <Empty>Medical claims need the expense read duty.</Empty>;
   return (
     <Section title="Medical claims">
-      <p className="hint">Lines of submitted expense claims in a medical category (code MEDICAL or MEDICAL_…), by bill date.</p>
+      <p className="hint">Medical bills from submitted expense claims, listed by bill date.</p>
       <form
         className="filters"
         aria-label="Medical claim filters"
@@ -1138,7 +1138,7 @@ export const PAYROLL_EXTRAS_SCREENS: readonly ScreenRoute[] = [
   { path: '/payroll/challan-master', title: 'Challan master', permission: CHALLAN_READ, nav: true, component: ChallanMasterPage },
   { path: '/payroll/tds-challans', title: 'TDS challans', permission: CHALLAN_READ, nav: true, component: TdsChallansPage },
   { path: '/payroll/tax-inputs', title: 'Perquisites and past salary', permission: TAX_READ, nav: true, component: TaxInputsPage },
-  { path: '/payroll/medical-claims', title: 'Medical claims', permission: MEDICAL_READ, nav: true, component: MedicalClaimsPage },
+  { path: '/payroll/medical-claims', title: 'Medical claims', permission: MEDICAL_READ, nav: true, staffOnly: true, component: MedicalClaimsPage },
   { path: '/payroll/liability-provisions', title: 'Liability provisions', permission: REPORT_READ, nav: true, component: LiabilityProvisionsPage },
   { path: '/payroll/salary-jv', title: 'GL mapping and salary JV', permission: MAPPING_READ, nav: true, component: SalaryJvPage },
   { path: '/payroll/edoc-export', title: 'Export payslips for EDOC', permission: EDOC_EXPORT, nav: true, component: EdocExportPage },

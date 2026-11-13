@@ -402,7 +402,7 @@ describe('the plan register', () => {
     expect(row('TRN-003')).toContain('Past');
     expect(row('TRN-003')).toContain('INR 0.00');
     expect(callsTo('GET', '/v1/training-plans')[0]!.params.toString()).toBe('page=1&pageSize=25');
-    expect(screen.getByText(/business date \(2026-10-28\)/).textContent).toContain('cancelled whatever its dates');
+    expect(screen.getByText(/business date \(28 Oct 2026\)/).textContent).toContain('cancelled whatever its dates');
 
     const filters = screen.getByRole('form', { name: 'Filter the plans' });
     change(filters, 'View', 'CANCELLED');

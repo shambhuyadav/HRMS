@@ -98,7 +98,7 @@ describe('the list (FR-004)', () => {
     mockApi({ [LIST]: [200, { items: [DEPT] }] });
     open('/organisation/departments');
     const row = within(await screen.findByRole('table', { name: 'Departments' })).getByText('ENG').closest('tr')!;
-    expect(within(row).getAllByRole('cell').slice(0, 5).map((c) => c.textContent)).toEqual(['ENG', 'Engineering', '2026-01-01', '—', 'active']);
+    expect(within(row).getAllByRole('cell').slice(0, 5).map((c) => c.textContent)).toEqual(['ENG', 'Engineering', '1 Jan 2026', '—', 'active']);
     expect(within(row).queryByRole('button')).toBeNull();
     expect(screen.queryByRole('form', { name: 'New department' })).toBeNull();
   });
@@ -113,7 +113,7 @@ describe('the list (FR-004)', () => {
     click(screen.getByLabelText('Show inactive'));
     const row = (await screen.findByText('OLD')).closest('tr')!;
     expect(within(row).getByText('inactive')).toBeTruthy();
-    expect(within(row).getAllByRole('cell')[3]!.textContent).toBe('2025-07-01');
+    expect(within(row).getAllByRole('cell')[3]!.textContent).toBe('1 Jul 2025');
   });
 
   it('says so when there are none, and reads a list it may not read in the server’s words', async () => {

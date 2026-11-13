@@ -412,7 +412,7 @@ const hm = (minutes: number) => `${Math.floor(minutes / 60)}:${pad(minutes % 60)
 function localDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function When({ at }: { at: string | null | undefined }) {
   return at ? <time dateTime={at}>{localDateTime(at)}</time> : <>—</>;
@@ -767,8 +767,10 @@ function ProjectList() {
         <ActiveFilter value={active} onChange={setActive} noun="projects" />
       </div>
       <ReadProblem error={list.error} what="projects" />
-      {list.isPending && <p className="hint">Loading projects…</p>}
-      {data && data.items.length === 0 && <Empty>No projects.</Empty>}
+      {list.isPending && <p className="hint loading">Loading projects…</p>}
+      {data && data.items.length === 0 && (
+        <Empty>{can(MASTER_MANAGE) ? 'No projects yet. Add the first one below.' : 'No projects yet. Your timesheet administrator sets them up.'}</Empty>
+      )}
       {data && data.items.length > 0 && (
         <div style={SCROLL}>
           <table aria-label="Projects">
@@ -818,13 +820,15 @@ function ActivityList() {
   const data = shown(list);
   return (
     <Section title="Activity catalogue">
-      <p className="hint">Jobs permit activities through approved job-activity links, kept on each job. The productive flag is copied onto each timesheet line, so later changes never alter history.</p>
+      <p className="hint">Each job lists the activities people can book time to. Changing whether an activity is productive does not change timesheets already filled in.</p>
       <div className="row">
         <ActiveFilter value={active} onChange={setActive} noun="activities" />
       </div>
       <ReadProblem error={list.error} what="activities" />
-      {list.isPending && <p className="hint">Loading activities…</p>}
-      {data && data.items.length === 0 && <Empty>No activities.</Empty>}
+      {list.isPending && <p className="hint loading">Loading activities…</p>}
+      {data && data.items.length === 0 && (
+        <Empty>{can(MASTER_MANAGE) ? 'No activities yet. Add the first one below.' : 'No activities yet. Your timesheet administrator sets them up.'}</Empty>
+      )}
       {data && data.items.length > 0 && (
         <div style={SCROLL}>
           <table aria-label="Activities">
@@ -927,15 +931,16 @@ function NewMasterForm({ kind, projectId }: { kind: MasterKind; projectId?: stri
         <input type="date" value={f.end} onChange={(e) => set('end')(e.target.value)} />
       </label>
       {kind === 'activity' && (
-        <fieldset className="wide">
-          <legend>Productive time (required; no default)</legend>
+        // One line, two inline choices; neither is chosen for you (the server takes no default).
+        <div className="row wide" role="radiogroup" aria-labelledby={`${id}-productive`}>
+          <span id={`${id}-productive`}>Counts as productive time</span>
           <label className="check">
-            <input type="radio" name={`${id}-productive`} checked={f.productive === 'yes'} onChange={() => set('productive')('yes')} /> Productive
+            <input type="radio" name={`${id}-productive`} checked={f.productive === 'yes'} onChange={() => set('productive')('yes')} /> Yes
           </label>
           <label className="check">
-            <input type="radio" name={`${id}-productive`} checked={f.productive === 'no'} onChange={() => set('productive')('no')} /> Not productive
+            <input type="radio" name={`${id}-productive`} checked={f.productive === 'no'} onChange={() => set('productive')('no')} /> No
           </label>
-        </fieldset>
+        </div>
       )}
       <div className="wide">
         <Problem text={problem} />
@@ -1057,7 +1062,7 @@ function ProjectScreen() {
         <Link to={PATHS.masters}>All projects and activities</Link>
       </p>
       <Section title={p ? `Project ${p.code}: ${p.name}` : 'Project'}>
-        {detail.isPending && <p className="hint">Loading the project…</p>}
+        {detail.isPending && <p className="hint loading">Loading the project…</p>}
         <ReadProblem error={detail.error} what="this project" />
         {p && <MasterFacts m={p} />}
         {p && can(MASTER_MANAGE) && <MasterEdit kind="project" m={p} path={`/v1/timesheet/projects/${encodeURIComponent(p.id)}`} onSaved={() => void qc.invalidateQueries({ queryKey: keys.masters })} />}
@@ -1124,7 +1129,7 @@ function JobScreen() {
         </p>
       )}
       <Section title={j ? `Job ${j.code}: ${j.name}` : 'Job'}>
-        {detail.isPending && <p className="hint">Loading the job…</p>}
+        {detail.isPending && <p className="hint loading">Loading the job…</p>}
         <ReadProblem error={detail.error} what="this job" />
         {j && <MasterFacts m={j} extra={<Item term="Project">{`${j.projectCode ?? ''}: ${j.projectName ?? ''}`}</Item>} />}
         {j && can(MASTER_MANAGE) && <MasterEdit kind="job" m={j} path={`/v1/timesheet/jobs/${encodeURIComponent(j.id)}`} onSaved={() => void qc.invalidateQueries({ queryKey: keys.masters })} />}
@@ -1180,7 +1185,7 @@ function JobActivities({ job }: { job: Job }) {
                   <td>{a.linkActive ? 'Approved' : 'Deactivated'}</td>
                   {manage && (
                     <td>
-                      <button type="button" className="secondary" disabled={link.isPending} onClick={() => link.mutate({ activityId: a.activityId, active: !a.linkActive })}>
+                      <button type="button" className={a.linkActive ? 'danger' : 'secondary'} disabled={link.isPending} onClick={() => link.mutate({ activityId: a.activityId, active: !a.linkActive })}>
                         {a.linkActive ? `Deactivate ${a.code}` : `Reactivate ${a.code}`}
                       </button>
                     </td>
@@ -1229,7 +1234,7 @@ function ActivityScreen() {
         <Link to={PATHS.masters}>All projects and activities</Link>
       </p>
       <Section title={a ? `Activity ${a.code}: ${a.name}` : 'Activity'}>
-        {detail.isPending && <p className="hint">Loading the activity…</p>}
+        {detail.isPending && <p className="hint loading">Loading the activity…</p>}
         <ReadProblem error={detail.error} what="this activity" />
         {a && <MasterFacts m={a} extra={<Item term="Productive">{a.productive ? 'Productive' : 'Not productive'}</Item>} />}
         {a && can(MASTER_MANAGE) && <MasterEdit kind="activity" m={a} path={`/v1/timesheet/activities/${encodeURIComponent(a.id)}`} onSaved={() => void qc.invalidateQueries({ queryKey: keys.masters })} />}
@@ -1282,7 +1287,7 @@ function AllocationsScreen() {
           </label>
         </div>
         <ReadProblem error={list.error} what="resource allocations" />
-        {list.isPending && <p className="hint">Loading allocations…</p>}
+        {list.isPending && <p className="hint loading">Loading allocations…</p>}
         {data && data.items.length === 0 && <Empty>No allocations match.</Empty>}
         {data && data.items.length > 0 && (
           <div style={SCROLL}>
@@ -1806,7 +1811,7 @@ function TimesheetScreen() {
         <Link to={PATHS.timesheets}>All timesheets</Link>
       </p>
       <Section title={s ? `Timesheet of ${s.employeeName} for ${weekText(s)}` : 'Timesheet'}>
-        {detail.isPending && <p className="hint">Loading the timesheet…</p>}
+        {detail.isPending && <p className="hint loading">Loading the timesheet…</p>}
         <ReadProblem error={detail.error} what="this timesheet" />
         {s && (
           <>
@@ -1826,7 +1831,7 @@ function TimesheetScreen() {
 
 /** CL-138: timesheets whose week overlaps the range, within the role's row scope. */
 function TimesheetsScreen() {
-  const { can } = useSession();
+  const { can, me } = useSession();
   const keys = useKeys();
   const [state, setState] = useState('');
   const [from, setFrom] = useState('');
@@ -1843,8 +1848,22 @@ function TimesheetsScreen() {
   });
   if (!can(TS_READ)) return <NotPermitted>The selected role cannot see timesheets.</NotPermitted>;
   const data = shown(list);
+  // An employee's own weeks are filled in on My ESS; this list is where they are looked up, so it leads there.
+  const fillOwn = me?.scopeKind === 'OWN' && can(TS_SUBMIT);
+  const own = me?.scopeKind === 'OWN';
   return (
-    <Section title="Timesheets">
+    // An own-scope list gets a heading of its own ("Timesheets" is the page's title, which a card of that name would hide), and
+    // filling in is the card's main action (styles.css: .card-header > a.primary).
+    <Section
+      title={own ? 'My timesheets' : 'Timesheets'}
+      actions={
+        fillOwn ? (
+          <Link className="primary" to="/me?tab=TN13">
+            Fill in my timesheet
+          </Link>
+        ) : undefined
+      }
+    >
       <div className="row">
         <label>
           Status
@@ -1867,8 +1886,10 @@ function TimesheetsScreen() {
         </label>
       </div>
       <ReadProblem error={list.error} what="timesheets" />
-      {list.isPending && <p className="hint">Loading timesheets…</p>}
-      {data && data.items.length === 0 && <Empty>No timesheets match.</Empty>}
+      {list.isPending && <p className="hint loading">Loading timesheets…</p>}
+      {data && data.items.length === 0 && (
+        <Empty>{own && !state && !from && !to ? 'You haven’t filled in a timesheet yet.' : 'No timesheets match these filters.'}</Empty>
+      )}
       {data && data.items.length > 0 && <SheetTable items={data.items} link />}
       {data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={data.total ?? data.items.length} onPage={(p) => setPaging({ query, page: p })} label="Timesheet pages" noun="timesheet" />}
     </Section>
@@ -1966,7 +1987,7 @@ function TimesheetDecisionQueue() {
     <div ref={region} role="region" aria-label="Timesheet approvals" tabIndex={-1}>
       <Section title={`Timesheet approvals${data ? ` (${items.length})` : ''}`}>
         <p className="hint">Approve, return for changes or reject each submitted week. Returning or rejecting needs a reason the employee sees; the employee then continues in a new revision.</p>
-        {tasks.isPending && <p className="hint">Loading the timesheets waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the timesheets waiting for you…</p>}
         <ReadProblem error={tasks.error} what="timesheet tasks" />
         <Notice notice={notice} />
         {data && items.length === 0 && <Empty>No timesheets are waiting for your decision.</Empty>}
@@ -2089,7 +2110,7 @@ function ReopenDecisionQueue() {
     <div ref={region} role="region" aria-label="Timesheet reopen requests" tabIndex={-1}>
       <Section title={`Timesheet reopen requests${data ? ` (${items.length})` : ''}`}>
         <p className="hint">Approving opens a correction as a new draft revision with the approved lines carried over; the approved revision stays in force until its correction is approved. Rejecting needs a reason.</p>
-        {tasks.isPending && <p className="hint">Loading the reopen requests waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the reopen requests waiting for you…</p>}
         <ReadProblem error={tasks.error} what="reopen requests" />
         <Notice notice={notice} />
         {data && items.length === 0 && <Empty>No reopen requests are waiting for your decision.</Empty>}
@@ -2239,7 +2260,7 @@ function MissedScreen() {
         </label>
       </div>
       <ReadProblem error={list.error} what="missed timesheets" />
-      {list.isPending && <p className="hint">Loading missed timesheets…</p>}
+      {list.isPending && <p className="hint loading">Loading missed timesheets…</p>}
       {data && data.items.length === 0 && <Empty>No missed timesheets match.</Empty>}
       {data && data.items.length > 0 && (
         <ul className="tasks" aria-label="Missed timesheets">
@@ -2384,7 +2405,7 @@ function HoursReportSection() {
   const data = shown(report);
   return (
     <Section title="Hours">
-      <p className="hint">Approved time only, counted from each timesheet’s approved revision in force; group totals, the grand total and the lines reconcile.</p>
+      <p className="hint">Approved time only, from the latest approved version of each timesheet. The totals add up to the lines below.</p>
       <form className="grid-form" aria-label="Hours report" onSubmit={run} noValidate>
         <label>
           From
@@ -2433,7 +2454,7 @@ function HoursReportSection() {
           <button type="submit">Show hours</button>
         </div>
       </form>
-      {report.isFetching && <p className="hint">Loading the report…</p>}
+      {report.isFetching && <p className="hint loading">Loading the report…</p>}
       <Refusal error={report.error} act="report" />
       {data && (
         <>
@@ -2486,7 +2507,7 @@ function HoursReportSection() {
           <button type="button" className="secondary" onClick={() => setShowLines(true)} disabled={showLines}>
             Show the approved lines behind this report
           </button>
-          {showLines && lines.isPending && <p className="hint">Loading the lines…</p>}
+          {showLines && lines.isPending && <p className="hint loading">Loading the lines…</p>}
           <Refusal error={lines.error} act="report" />
           {showLines && shown(lines) && (
             <div style={SCROLL}>
@@ -2582,7 +2603,7 @@ function UtilisationSection() {
           <button type="submit">Show utilisation</button>
         </div>
       </form>
-      {report.isFetching && <p className="hint">Loading the report…</p>}
+      {report.isFetching && <p className="hint loading">Loading the report…</p>}
       <Refusal error={report.error} act="report" />
       {data && (
         <>
@@ -2974,7 +2995,7 @@ function MyWeeks({ openId, onOpen }: { openId: string | null; onOpen: (id: strin
       <Refusal error={create.error} act="week" />
       <Notice notice={notice} />
       <ReadProblem error={list.error} what="your timesheets" />
-      {list.isPending && can(TS_READ) && <p className="hint">Loading your timesheets…</p>}
+      {list.isPending && can(TS_READ) && <p className="hint loading">Loading your timesheets…</p>}
       {data && data.items.length === 0 && <Empty>You have no timesheets yet.</Empty>}
       {data && data.items.length > 0 && <SheetTable items={data.items} onOpen={onOpen} />}
       {openId && data && !data.items.some((s) => s.id === openId) && <p className="hint">The week opened below is not in the list above yet.</p>}
@@ -3037,7 +3058,7 @@ function MyWeek({ id, onClose }: { id: string; onClose: () => void }) {
         </button>
       }
     >
-      {detail.isPending && <p className="hint">Loading the week…</p>}
+      {detail.isPending && <p className="hint loading">Loading the week…</p>}
       <ReadProblem error={detail.error} what="this timesheet" />
       <Notice notice={notice} />
       {s && (
@@ -3269,7 +3290,7 @@ function MyAllocations() {
   return (
     <Section title="My allocations">
       <ReadProblem error={list.error} what="your allocations" />
-      {list.isPending && <p className="hint">Loading your allocations…</p>}
+      {list.isPending && <p className="hint loading">Loading your allocations…</p>}
       {data && data.items.length === 0 && <Empty>You have no active allocations, so no time can be recorded yet.</Empty>}
       {data && data.items.length > 0 && (
         <div style={SCROLL}>
@@ -3311,7 +3332,7 @@ function MyReminders() {
     <Section title="Missed-submission reminders">
       <p className="hint">A reminder only: a missed week is never a deduction or a penalty, and a late timesheet is still accepted.</p>
       <ReadProblem error={list.error} what="your reminders" />
-      {list.isPending && <p className="hint">Loading your reminders…</p>}
+      {list.isPending && <p className="hint loading">Loading your reminders…</p>}
       {data && data.items.length === 0 && <Empty>No reminders.</Empty>}
       {data && data.items.length > 0 && (
         <ul aria-label="My reminders">
@@ -3336,7 +3357,7 @@ function MyDecisionHistory() {
   return (
     <Section title="Status and decision history">
       <ReadProblem error={history.error} what="your decision history" />
-      {history.isPending && <p className="hint">Loading your history…</p>}
+      {history.isPending && <p className="hint loading">Loading your history…</p>}
       {data && data.items.length === 0 && <Empty>No submissions yet.</Empty>}
       {data && data.items.length > 0 && (
         <div style={SCROLL}>
@@ -3373,7 +3394,7 @@ function MyDecisionHistory() {
 
 /** Screens of the timesheet module; detail screens are reached through links (nav: false). */
 export const TIMESHEET_SCREENS: ScreenRoute[] = [
-  { path: PATHS.masters, title: 'Timesheet masters', permission: MASTER_READ, nav: true, component: MastersScreen },
+  { path: PATHS.masters, title: 'Projects and activities', permission: MASTER_READ, nav: true, component: MastersScreen },
   { path: '/timesheet/projects/:id', title: 'Timesheet project', permission: MASTER_READ, nav: false, component: ProjectScreen },
   { path: '/timesheet/jobs/:id', title: 'Timesheet job', permission: MASTER_READ, nav: false, component: JobScreen },
   { path: '/timesheet/activities/:id', title: 'Timesheet activity', permission: MASTER_READ, nav: false, component: ActivityScreen },

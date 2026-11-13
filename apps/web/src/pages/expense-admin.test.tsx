@@ -94,11 +94,12 @@ describe('the screen', () => {
     const table = await screen.findByRole('table', { name: 'Expense policy revisions' });
     const [, first, second] = within(table).getAllByRole('row');
     expect(first!.textContent).toContain('DEFAULT revision 1');
-    expect(first!.textContent).toContain('from 2000-01-01');
-    expect(first!.textContent).toContain('Submission within 30 days; high-value approval above INR 50000.00');
-    expect(first!.textContent).toContain('MEALS for the whole company: INR 1000.00 a day, receipt required');
+    expect(first!.textContent).toContain('from 1 Jan 2000');
+    expect(first!.textContent).toContain('Submission within 30 days; high-value approval above INR 50,000.00');
+    // Categories and locations by name; a code the page cannot name (no longer a choice) shows as itself.
+    await waitFor(() => expect(first!.textContent).toContain('Meals for the whole company: INR 1,000.00 a day, receipt required'));
     expect(first!.textContent).toContain('Used by submitted claims up to');
-    expect(second!.textContent).toContain('ACCOMMODATION for grade G1, location HQ: INR 6000.00 a night, receipt not required');
+    expect(second!.textContent).toContain('ACCOMMODATION for grade G1, location Head office: INR 6,000.00 a night, receipt not required');
     expect(within(second!).getByRole('note').textContent).toContain('tie for an employee with both');
   });
 
@@ -107,9 +108,9 @@ describe('the screen', () => {
     mockApi(BASE_ROUTES);
     const view = open();
     await screen.findByRole('table', { name: 'Expense policy revisions' });
-    expect(screen.getByText('Activate DEFAULT revision 2')).toBeTruthy();
-    expect(screen.getByText('Retire DEFAULT revision 1')).toBeTruthy();
-    expect(screen.queryByText('Edit DEFAULT revision 2')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Activate DEFAULT revision 2' }).textContent).toBe('Activate');
+    expect(screen.getByRole('button', { name: 'Retire DEFAULT revision 1' }).textContent).toBe('Retire');
+    expect(screen.queryByRole('button', { name: 'Edit DEFAULT revision 2' })).toBeNull();
     expect(screen.queryByRole('form', { name: 'New policy revision' })).toBeNull();
     view.unmount();
 
@@ -117,13 +118,13 @@ describe('the screen', () => {
     mockApi(BASE_ROUTES);
     open();
     await screen.findByRole('table', { name: 'Expense policy revisions' });
-    expect(screen.getByText('Edit DEFAULT revision 2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit DEFAULT revision 2' }).textContent).toBe('Edit');
     expect(screen.getByRole('form', { name: 'New policy revision' })).toBeTruthy();
-    expect(screen.queryByText('Activate DEFAULT revision 2')).toBeNull();
-    expect(screen.queryByText('Retire DEFAULT revision 1')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Activate DEFAULT revision 2' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retire DEFAULT revision 1' })).toBeNull();
     // A frozen revision offers no editing.
-    expect(screen.queryByText('Edit DEFAULT revision 1')).toBeNull();
-    expect(screen.queryByText('Add a rule to DEFAULT revision 1')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit DEFAULT revision 1' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add a rule to DEFAULT revision 1' })).toBeNull();
   });
 });
 
@@ -146,15 +147,17 @@ describe('maintaining a draft', () => {
     session.permissions = [MANAGE];
     const calls = mockApi({ ...BASE_ROUTES, 'PATCH /v1/expense/policies/p-2': [200, { id: 'p-2', version: 4 }], 'POST /v1/expense/policies/p-2/rules': [201, { id: 'r-9', policyVersion: 4 }] });
     open();
-    fireEvent.click(await screen.findByText('Edit DEFAULT revision 2'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit DEFAULT revision 2' }));
     const edit = screen.getByRole('form', { name: 'Edit DEFAULT revision 2' });
     type(within(edit).getByLabelText('Submission window (calendar days)'), '20');
     fireEvent.click(within(edit).getByRole('button', { name: 'Save draft' }));
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ expectedVersion: 3, effectiveFrom: '2026-12-01', effectiveTo: null, submissionWindowDays: 20, highValueThreshold: '50000.00' }));
 
-    fireEvent.click(await screen.findByText('Add a rule to DEFAULT revision 2'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a rule to DEFAULT revision 2' }));
     const rule = screen.getByRole('form', { name: 'Add a rule to DEFAULT revision 2' });
-    await within(rule).findByRole('option', { name: 'MEALS' });
+    await within(rule).findByRole('option', { name: 'Meals' });
+    expect(within(rule).getByRole('option', { name: 'One (G1)' })).toBeTruthy();
+    expect(within(rule).getByRole('option', { name: 'Head office' })).toBeTruthy();
     type(within(rule).getByLabelText('Category'), 'c-1');
     type(within(rule).getByLabelText('Grade'), 'g-1');
     type(within(rule).getByLabelText('Limit (INR, a day)'), '750');
@@ -167,7 +170,7 @@ describe('maintaining a draft', () => {
     session.permissions = [MANAGE];
     const calls = mockApi({ ...BASE_ROUTES, 'POST /v1/expense/policies/p-2/rules/r-2/remove': [200, { policyVersion: 4 }] });
     open();
-    fireEvent.click(await screen.findByText('Remove ACCOMMODATION for grade G1, location HQ'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove ACCOMMODATION for grade G1, location HQ' }));
     await waitFor(() => expect(calls.find((c) => c.url.endsWith('/remove'))?.body).toEqual({ expectedVersion: 3 }));
   });
 });
@@ -178,7 +181,7 @@ describe('activation and retirement', () => {
     session.permissions = [ACTIVATE];
     const calls = mockApi({ ...BASE_ROUTES, 'POST /v1/expense/policies/p-2/activate': reply });
     open();
-    fireEvent.click(await screen.findByText('Activate DEFAULT revision 2'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Activate DEFAULT revision 2' }));
     return { calls, alert: await screen.findByRole('alert') };
   };
 
@@ -186,13 +189,13 @@ describe('activation and retirement', () => {
     session.permissions = [ACTIVATE];
     const calls = mockApi({ ...BASE_ROUTES, 'POST /v1/expense/policies/p-2/activate': [200, { id: 'p-2', state: 'ACTIVE', closed: ['p-1'] }] });
     open();
-    fireEvent.click(await screen.findByText('Activate DEFAULT revision 2'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Activate DEFAULT revision 2' }));
     await waitFor(() => expect(calls.find((c) => c.url.endsWith('/activate'))?.body).toEqual({ expectedVersion: 3 }));
   });
 
   it.each([
     ['POLICY_OVERLAP', { revisions: [{ code: 'TRAVEL', revision: 4 }] }, 'overlaps TRAVEL revision 4'],
-    ['POLICY_IN_USE', { lastUsedOn: '2026-12-05' }, 'used the revision this would end for 2026-12-05'],
+    ['POLICY_IN_USE', { lastUsedOn: '2026-12-05' }, 'used the revision this would end for 5 Dec 2026'],
     ['POLICY_AMBIGUOUS', { ties: [{ category: 'MEALS', grade: 'G1', location: 'HQ' }] }, 'MEALS for grade G1 at location HQ'],
     ['POLICY_HAS_NO_RULES', undefined, 'at least one category rule'],
     ['SELF_APPROVAL', undefined, 'someone else must'],
@@ -206,7 +209,7 @@ describe('activation and retirement', () => {
     session.permissions = [ACTIVATE];
     const calls = mockApi({ ...BASE_ROUTES, 'POST /v1/expense/policies/p-1/retire': [200, { id: 'p-1', state: 'RETIRED', effectiveTo: '2027-01-01' }] });
     open();
-    fireEvent.click(await screen.findByText('Retire DEFAULT revision 1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Retire DEFAULT revision 1' }));
     const form = screen.getByRole('form', { name: 'Retire DEFAULT revision 1' });
     type(within(form).getByLabelText('No longer applies from'), '2027-01-01');
     type(within(form).getByLabelText('Reason for retiring'), ' Synthetic replacement ');
@@ -226,7 +229,7 @@ describe('categories', () => {
     type(within(form).getByLabelText('Limit counts per'), 'PER_LINE');
     fireEvent.click(within(form).getByRole('button', { name: 'Add category' }));
     await waitFor(() => expect(calls.find((c) => c.url === '/v1/expense/categories')?.body).toEqual({ code: 'PARKING', name: 'Synthetic parking', limitBasis: 'PER_LINE' }));
-    fireEvent.click(await screen.findByText('Deactivate MEALS'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Deactivate MEALS' }));
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ expectedVersion: 1, active: false }));
   });
 });
@@ -273,7 +276,17 @@ describe('exchange rates (I-87)', () => {
     const calls = mockApi({
       'GET /v1/expense/policies': [200, { items: [] }],
       'GET /v1/expense/categories': [200, { items: [] }],
-      'GET /v1/expense/currencies': [200, { companyCurrency: 'INR', reference: [], items: [] }],
+      'GET /v1/expense/currencies': [
+        200,
+        {
+          companyCurrency: 'INR',
+          reference: [],
+          items: [
+            { id: 'cc-1', currencyCode: 'USD', state: 'ACTIVE', reason: 'Conference travel', createdBy: 'someone', version: 2 },
+            { id: 'cc-2', currencyCode: 'AED', state: 'DRAFT', reason: 'Gulf office visits', createdBy: 'someone', version: 1 },
+          ],
+        },
+      ],
       'GET /v1/expense/exchange-rates': [
         200,
         { companyCurrency: 'INR', items: [{ id: 'xr-1', currencyCode: 'EUR', effectiveFrom: '2026-10-01', rate: '90.12345678', reason: 'Reference rate', state: 'DRAFT', createdBy: 'someone', version: 1 }] },
@@ -283,11 +296,14 @@ describe('exchange rates (I-87)', () => {
     });
     open();
     const list = await screen.findByRole('list', { name: 'Exchange rates' });
-    expect(list.textContent).toContain('EUR from 2026-10-01: 90.12345678 (Reference rate)');
+    expect(list.textContent).toContain('EUR from 1 Oct 2026: 90.12345678 (Reference rate)');
     fireEvent.click(within(list).getByRole('button', { name: 'Activate' }));
     await waitFor(() => expect(calls.find((c) => c.url === '/v1/expense/exchange-rates/xr-1/decision')?.body).toEqual({ action: 'ACTIVATE', expectedVersion: 1 }));
     const form = screen.getByRole('form', { name: 'Enter an exchange rate' });
-    type(within(form).getByLabelText('Currency'), 'usd');
+    // The currency is chosen from those enabled for claims (a draft one is not yet).
+    await within(form).findByRole('option', { name: 'USD' });
+    expect(within(form).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose', 'USD']);
+    type(within(form).getByLabelText('Currency'), 'USD');
     type(within(form).getByLabelText('From'), '2026-11-01');
     type(within(form).getByLabelText('Rate'), '83.5');
     type(within(form).getByLabelText('Source'), 'Bank reference rate');

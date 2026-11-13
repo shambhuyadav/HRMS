@@ -27,9 +27,9 @@ function mockApi(routes: Record<string, unknown>) {
   );
   return calls;
 }
-const renderPage = (ui: JSX.Element) =>
+const renderPage = (ui: JSX.Element, entry = '/me') =>
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[entry]}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>
     </MemoryRouter>,
   );
@@ -89,19 +89,32 @@ afterEach(() => {
 });
 
 describe('My ESS (FR-103)', () => {
-  it('shows every tab with the own-record context, and a named state for an unavailable tab', async () => {
+  it('shows the usable tabs with the own-record context, and lists each unavailable one once with its named reason', async () => {
     mockApi({ 'GET /v1/me/ess': INDEX, 'GET /v1/me/private-profile': PROFILE });
     renderPage(<MyEssPage />);
-    expect((await screen.findByLabelText('Own record')).textContent).toContain('Synthetic Person (E-001)');
-    expect(screen.getAllByRole('tab')).toHaveLength(18);
+    const context = (await screen.findByLabelText('Own record')).textContent!;
+    expect(context).toContain('Your own requests and records');
+    expect(context).toContain('Synthetic Person (E-001)');
+    // Only the 8 available tabs are tabs; "My Profile" reads in sentence case.
+    expect(screen.getAllByRole('tab')).toHaveLength(8);
+    expect(screen.getByRole('tab', { name: 'My profile' })).toBeTruthy();
+    expect(screen.queryByText(/\(unavailable\)/)).toBeNull();
     // TN01 opens first and shows the masked bank summary only.
     expect(await screen.findByText('••••6789')).toBeTruthy();
     expect(screen.getByText('12 Synthetic Street')).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: /Payslip/ }));
+    const notYet = within(screen.getByRole('list', { name: 'Not available yet' }));
+    expect(notYet.getAllByRole('listitem')).toHaveLength(10);
+    expect(notYet.getByText('Payslip: Available once payroll is enabled for your company.')).toBeTruthy();
+    expect(notYet.getByText(/^Document upload: .*contact HR/)).toBeTruthy();
+    expect(notYet.queryByRole('link')).toBeNull();
+  });
+
+  it('a link to an unavailable tab opens it with its reason', async () => {
+    mockApi({ 'GET /v1/me/ess': INDEX, 'GET /v1/me/private-profile': PROFILE });
+    renderPage(<MyEssPage />, '/me?tab=TN06');
+    expect((await screen.findByRole('tab', { name: 'Payslip' })).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tabpanel').textContent).toContain('Available once payroll is enabled for your company.');
     expect(within(screen.getByRole('tabpanel')).queryByRole('link')).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: /Document upload/ }));
-    expect(screen.getByRole('tabpanel').textContent).toContain('contact HR');
   });
 
   it('drafts an address change with only the typed fields, then submits it with its version (FR-104)', async () => {
@@ -162,7 +175,7 @@ describe('My ESS (FR-103)', () => {
     await waitFor(() => expect(calls.some((c) => c.url === '/v1/me/sensitive-changes/sc-5/submit')).toBe(true));
     const warning = await screen.findByText(/after the input cutoff/);
     expect(warning.closest('p')!.textContent).toBe(
-      'after payroll cutoff This bank change takes effect on 2026-10-29, after the input cutoff (2026-10-25) of payroll period 2026-10. The 2026-10 payment due on 2026-10-31 may still be made to the current bank account.',
+      'after payroll cutoff This bank change takes effect on 29 Oct 2026, after the input cutoff (25 Oct 2026) of payroll period 2026-10. The 2026-10 payment due on 31 Oct 2026 may still be made to the current bank account.',
     );
     expect(warning.closest('p')!.textContent).not.toContain('000987654321');
     expect(screen.getByText('Request submitted for review.')).toBeTruthy();
@@ -203,7 +216,7 @@ describe('My ESS (FR-103)', () => {
     const row = warnings[0]!.closest('tr')!;
     expect(row.textContent).toContain('with Synthetic Reviewer');
     expect(warnings[0]!.closest('p')!.textContent).toBe(
-      'after payroll cutoff This bank change takes effect on 2026-10-29, after the input cutoff (2026-10-25) of payroll period 2026-10. The 2026-10 payment due on 2026-10-31 may still be made to the current bank account.',
+      'after payroll cutoff This bank change takes effect on 29 Oct 2026, after the input cutoff (25 Oct 2026) of payroll period 2026-10. The 2026-10 payment due on 31 Oct 2026 may still be made to the current bank account.',
     );
     expect(warnings[0]!.closest('p')!.textContent).not.toContain('000987654321');
   });
@@ -250,7 +263,7 @@ describe('My ESS (FR-103)', () => {
     });
     renderPage(<MyEssPage />);
     fireEvent.click(await screen.findByRole('tab', { name: 'Leave' }));
-    expect(await screen.findByText('step 1: approve on 2026-10-21')).toBeTruthy();
+    expect(await screen.findByText('step 1: approve on 21 Oct 2026')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Open leave' }).getAttribute('href')).toBe('/leave');
     // Everything fits on one page: no pager.
     expect(screen.queryByRole('navigation', { name: 'Request pages' })).toBeNull();
@@ -378,7 +391,7 @@ describe('sensitive-change review (FR-104, FR-105)', () => {
     expect(await screen.findByText('No changes are waiting for you.')).toBeTruthy();
     const after = screen.getByText(/after the input cutoff/).closest('p')!;
     expect(after.closest('article')).toBeNull();
-    expect(after.textContent).toContain('The 2026-10 payment due on 2026-10-31 may still be made to the current bank account.');
+    expect(after.textContent).toContain('The 2026-10 payment due on 31 Oct 2026 may still be made to the current bank account.');
     // The warning carries no bank value: neither the requested nor the masked current one.
     expect(after.textContent).not.toMatch(/000123456789|4321/);
   });

@@ -75,7 +75,7 @@ describe('dashboard panel (CL-021, CL-022)', () => {
     expect(banner.textContent).toContain('Office closed on Friday');
     const events = screen.getByRole('list', { name: 'Upcoming events' });
     expect(events.textContent).toContain('Engineering offsite');
-    expect(events.textContent).toContain('2026-11-16 · Engineering');
+    expect(events.textContent).toContain('16 Nov 2026 · Engineering');
   });
 
   it('asks for nothing and shows nothing without the read duty, or when there is nothing', async () => {
@@ -109,9 +109,14 @@ describe('HR screens (CL-021, CL-022)', () => {
     show(<EventsPage />);
     expect(await screen.findByText('No events yet.')).toBeTruthy();
     const form = screen.getByRole('form', { name: 'New event' });
+    const save = within(form).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true); // nothing to save on an empty form
+    expect(within(form).getByLabelText('Description').tagName).toBe('TEXTAREA');
     fireEvent.change(within(form).getByLabelText('Event name'), { target: { value: ' Offsite ' } });
     fireEvent.change(within(form).getByLabelText('Event date'), { target: { value: '2026-11-16' } });
+    expect(save.disabled).toBe(false);
     fireEvent.change(within(form).getByLabelText('For'), { target: { value: 'DEPARTMENT' } });
+    expect(save.disabled).toBe(true); // which department, first
     await within(form).findByRole('option', { name: 'Engineering (ENG)' });
     fireEvent.change(within(form).getByLabelText('Department'), { target: { value: 'd-1' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Save' }));
@@ -143,6 +148,7 @@ describe('HR screens (CL-021, CL-022)', () => {
     });
     show(<TickerPage />);
     const form = await screen.findByRole('form', { name: 'New message' });
+    expect((within(form).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(within(form).getByLabelText('Message'), { target: { value: 'Fire drill  ' } });
     fireEvent.change(within(form).getByLabelText('First day'), { target: { value: '2026-11-14' } });
     fireEvent.change(within(form).getByLabelText('Last day'), { target: { value: '2026-11-12' } });

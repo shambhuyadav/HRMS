@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatUnits, idempotencyKey, localDate, pinSession } from '../api';
 import { isReportRefusal, reportProblem } from '../report-failures';
 import { MODULE_TASK_QUEUES } from '../screens-registry';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
+import { Badge, CompactEmptyContext, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
 import { DelegatedBadge, DelegatedTasksSection } from './delegations';
 import { NotificationPreferencesPanel } from './notifications';
 import { canRaiseAgain, describeWindow, type Evidence, EvidenceChoice, EvidenceError, EvidenceList, followedRequests, KIND_LABEL, ownRecordInScope, ownRecordNotFound, RaiseAgainNote, RaisedAgainHint, WorkTaskEvidence } from './requests';
@@ -15,6 +16,8 @@ import { canRaiseAgain, describeWindow, type Evidence, EvidenceChoice, EvidenceE
 
 interface Balance {
   leaveType: string;
+  /** The name HR gave the type; the code is shown when an older server sends none. */
+  leaveTypeName?: string;
   paid: boolean;
   available: string;
   pending: string;
@@ -126,7 +129,7 @@ function LeaveRequestActions({ request: r, onChanged }: { request: LeaveRequest;
 }
 
 export function LeavePage() {
-  const { me, can } = useSession();
+  const { me, can, switchRole } = useSession();
   const qc = useQueryClient();
   const employeeId = me?.employeeId;
   const own = !!employeeId && ownRecordInScope(me?.scopeKind);
@@ -162,10 +165,27 @@ export function LeavePage() {
     },
   });
   const withdraw = useMutation({ mutationFn: (id: string) => api(`/v1/leave/requests/${id}/withdraw`, { method: 'POST' }), onSuccess: refresh });
+  const typeName = (code: string) => balances.data?.items.find((b) => b.leaveType === code)?.leaveTypeName || code;
 
   if (!employeeId) return <Empty>No employee record is linked to this account.</Empty>;
   if (!own || ownRecordNotFound(balances.error) || ownRecordNotFound(requests.error)) {
-    return <Empty>Your own leave is not in this role’s scope ({me?.scopeKind.toLowerCase()}). Switch to a role that covers your own record to see or request leave.</Empty>;
+    // Said in the reader's terms: where their own leave is, and where their team's requests are.
+    return (
+      <Section title="Leave">
+        <p>
+          Your own leave is not in this role’s scope.{' '}
+          <button type="button" className="link" onClick={switchRole}>
+            Switch role
+          </button>{' '}
+          and choose your Employee role to see your balances or request leave.
+        </p>
+        {can('leave.approve.operational') && (
+          <p>
+            Your team’s leave requests are waiting for you in <Link to="/tasks">Decisions</Link>.
+          </p>
+        )}
+      </Section>
+    );
   }
   return (
     <>
@@ -183,7 +203,7 @@ export function LeavePage() {
             {balances.data?.items.map((b) => (
               <tr key={b.leaveType}>
                 <td>
-                  {b.leaveType} {b.paid ? '' : '(unpaid)'}
+                  {b.leaveTypeName || b.leaveType} {b.paid || /unpaid/i.test(b.leaveTypeName ?? '') ? '' : '(unpaid)'}
                 </td>
                 <td>{b.paid ? formatUnits(b.available) : '—'}</td>
                 <td>{formatUnits(b.pending)}</td>
@@ -209,7 +229,9 @@ export function LeavePage() {
               Type
               <select value={form.leaveType} onChange={(e) => setForm({ ...form, leaveType: e.target.value })}>
                 {(balances.data?.items ?? []).map((b) => (
-                  <option key={b.leaveType}>{b.leaveType}</option>
+                  <option key={b.leaveType} value={b.leaveType}>
+                    {b.leaveTypeName || b.leaveType}
+                  </option>
                 ))}
               </select>
             </label>
@@ -223,7 +245,8 @@ export function LeavePage() {
                 <input type="date" required value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
               </label>
             )}
-            <label className="check">
+            {/* Its own row under the dates, not floating beside them. */}
+            <label className="check wide">
               <input type="checkbox" checked={form.halfDay} onChange={(e) => setForm({ ...form, halfDay: e.target.checked })} /> Half day
             </label>
             <label className="wide">
@@ -256,7 +279,7 @@ export function LeavePage() {
           <tbody>
             {requests.data?.items.map((r) => (
               <tr key={r.id}>
-                <td>{r.leaveType}</td>
+                <td>{typeName(r.leaveType)}</td>
                 <td>{formatDate(r.startDate)}</td>
                 <td>{formatDate(r.endDate)}</td>
                 <td>{formatUnits(r.units)}</td>
@@ -294,7 +317,9 @@ export function LeavePage() {
             ))}
           </tbody>
         </table>
-        {requests.data?.items.length === 0 && <Empty>No leave requests yet.</Empty>}
+        {requests.data?.items.length === 0 && <Empty>{can('leave.submit.operational') ? 'No leave requests yet. Use Request leave above to ask for time off.' : 'No leave requests yet.'}</Empty>}
+        {requests.isPending && <p className="hint loading">Loading your requests…</p>}
+        <ErrorNote error={requests.error} />
         <ErrorNote error={withdraw.error} />
       </Section>
     </>
@@ -332,6 +357,8 @@ const DEFAULT_CATEGORIES = [
   { code: 'OFFICE_SUPPLIES', name: 'Office supplies', limitBasis: 'PER_LINE' },
   { code: 'OTHER', name: 'Other', limitBasis: 'PER_LINE' },
 ];
+/** I-87: the currencies a line is commonly paid in; INR is the claim's own (nothing extra is sent for it). */
+const CLAIM_CURRENCIES: readonly string[] = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD'];
 /** FR-074, DF03: a claim can be withdrawn at any state before its final decision. */
 const WITHDRAWABLE_CLAIM = ['DRAFT', 'RETURNED', 'MANAGER_PENDING', 'FINANCE_PENDING', 'HIGH_VALUE_PENDING'];
 
@@ -535,7 +562,7 @@ export function ExpensesPage() {
           {correcting === 'RETURNED' && <p className="hint">Submitting starts a new revision; the one already reviewed is kept as it was.</p>}
           {raisingAgain && <p className="hint">Attach the receipts again: they stay with the rejected claim.</p>}
           {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
-          {receiptDropped && <p className="hint">A receipt on this claim failed the malware scan and was removed; attach another.</p>}
+          {receiptDropped && <p className="hint">A receipt on this claim failed the safety check and was removed; attach another.</p>}
           <form
             key={formKey}
             onSubmit={(e) => {
@@ -549,58 +576,69 @@ export function ExpensesPage() {
               <input value={purpose} onChange={(e) => setPurpose(e.target.value)} required maxLength={500} />
             </label>
             {lines.map((l, i) => (
-              <fieldset key={i} className="grid-form">
+              // A framed block per line: a grid-form inside a card draws no frame of its own, the fieldset does.
+              <fieldset key={i}>
                 <legend>Line {i + 1}</legend>
-                <label>
-                  Category
-                  <select value={l.category} onChange={(e) => update(i, { category: e.target.value })}>
-                    {/* The company's name for each category; the code is what is sent. A code no longer listed keeps its own text. */}
-                    {[...categoryList.map((c) => ({ code: c.code, name: c.name })), ...(categoryList.some((c) => c.code === l.category) ? [] : [{ code: l.category, name: l.category }])].map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Date
-                  <input type="date" required value={l.expenseDate} onChange={(e) => update(i, { expenseDate: e.target.value })} />
-                </label>
-                {basisOf(l.category) === 'PER_NIGHT' && (
-                  <label>
-                    Nights
-                    <input type="number" min={1} required value={l.nights} onChange={(e) => update(i, { nights: e.target.value })} />
+                <div className="grid-form">
+                  {/* Full width, so a long category name is never cut off. */}
+                  <label className="wide">
+                    Category
+                    <select value={l.category} onChange={(e) => update(i, { category: e.target.value })}>
+                      {/* The company's name for each category; the code is what is sent. A code no longer listed keeps its own text. */}
+                      {[...categoryList.map((c) => ({ code: c.code, name: c.name })), ...(categoryList.some((c) => c.code === l.category) ? [] : [{ code: l.category, name: l.category }])].map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
                   </label>
-                )}
-                <label>
-                  Merchant
-                  <input required value={l.merchant} onChange={(e) => update(i, { merchant: e.target.value })} />
-                </label>
-                <label>
-                  Invoice reference (if the bill has one)
-                  <input maxLength={100} value={l.invoiceReference} onChange={(e) => update(i, { invoiceReference: e.target.value })} />
-                </label>
-                <label>
-                  {`Amount (${l.currency || 'INR'})`}
-                  <input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={l.amount} onChange={(e) => update(i, { amount: e.target.value })} />
-                </label>
-                <label>
-                  Paid in another currency (code, if not INR)
-                  <input maxLength={3} pattern="[A-Za-z]{3}" value={l.currency ?? ''} onChange={(e) => update(i, { currency: e.target.value.toUpperCase() })} />
-                </label>
-                <label className="wide">
-                  Description
-                  <input required value={l.description} onChange={(e) => update(i, { description: e.target.value })} />
-                </label>
-                <label className="wide">
-                  Exception reason (if over limit, late or without receipt)
-                  <input value={l.exceptionReason} onChange={(e) => update(i, { exceptionReason: e.target.value })} />
-                </label>
-                <label className="wide">
-                  Receipt (PDF, JPEG or PNG)
-                  <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => update(i, { receipt: e.target.files?.[0] ?? null })} />
-                  {l.keptReceiptId && !l.receipt && <span className="hint">The receipt already on this line is kept unless you choose another file.</span>}
-                </label>
+                  <label>
+                    Date
+                    <input type="date" required value={l.expenseDate} onChange={(e) => update(i, { expenseDate: e.target.value })} />
+                  </label>
+                  {basisOf(l.category) === 'PER_NIGHT' && (
+                    <label>
+                      Nights
+                      <input type="number" min={1} required value={l.nights} onChange={(e) => update(i, { nights: e.target.value })} />
+                    </label>
+                  )}
+                  <label>
+                    Merchant
+                    <input required value={l.merchant} onChange={(e) => update(i, { merchant: e.target.value })} />
+                  </label>
+                  <label>
+                    Invoice reference (if the bill has one)
+                    <input maxLength={100} value={l.invoiceReference} onChange={(e) => update(i, { invoiceReference: e.target.value })} />
+                  </label>
+                  <label>
+                    Currency paid in
+                    <select value={l.currency || 'INR'} onChange={(e) => update(i, { currency: e.target.value === 'INR' ? '' : e.target.value })}>
+                      {/* A currency not in the list (a stored line) keeps its own code. */}
+                      {[...CLAIM_CURRENCIES, ...(l.currency && !CLAIM_CURRENCIES.includes(l.currency) ? [l.currency] : [])].map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    {`Amount (${l.currency || 'INR'})`}
+                    <input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={l.amount} onChange={(e) => update(i, { amount: e.target.value })} />
+                  </label>
+                  <label className="wide">
+                    Description
+                    <input required value={l.description} onChange={(e) => update(i, { description: e.target.value })} />
+                  </label>
+                  <label className="wide">
+                    Exception reason (if over limit, late or without receipt)
+                    <input value={l.exceptionReason} onChange={(e) => update(i, { exceptionReason: e.target.value })} />
+                  </label>
+                  <label className="wide">
+                    Receipt (PDF, JPEG or PNG)
+                    <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => update(i, { receipt: e.target.files?.[0] ?? null })} />
+                    {l.keptReceiptId && !l.receipt && <span className="hint">The receipt already on this line is kept unless you choose another file.</span>}
+                  </label>
+                </div>
               </fieldset>
             ))}
             <div className="row">
@@ -666,7 +704,7 @@ export function ExpensesPage() {
             ))}
           </tbody>
         </table>
-        {claims.data?.items.length === 0 && <Empty>No claims yet.</Empty>}
+        {claims.data?.items.length === 0 && <Empty>{can('expense.draft.operational') ? 'No claims yet. Fill in New expense claim above to claim an expense.' : 'No claims yet.'}</Empty>}
         <ErrorNote error={claims.error ?? correct.error ?? raiseAgain.error ?? withdraw.error} />
       </Section>
     </>
@@ -794,22 +832,28 @@ const QUEUES: Queue[] = [
   },
 ];
 
+/** Whether the role decides anything: a role with no decision queue has no Decisions page in its menu. */
+export const hasDecisionQueues = (can: (permission: string) => boolean) => QUEUES.some((q) => can(q.permission)) || MODULE_TASK_QUEUES.some((q) => can(q.permission));
+
 export function TasksPage() {
   const { can } = useSession();
   const visible = QUEUES.filter((q) => can(q.permission));
   // Wave-2 module queues (screens-registry.ts); each renders its own section and checks its own decision keys.
   const modules = MODULE_TASK_QUEUES.filter((q) => can(q.permission));
   if (visible.length === 0 && modules.length === 0) return <Empty>You have no decision queues in this role.</Empty>;
+  // (A queue with nothing waiting is one quiet line after the queues that have something: styles.css, .decision-queues.)
   return (
-    <>
-      <DelegatedTasksSection />
-      {visible.map((q) => (
-        <TaskQueue key={q.path} queue={q} />
-      ))}
-      {modules.map((q) => (
-        <q.component key={q.title} />
-      ))}
-    </>
+    <CompactEmptyContext.Provider value={true}>
+      <div className="decision-queues">
+        <DelegatedTasksSection />
+        {visible.map((q) => (
+          <TaskQueue key={q.path} queue={q} />
+        ))}
+        {modules.map((q) => (
+          <q.component key={q.title} />
+        ))}
+      </div>
+    </CompactEmptyContext.Provider>
   );
 }
 
@@ -1151,7 +1195,7 @@ export function PaymentsPage() {
   return (
     <>
       <Section title="Approved claims awaiting payment">
-        <p className="hint">Recording payments here never transfers money; outcomes come from bank evidence (DF07).</p>
+        <p className="hint">Recording payments here never transfers money; outcomes come from bank evidence.</p>
         <table>
           <thead>
             <tr>
@@ -1551,8 +1595,9 @@ export function InboxPage() {
   });
   return (
     <>
-      <Section title="Notifications">
-        {inbox.data?.items.length === 0 && <Empty>No notifications.</Empty>}
+      {/* A visible heading of its own: the page is titled "Notifications", which a card of the same name would hide. */}
+      <Section title="Inbox">
+        {inbox.data?.items.length === 0 && <Empty>No notifications yet.</Empty>}
         <ul className="tasks">
           {inbox.data?.items.map((n) => (
             <li key={n.id} className={n.readAt ? 'read' : 'unread'}>
@@ -1614,7 +1659,13 @@ export function ReportsPage() {
   return (
     <>
       <Section title="Request a report">
-        {catalogue.data && offered.length === 0 && <Empty>No report can be requested in this role.</Empty>}
+        {catalogue.data && offered.length === 0 && (
+          <>
+            <Empty>No report can be requested in this role.</Empty>
+            {/* Several reports are explicit grants, never default duties (the delivery log, audit export): say how to get one. */}
+            <p className="hint">Reports come with the duties of the selected role. If you need one that is not listed, ask an administrator to grant it; another administrator approves the grant.</p>
+          </>
+        )}
         {offered.length > 0 && (
         <form
           className="grid-form"

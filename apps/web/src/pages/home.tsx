@@ -75,8 +75,12 @@ const words = (code: string) => code.replace(/_/g, ' ').toLowerCase();
 /** FR-041 KRA review (I-77 item 3): listed with the tasks, but reviewed on the appraisal (POST /v1/appraisals/:id/goal-review). */
 const GOAL_REVIEW = 'appraisal_goal_review';
 
+/** Codes whose plain reading is not just the code in words. */
+const VALUE_WORDS: Record<string, string> = { NOT_PROCESSED: 'Not yet calculated' };
+
 /** A figure as a person reads it: a code in words, a decimal without its padding zeros. Nothing is rounded, and other text stays as sent. */
 function widgetText(value: number | string | undefined): string {
+  if (typeof value === 'string' && VALUE_WORDS[value]) return VALUE_WORDS[value];
   if (typeof value === 'string' && /^[A-Z][A-Z0-9_]*$/.test(value)) {
     const text = words(value);
     return text.charAt(0).toUpperCase() + text.slice(1);
@@ -201,9 +205,30 @@ function shortcutIcon(to: string): IconName {
   if (to.startsWith('/confirmations')) return 'badgeCheck';
   if (to.startsWith('/payroll') || to.startsWith('/payments') || to.startsWith('/expenses')) return 'wallet';
   if (to.startsWith('/reports')) return 'barChart';
+  if (to.startsWith('/timesheet') || to.startsWith('/me/attendance')) return 'clock';
   if (to.startsWith('/me') || to.startsWith('/profile')) return 'user';
   return 'sparkles';
 }
+
+/**
+ * Where a figure's foot link leads, named for the reader. A figure whose list is a module screen with its filters goes there;
+ * one whose list is the records page goes to the module screen where the reader acts (the figure itself still opens its
+ * records, FR-097); one with neither goes to its records.
+ */
+function widgetFoot(source: WidgetSource): { to: string; label: string; sameAsFigure: boolean } {
+  const lower = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
+  const recordsPage = source.href.startsWith('/dashboard/sources/');
+  if (!recordsPage) return { to: source.href, label: source.shortcut ? `See ${lower(source.shortcut.label)}` : 'See the list', sameAsFigure: true };
+  if (source.shortcut) return { to: source.shortcut.to, label: `See ${lower(source.shortcut.label)}`, sameAsFigure: false };
+  return { to: source.href, label: 'See the list', sameAsFigure: true };
+}
+
+/** The everyday tasks a role may start, offered beside the server's shortcuts when the role holds the screen's duties. */
+const TASK_SHORTCUTS: readonly { to: string; label: string; permissions: readonly string[]; ownRecord?: boolean }[] = [
+  { to: '/leave', label: 'Apply for leave', permissions: ['leave.read.operational', 'leave.submit.operational'], ownRecord: true },
+  { to: '/expenses', label: 'Claim an expense', permissions: ['expense.draft.operational'], ownRecord: true },
+  { to: '/timesheets', label: 'Fill in my timesheet', permissions: ['timesheet.read.operational', 'timesheet.submit.operational'], ownRecord: true },
+];
 
 const greetingAt = (hour: number) => (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -216,12 +241,23 @@ function longDate(day: string): string {
   return `${weekday}, ${d} ${MONTHS[m - 1]} ${y}`;
 }
 
+/** The month a period starting on `day` covers, in words ("November 2026"). */
+function monthOf(day: string): string {
+  const [y, m] = day.split('-').map(Number);
+  return y && m && MONTHS[m - 1] ? `${MONTHS[m - 1]} ${y}` : day;
+}
+
 /** DF17: role-labelled dashboard; refresh at most every 60 s with jitter, paused while the tab is hidden. */
 export function DashboardPage() {
-  const { me } = useSession();
+  const { me, can } = useSession();
   const [jitter] = useState(() => 60_000 + Math.floor(Math.random() * 15_000));
   const dashboard = useDashboard(jitter);
   const d = dashboard.data;
+  // The role's everyday tasks first (own-record screens only where the scope reaches the own record), then the server's
+  // shortcuts to other screens; one entry per screen.
+  const ownRecord = !!me?.employeeId && (me.scopeKind === 'OWN' || me.scopeKind === 'COMPANY');
+  const tasks = d?.state === 'OK' ? TASK_SHORTCUTS.filter((t) => (!t.ownRecord || ownRecord) && t.permissions.every((p) => can(p))) : [];
+  const quickActions = [...tasks, ...(d?.shortcuts ?? []).filter((s) => !tasks.some((t) => t.to === s.to))];
   const firstName = (me?.displayName ?? '').trim().split(/\s+/)[0];
   const role = me?.roleName ?? (d ? words(d.role) : '');
   return (
@@ -237,8 +273,10 @@ export function DashboardPage() {
           {d && (
             // FR-096: the acting role, its company and scope, and the period the figures cover are always visible.
             <p className="dash-context">
-              {role.charAt(0).toUpperCase() + role.slice(1)} · {d.company ? `${d.company} · ` : ''}
-              {scopeWords(d.scope)} · figures for the month from {d.period.from}
+              <span>{role.charAt(0).toUpperCase() + role.slice(1)}</span>
+              {d.company && <span>{d.company}</span>}
+              <span>{scopeWords(d.scope)}</span>
+              <span>Figures for {monthOf(d.period.from)}</span>
             </p>
           )}
         </div>
@@ -256,28 +294,43 @@ export function DashboardPage() {
                   <Icon name={widgetIcon(w.title)} size={18} />
                 </span>
               </div>
-              {w.status === 'OK' && <div className="widget-value">{w.source ? <Link to={w.source.href}>{widgetText(w.value)}</Link> : widgetText(w.value)}</div>}
+              {w.status === 'OK' && (
+                <div className={typeof w.value === 'number' || /^[\d.,\s]*$/.test(String(w.value ?? '')) ? 'widget-value' : 'widget-value widget-value-text'}>
+                  {w.source ? <Link to={w.source.href}>{widgetText(w.value)}</Link> : widgetText(w.value)}
+                </div>
+              )}
               {w.status === 'NOT_CONFIGURED' && <div className="widget-note">{w.message}</div>}
               {w.status === 'NOT_AVAILABLE' && <div className="widget-note">Not available yet</div>}
               {w.status === 'SUPPRESSED' && (
                 <>
-                  <div className="widget-value">Fewer than {w.threshold}</div>
+                  <div className="widget-value widget-value-text">Fewer than {w.threshold}</div>
                   <div className="widget-note">Small counts are not shown where the records cannot be opened here.</div>
                 </>
               )}
-              {w.status === 'OK' && w.source && (
-                <span className="widget-foot" aria-hidden="true">
-                  View records
-                </span>
-              )}
+              {w.status === 'OK' &&
+                w.source &&
+                (() => {
+                  const foot = widgetFoot(w.source);
+                  // Leading where the figure leads, it is a mouse convenience (the keyboard already reaches the figure's link);
+                  // leading elsewhere, it is a link of its own.
+                  return foot.sameAsFigure ? (
+                    <Link className="widget-foot" to={foot.to} tabIndex={-1} aria-hidden="true">
+                      {foot.label}
+                    </Link>
+                  ) : (
+                    <Link className="widget-foot" to={foot.to}>
+                      {foot.label}
+                    </Link>
+                  );
+                })()}
             </div>
           ))}
         </div>
       )}
-      {!!d?.shortcuts?.length && (
+      {quickActions.length > 0 && (
         <Section title="Quick actions">
           <ul className="quick-actions">
-            {d.shortcuts.map((s) => (
+            {quickActions.map((s) => (
               <li key={s.to}>
                 <Link to={s.to} className="quick-action">
                   <span className="quick-action-icon" aria-hidden="true">
@@ -346,7 +399,7 @@ export function WidgetSourcePage() {
   const widget = dashboard.data?.widgets.find((w) => w.code === code);
   return (
     <>
-      <Link to="/">← Home</Link>
+      <Link className="back-link" to="/">← Home</Link>
       {dashboard.data && !widget?.source && <Empty>This list is not available in the selected role.</Empty>}
       {widget?.source && (
         <Section title={widget.title}>
@@ -427,7 +480,7 @@ export function MyTeamPage() {
     <Section title={`My team${team.data ? ` (${team.data.total})` : ''}`}>
       <div className="grid-form">
         <label className="inline">
-          Search <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code, email or extension" />
+          Search <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code or email" />
         </label>
         <label className="inline">
           Department{' '}
@@ -671,7 +724,7 @@ export function TeamMemberPage() {
   const detail = useQuery({ queryKey: ['member', id], queryFn: () => api<{ tabs: Record<string, Tab> }>(`/v1/my-team/${id}`) });
   return (
     <>
-      <Link to="/team">← My team</Link>
+      <Link className="back-link" to="/team">← My team</Link>
       {Object.entries(detail.data?.tabs ?? {}).map(([key, tab]) => (
         <Section key={key} title={TAB_TITLES[key] ?? key}>
           {tab.items && tab.items.length === 0 && <Empty>Nothing recorded yet.</Empty>}
@@ -858,7 +911,7 @@ export function EmployeesPage() {
           <input
             maxLength={100}
             value={search}
-            placeholder="Name, code, email or extension"
+            placeholder="Name, code or email"
             onChange={(e) => {
               setSearch(e.target.value);
               listChanged();

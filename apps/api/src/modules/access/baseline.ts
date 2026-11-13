@@ -44,6 +44,12 @@ const ACCESS_ADMIN: PermissionKey[] = [
   // §5 "user/role administration", DB007, DB009 (0100). A link grants no permission by itself.
   'access.link_user.operational',
   'access.deactivate_user.operational',
+  // FR-001, the source system's User Master (0311; owner request of 13 Nov 2026): create an account with its sign-in, change its
+  // name and email, give it a new temporary password, delete one never used. An account holds no permission by itself.
+  'access.manage_accounts.operational',
+  // The access reviews of the BRD role matrix ("System Administrator: ... access reviews"): the user access register
+  // (USER_ACCESS, 0310). Access metadata only, so a default duty like the user list it reports.
+  'access.export.operational',
 ];
 
 // FR-003, FR-068: ask to delegate one's own decision authority, for the two reviewers DF03 names, the Reporting Manager and the

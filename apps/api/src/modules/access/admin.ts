@@ -455,7 +455,10 @@ export async function listCompanyUsers(db: Queryable, admin: AccessGrant, q: { s
       : `select m.user_id, l.employee_id
            from (select x.user_id from user_employee_link x where x.company_id = ${company}
                  union
-                 select ra.user_id from role_assignment ra where ra.company_id = ${company}) m
+                 select ra.user_id from role_assignment ra where ra.company_id = ${company}
+                 union
+                 -- An account this company created (0311), before it is linked or granted anything.
+                 select c.user_id from company_user_account c where c.company_id = ${company}) m
            left join user_employee_link l on l.user_id = m.user_id and ${currentLink('l')}`;
   // A blank search lists everyone; % _ and \ match literally. ILIKE folds both sides with the database's rules.
   const search = q.search?.trim();

@@ -398,7 +398,7 @@ describe('the register', () => {
     const row = within(table).getByText('DOCK-0002').closest('tr')!;
     expect(row.textContent).toContain('Issued');
     expect(row.textContent).toContain('Ravi Synthetic (SYN-002)');
-    expect(row.textContent).toContain('2026-10-01');
+    expect(row.textContent).toContain('1 Oct 2026');
     expect(callsTo('GET', '/v1/assets')[0]!.params.toString()).toBe('page=1&pageSize=25');
 
     const filters = screen.getByRole('form', { name: 'Filter the register' });
@@ -499,7 +499,7 @@ describe('one item', () => {
     fireEvent.click(button(form, 'Issue the item'));
 
     await screen.findByRole('form', { name: 'Record the return' });
-    expect(screen.getByRole('status').textContent).toBe(`LAP-0001 was issued to Ravi Synthetic (SYN-002) on ${TODAY}.`);
+    expect(screen.getByRole('status').textContent).toBe('LAP-0001 was issued to Ravi Synthetic (SYN-002) on 28 Oct 2026.');
     expect(bodiesTo('POST', `/v1/assets/${A_STOCK}/issue`)).toEqual([
       { employeeId: RAVI.id, condition: 'Good working order (synthetic)', requestId: R_APPROVED, idempotencyKey: key('asset-issue') },
     ]);
@@ -543,11 +543,11 @@ describe('one item', () => {
     change(form, /^Returned on/, '2026-10-27');
     fireEvent.click(button(form, 'Record the return'));
     await screen.findByRole('form', { name: 'Issue the item' });
-    expect(screen.getByRole('status').textContent).toContain('The return of DOCK-0002 on 2026-10-27 was recorded.');
+    expect(screen.getByRole('status').textContent).toContain('The return of DOCK-0002 on 27 Oct 2026 was recorded.');
     const bodies = bodiesTo('POST', `/v1/assets/${A_ISSUED}/return`);
     expect(bodies[1]).toEqual({ returnedOn: '2026-10-27', condition: 'Returned in good order (synthetic)', idempotencyKey: key('asset-return') });
     expect(bodies[1]!.idempotencyKey).not.toBe(bodies[0]!.idempotencyKey);
-    expect((await screen.findByRole('table', { name: 'Custody history' })).textContent).toContain('2026-10-27');
+    expect((await screen.findByRole('table', { name: 'Custody history' })).textContent).toContain('27 Oct 2026');
   });
 
   it('retires an item in stock with a note and the loaded version, saying date refusals in words', async () => {
@@ -597,7 +597,7 @@ describe('one item', () => {
     renderAt(`/assets/items/${A_RETIRED}`, [READ]);
     const facts = (await findSection('Item')).textContent!;
     expect(facts).toContain('Retired (final)');
-    expect(facts).toContain('2026-09-30');
+    expect(facts).toContain('30 Sep 2026');
     expect(facts).toContain('Beyond repair (synthetic)');
     expect(screen.getByText('The item has never been issued.')).toBeTruthy();
     expect(screen.queryAllByRole('form')).toHaveLength(0);
@@ -791,7 +791,7 @@ describe('My ESS TN16', () => {
     expect(rows).toHaveLength(4);
     expect(table.textContent).toContain('Waiting for a decision · with Hema Synthetic');
     expect(table.textContent).toContain('Rejected');
-    expect(table.textContent).toContain('MON-0004, issued 2026-10-01');
+    expect(table.textContent).toContain('MON-0004, issued 1 Oct 2026');
     expect(within(table).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Withdraw the request for General item', 'Raise again the rejected request for Laptop']);
     fireEvent.click(button(table, 'Withdraw the request for General item'));
     await screen.findByText('Your request was withdrawn.');

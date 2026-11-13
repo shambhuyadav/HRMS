@@ -227,7 +227,7 @@ const UPLOAD_WORDS: Words = {
 
 const DOWNLOAD_WORDS: Words = {
   FILE_NOT_RELEASED: (e) =>
-    scanStateOf(e) === 'QUARANTINED' ? 'This version was quarantined by the malware scan and can never be opened.' : 'This version has not been released by the malware scan yet, so it cannot be opened.',
+    scanStateOf(e) === 'QUARANTINED' ? 'This version failed the safety check and can never be opened.' : 'This version is still being checked, so it cannot be opened yet. Try again shortly.',
   NOT_FOUND: 'This policy version is not available in the selected role’s company.',
   FORBIDDEN: 'The selected role cannot read company policies.',
 };
@@ -273,11 +273,11 @@ function ClassificationBadge({ classification }: { classification: string }) {
   return <Badge tone={classification === 'CONFIDENTIAL' ? 'warn' : 'neutral'}>{classification === 'CONFIDENTIAL' ? 'confidential' : 'operational'}</Badge>;
 }
 
-/** FR-106: only a released (CLEAN) file is ever served. */
+/** FR-106: only a released (CLEAN) file is ever served. Said as a safety check: these screens are read by employees too. */
 function ScanBadge({ state }: { state: string | null | undefined }) {
-  if (state === 'CLEAN') return <Badge tone="good">released</Badge>;
-  if (state === 'QUARANTINED') return <Badge tone="bad">quarantined by the malware scan</Badge>;
-  return <Badge tone="warn">waiting for the malware scan</Badge>;
+  if (state === 'CLEAN') return <Badge tone="good">passed</Badge>;
+  if (state === 'QUARANTINED') return <Badge tone="bad">failed the safety check</Badge>;
+  return <Badge tone="warn">being checked</Badge>;
 }
 
 function Expiry({ expiresOn, expired }: { expiresOn: string | null; expired: boolean }) {
@@ -318,7 +318,7 @@ function VersionHistory({ versions }: { versions: PolicyVersion[] }) {
               <th scope="col">File</th>
               <th scope="col">Published</th>
               <th scope="col">Expires</th>
-              <th scope="col">Malware scan</th>
+              <th scope="col">Safety check</th>
               <th scope="col">Change note</th>
               <th scope="col">
                 <span style={SR_ONLY}>Open</span>
@@ -419,8 +419,8 @@ function PoliciesScreen() {
   const items = list.data?.items ?? [];
   return (
     <Section title="Company policies" actions={can(POLICY_MANAGE) ? <Link to={PATHS.manage}>Policy upload</Link> : undefined}>
-      <p className="hint">Each policy shows its latest version released by the malware scan. An expired version stays on record and is marked expired.</p>
-      {list.isPending && <p className="hint">Loading policies…</p>}
+      <p className="hint">Each policy shows its latest checked version. Download it to read it; an expired version stays on record, marked expired.</p>
+      {list.isPending && <p className="hint loading">Loading policies…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot read company policies.</NotPermitted> : <ErrorNote error={list.error} />}
       {list.data && items.length === 0 && <Empty>No company policies are published yet.</Empty>}
       {items.length > 0 && (
@@ -488,7 +488,7 @@ function PolicyScreen() {
   return (
     <>
       <p>
-        <Link to={PATHS.policies}>← Company policies</Link>
+        <Link className="back-link" to={PATHS.policies}>← Company policies</Link>
       </p>
       {!canRead ? (
         <Section title="Company policy">
@@ -499,12 +499,12 @@ function PolicyScreen() {
           <PolicyUnavailable error={detail.error ?? new ApiError(404, 'NOT_FOUND', 'Not found')} />
         </Section>
       ) : !p ? (
-        <p className="hint">Loading the policy…</p>
+        <p className="hint loading">Loading the policy…</p>
       ) : (
         <Section title={p.title} actions={can(POLICY_MANAGE) ? <Link to={PATHS.managePolicy(p.id)}>Manage this policy</Link> : undefined}>
           <PolicyFacts policy={p} />
           <h3>Versions</h3>
-          <p className="hint">Every version stays on record. Only a version the malware scan released can be opened.</p>
+          <p className="hint">Every version stays on record. A version can be downloaded once it has passed the safety check.</p>
           <VersionHistory versions={p.versions} />
         </Section>
       )}
@@ -535,7 +535,7 @@ function ManagePoliciesScreen() {
       <PublishPolicyForm />
       <Section title="Published policies">
         {!canRead && <NotPermitted>The selected role cannot list company policies.</NotPermitted>}
-        {canRead && list.isPending && <p className="hint">Loading policies…</p>}
+        {canRead && list.isPending && <p className="hint loading">Loading policies…</p>}
         {isForbidden(list.error) ? <NotPermitted>The selected role cannot list company policies.</NotPermitted> : <ErrorNote error={list.error} />}
         {list.data && items.length === 0 && <Empty>No company policies are published yet.</Empty>}
         {items.length > 0 && (
@@ -697,7 +697,7 @@ function ManagePolicyScreen() {
   return (
     <>
       <p>
-        <Link to={PATHS.manage}>← Policy upload</Link>
+        <Link className="back-link" to={PATHS.manage}>← Policy upload</Link>
       </p>
       {!canManage || !canRead ? (
         <Section title="Manage company policy">
@@ -708,7 +708,7 @@ function ManagePolicyScreen() {
           <PolicyUnavailable error={detail.error ?? new ApiError(404, 'NOT_FOUND', 'Not found')} />
         </Section>
       ) : !p ? (
-        <p className="hint">Loading the policy…</p>
+        <p className="hint loading">Loading the policy…</p>
       ) : (
         <>
           <Section title={`${p.title} (${p.policyCode})`}>
@@ -961,9 +961,9 @@ function stageText(r: StageResult): string {
     const e = r.error;
     return wordsFor(e, STAGE_WORDS) ?? (e instanceof ApiError ? `${e.message} (${e.code})` : 'Not staged: no answer came back.');
   }
-  if (r.scanState === 'CLEAN') return 'Staged and released by the malware scan; it can be mapped.';
-  if (r.scanState === 'QUARANTINED') return 'Staged, but quarantined by the malware scan: it can never be mapped.';
-  return 'Staged; waiting for the malware scan. It can be mapped once the scan releases it.';
+  if (r.scanState === 'CLEAN') return 'Staged and checked; it can be mapped.';
+  if (r.scanState === 'QUARANTINED') return 'Staged, but it failed the safety check, so it can never be mapped.';
+  return 'Staged; being checked. It can be mapped once the check passes.';
 }
 
 function BulkMappingScreen() {
@@ -1043,8 +1043,8 @@ function StageDocuments() {
         </button>
       </form>
       <p className="hint">
-        PDF, JPEG or PNG up to 10 MB each. A staged file waits, unassigned, under its file name until a mapping file assigns it to an employee. Every file is scanned for
-        malware first.
+        PDF, JPEG or PNG up to 10 MB each. A staged file waits, unassigned, under its file name until a mapping file assigns it to an employee. Every file goes through
+        a safety check first.
       </p>
       {stage.isPending && <p className="hint">Staging…</p>}
       {results.length > 0 && (
@@ -1102,7 +1102,7 @@ function StagedFiles() {
     <Section
       title="Your staged files"
       actions={
-        <div className="row">
+        <div className="row toggle-group">
           {STAGED_TABS.map((t) => (
             <button key={t.state} type="button" aria-pressed={state === t.state} className={state === t.state ? '' : 'secondary'} onClick={() => show(t.state)}>
               {t.label}
@@ -1112,9 +1112,8 @@ function StagedFiles() {
       }
     >
       <p className="hint">
-        Only you see the files you staged. A mapped file has become an employee document and cannot be mapped again or discarded. A file waiting to be mapped (one the
-        malware scan quarantined, or one staged by mistake) can be discarded: it is kept on record under Discarded, never deleted, and can never be mapped; its file name
-        can be staged again.
+        Only you see the files you staged. A mapped file is now an employee document and cannot be changed. You can discard a file still waiting to be mapped (for example
+        one that failed the safety check or was staged by mistake); it stays on record, and you can stage a file with the same name again.
       </p>
       {discarded && (
         <p className="ok" role="status">
@@ -1122,7 +1121,7 @@ function StagedFiles() {
         </p>
       )}
       <Refusal error={discard.error} words={DISCARD_WORDS} />
-      {list.isPending && <p className="hint">Loading staged files…</p>}
+      {list.isPending && <p className="hint loading">Loading staged files…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot list staged documents.</NotPermitted> : <ErrorNote error={list.error} />}
       {list.data && items.length === 0 && <Empty>{page === 1 ? tab.empty : 'No staged files on this page.'}</Empty>}
       {items.length > 0 && (
@@ -1132,7 +1131,7 @@ function StagedFiles() {
               <tr>
                 <th scope="col">File</th>
                 <th scope="col">Staged</th>
-                <th scope="col">Malware scan</th>
+                <th scope="col">Safety check</th>
                 {state === 'MAPPED' && <th scope="col">Mapped</th>}
                 {state === 'DISCARDED' && <th scope="col">Discarded</th>}
                 {state === 'UNMAPPED' && (
@@ -1329,7 +1328,7 @@ function MappingBatches({ openedId, busy, onOpen, error }: { openedId: string | 
       <p className="hint">
         Only you see the mapping files you uploaded. Open a batch to see its rows; one still waiting for its scan can be checked again and then committed or cancelled.
       </p>
-      {list.isPending && <p className="hint">Loading your mapping batches…</p>}
+      {list.isPending && <p className="hint loading">Loading your mapping batches…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot list mapping batches.</NotPermitted> : <ErrorNote error={list.error} />}
       <Refusal error={error} words={{ NOT_FOUND: 'This batch is not available to the selected role.' }} />
       {list.data && items.length === 0 && <Empty>{page === 1 ? 'You have not uploaded a mapping file yet.' : 'No batches on this page.'}</Empty>}
@@ -1341,7 +1340,7 @@ function MappingBatches({ openedId, busy, onOpen, error }: { openedId: string | 
                 <th scope="col">Mapping file</th>
                 <th scope="col">Uploaded</th>
                 <th scope="col">Status</th>
-                <th scope="col">Malware scan</th>
+                <th scope="col">Safety check</th>
                 <th scope="col">Rows</th>
                 <th scope="col">
                   <span style={SR_ONLY}>Actions</span>
@@ -1491,7 +1490,7 @@ function MandatoryTypes() {
           {notice}
         </p>
       )}
-      {list.isPending && <p className="hint">Loading the mandatory document types…</p>}
+      {list.isPending && <p className="hint loading">Loading the mandatory document types…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot read the mandatory document types.</NotPermitted> : <ErrorNote error={list.error} />}
       {data && data.items.length === 0 && <Empty>No document type is mandatory yet.</Empty>}
       {data && data.items.length > 0 && (
@@ -1987,7 +1986,7 @@ export const DOCUMENTS_SCREENS: ScreenRoute[] = [
   { path: '/policies/:id', title: 'Company policy', permission: POLICY_READ, nav: false, component: PolicyScreen },
   { path: PATHS.manage, title: 'Policy upload', permission: POLICY_MANAGE, nav: true, component: ManagePoliciesScreen },
   { path: '/documents/policies/:id', title: 'Manage company policy', permission: POLICY_MANAGE, nav: false, component: ManagePolicyScreen },
-  { path: PATHS.mapping, title: 'Bulk document mapping', permission: DOCUMENT_UPLOAD, nav: true, component: BulkMappingScreen },
+  { path: PATHS.mapping, title: 'Bulk document mapping', permission: DOCUMENT_UPLOAD, nav: true, staffOnly: true, component: BulkMappingScreen },
   // CL-150 (0261): the mandatory document types and the compliance report.
   { path: REQUIREMENTS_PATH, title: 'Mandatory documents', permission: REQUIREMENT_READ, nav: true, component: MandatoryDocumentsScreen },
   // CL-027 (0281): employee documents exported to a ZIP, with the export log.

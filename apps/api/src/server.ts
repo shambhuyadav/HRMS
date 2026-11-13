@@ -1,6 +1,7 @@
 ﻿// Development entry point. Production configuration (OIDC verifier, secrets, TLS) is a separate,
 // authorised deployment step and is intentionally not wired here.
 import { buildApp } from './app.js';
+import { memoryIdentityAdmin } from './auth/identity-admin.js';
 import { devTokenVerifier } from './auth/tokens.js';
 import { createPool } from './db/pool.js';
 import { localFileStore } from './storage/files.js';
@@ -20,6 +21,9 @@ const app = buildApp({
   verifier: devTokenVerifier(tokens),
   devLogin: tokens,
   files: localFileStore(process.env.FILE_STORE_DIR ?? '.dev-files'),
+  // HRMS_DEV_IDENTITY=memory: an in-memory sign-in provider, so the User accounts screen shows its temporary passwords on a
+  // development server (they open nothing: this server signs in by account key).
+  identity: process.env.HRMS_DEV_IDENTITY === 'memory' ? memoryIdentityAdmin() : null,
   logger: true,
 });
 await app.listen({ host: '127.0.0.1', port: Number(process.env.PORT ?? 3000) });

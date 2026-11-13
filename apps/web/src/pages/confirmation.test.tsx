@@ -216,10 +216,11 @@ const INVALID_STATE = { error: 'INVALID_STATE', message: 'This exception has alr
 const CASE_NOT_OPEN = { error: 'CASE_NOT_OPEN', message: 'The due date can change only while no recommendation is under review' };
 
 /** An instant as the page shows it: the viewer's local date and time. */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function localTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 interface Call {
@@ -485,8 +486,8 @@ describe('confirmation views (FR-082)', () => {
       'Case',
     ]);
     // On All, the server-derived timing of running cases is shown next to the current due date.
-    expect(cells(rowWith(panel, 'Meera Synthetic'))).toEqual(['Meera Synthetic SYN-103', '2026-04-30', '2026-07-31', '2026-08-31 overdue', '1', 'open', 'Recommendation returned', 'View case']);
-    expect(cells(rowWith(panel, 'Dev Synthetic'))[3]).toBe('2027-01-15 later');
+    expect(cells(rowWith(panel, 'Meera Synthetic'))).toEqual(['Meera Synthetic SYN-103', '30 Apr 2026', '31 Jul 2026', '31 Aug 2026 overdue', '1', 'open', 'Recommendation returned', 'View case']);
+    expect(cells(rowWith(panel, 'Dev Synthetic'))[3]).toBe('15 Jan 2027 later');
 
     for (const [label, view, name] of [
       ['Overdue (1)', 'OVERDUE', 'Meera Synthetic'],
@@ -506,9 +507,9 @@ describe('confirmation views (FR-082)', () => {
     }
     expect(cells(rowWith(screen.getByRole('tabpanel'), 'Kiran Synthetic'))).toEqual([
       'Kiran Synthetic SYN-104',
-      '2026-02-28',
-      '2026-05-31',
-      '2026-05-31',
+      '28 Feb 2026',
+      '31 May 2026',
+      '31 May 2026',
       '0',
       'confirmed',
       'Confirmed',
@@ -587,7 +588,7 @@ describe('confirmation views (FR-082)', () => {
       return r;
     });
     // The extended case keeps its date view, shown next to its due date.
-    expect(cells(rows[1]!)).toEqual(['Meera Synthetic SYN-103', '2026-04-30', '2026-07-31', '2026-08-31 overdue', '1', 'open', 'Recommendation returned', 'View case']);
+    expect(cells(rows[1]!)).toEqual(['Meera Synthetic SYN-103', '30 Apr 2026', '31 Jul 2026', '31 Aug 2026 overdue', '1', 'open', 'Recommendation returned', 'View case']);
     // The count comes from the All list's extended flags, not from a second request.
     expect(screen.getByRole('tab', { name: 'Extended (1)' })).toBeTruthy();
     cleanup();
@@ -702,12 +703,12 @@ describe('case detail and history (FR-081, CI17, DF02/DF11)', () => {
       expect(within(history).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Action', 'Prior due date', 'New due date', 'Actual confirmation date', 'Occurred at']);
       const [, extended, returned] = within(history).getAllByRole('row');
       expect(cells(extended!)).toHaveLength(5);
-      expect(cells(extended!).slice(0, 4)).toEqual(['Probation extended', '2026-07-31', '2026-08-31', '—']);
-      expect(cells(returned!).slice(0, 4)).toEqual(['Recommendation returned', '2026-08-31', '2026-08-31', '—']);
+      expect(cells(extended!).slice(0, 4)).toEqual(['Probation extended', '31 Jul 2026', '31 Aug 2026', '—']);
+      expect(cells(returned!).slice(0, 4)).toEqual(['Recommendation returned', '31 Aug 2026', '31 Aug 2026', '—']);
       expect(extended!.querySelector('time')!.getAttribute('datetime')).toBe('2026-07-30T12:00:00.000Z');
       expect(within(panel).queryByText(/reason/i)).toBeNull();
       expect(panel.textContent).not.toMatch(/hidden|withheld|restricted|redacted|confidential|\*\*\*/i);
-      expect(within(panel).getByText('Initial due date').nextElementSibling!.textContent).toBe('2026-07-31');
+      expect(within(panel).getByText('Initial due date').nextElementSibling!.textContent).toBe('31 Jul 2026');
       expect(within(panel).getByText('Extensions').nextElementSibling!.textContent).toBe('1');
       expect(callsTo('GET', `/v1/confirmations/${C_OVERDUE}`)).toHaveLength(1);
       cleanup();
@@ -737,8 +738,8 @@ describe('case detail and history (FR-081, CI17, DF02/DF11)', () => {
     renderPage([READ]);
     const panel = await openCase('Kiran Synthetic (SYN-104)');
     const [, confirmed] = within(within(panel).getByRole('table')).getAllByRole('row');
-    expect(cells(confirmed!).slice(0, 4)).toEqual(['Confirmed', '2026-05-31', '2026-05-31', '2026-06-01']);
-    expect(within(panel).getByText('Actual confirmation date', { selector: 'dt' }).nextElementSibling!.textContent).toBe('2026-06-01');
+    expect(cells(confirmed!).slice(0, 4)).toEqual(['Confirmed', '31 May 2026', '31 May 2026', '1 Jun 2026']);
+    expect(within(panel).getByText('Actual confirmation date', { selector: 'dt' }).nextElementSibling!.textContent).toBe('1 Jun 2026');
     fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: /Confirmation case/ })).toBeNull());
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'View case of Kiran Synthetic (SYN-104)' }));
@@ -953,7 +954,7 @@ describe('opening a case (FR-080)', () => {
     fireEvent.click(open);
     await waitFor(() => expect(callsTo('POST', '/v1/confirmations')).toHaveLength(1));
     expect(callsTo('POST', '/v1/confirmations')[0]!.body).toEqual({ employeeId: E_NILA });
-    expect(await within(section).findByText('Case opened for Nila Synthetic (SYN-201); planned due date 2027-01-31.')).toBeTruthy();
+    expect(await within(section).findByText('Case opened for Nila Synthetic (SYN-201); planned due date 31 Jan 2027.')).toBeTruthy();
     // The new case is shown and the list reloads with it.
     expect(await caseRegion('Nila Synthetic (SYN-201)')).toBeTruthy();
     await waitFor(() => expect(listViews()).toEqual(['ALL', 'ALL']));
@@ -1014,7 +1015,7 @@ describe('exceptions on a case (DF11, I-19)', () => {
     const table = await exceptionTable(panel);
     expect(headers(table)).toEqual(['Exception', 'Proposed due date', 'State', 'Proposed at', 'Decided at']);
     const [, rejected, waiting] = within(table).getAllByRole('row');
-    expect(cells(rejected!)).toEqual(['Due date override', '2026-12-31', 'rejected', localTime(PROPOSED_AT), localTime(DECIDED_AT)]);
+    expect(cells(rejected!)).toEqual(['Due date override', '31 Dec 2026', 'rejected', localTime(PROPOSED_AT), localTime(DECIDED_AT)]);
     expect(cells(waiting!)).toEqual(['Extra extension', '—', 'proposed', localTime('2026-10-22T08:05:00.000Z'), '—']);
     expect([...rejected!.querySelectorAll('time')].map((t) => t.getAttribute('datetime'))).toEqual([PROPOSED_AT, DECIDED_AT]);
     expect(within(panel).queryByText(/reason/i)).toBeNull();
@@ -1074,8 +1075,8 @@ describe('exceptions on a case (DF11, I-19)', () => {
     expect(within(form).queryByRole('alert')).toBeNull();
     // The case's exceptions show the waiting proposal; the due date stays until another HR user approves it.
     const table = await exceptionTable(panel);
-    expect(cells(within(table).getAllByRole('row')[1]!).slice(0, 3)).toEqual(['Due date override', '2026-12-15', 'proposed']);
-    expect(dueDateIn(panel)).toMatch(/^2026-11-03/);
+    expect(cells(within(table).getAllByRole('row')[1]!).slice(0, 3)).toEqual(['Due date override', '15 Dec 2026', 'proposed']);
+    expect(dueDateIn(panel)).toMatch(/^3 Nov 2026/);
   });
 
   it('proposes an extra extension without a date', async () => {
@@ -1109,7 +1110,7 @@ describe('exceptions on a case (DF11, I-19)', () => {
     fireEvent.change(reason(), { target: { value: 'Synthetic justification' } });
 
     const refusals: [Reply, string][] = [
-      [refusal, 'The new due date cannot be before the employee’s start date (2026-08-03).'],
+      [refusal, 'The new due date cannot be before the employee’s start date (3 Aug 2026).'],
       [[422, { error: 'NO_CHANGE', message: 'This is already the due date' }], 'That date is already the case’s due date. Choose a different date.'],
       [
         [409, { error: 'OPEN_PROPOSAL_EXISTS', message: 'An exception of this kind is already waiting for a decision' }],
@@ -1200,12 +1201,12 @@ describe('pending exceptions (DF11, C4)', () => {
     serve({}, { exceptions: [ASHA_WAITING(), MEERA_OWN_EXTRA()] });
     renderPage([READ, APPROVE_EXCEPTION], `/confirmations?case=${C_UPCOMING}`);
     const panel = await caseRegion('Asha Synthetic (SYN-101)');
-    expect(dueDateIn(panel)).toMatch(/^2026-11-03/);
+    expect(dueDateIn(panel)).toMatch(/^3 Nov 2026/);
     expect(await within(panel).findByText('Waiting proposals are decided under Pending exceptions on this page.')).toBeTruthy();
     const queue = await findSection('Pending exceptions');
     const item = await within(queue).findByRole('listitem', { name: 'Due date override: Asha Synthetic (SYN-101)' });
     expect(within(queue).getAllByRole('listitem')).toHaveLength(2);
-    expect(within(item).getByText('Proposed due date').nextElementSibling!.textContent).toBe('2026-12-15');
+    expect(within(item).getByText('Proposed due date').nextElementSibling!.textContent).toBe('15 Dec 2026');
     expect(within(item).getByText('Proposed at').nextElementSibling!.textContent).toBe(localTime(PROPOSED_AT));
     // The server withheld the private reason: no Reason entry.
     expect(within(item).queryByText('Reason', { selector: 'dt' })).toBeNull();
@@ -1240,14 +1241,14 @@ describe('pending exceptions (DF11, C4)', () => {
     });
 
     await act(async () => release());
-    expect((await within(queue).findByRole('status')).textContent).toBe('Approved the due date override for Asha Synthetic (SYN-101): the due date is now 2026-12-15.');
+    expect((await within(queue).findByRole('status')).textContent).toBe('Approved the due date override for Asha Synthetic (SYN-101): the due date is now 15 Dec 2026.');
     expect(within(queue).queryByRole('listitem', { name: 'Due date override: Asha Synthetic (SYN-101)' })).toBeNull();
     expect(within(queue).getAllByRole('listitem')).toHaveLength(1);
     // The decided item went away; focus stays in the queue instead of falling to the page.
     expect(document.activeElement).toBe(screen.getByRole('region', { name: 'Pending exceptions' }));
     // The case reloads with its new due date, and so do the list and the case's exceptions.
-    await waitFor(() => expect(dueDateIn(panel)).toMatch(/^2026-12-15/));
-    await waitFor(() => expect(cells(rowWith(screen.getByRole('tabpanel'), 'Asha Synthetic'))[3]).toMatch(/^2026-12-15/));
+    await waitFor(() => expect(dueDateIn(panel)).toMatch(/^15 Dec 2026/));
+    await waitFor(() => expect(cells(rowWith(screen.getByRole('tabpanel'), 'Asha Synthetic'))[3]).toMatch(/^15 Dec 2026/));
     const table = await exceptionTable(panel);
     await waitFor(() => expect(cells(rowWith(table, 'Due date override'))[2]).toBe('approved'));
   });
@@ -1266,7 +1267,7 @@ describe('pending exceptions (DF11, C4)', () => {
     expect(await within(queue).findByText('No exceptions are waiting for a decision.')).toBeTruthy();
     const table = await exceptionTable(panel);
     await waitFor(() => expect(cells(rowWith(table, 'Due date override'))[2]).toBe('rejected'));
-    expect(dueDateIn(panel)).toMatch(/^2026-11-03/);
+    expect(dueDateIn(panel)).toMatch(/^3 Nov 2026/);
   });
 
   it('does not let a proposer decide their own proposal, and lets them withdraw it', async () => {
@@ -1368,7 +1369,7 @@ describe('pending exceptions (DF11, C4)', () => {
     expect(retried[0]).toMatch(/^conf-exception-[0-9a-f-]{36}$/);
     expect(retried[1]).toBe(retried[0]);
     // Applied once: the case shows its new due date, one version on.
-    await waitFor(() => expect(dueDateIn(panel)).toMatch(/^2026-12-15/));
+    await waitFor(() => expect(dueDateIn(panel)).toMatch(/^15 Dec 2026/));
     expect(cases.find((c) => c.id === C_UPCOMING)!.version).toBe(4);
     cleanup();
 
@@ -1720,9 +1721,9 @@ describe('confirmation policies (FR-080, BR-029, DF11)', () => {
     serve({ [`GET ${POLICIES}`]: [200, LIST()] });
     renderPolicies();
     const table = await screen.findByRole('table', { name: 'Confirmation policies' });
-    expect(cells(row(table, 'DEFAULT', 1)).slice(1, 8)).toEqual(['Every employee', '3 calendar months', 'Joining date', '2000-01-01', 'No end date', 'in force', 'None']);
+    expect(cells(row(table, 'DEFAULT', 1)).slice(1, 8)).toEqual(['Every employee', '3 calendar months', 'Joining date', '1 Jan 2000', 'No end date', 'in force', 'None']);
     const old = row(table, 'INTERN_TERMS', 1);
-    expect(cells(old).slice(1, 8)).toEqual(['INTERN', '1 calendar months', 'Joining date', '2000-01-01', '2026-03-01', 'ended', 'In use (latest start 2026-01-31)']);
+    expect(cells(old).slice(1, 8)).toEqual(['INTERN', '1 calendar months', 'Joining date', '1 Jan 2000', '1 Mar 2026', 'ended', 'In use (latest start 31 Jan 2026)']);
     // A superseded, ended revision offers nothing; the latest offers a new revision and an end date.
     expect(within(old).queryByRole('button')).toBeNull();
     const latest = row(table, 'INTERN_TERMS', 2);
@@ -1854,7 +1855,7 @@ describe('confirmation policies (FR-080, BR-029, DF11)', () => {
     const table = await screen.findByRole('table', { name: 'Confirmation policies' });
     fireEvent.click(within(row(table, 'INTERN_TERMS', 2)).getByRole('button', { name: 'New revision of INTERN_TERMS revision 2' }));
     const form = await screen.findByRole('form', { name: 'New revision of INTERN_TERMS' });
-    expect(screen.getByText(/The date must come after 2026-04-02/)).toBeTruthy();
+    expect(screen.getByText(/The date must come after 2 Apr 2026/)).toBeTruthy();
     expect((within(form).getByLabelText('Duration') as HTMLInputElement).value).toBe('45');
     expect((within(form).getByLabelText('Unit') as HTMLSelectElement).value).toBe('CALENDAR_DAYS');
     expect(within(form).queryByLabelText('Employment type')).toBeNull();
@@ -1870,7 +1871,7 @@ describe('confirmation policies (FR-080, BR-029, DF11)', () => {
       effectiveFrom: '2027-01-01',
       expectedVersion: 4,
     });
-    expect(await screen.findByText('INTERN_TERMS revision 3 created; it applies from 2027-01-01.')).toBeTruthy();
+    expect(await screen.findByText('INTERN_TERMS revision 3 created; it applies from 1 Jan 2027.')).toBeTruthy();
     expect(screen.queryByRole('form', { name: 'New revision of INTERN_TERMS' })).toBeNull();
     await waitFor(() => expect(cells(row(screen.getByRole('table', { name: 'Confirmation policies' }), 'INTERN_TERMS', 3))[6]).toBe('scheduled'));
   });
@@ -1933,9 +1934,9 @@ describe('confirmation policies (FR-080, BR-029, DF11)', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'End policy' }));
     await waitFor(() => expect(callsTo('POST', `${POLICIES}/${P_INTERN_2}/retire`)).toHaveLength(2));
     expect(callsTo('POST', `${POLICIES}/${P_INTERN_2}/retire`)[1]!.body).toEqual({ effectiveTo: '2026-12-01', expectedVersion: 4 });
-    expect(await screen.findByText('INTERN_TERMS revision 2 ends on 2026-12-01.')).toBeTruthy();
+    expect(await screen.findByText('INTERN_TERMS revision 2 ends on 1 Dec 2026.')).toBeTruthy();
     expect(screen.queryByRole('form', { name: 'End INTERN_TERMS revision 2' })).toBeNull();
-    await waitFor(() => expect(cells(row(screen.getByRole('table', { name: 'Confirmation policies' }), 'INTERN_TERMS', 2))[5]).toBe('2026-12-01'));
+    await waitFor(() => expect(cells(row(screen.getByRole('table', { name: 'Confirmation policies' }), 'INTERN_TERMS', 2))[5]).toBe('1 Dec 2026'));
   });
 
   it('never shows a list answered for another role assignment, even from the cache', async () => {

@@ -359,8 +359,9 @@ describe('masters', () => {
     serve({ ...routes(), 'POST /v1/timesheet/activities': [201, { ...master(A_QA, 'REVIEW', 'Review'), productive: false }] });
     renderAt('/timesheet/masters', [MASTER_READ, MASTER_MANAGE]);
     const f = await screen.findByRole('form', { name: 'New activity' });
-    expect((within(f).getByLabelText('Productive') as HTMLInputElement).checked).toBe(false);
-    expect((within(f).getByLabelText('Not productive') as HTMLInputElement).checked).toBe(false);
+    const productive = within(within(f).getByRole('radiogroup', { name: 'Counts as productive time' }));
+    expect((productive.getByLabelText('Yes') as HTMLInputElement).checked).toBe(false);
+    expect((productive.getByLabelText('No') as HTMLInputElement).checked).toBe(false);
     change(f, 'Code', 'REVIEW');
     change(f, 'Name', 'Review');
     change(f, 'Owner', ASHA);
@@ -370,7 +371,7 @@ describe('masters', () => {
     expect((await within(f).findByRole('alert')).textContent).toContain('whether the activity is productive');
     await settle();
     expect(callsTo('POST', '/v1/timesheet/activities')).toHaveLength(0);
-    fireEvent.click(within(f).getByLabelText('Not productive'));
+    fireEvent.click(productive.getByLabelText('No'));
     fireEvent.click(button(f, 'Create activity'));
     await within(f).findByRole('status');
     expect(bodiesTo('POST', '/v1/timesheet/activities')).toEqual([{ code: 'REVIEW', name: 'Review', ownerEmployeeId: ASHA, startDate: '2026-11-01', endDate: '2027-03-31', productive: false }]);
@@ -458,7 +459,7 @@ describe('allocations', () => {
     expect(within(f).queryByLabelText(/Over-allocation exception reason/)).toBeNull();
     fireEvent.click(button(f, 'Allocate'));
     expect((await within(f).findByRole('alert')).textContent).toBe(
-      'The employee would be allocated 110.00% on 2026-11-02. Above 100% needs an over-allocation exception with a reason, recorded by the employee’s direct manager.',
+      'The employee would be allocated 110.00% on 2 Nov 2026. Above 100% needs an over-allocation exception with a reason, recorded by the employee’s direct manager.',
     );
     change(f, /Over-allocation exception reason/, 'Synthetic: go-live support');
     fireEvent.click(button(f, 'Allocate with the exception'));
@@ -802,7 +803,7 @@ describe('decision queues', () => {
   it('approves with an idempotency key, disabling the decisions while in flight; a return needs a reason', async () => {
     serve({ 'GET /v1/timesheet-tasks': [200, { items: [TASK] }], [`POST ${decision}`]: [200, { timesheetId: S_APPROVED, revision: 2, state: 'APPROVED', replayed: false }] });
     renderComponent(queue('Timesheet approvals'), [TS_APPROVE]);
-    const item = await screen.findByRole('listitem', { name: 'Ravi Synthetic (SYN-002): 2026-10-19 to 2026-10-25' });
+    const item = await screen.findByRole('listitem', { name: 'Ravi Synthetic (SYN-002): 19 Oct 2026 to 25 Oct 2026' });
     expect(item.textContent).toContain('submitted late');
     expect(item.textContent).toContain('37:30 h');
     fireEvent.click(button(item, 'Return for changes'));
@@ -814,7 +815,7 @@ describe('decision queues', () => {
     await waitFor(() => expect(button(item, 'Approve').disabled).toBe(true));
     expect(button(item, 'Reject').disabled).toBe(true);
     release();
-    expect((await screen.findByRole('status')).textContent).toBe('Approved revision 2 of the timesheet of Ravi Synthetic (SYN-002) for 2026-10-19 to 2026-10-25.');
+    expect((await screen.findByRole('status')).textContent).toBe('Approved revision 2 of the timesheet of Ravi Synthetic (SYN-002) for 19 Oct 2026 to 25 Oct 2026.');
     expect(bodiesTo('POST', decision)).toEqual([{ decision: 'APPROVE', idempotencyKey: KEY('timesheet-decision') }]);
     expect(screen.queryByRole('listitem', { name: /Ravi Synthetic/ })).toBeNull();
   });
@@ -867,7 +868,7 @@ describe('decision queues', () => {
     const path = `/v1/timesheet-reopen-tasks/${RT1}/decision`;
     serve({ 'GET /v1/timesheet-reopen-tasks': [200, { items: [reopen] }], [`POST ${path}`]: [200, { reopenRequestId: 'r-1', timesheetId: S_APPROVED, state: 'APPROVED', newRevision: 3, replayed: false }] });
     renderComponent(queue('Timesheet reopen requests'), [TS_REOPEN]);
-    const item = await screen.findByRole('listitem', { name: 'Reopen Ravi Synthetic (SYN-002): 2026-10-19 to 2026-10-25' });
+    const item = await screen.findByRole('listitem', { name: 'Reopen Ravi Synthetic (SYN-002): 19 Oct 2026 to 25 Oct 2026' });
     expect(item.textContent).toContain('Synthetic: Friday missing');
     fireEvent.click(button(item, 'Reject reopen'));
     expect(within(item).getByRole('alert').textContent).toBe('Enter a reason to reject the reopen request.');
@@ -896,7 +897,7 @@ describe('a timesheet and its revisions', () => {
     fireEvent.click(within(revisions).getByRole('button', { name: 'Show revision 1' }));
     await screen.findByRole('table', { name: 'Lines of revision 1' });
     expect(calls.at(-1)!.params.get('revision')).toBe('1');
-    expect(screen.getByText(/2026-10-20 2.00 h/)).toBeTruthy();
+    expect(screen.getByText(/20 Oct 2026 2.00 h/)).toBeTruthy();
     const f = form('Request a reopen');
     fireEvent.click(button(f, 'Request reopen'));
     expect(within(f).getByRole('alert').textContent).toBe('Enter why the approved timesheet needs a correction.');
@@ -931,7 +932,7 @@ describe('missed submissions', () => {
   it('resolves a reminder only with a documented reason and says a self-resolution refusal in words', async () => {
     serve({ 'GET /v1/timesheet-exceptions': [200, { items: [MISSED] }], 'POST /v1/timesheet-exceptions/x-1/resolve': [403, { error: 'SELF_ACTION_NOT_ALLOWED', message: 'own' }] });
     renderAt('/timesheet/missed', [TS_READ, TS_RESOLVE]);
-    const f = await screen.findByRole('form', { name: 'Resolve the reminder of SYN-002 for 2026-10-12' });
+    const f = await screen.findByRole('form', { name: 'Resolve the reminder of SYN-002 for 12 Oct 2026' });
     expect(calls[0]!.params.get('state')).toBe('OPEN');
     expect(screen.getByText(/never a deduction or a penalty/)).toBeTruthy();
     fireEvent.click(button(f, 'Resolve reminder'));
@@ -1150,11 +1151,11 @@ describe('My ESS TN13', () => {
     change(f, 'Week starting (Monday)', '2026-10-19');
     fireEvent.click(button(f, 'Start timesheet'));
     await screen.findByText('You already have a timesheet for this week. It is opened below.');
-    await screen.findByRole('heading', { name: 'My week 2026-10-19 to 2026-10-25' });
+    await screen.findByRole('heading', { name: 'My week 19 Oct 2026 to 25 Oct 2026' });
     expect(bodiesTo('POST', '/v1/me/timesheets')).toEqual([{ periodStart: '2026-10-20' }, { periodStart: '2026-10-19' }]);
-    expect(screen.getByRole('list', { name: 'My reminders' }).textContent).toContain('was due on 2026-10-19 and has not been submitted');
+    expect(screen.getByRole('list', { name: 'My reminders' }).textContent).toContain('was due on 19 Oct 2026 and has not been submitted');
     expect(screen.getByText(/never a deduction or a penalty/)).toBeTruthy();
-    expect(screen.getByRole('table', { name: 'My timesheet decisions' }).textContent).toContain('Approved on 2026-10-27');
+    expect(screen.getByRole('table', { name: 'My timesheet decisions' }).textContent).toContain('Approved on 27 Oct 2026');
     expect(callsTo('GET', '/v1/me/requests')[0]!.params.get('kind')).toBe('timesheet');
   });
 
@@ -1170,7 +1171,7 @@ describe('My ESS TN13', () => {
       }),
     );
     renderComponent(Panel, [TS_READ, TS_SUBMIT]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open week 2026-10-19' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open week 19 Oct 2026' }));
     const f = await screen.findByRole('form', { name: 'Add a line' });
     await within(f).findByRole('option', { name: 'PRJ-A / BUILD: Build' });
     expect(within(f).queryByRole('option', { name: /SUPPORT/ })).toBeNull();
@@ -1180,7 +1181,7 @@ describe('My ESS TN13', () => {
     change(f, 'Time (quarter hours)', '450');
     change(f, 'Note (optional)', 'Synthetic build');
     fireEvent.click(button(f, 'Add line'));
-    expect((await within(f).findByRole('alert')).textContent).toBe('The lines of 2026-10-19 would total 24:15 h: a day holds at most 24 hours.');
+    expect((await within(f).findByRole('alert')).textContent).toBe('The lines of 19 Oct 2026 would total 24:15 h: a day holds at most 24 hours.');
     expect(field(f, 'Time (quarter hours)').value).toBe('450');
     fireEvent.click(button(f, 'Add line'));
     await within(f).findByText('There is already a line for this day, job and activity. Change the time of that line instead of adding another.');
@@ -1195,7 +1196,7 @@ describe('My ESS TN13', () => {
   it('submits the draft against its version and says when it is flagged late', async () => {
     serve(routes({ [`POST /v1/me/timesheets/${S_DRAFT}/submit`]: [200, { timesheetId: S_DRAFT, revision: 1, state: 'SUBMITTED', late: true }] }));
     renderComponent(Panel, [TS_READ, TS_SUBMIT]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open week 2026-10-19' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open week 19 Oct 2026' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Submit revision 1' }));
     expect((await screen.findByText(/so it is flagged late/)).textContent).toBe(
       'Submitted revision 1 for your manager’s decision. It was submitted after its due date, so it is flagged late; a late timesheet is still accepted.',
@@ -1211,7 +1212,7 @@ describe('My ESS TN13', () => {
     const revised = detail({ currentRevision: 2, shownRevision: 2, version: 5, revisions: [returned.revisions[0], revision(2, 'RETURNED', 'DRAFT')] });
     serve(routes({ [`GET /v1/timesheets/${S_DRAFT}`]: sequence([200, returned], [200, revised]), [`POST /v1/me/timesheets/${S_DRAFT}/revise`]: [201, revised] }));
     renderComponent(Panel, [TS_READ, TS_SUBMIT]);
-    fireEvent.click(await screen.findByRole('button', { name: 'Open week 2026-10-19' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open week 19 Oct 2026' }));
     expect((await screen.findByText(/Your manager returned this timesheet for changes/)).textContent).toContain('Continue in a new revision');
     expect(screen.getByRole('table', { name: 'Revisions' }).textContent).toContain('Reason: Synthetic: add the review meeting');
     expect(screen.queryByRole('form', { name: 'Add a line' })).toBeNull();
@@ -1240,6 +1241,6 @@ describe('My ESS TN13', () => {
     serve(routes());
     renderComponent(Panel, [TS_READ, TS_SUBMIT]);
     const table = await screen.findByRole('table', { name: 'My allocations' });
-    expect(within(table).getAllByRole('row')[1]!.textContent).toBe('PRJ-A / BUILD: Build2026-10-01 to 2026-12-3160.00%DEV: Development');
+    expect(within(table).getAllByRole('row')[1]!.textContent).toBe('PRJ-A / BUILD: Build1 Oct 2026 to 31 Dec 202660.00%DEV: Development');
   });
 });

@@ -134,8 +134,8 @@ describe('the record (FR-006, FR-008)', () => {
     const calls = await openRecord([READ], {});
     expect(factOf('Employee code')).toBe('SYN-1');
     expect(factOf('Employment type')).toBe('Fixed term');
-    expect(factOf('Status')).toBe('active probation');
-    expect(factOf('Joining date')).toBe('2026-02-01');
+    expect(factOf('Status')).toBe('on probation');
+    expect(factOf('Joining date')).toBe('1 Feb 2026');
     expect(factOf('Confirmation date')).toBe('—');
     expect(factOf('Department')).toBe('Engineering');
     expect(factOf('Location')).toBe('Head office');
@@ -157,7 +157,7 @@ describe('the record (FR-006, FR-008)', () => {
     cleanup();
 
     await openRecord([READ], {}, { ...RECORD, dateOfBirth: '1990-05-04', serviceAnniversaryDate: null });
-    expect(factOf('Date of birth')).toBe('1990-05-04');
+    expect(factOf('Date of birth')).toBe('4 May 1990');
     expect(factOf('Service anniversary base date')).toBe('—');
   });
 
@@ -313,9 +313,9 @@ describe('record sections (FR-008, I-82 item 2: family, qualifications, prior em
     click(button(SHOW));
     await screen.findByRole('table', { name: 'Family and dependants' });
     expect(sectionReads(calls).map((c) => c.url)).toEqual([SECTIONS_PATH]);
-    expect(rowsOf('Family and dependants')).toEqual([['Spouse', 'Synthetic Partner', '1991-07-09', 'Yes']]);
+    expect(rowsOf('Family and dependants')).toEqual([['Spouse', 'Synthetic Partner', '9 Jul 1991', 'Yes']]);
     expect(rowsOf('Qualifications')).toEqual([['Graduate', 'Synthetic Degree', '—', 'Synthetic University', '2012']]);
-    expect(rowsOf('Prior employment')).toEqual([['Synthetic Earlier Co', 'Analyst', '2015-01-01', '2025-12-31']]);
+    expect(rowsOf('Prior employment')).toEqual([['Synthetic Earlier Co', 'Analyst', '1 Jan 2015', '31 Dec 2025']]);
     expect(within(screen.getByRole('heading', { name: /^Payroll identifiers/ })).getByText('masked')).toBeTruthy();
     expect(factOf('PAN')).toBe('••••234F');
     expect(factOf('UAN (EPF)')).toBe('—');
@@ -614,8 +614,8 @@ describe('employment history (FR-006)', () => {
   it('keeps what the employee history does not carry: shift periods, the last working date and linked employments; no record ids', async () => {
     await openRecord([READ, HISTORY_DUTY], { 'GET /v1/employees/e-1/history': [200, { ...HISTORY, leavingDate: '2026-12-31', nextEmployment: { employeeId: 'e-5', employeeCode: 'SYN-5' } }] });
     await screen.findByRole('table', { name: 'Shifts' });
-    expect(rowsOf('Shifts')).toEqual([['2026-02-01', 'Open', 'DAY Day shift']]);
-    expect(factOf('Last working date')).toBe('2026-12-31');
+    expect(rowsOf('Shifts')).toEqual([['1 Feb 2026', 'Open', 'DAY Day shift']]);
+    expect(factOf('Last working date')).toBe('31 Dec 2026');
     expect(screen.getByRole('link', { name: 'SYN-0' }).getAttribute('href')).toBe('/employees/e-0');
     expect(screen.getByRole('link', { name: 'SYN-5' }).getAttribute('href')).toBe('/employees/e-5');
     expect(document.body.textContent).not.toContain('e-5');
@@ -786,7 +786,7 @@ describe('activation (DF04)', () => {
     expect(await screen.findByText(/^Activated\./)).toBeTruthy();
     expect(writes(calls)[0]!.body).toEqual({ expectedVersion: 7 });
     await waitFor(() => expect(screen.queryByRole('form', { name: 'Activate' })).toBeNull());
-    expect(factOf('Status')).toBe('active probation');
+    expect(factOf('Status')).toBe('on probation');
   });
 
   it('a typed reason is sent trimmed', async () => {

@@ -419,8 +419,8 @@ describe('TN06 own issued payslips', () => {
     renderPanel('TN06', [OWN_PAYSLIP]);
     const table = await screen.findByRole('table', { name: 'My payslips' });
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(cells(rows[0]!)).toEqual(['2026-09', '2', 'Current version', '2026-10-02', '48,250.50', '5,000.00', '43,250.50', '0.00', 'View Download']);
-    expect(cells(rows[1]!)).toEqual(['2026-09', '1', 'Replaced by a later version on 2026-10-02', '2026-10-01', 'See the current version', 'View Download']);
+    expect(cells(rows[0]!)).toEqual(['2026-09', '2', 'Current version', '2 Oct 2026', '48,250.50', '5,000.00', '43,250.50', '0.00', 'View Download']);
+    expect(cells(rows[1]!)).toEqual(['2026-09', '1', 'Replaced by a later version on 2 Oct 2026', '1 Oct 2026', 'See the current version', 'View Download']);
     expect(screen.getByRole('note').textContent).toContain('Publication of a payslip does not mean the salary has been paid.');
     expect(document.body.textContent).toContain('Form 16 is not available: no statutory Form 16 template is configured yet.');
     expect(table.textContent).not.toMatch(/\bpaid\b(?! \(confirmed\))/i);
@@ -513,8 +513,8 @@ describe('TN06 own issued payslips', () => {
     renderPanel('TN06', [OWN_PAYSLIP]);
     const table = await screen.findByRole('table', { name: 'My salary payment holds' });
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(cells(rows[0]!)).toEqual(['2026-09', 'On hold', '2026-09-30', '—']);
-    expect(cells(rows[1]!)).toEqual(['2026-08', 'Released for payment', '2026-08-31', '2026-09-05']);
+    expect(cells(rows[0]!)).toEqual(['2026-09', 'On hold', '30 Sep 2026', '—']);
+    expect(cells(rows[1]!)).toEqual(['2026-08', 'Released for payment', '31 Aug 2026', '5 Sep 2026']);
     expect(callsTo('GET', '/v1/me/payroll-holds')[0]?.query.toString()).toBe('page=1&pageSize=25');
     expect(table.textContent).not.toMatch(/reason|INR|bank/i);
     // Everything fits on one page: no pager.
@@ -566,7 +566,7 @@ describe('TN15 own loans and advances', () => {
     asEmployee();
     serve({ 'GET /v1/me/loans': [200, { ...LOANS, items: [ownLoan({ recovered: '0.0000', awaitingRecognition: '3000.0000', outstanding: '3000.0000' })] }] });
     renderPanel('TN15', [OWN_LOAN_READ]);
-    const item = await screen.findByRole('listitem', { name: 'Loan requested 2026-09-10' });
+    const item = await screen.findByRole('listitem', { name: 'Loan requested 10 Sep 2026' });
     expect(item.textContent).toContain('Deducted, not yet recognisedINR 3,000.00');
     expect(item.textContent).toContain('Outstanding balanceINR 3,000.00');
   });
@@ -575,15 +575,15 @@ describe('TN15 own loans and advances', () => {
     asEmployee();
     serve({ 'GET /v1/me/loans': [200, LOANS] });
     renderPanel('TN15', [OWN_LOAN_READ]);
-    const item = await screen.findByRole('listitem', { name: 'Loan requested 2026-09-10' });
+    const item = await screen.findByRole('listitem', { name: 'Loan requested 10 Sep 2026' });
     expect(item.textContent).toContain('Disbursed, being recovered');
     expect(item.textContent).toContain('RecoveredINR 3,000.00');
     expect(item.textContent).toContain('Outstanding balanceINR 3,000.00');
     // Nothing processed is waiting to be recognised, so that figure stays out of the way.
     expect(item.textContent).not.toContain('Deducted, not yet recognised');
-    const schedule = within(item).getByRole('table', { name: 'Recovery schedule of Loan requested 2026-09-10' });
+    const schedule = within(item).getByRole('table', { name: 'Recovery schedule of Loan requested 10 Sep 2026' });
     expect(cells(within(schedule).getAllByRole('row')[2]!)).toEqual(['2', '2026-11', 'INR 3,000.00']);
-    expect(cells(within(within(item).getByRole('table', { name: 'Recoveries of Loan requested 2026-09-10' })).getAllByRole('row')[1]!)).toEqual(['2026-10', 'INR 3,000.00', '2026-10-28']);
+    expect(cells(within(within(item).getByRole('table', { name: 'Recoveries of Loan requested 10 Sep 2026' })).getAllByRole('row')[1]!)).toEqual(['2026-10', 'INR 3,000.00', '28 Oct 2026']);
     expect(document.body.textContent).toContain('Loans carry no interest: no approved interest rate is configured.');
     // Without the request key there is neither a request form nor a withdrawal.
     expect(screen.queryByRole('form', { name: 'Request a loan or advance' })).toBeNull();
@@ -650,9 +650,9 @@ describe('TN15 own loans and advances', () => {
       [`POST /v1/me/loans/${LOAN}/withdraw`]: [200, { ...requested, state: 'WITHDRAWN' }],
     });
     renderPanel('TN15', [OWN_LOAN_READ, OWN_LOAN_REQUEST]);
-    const mine = await screen.findByRole('listitem', { name: 'Loan requested 2026-10-20' });
-    expect(within(screen.getByRole('listitem', { name: 'Salary advance requested 2026-10-21' })).queryByRole('button', { name: 'Withdraw the request' })).toBeNull();
-    expect(within(screen.getByRole('listitem', { name: 'Loan requested 2026-08-01' })).queryByRole('button', { name: 'Withdraw the request' })).toBeNull();
+    const mine = await screen.findByRole('listitem', { name: 'Loan requested 20 Oct 2026' });
+    expect(within(screen.getByRole('listitem', { name: 'Salary advance requested 21 Oct 2026' })).queryByRole('button', { name: 'Withdraw the request' })).toBeNull();
+    expect(within(screen.getByRole('listitem', { name: 'Loan requested 1 Aug 2026' })).queryByRole('button', { name: 'Withdraw the request' })).toBeNull();
     fireEvent.click(button(mine, 'Withdraw the request'));
     expect(await within(mine).findByText('Give a reason first.')).toBeTruthy();
     fireEvent.change(within(mine).getByLabelText('Reason for withdrawing'), { target: { value: 'No longer needed' } });
@@ -676,7 +676,7 @@ describe('payroll runs', () => {
     });
     renderScreen('/payroll/runs', [RUN_STATUS]);
     const table = await screen.findByRole('table', { name: 'Payroll runs' });
-    expect(cells(rowWith(table, '2026-10 revision 2'))).toEqual(['2026-10 revision 2', 'FY2026', 'MONTHLY', '2', 'In review', '12', '1', '2026-10-20', '—']);
+    expect(cells(rowWith(table, '2026-10 revision 2'))).toEqual(['2026-10 revision 2', 'FY2026', 'MONTHLY', '2', 'In review', '12', '1', '20 Oct 2026', '—']);
     // Starting a run needs the prepare duty.
     expect(screen.queryByRole('heading', { name: 'Start a payroll run' })).toBeNull();
     cleanup();
@@ -881,7 +881,7 @@ describe('payroll runs', () => {
     fireEvent.click(within(members).getByRole('button', { name: 'Details of SYN-001' }));
     const lines = await screen.findByRole('table', { name: 'Record lines' });
     expect(cells(rowWith(lines, 'Income tax'))).toEqual(['Income tax', 'Deduction', 'Rule pack', 'INR 24,375.00']);
-    expect(cells(rowWith(screen.getByRole('table', { name: 'Paid days' }), '31.0000'))).toEqual(['2026-10-01', '2026-10-31', '31', '0.0000', '0.0000', '31.0000']);
+    expect(cells(rowWith(screen.getByRole('table', { name: 'Paid days' }), '31.0000'))).toEqual(['1 Oct 2026', '31 Oct 2026', '31', '0.0000', '0.0000', '31.0000']);
     expect(cells(rowWith(screen.getByRole('table', { name: 'Approved inputs' }), 'SYN-INPUT-1'))).toEqual(['BONUS', 'SYN-INPUT-1', 'INR 5,000.00']);
     const statutory = cells(rowWith(screen.getByRole('table', { name: 'Statutory workings' }), 'Income tax'));
     expect(statutory.slice(0, 3)).toEqual(['Income tax', 'INCOME_TAX revision 1', 'INR 24,375.00']);
@@ -1589,7 +1589,7 @@ describe('salary holds and salary stops', () => {
     });
     renderScreen('/payroll/holds', [HOLD_READ, HOLD_RELEASE]);
     const table = await screen.findByRole('table', { name: 'Salary holds' });
-    expect(cells(rowWith(table, 'SYN-001 Asha Synthetic')).slice(0, 6)).toEqual(['SYN-001 Asha Synthetic', '2026-10 revision 1', 'Salary hold', 'INR 5,000.00', 'Active: payment withheld', '2026-11-15']);
+    expect(cells(rowWith(table, 'SYN-001 Asha Synthetic')).slice(0, 6)).toEqual(['SYN-001 Asha Synthetic', '2026-10 revision 1', 'Salary hold', 'INR 5,000.00', 'Active: payment withheld', '15 Nov 2026']);
     fireEvent.click(button(table, 'Release the hold of SYN-003 for 2026-10'));
     const mine = screen.getByRole('form', { name: 'Release the hold of SYN-003' });
     expect(mine.textContent).toContain('You proposed this hold, so someone else releases it.');
@@ -1743,7 +1743,7 @@ describe('payroll inputs', () => {
     type(form, 'Amount (INR)', '1500.00');
     fireEvent.click(button(form, 'Add the line'));
     const lines = screen.getByRole('table', { name: 'Lines to save' });
-    expect(cells(within(lines).getAllByRole('row')[1]!).slice(0, 7)).toEqual(['1', 'SYN-001 Asha Synthetic', 'OVERTIME', 'ONE_TIME', 'INR 1,500.00', '2026-10-15', 'SYN-OT-1']);
+    expect(cells(within(lines).getAllByRole('row')[1]!).slice(0, 7)).toEqual(['1', 'SYN-001 Asha Synthetic', 'OVERTIME', 'ONE_TIME', 'INR 1,500.00', '15 Oct 2026', 'SYN-OT-1']);
     lost.add(`POST ${INPUTS_PATH}`);
     fireEvent.click(screen.getByRole('button', { name: 'Save the lines as a draft batch' }));
     expect(await screen.findByText(/No answer came back, so it may or may not have been recorded\. Send the same again/)).toBeTruthy();
@@ -1830,11 +1830,11 @@ describe('payroll inputs', () => {
     renderScreen('/payroll/inputs', [INPUT_READ, INPUT_PREPARE]);
     const table = await screen.findByRole('table', { name: 'Input batches' });
     expect(cells(within(table).getAllByRole('row')[1]!).slice(0, 5)).toEqual(['2026-10', 'Entered', '1', 'Draft, not submitted', 'You']);
-    fireEvent.click(button(table, 'Details of the 2026-10 batch created 2026-10-21'));
+    fireEvent.click(button(table, 'Details of the 2026-10 batch created 21 Oct 2026'));
     const other = await screen.findByRole('region', { name: 'Input batch of 2026-10' });
     expect(other.textContent).toContain('Only its preparer submits or cancels this batch.');
     expect(within(other).queryByRole('button', { name: 'Submit for approval' })).toBeNull();
-    fireEvent.click(button(table, 'Details of the 2026-10 batch created 2026-10-20'));
+    fireEvent.click(button(table, 'Details of the 2026-10 batch created 20 Oct 2026'));
     await waitFor(() => expect(screen.getByRole('region', { name: 'Input batch of 2026-10' }).textContent).toContain('INR 1,500.00'));
     const mine = screen.getByRole('region', { name: 'Input batch of 2026-10' });
     expect(mine.textContent).toContain('Some lines of this batch are outside your scope or are your own, so they are not shown.');
@@ -1862,7 +1862,7 @@ describe('payroll inputs', () => {
       });
       renderScreen('/payroll/inputs', [INPUT_READ, INPUT_APPROVE]);
       const table = await screen.findByRole('table', { name: 'Input batches' });
-      fireEvent.click(button(table, 'Details of the 2026-10 batch created 2026-10-20'));
+      fireEvent.click(button(table, 'Details of the 2026-10 batch created 20 Oct 2026'));
       const region = await screen.findByRole('region', { name: 'Input batch of 2026-10' });
       await within(region).findByRole('table', { name: 'Lines of the 2026-10 batch' });
       return region;
@@ -1922,7 +1922,7 @@ describe('payroll inputs', () => {
         [`GET /v1/payroll/input-batches/${IB_OTHER}`]: [200, { ...b, lines: APPROVED_LINES, scopeComplete: true }],
       });
       renderScreen('/payroll/inputs', [INPUT_READ]);
-      fireEvent.click(button(await screen.findByRole('table', { name: 'Input batches' }), 'Details of the 2026-10 batch created 2026-10-20'));
+      fireEvent.click(button(await screen.findByRole('table', { name: 'Input batches' }), 'Details of the 2026-10 batch created 20 Oct 2026'));
       const region = await screen.findByRole('region', { name: 'Input batch of 2026-10' });
       await within(region).findByRole('table', { name: 'Lines of the 2026-10 batch' });
       expect(within(region).queryByRole('form', { name: 'Reverse the selected lines' })).toBeNull();
@@ -2304,7 +2304,7 @@ describe('hold proposals and criteria', () => {
     type(renew, 'New review date', '2026-11-25');
     type(renew, 'Why the hold continues', 'Synthetic: inquiry still open');
     fireEvent.click(button(renew, 'Renew the review'));
-    expect(await screen.findByText('The review of the hold of SYN-003 is renewed until 2026-11-25; the payment stays withheld.')).toBeTruthy();
+    expect(await screen.findByText('The review of the hold of SYN-003 is renewed until 25 Nov 2026; the payment stays withheld.')).toBeTruthy();
     expect(bodiesTo('POST', '/v1/payroll/holds/h2/renew-review')).toEqual([{ reviewDueOn: '2026-11-25', reason: 'Synthetic: inquiry still open', expectedVersion: 5 }]);
     fireEvent.click(button(table, 'Details of the hold of SYN-003 for 2026-10'));
     const detail = await screen.findByRole('region', { name: 'Hold of SYN-003 for 2026-10' });
@@ -2854,8 +2854,8 @@ describe('payroll reports', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Show' }));
     const table = await screen.findByRole('table', { name: 'TDS by employee' });
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(cells(rows[0]!)).toEqual(['SYN-001 Asha Synthetic', '2026-04', 'Payroll', 'INR 2,00,000.00', 'INR 24,375.00']);
-    expect(cells(rows[1]!)).toEqual(['', '2026-05', 'Final settlement', 'INR 22,00,000.00', 'INR 2,68,125.00']);
+    expect(cells(rows[0]!)).toEqual(['SYN-001 Asha Synthetic', 'Apr 2026', 'Payroll', 'INR 2,00,000.00', 'INR 24,375.00']);
+    expect(cells(rows[1]!)).toEqual(['', 'May 2026', 'Final settlement', 'INR 22,00,000.00', 'INR 2,68,125.00']);
     expect(callsTo('GET', '/v1/payroll-outputs/tds-register')[0]?.query.toString()).toBe('fiscalYear=2026-27&quarter=1');
     expect(screen.getByLabelText('TDS register totals').textContent).toContain('INR 2,92,500.00');
   });
@@ -3085,7 +3085,7 @@ describe('HR loans', () => {
     expect(await within(form).findByText(/No answer came back, so it may or may not have been recorded/)).toBeTruthy();
     await waitFor(() => expect(button(form, 'Record the disbursement').disabled).toBe(false));
     fireEvent.click(button(form, 'Record the disbursement'));
-    expect(await screen.findByText('The disbursement of INR 6,000.00 on 2026-10-27 is recorded from its evidence; it is recovered through processed payroll.')).toBeTruthy();
+    expect(await screen.findByText('The disbursement of INR 6,000.00 on 27 Oct 2026 is recorded from its evidence; it is recovered through processed payroll.')).toBeTruthy();
     const sent = bodiesTo('POST', `/v1/payroll-outputs/loans/${LOAN}/disbursement`);
     expect(sent[0]).toEqual({ disbursementDate: '2026-10-27', evidenceKey: expect.stringMatching(/^payroll-loan-disbursement-/), evidenceReference: 'SYN-BANK-STMT-9', evidenceDocumentIds: [DOC_OK], expectedVersion: 3 });
     expect(sent[1]!.evidenceKey).toBe(sent[0]!.evidenceKey);
@@ -3381,7 +3381,7 @@ describe('payroll calendars and periods', () => {
     renderScreen(`/payroll/calendars/${K_DRAFT}`, [CONFIG_READ, CONFIG_MANAGE]);
     const periods = await section('Periods');
     const table = within(periods).getByRole('table', { name: 'Periods of calendar SYN_NEW' });
-    expect(cells(rowWith(table, '2026-10'))).toEqual(['2026-10', '2026-27', '2026-10-01 to 2026-10-31', '2026-10-25', '2026-10-31', 'Change dates']);
+    expect(cells(rowWith(table, '2026-10'))).toEqual(['2026-10', '2026-27', '1 Oct 2026 to 31 Oct 2026', '25 Oct 2026', '31 Oct 2026', 'Change dates']);
     expect(screen.queryByRole('button', { name: /Activate/ })).toBeNull();
     const add = within(periods).getByRole('form', { name: 'Add a period' });
     for (const field of ['Period code', 'Financial year', 'Service start', 'Service end', 'Input cutoff', 'Payment date']) expect((within(add).getByLabelText(field) as HTMLInputElement).value).toBe('');
@@ -3431,7 +3431,7 @@ describe('payroll calendars and periods', () => {
     const table = await within(policies).findByRole('table', { name: 'Paid-day policies' });
     expect(rowWith(table, '2').textContent).toContain('You wrote it: someone else activates it');
     fireEvent.click(button(table, 'Activate paid-day policy revision 1'));
-    expect(await within(policies).findByText('Paid-day policy revision 1 is active from 2026-10-01.')).toBeTruthy();
+    expect(await within(policies).findByText('Paid-day policy revision 1 is active from 1 Oct 2026.')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/payroll/paid-day-policies/${PD_1}/activate`)).toEqual([{ expectedVersion: 1 }]);
     const form = within(policies).getByRole('form', { name: 'Define a paid-day policy' });
     expect((within(form).getByLabelText('Reduces paid days for') as HTMLSelectElement).value).toBe('');
@@ -3462,7 +3462,7 @@ describe('pay components and heads', () => {
     serve(gets);
     renderScreen('/payroll/heads', [CONFIG_READ]);
     const components = await screen.findByRole('table', { name: 'Pay components' });
-    expect(cells(rowWith(components, 'BASIC'))).toEqual(['BASIC', 'Basic pay', 'Earning', 'Revision 1 from 2026-04-01: Earning, fixed (from the salary components)', 'Active']);
+    expect(cells(rowWith(components, 'BASIC'))).toEqual(['BASIC', 'Basic pay', 'Earning', 'Revision 1 from 1 Apr 2026: Earning, fixed (from the salary components)', 'Active']);
     expect(cells(rowWith(components, 'PF_EMPLOYER'))[3]).toBe('No head in effect');
     await screen.findByRole('table', { name: 'Head revisions' });
     expect(screen.queryByRole('form', { name: 'Create a pay component' })).toBeNull();
@@ -3509,7 +3509,7 @@ describe('pay components and heads', () => {
     expect(pf.textContent).toContain('Base heads: BASIC');
     expect(pf.textContent).toContain('Blocks calculation until a rule pack exists');
     expect(cells(pf)[4]).toBe('Employer contribution');
-    expect(cells(pf).slice(6, 9)).toEqual(['Half up to the currency minor unit (DF05)', 'NON_TAXABLE', '20']);
+    expect(cells(pf).slice(6, 9)).toEqual(['Half up to the nearest paisa', 'NON_TAXABLE', '20']);
     expect(rowWith(table, 'BASIC · Basic pay').textContent).not.toContain('Blocks calculation');
     const hra = rowWith(table, 'HRA · Synthetic HRA');
     expect(hra.textContent).toContain('You wrote it: someone else activates it');
@@ -3517,7 +3517,7 @@ describe('pay components and heads', () => {
     fireEvent.click(button(table, 'Activate head PF_EMPLOYER revision 1'));
     expect(
       await within(heads).findByText(
-        'A rule-pack head names a base head that is not defined and in use on that date (a missing definition), so it cannot be activated (pay component PF_EMPLOYER, base BASIC, on 2026-11-01).',
+        'A rule-pack head names a base head that is not defined and in use on that date (a missing definition), so it cannot be activated (pay component PF_EMPLOYER, base BASIC, on 1 Nov 2026).',
       ),
     ).toBeTruthy();
     await waitFor(() => expect(button(table, 'Cancel head HRA revision 1').disabled).toBe(false));
@@ -3526,7 +3526,7 @@ describe('pay components and heads', () => {
     expect(bodiesTo('POST', `/v1/payroll/head-revisions/${H_HRA}/cancel`)).toEqual([{ expectedVersion: 1 }]);
     await waitFor(() => expect(button(table, 'Activate head PF_EMPLOYER revision 1').disabled).toBe(false));
     fireEvent.click(button(table, 'Activate head PF_EMPLOYER revision 1'));
-    expect(await within(heads).findByText('Head PF_EMPLOYER revision 1 is active from 2026-11-01.')).toBeTruthy();
+    expect(await within(heads).findByText('Head PF_EMPLOYER revision 1 is active from 1 Nov 2026.')).toBeTruthy();
     expect(bodiesTo('POST', `/v1/payroll/head-revisions/${H_PF}/activate`)).toEqual([{ expectedVersion: 1 }, { expectedVersion: 1 }]);
   });
 
@@ -3613,7 +3613,7 @@ describe('salary components of an arrangement', () => {
   async function openArrangement() {
     const picker = await section('Salary components');
     await chooseEmployee(picker);
-    fireEvent.click(await within(picker).findByRole('button', { name: 'Show the components of the arrangement from 2026-04-01' }));
+    fireEvent.click(await within(picker).findByRole('button', { name: 'Show the components of the arrangement from 1 Apr 2026' }));
     return section('Components of the arrangement');
   }
 

@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, formatDate, idempotencyKey } from '../api';
 import { ESS_PANELS_BY_TAB } from '../screens-registry';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
+import { Badge, CompactEmptyContext, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../ui';
 import { DelegatedBadge } from './delegations';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -96,26 +96,36 @@ const TAB_SCREENS: Record<string, { to: string; label: string; kind?: string }> 
   TN14: { to: '/expenses', label: 'Open expenses', kind: 'expense_claim' },
 };
 
+/** A tab's name in the app's sentence case ("My Profile" from the server reads "My profile"). */
+const tabName = (name: string) => (name === 'My Profile' ? 'My profile' : name);
+
 export function MyEssPage() {
   const index = useQuery({ queryKey: ['ess-index'], queryFn: () => api<EssIndex>('/v1/me/ess') });
-  const [selected, setSelected] = useState('TN01');
+  // A link may open a given tab (/me?tab=TN13 from the Timesheets list); otherwise the profile tab.
+  const [params] = useSearchParams();
+  const [selected, setSelected] = useState(() => params.get('tab') ?? 'TN01');
   if (index.error) return <ErrorNote error={index.error} />;
   if (!index.data) return <p>Loading…</p>;
   const { context, tabs } = index.data;
-  const tab = tabs.find((t) => t.id === selected) ?? tabs[0]!;
-  const sections = [...new Set(tabs.map((t) => t.section))];
+  const available = tabs.filter((t) => t.status === 'AVAILABLE');
+  const tab = tabs.find((t) => t.id === selected) ?? available[0] ?? tabs[0]!;
+  // Only what the employee can use is a tab; an unavailable one is listed once, with its reason, below the tabs. One opened by a
+  // link (/me?tab=…) keeps its tab, so its reason shows in the panel.
+  const shownTabs = tabs.filter((t) => t.status === 'AVAILABLE' || t.id === tab.id);
+  const unavailable = tabs.filter((t) => !shownTabs.includes(t));
+  const sections = [...new Set(shownTabs.map((t) => t.section))];
   return (
     <>
-      {/* H3: the own-record context indicator. */}
+      {/* H3: the own-record context indicator, in the reader's words. */}
       <p className="hint" aria-label="Own record">
-        My ESS for {context.employeeName ?? 'your record'}
-        {context.employeeCode ? ` (${context.employeeCode})` : ''} · Employee role, own record only
+        Your own requests and records{context.employeeName ? ` · ${context.employeeName}` : ''}
+        {context.employeeCode ? ` (${context.employeeCode})` : ''}
       </p>
       <div className="ess-tabs">
         {sections.map((section) => (
           <div key={section} role="tablist" aria-label={section}>
             <strong>{section}</strong>
-            {tabs
+            {shownTabs
               .filter((t) => t.section === section)
               .map((t) => (
                 <button
@@ -125,18 +135,29 @@ export function MyEssPage() {
                   id={`ess-tab-${t.id}`}
                   aria-selected={t.id === tab.id}
                   aria-controls="ess-panel"
-                  className={t.id === tab.id ? '' : 'secondary'}
+                  className={t.id === tab.id ? undefined : 'secondary'}
                   onClick={() => setSelected(t.id)}
                 >
-                  {t.name}
-                  {t.status !== 'AVAILABLE' ? ' (unavailable)' : ''}
+                  {tabName(t.name)}
                 </button>
               ))}
           </div>
         ))}
       </div>
+      {unavailable.length > 0 && (
+        <details className="hint">
+          <summary>{`Not available to you yet (${unavailable.length})`}</summary>
+          <ul aria-label="Not available yet">
+            {unavailable.map((t) => (
+              <li key={t.id}>{`${tabName(t.name)}: ${t.unavailable?.message ?? 'Not available.'}`}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       <div role="tabpanel" id="ess-panel" aria-labelledby={`ess-tab-${tab.id}`}>
-        <TabPanel tab={tab} />
+        <CompactEmptyContext.Provider value={true}>
+          <TabPanel tab={tab} />
+        </CompactEmptyContext.Provider>
       </div>
     </>
   );
@@ -146,7 +167,7 @@ function TabPanel({ tab }: { tab: EssTab }) {
   const { me } = useSession();
   if (tab.status !== 'AVAILABLE') {
     return (
-      <Section title={tab.name}>
+      <Section title={tabName(tab.name)}>
         <Empty>{tab.unavailable?.message ?? 'Not available.'}</Empty>
       </Section>
     );
@@ -191,7 +212,7 @@ function PrivateProfilePanel() {
   if (profile.error) return <ErrorNote error={profile.error} />;
   const p = profile.data;
   return (
-    <Section title="My Profile">
+    <Section title="My profile">
       {!p ? (
         <p>Loading…</p>
       ) : (

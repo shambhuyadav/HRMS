@@ -22,7 +22,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ComponentType, type CSSProperties, type FormEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, ApiError, download, fileToBase64, formatAmount, formatDate, idempotencyKey, localDate, pinSession } from '../api';
+import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatMonth, idempotencyKey, localDate, pinSession } from '../api';
 import { isReportRefusal } from '../report-failures';
 import type { EssPanel, ScreenRoute } from '../screens';
 import { type MeContext, useSession } from '../session';
@@ -816,7 +816,7 @@ const REFUSALS: Record<string, string> = {
   INVALID_DATE: 'A date is missing or not valid.',
   CALENDAR_EXISTS: 'A payroll calendar with this code already exists.',
   NO_PERIODS: 'Add the calendar’s periods before it is activated.',
-  SERVICE_PERIOD_NOT_A_MONTH: 'A service period is one whole calendar month, from its first to its last day (DF05 proration uses the days of that month).',
+  SERVICE_PERIOD_NOT_A_MONTH: 'A service period is one whole calendar month, from its first to its last day (proration uses the days of that month).',
   CUTOFF_AFTER_PAYMENT: 'The input cutoff must be on or before the payment date.',
   INVALID_FINANCIAL_YEAR: 'The financial year label is letters, digits, dashes, slashes and underscores.',
   PERIOD_EXISTS: 'The calendar already has this period code, or another of its periods covers these dates.',
@@ -984,7 +984,7 @@ function OwnOnly({ title, children }: { title: string; children: ReactNode }) {
 
 function MyPayslipsPanel() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint">Loading your role…</p>;
+  if (!me) return <p className="hint loading">Loading your role…</p>;
   if (!ownContext(me)) return <OwnOnly title="My payslips">Your own payslips are shown in your Employee role. Switch to it to see them.</OwnOnly>;
   if (!can(OWN_PAYSLIP)) return <OwnOnly title="My payslips">Your Employee role does not include payslips; contact HR.</OwnOnly>;
   return (
@@ -1020,7 +1020,7 @@ function OwnHoldStatus() {
   return (
     <Section title="My salary payment holds">
       <p className="hint">A hold withholds payment of earned salary; it never reduces what you earned. Only the status and dates are shown here.</p>
-      {list.isPending && <p className="hint">Loading your salary payment holds…</p>}
+      {list.isPending && <p className="hint loading">Loading your salary payment holds…</p>}
       {list.error && <Problem error={list.error} act="own" />}
       {data && data.items.length === 0 && <Empty>No payment of your salary is or was on hold.</Empty>}
       {data && data.items.length > 0 && (
@@ -1077,7 +1077,7 @@ function OwnPayslipList() {
         Publication of a payslip does not mean the salary has been paid. Earned is your frozen net pay; held is withheld under an approved hold; reserved is in a bank file being paid;
         paid is only what confirmed payment evidence shows.
       </p>
-      {list.isPending && <p className="hint">Loading your payslips…</p>}
+      {list.isPending && <p className="hint loading">Loading your payslips…</p>}
       {list.error && <Problem error={list.error} act="own" />}
       {data && data.items.length === 0 && <Empty>No payslip has been issued to you yet.</Empty>}
       {data && data.items.length > 0 && (
@@ -1190,7 +1190,7 @@ function PayslipDocument({ payslip, onClose }: { payslip: OwnPayslip; onClose: (
       <button type="button" className="secondary" onClick={onClose}>
         Close
       </button>
-      {doc.isPending && <p className="hint">Loading the payslip…</p>}
+      {doc.isPending && <p className="hint loading">Loading the payslip…</p>}
       {doc.error && <Problem error={doc.error} act="own" />}
       {d && (
         <>
@@ -1257,7 +1257,7 @@ function PayslipDocument({ payslip, onClose }: { payslip: OwnPayslip; onClose: (
 
 function MyLoansPanel() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint">Loading your role…</p>;
+  if (!me) return <p className="hint loading">Loading your role…</p>;
   if (!ownContext(me)) return <OwnOnly title="My loans and advances">Your own loans are shown in your Employee role. Switch to it to see or request them.</OwnOnly>;
   if (!can(OWN_LOAN_READ) && !can(OWN_LOAN_REQUEST)) return <OwnOnly title="My loans and advances">Your Employee role does not include loans; contact HR.</OwnOnly>;
   return (
@@ -1275,7 +1275,7 @@ function OwnLoanList({ canWithdraw }: { canWithdraw: boolean }) {
   const data = list.data;
   return (
     <Section title="My loans and advances">
-      {list.isPending && <p className="hint">Loading your loans…</p>}
+      {list.isPending && <p className="hint loading">Loading your loans…</p>}
       {list.error && <Problem error={list.error} act="own" />}
       {data?.interest?.status === 'NOT_CONFIGURED' && <p className="hint">Loans carry no interest: no approved interest rate is configured.</p>}
       {data?.earlySettlement?.status === 'NOT_CONFIGURED' && <p className="hint">Early settlement is not available: no settlement rule is configured.</p>}
@@ -1564,7 +1564,7 @@ function RunList() {
         Each revision of a run is listed separately. Payment is not tracked on a run: it comes only from the outcomes recorded on its bank manifests. <Link to={PATHS.decisions}>Run decisions</Link>
       </p>
       {year.trim() !== '' && !yearFilter && <p className="hint">A financial year is the label its calendar gives it, for example FY2026: letters, digits, _, / or -.</p>}
-      {runs.isPending && <p className="hint">Loading payroll runs…</p>}
+      {runs.isPending && <p className="hint loading">Loading payroll runs…</p>}
       {runs.error && <Problem error={runs.error} act="read" />}
       {runs.data && runs.data.items.length === 0 && <Empty>{state || yearFilter ? 'No payroll runs match these filters.' : 'No payroll runs yet.'}</Empty>}
       {runs.data && runs.data.items.length > 0 && (
@@ -1768,7 +1768,7 @@ function RunView({ id }: { id: string }) {
   const keys = useKeys();
   const run = useQuery({ queryKey: keys.run(id), queryFn: () => api<RunDetail>(`/v1/payroll/runs/${encodeURIComponent(id)}`), retry: retryTransient });
   const r = run.data;
-  if (run.isPending) return <p className="hint">Loading the payroll run…</p>;
+  if (run.isPending) return <p className="hint loading">Loading the payroll run…</p>;
   if (!r) {
     return (
       <Section title="Payroll run">
@@ -2068,7 +2068,7 @@ function RecordDetailPanel({ runId, record, onClose }: { runId: string; record: 
       <button type="button" className="secondary" onClick={onClose}>
         Close
       </button>
-      {detail.isPending && <p className="hint">Loading the record…</p>}
+      {detail.isPending && <p className="hint loading">Loading the record…</p>}
       {detail.error && <Problem error={detail.error} act="read" />}
       {d && (
         <>
@@ -2214,7 +2214,7 @@ function RunRecords({ run }: { run: RunDetail }) {
       <label className="check">
         <input type="checkbox" checked={onlyExceptions} onChange={(e) => reset(e.target.checked)} /> Only members with exceptions
       </label>
-      {records.isPending && <p className="hint">Loading the members…</p>}
+      {records.isPending && <p className="hint loading">Loading the members…</p>}
       {records.error && <Problem error={records.error} act="read" />}
       {records.data && records.data.items.length === 0 && <Empty>{run.progress.calculation.started ? 'No member records to show.' : 'Member records appear once the run is calculated.'}</Empty>}
       {records.data && records.data.items.length > 0 && (
@@ -2359,7 +2359,7 @@ function RunComponentsSection({ run }: { run: RunDetail }) {
   const c = data.data;
   return (
     <Section title="Component totals and prior period">
-      {data.isPending && <p className="hint">Loading the component totals…</p>}
+      {data.isPending && <p className="hint loading">Loading the component totals…</p>}
       {data.error && <Problem error={data.error} act="read" />}
       {c?.basis === 'SCOPE' && <p className="hint">Your scope covers part of this run: the records in your scope are compared with the same employees’ latest earlier processed records.</p>}
       {c?.basis === 'RUN' && !c.priorPeriodCode && <p className="hint">No earlier processed run of this calendar and scope to compare with.</p>}
@@ -2478,7 +2478,7 @@ function RunPayslips({ run }: { run: RunDetail }) {
       <Problem error={publish.error} act="publish" />
       {can(OUTPUT_READ) && (
         <>
-          {outputs.isPending && <p className="hint">Loading issued payslips…</p>}
+          {outputs.isPending && <p className="hint loading">Loading issued payslips…</p>}
           {outputs.error && <Problem error={outputs.error} act="read" />}
           {outputs.data && outputs.data.items.length === 0 && <Empty>No payslip of this run has been issued yet.</Empty>}
           {outputs.data && outputs.data.items.length > 0 && (
@@ -2572,7 +2572,7 @@ function RunBank({ run }: { run: RunDetail }) {
   return (
     <Section title="Bank manifests">
       <p className="hint">A manifest or a bank file is not a payment: payment status comes only from outcomes recorded from bank evidence.</p>
-      {manifests.isPending && <p className="hint">Loading manifests…</p>}
+      {manifests.isPending && <p className="hint loading">Loading manifests…</p>}
       {manifests.error && <Problem error={manifests.error} act="read" />}
       {manifests.data && manifests.data.items.length === 0 && <Empty>No manifest has been prepared for this run.</Empty>}
       {manifests.data && manifests.data.items.length > 0 && (
@@ -2775,7 +2775,7 @@ function ManifestView({ id }: { id: string }) {
     },
     onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.manifestAll }), qc.invalidateQueries({ queryKey: keys.runAll })]),
   });
-  if (batch.isPending) return <p className="hint">Loading the manifest…</p>;
+  if (batch.isPending) return <p className="hint loading">Loading the manifest…</p>;
   if (!b) {
     return (
       <Section title="Bank manifest">
@@ -2936,7 +2936,7 @@ function ManifestLines({ batch, blocked }: { batch: Manifest; blocked: boolean }
   return (
     <Section title="Manifest lines">
       {recordable && <p className="hint">Outcomes are recorded only from bank evidence, each with its own evidence key. Before the file is issued, only a cancellation can be recorded.</p>}
-      {lines.isPending && <p className="hint">Loading the lines…</p>}
+      {lines.isPending && <p className="hint loading">Loading the lines…</p>}
       {lines.error && <Problem error={lines.error} act="read" />}
       {lines.data && lines.data.items.length === 0 && <Empty>This manifest has no lines.</Empty>}
       {lines.data && lines.data.items.length > 0 && (
@@ -3245,7 +3245,7 @@ function RunTaskQueue({ steps, permission, title }: { steps: readonly string[]; 
   const mine = (tasks.data?.items ?? []).filter((t) => steps.includes(t.step));
   return (
     <Section title={title}>
-      {tasks.isPending && <p className="hint">Loading your tasks…</p>}
+      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
         <p key={n.id} role="status" className="ok">
@@ -3425,7 +3425,7 @@ function LoanList() {
         </label>
       }
     >
-      {loans.isPending && <p className="hint">Loading loans…</p>}
+      {loans.isPending && <p className="hint loading">Loading loans…</p>}
       {loans.error && <Problem error={loans.error} act="read" />}
       {loans.data && loans.data.items.length === 0 && <Empty>No loans or advances in the selected role’s scope.</Empty>}
       {loans.data && loans.data.items.length > 0 && (
@@ -3480,7 +3480,7 @@ function LoanDetail({ id }: { id: string }) {
   const [note, setNote] = useState<string | null>(null);
   const loan = useQuery({ queryKey: keys.loan(id), queryFn: () => api<Loan>(`/v1/payroll-outputs/loans/${encodeURIComponent(id)}`), retry: retryTransient });
   const l = loan.data;
-  if (loan.isPending) return <p className="hint">Loading the loan…</p>;
+  if (loan.isPending) return <p className="hint loading">Loading the loan…</p>;
   if (!l) return <Problem error={loan.error} act="read" />;
   const name = `${label(LOAN_KIND, l.loanKind)} of ${l.employeeCode}`;
   return (
@@ -3530,7 +3530,7 @@ function LoanDecisionQueue() {
   return (
     <Section title="Loan requests to decide">
       <p className="hint">An approval fixes the recovery head and a schedule that recovers exactly the principal; neither changes afterwards. Loans carry no interest.</p>
-      {pending.isPending && <p className="hint">Loading loan requests…</p>}
+      {pending.isPending && <p className="hint loading">Loading loan requests…</p>}
       {pending.error && <Problem error={pending.error} act="read" />}
       {notes.map((n) => (
         <p key={n.id} role="status" className="ok">
@@ -3847,7 +3847,7 @@ function HoldDecisionQueue() {
   const refresh = () => qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('payroll-hold') });
   return (
     <Section title="Salary holds to decide">
-      {tasks.isPending && <p className="hint">Loading your tasks…</p>}
+      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
         <p key={n.id} role="status" className="ok">
@@ -3923,7 +3923,7 @@ function StopDecisionQueue() {
   const refresh = () => qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('payroll-stop') });
   return (
     <Section title="Salary stops to decide">
-      {tasks.isPending && <p className="hint">Loading your tasks…</p>}
+      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
         <p key={n.id} role="status" className="ok">
@@ -4031,7 +4031,7 @@ function HoldList() {
       <p className="hint">
         A hold withholds payment of earned salary; it never reduces what was earned. A released amount is paid only through a new manifest and a confirmed outcome. A hold is proposed from the member list of a processed payroll run.
       </p>
-      {holds.isPending && <p className="hint">Loading holds…</p>}
+      {holds.isPending && <p className="hint loading">Loading holds…</p>}
       {holds.error && <Problem error={holds.error} act="read" />}
       {note && (
         <p role="status" className="ok">
@@ -4197,7 +4197,7 @@ function StopList() {
   const withActions = (stops.data?.items ?? []).some((s) => actionOf(s) !== null);
   return (
     <Section title="Salary stops">
-      {stops.isPending && <p className="hint">Loading salary stops…</p>}
+      {stops.isPending && <p className="hint loading">Loading salary stops…</p>}
       {stops.error && <Problem error={stops.error} act="read" />}
       {note && (
         <p role="status" className="ok">
@@ -4464,7 +4464,7 @@ function EvidencePicker({ employeeId, chosen, onChange, max }: { employeeId: str
   return (
     <fieldset className="wide" style={GROUP}>
       <legend>{max === 1 ? 'Evidence document (released and verified)' : `Evidence documents (released and verified, at most ${max})`}</legend>
-      {docs.isPending && <p className="hint">Loading the employee’s documents…</p>}
+      {docs.isPending && <p className="hint loading">Loading the employee’s documents…</p>}
       {docs.error && <Problem error={docs.error} act="read" />}
       {docs.data && docs.data.items.length === 0 && <p className="hint">The employee has no documents yet: add the evidence to their record and have it verified first.</p>}
       {docs.data?.items.map((d) => {
@@ -4879,7 +4879,7 @@ function InputBatchList() {
         </label>
       }
     >
-      {batches.isPending && <p className="hint">Loading input batches…</p>}
+      {batches.isPending && <p className="hint loading">Loading input batches…</p>}
       {batches.error && <Problem error={batches.error} act="read" />}
       {batches.data && batches.data.items.length === 0 && <Empty>No input batches.</Empty>}
       {batches.data && batches.data.items.length > 0 && (
@@ -4945,7 +4945,7 @@ function InputBatchView({ id, withActions }: { id: string; withActions: boolean 
     onSettled: () => qc.invalidateQueries({ queryKey: keys.inputBatchesAll }),
   });
   const b = batch.data;
-  if (batch.isPending) return <p className="hint">Loading the batch…</p>;
+  if (batch.isPending) return <p className="hint loading">Loading the batch…</p>;
   if (!b) return <Problem error={batch.error} act="read" />;
   const name = `Input batch of ${b.periodCode}`;
   const mine = b.preparedBy === me?.userId;
@@ -5089,7 +5089,7 @@ function InputDecisionQueue() {
   return (
     <Section title="Payroll inputs to approve">
       <p className="hint">An approved batch is used by the next calculation of its period; a rejected one is never used.</p>
-      {tasks.isPending && <p className="hint">Loading your tasks…</p>}
+      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
         <Note key={n.id} text={n.text} />
@@ -5230,7 +5230,7 @@ function HoldCriteriaSection() {
       <p className="hint">
         {`Salary holds are disabled until the company activates a validated criterion; each is activated by someone other than its author.${manage || can(HOLD_DEFINE) ? '' : ' Read only for the selected role.'}`}
       </p>
-      {criteria.isPending && <p className="hint">Loading hold criteria…</p>}
+      {criteria.isPending && <p className="hint loading">Loading hold criteria…</p>}
       {criteria.error && <Problem error={criteria.error} act="read" />}
       <Note text={note} />
       {criteria.data && criteria.data.items.length === 0 && <Empty>No hold criterion is defined, so no salary hold can be proposed.</Empty>}
@@ -5465,7 +5465,7 @@ function RecordHoldPanel({ record }: { record: RunRecord }) {
       <h3 style={H3}>{`Salary hold: ${record.employeeCode} ${record.employeeName}`}</h3>
       {can(HOLD_READ) && (
         <>
-          {balance.isPending && <p className="hint">Loading the hold position…</p>}
+          {balance.isPending && <p className="hint loading">Loading the hold position…</p>}
           {balance.error && <Problem error={balance.error} act="read" />}
           {b && (
             <dl className="kv" aria-label="Hold position">
@@ -5613,7 +5613,7 @@ function HoldDetailView({ id }: { id: string }) {
   const keys = useKeys();
   const hold = useQuery({ queryKey: keys.hold(id), queryFn: () => api<HoldDetail>(`/v1/payroll/holds/${encodeURIComponent(id)}`), retry: retryTransient });
   const h = hold.data;
-  if (hold.isPending) return <p className="hint">Loading the hold…</p>;
+  if (hold.isPending) return <p className="hint loading">Loading the hold…</p>;
   if (!h) return <Problem error={hold.error} act="read" />;
   return (
     <div role="region" aria-label={`Hold of ${h.employeeCode} for ${h.periodCode}`} style={{ marginTop: '0.5rem' }}>
@@ -5952,7 +5952,7 @@ function TemplateList({ openId, onOpen }: { openId: string | null; onOpen: (id: 
       <p className="hint">
         A template is the company’s transcription of the bank’s accepted file specification as a delimited field mapping; no bank format is presumed. Its system-generated sample is validated, and the template activated, by people other than its author.
       </p>
-      {templates.isPending && <p className="hint">Loading templates…</p>}
+      {templates.isPending && <p className="hint loading">Loading templates…</p>}
       {templates.error && <Problem error={templates.error} act="read" />}
       {templates.data && templates.data.items.length === 0 && <Empty>No bank file template yet.</Empty>}
       {templates.data && templates.data.items.length > 0 && (
@@ -6038,7 +6038,7 @@ function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFul
     onSettled: () => qc.invalidateQueries({ queryKey: keys.templates }),
   });
   const t = template.data;
-  if (template.isPending) return <p className="hint">Loading the template…</p>;
+  if (template.isPending) return <p className="hint loading">Loading the template…</p>;
   if (!t) return <Problem error={template.error} act="read" />;
   const author = t.createdBy === me?.userId;
   const def = t.formatDefinition;
@@ -6599,7 +6599,7 @@ function RegisterReport({ runId }: { runId: string }) {
   const cur = d?.run.currencyCode;
   return (
     <Section title="Payroll register">
-      {register.isPending && <p className="hint">Loading the register…</p>}
+      {register.isPending && <p className="hint loading">Loading the register…</p>}
       {register.error && <Problem error={register.error} act="read" />}
       {d && (
         <>
@@ -6702,7 +6702,7 @@ function DisbursementReport({ runId }: { runId: string }) {
   const cur = d?.run.currencyCode;
   return (
     <Section title="Disbursement reconciliation">
-      {report.isPending && <p className="hint">Loading the reconciliation…</p>}
+      {report.isPending && <p className="hint loading">Loading the reconciliation…</p>}
       {report.error && <Problem error={report.error} act="read" />}
       {d && (
         <>
@@ -6769,7 +6769,7 @@ function ComparisonReport({ runId }: { runId: string }) {
   const c = report.data;
   return (
     <Section title="Prior-period comparison">
-      {report.isPending && <p className="hint">Loading the comparison…</p>}
+      {report.isPending && <p className="hint loading">Loading the comparison…</p>}
       {report.error && <Problem error={report.error} act="read" />}
       {c?.basis === 'SCOPE' && <p className="hint">Your scope covers part of this run: the records in your scope are compared with the same employees’ latest earlier processed records.</p>}
       {c?.basis === 'RUN' && !c.priorPeriodCode && <p className="hint">No earlier processed run of this calendar and scope to compare with.</p>}
@@ -6877,7 +6877,7 @@ function StatutoryRegisters({ runId }: { runId: string }) {
           ))}
         </select>
       </label>
-      {register.isPending && <p className="hint">Loading the register…</p>}
+      {register.isPending && <p className="hint loading">Loading the register…</p>}
       {register.error && <Problem error={register.error} act="read" />}
       {d && (
         <>
@@ -6970,7 +6970,7 @@ function StatutoryScreen() {
       <p className="hint">
         Each statutory register, certificate and return needs an activated rule pack and the payroll owner’s period template. While a PF, ESIC, professional tax or labour welfare fund pack is active, its register is a working register on each run’s reports page: what the calculation recorded, not a filing. Filing formats and the other outputs are not produced until the template and an approved sample exist; the source labels are kept as written until the owner confirms them.
       </p>
-      {outputs.isPending && <p className="hint">Loading statutory outputs…</p>}
+      {outputs.isPending && <p className="hint loading">Loading statutory outputs…</p>}
       {outputs.error && <Problem error={outputs.error} act="read" />}
       {outputs.data && outputs.data.items.length > 0 && (
         <div style={SCROLL}>
@@ -7050,7 +7050,7 @@ function TdsRegister() {
         </label>
         <button type="submit">Show</button>
       </form>
-      {register.isFetching && <p className="hint">Loading the register…</p>}
+      {register.isFetching && <p className="hint loading">Loading the register…</p>}
       {register.error && <Problem error={register.error} act="read" />}
       {d && (
         <>
@@ -7060,7 +7060,7 @@ function TdsRegister() {
             <Fact term="Employees">{d.totals.employees}</Fact>
             <Fact term="TDS deducted">{money(d.totals.tds, 'INR')}</Fact>
             {d.totals.months.map((m) => (
-              <Fact key={m.month} term={m.month}>{`${money(m.tds, 'INR')} on ${money(m.taxableSalary, 'INR')}`}</Fact>
+              <Fact key={m.month} term={formatMonth(m.month)}>{`${money(m.tds, 'INR')} on ${money(m.taxableSalary, 'INR')}`}</Fact>
             ))}
           </dl>
           {d.scope === 'ROW_SCOPE' && <p className="hint">Only the employees within your scope are listed and totalled.</p>}
@@ -7083,7 +7083,7 @@ function TdsRegister() {
                     i.months.map((m, n) => (
                       <tr key={`${i.employeeId}-${m.month}-${m.source}`}>
                         <td>{n === 0 ? `${i.employeeCode} ${i.employeeName}` : ''}</td>
-                        <td>{m.month}</td>
+                        <td>{formatMonth(m.month)}</td>
                         <td>{m.source === 'FINAL_SETTLEMENT' ? 'Final settlement' : 'Payroll'}</td>
                         <td>{money(m.taxableSalary, 'INR')}</td>
                         <td>{money(m.tds, 'INR')}</td>
@@ -7492,7 +7492,7 @@ function EvidenceIdLookup() {
           <div className="grid-form">
             <EmployeePicker title="Employee" value={employee} onChange={setEmployee} />
           </div>
-          {employee && docs.isPending && <p className="hint">Loading the employee’s documents…</p>}
+          {employee && docs.isPending && <p className="hint loading">Loading the employee’s documents…</p>}
           {docs.error && <Problem error={docs.error} act="read" />}
           {employee && docs.data && docs.data.items.length === 0 && <Empty>The employee has no documents yet.</Empty>}
           {employee && docs.data && docs.data.items.length > 0 && (
@@ -7882,7 +7882,7 @@ interface ArrangementComponents {
 const CONFIG_STATE: Record<string, string> = { DRAFT: 'Draft, not active', ACTIVE: 'Active', SUPERSEDED: 'Superseded by a correction', CANCELLED: 'Cancelled', RETIRED: 'Retired' };
 const COMPONENT_KIND: Record<string, string> = { EARNING: 'Earning', DEDUCTION: 'Deduction' };
 const CALCULATION_BASIS: Record<string, string> = { FIXED: 'Fixed (from the salary components)', INPUT: 'From approved inputs', RULE_PACK: 'Rule pack' };
-const ROUNDING: Record<string, string> = { HALF_UP_MINOR_UNIT: 'Half up to the currency minor unit (DF05)' };
+const ROUNDING: Record<string, string> = { HALF_UP_MINOR_UNIT: 'Half up to the nearest paisa' };
 const HEAD_USE: Record<string, string> = { IN_USE: 'In use from this date', DISCONTINUED: 'Discontinued from this date' };
 const AMOUNT_BASIS: Record<string, string> = { MONTHLY: 'Monthly', ANNUAL: 'Annual' };
 const ATTENDANCE_BASIS: Record<string, string> = { APPROVED_LEAVE_ONLY: 'Approved unpaid leave only', REVIEWED_ATTENDANCE: 'Approved unpaid leave and reviewed attendance' };
@@ -7977,7 +7977,7 @@ function CalendarList() {
         No calendar exists by default. A calendar is saved as a draft with its currency, gets its monthly periods, and is activated by someone other than its author; runs and
         inputs use only the periods of an active calendar.
       </p>
-      {calendars.isPending && <p className="hint">Loading payroll calendars…</p>}
+      {calendars.isPending && <p className="hint loading">Loading payroll calendars…</p>}
       {calendars.error && <Problem error={calendars.error} act="read" />}
       <Note text={note} />
       {calendars.data && calendars.data.items.length === 0 && <Empty>No payroll calendar is defined, so no payroll can be run yet.</Empty>}
@@ -8120,7 +8120,7 @@ function CalendarView({ id }: { id: string }) {
   return (
     <div className="stack">
       <Section title={k ? `Payroll calendar ${k.code}` : 'Payroll calendar'} actions={<Link to={PATHS.calendars}>All calendars</Link>}>
-        {calendar.isPending && <p className="hint">Loading the calendar…</p>}
+        {calendar.isPending && <p className="hint loading">Loading the calendar…</p>}
         {calendar.error && <Problem error={calendar.error} act="read" />}
         <Note text={note} />
         {k && (
@@ -8323,7 +8323,7 @@ function PaidDayPolicySection() {
         None exists by default. Until a policy is active, attendance never reduces paid days: absences are paid and reported for a documented resolution. Late flags and missing
         timesheets never reduce pay.
       </p>
-      {policies.isPending && <p className="hint">Loading paid-day policies…</p>}
+      {policies.isPending && <p className="hint loading">Loading paid-day policies…</p>}
       {policies.error && <Problem error={policies.error} act="read" />}
       <Note text={note} />
       {policies.data && policies.data.items.length === 0 && <Empty>No paid-day policy is defined.</Empty>}
@@ -8505,7 +8505,7 @@ function PayComponentsSection() {
   return (
     <Section title="Pay components">
       <p className="hint">A pay component is the identity of a head; head revisions classify it for payroll from a date.</p>
-      {components.isPending && <p className="hint">Loading pay components…</p>}
+      {components.isPending && <p className="hint loading">Loading pay components…</p>}
       {components.error && <Problem error={components.error} act="read" />}
       {components.data && components.data.items.length === 0 && <Empty>No pay component is defined.</Empty>}
       {components.data && components.data.items.length > 0 && (
@@ -8593,7 +8593,7 @@ function HeadRevisionsSection() {
         A head revision is created whole and never edited. It takes effect only once someone other than its author activates it, and activation refuses missing or cyclic
         definitions. The latest active revision on or before a date is the one in effect.
       </p>
-      {heads.isPending && <p className="hint">Loading head revisions…</p>}
+      {heads.isPending && <p className="hint loading">Loading head revisions…</p>}
       {heads.error && <Problem error={heads.error} act="read" />}
       <Note text={note} />
       {heads.data && heads.data.items.length === 0 && <Empty>No head revision is defined, so no pay component is classified for payroll.</Empty>}
@@ -8863,7 +8863,7 @@ function ArrangementList({ employeeId, chosen, onChoose }: { employeeId: string;
   const withheld = history.data?.historyIncluded === false;
   return (
     <>
-      {history.isPending && <p className="hint">Loading the salary arrangements…</p>}
+      {history.isPending && <p className="hint loading">Loading the salary arrangements…</p>}
       {history.error && <Problem error={history.error} act="read" />}
       {history.data && history.data.items.length === 0 && <Empty>{withheld ? 'The employee has no salary arrangement in force today or later.' : 'The employee has no salary arrangement yet.'}</Empty>}
       {history.data && history.data.items.length > 0 && (
@@ -8922,7 +8922,7 @@ function ArrangementComponentsView({ arrangementId }: { arrangementId: string })
   const a = view.data;
   return (
     <Section title="Components of the arrangement">
-      {view.isPending && <p className="hint">Loading the components…</p>}
+      {view.isPending && <p className="hint loading">Loading the components…</p>}
       {view.error && <Problem error={view.error} act="salary-components" />}
       <Note text={note} />
       {a && (

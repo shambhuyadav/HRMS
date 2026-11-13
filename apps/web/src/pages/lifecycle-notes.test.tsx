@@ -122,7 +122,7 @@ describe('notes register screen (CL-040; FR-018)', () => {
     renderAt('/lifecycle/notes', [NOTE_READ]);
     const table = await screen.findByRole('table', { name: 'Notes' });
     const row = within(table).getAllByRole('row')[1]!;
-    expect(row.textContent).toContain('2026-11-02');
+    expect(row.textContent).toContain('2 Nov 2026');
     expect(row.textContent).toContain('Synthetic Noor');
     expect(row.textContent).toContain('warning');
     expect(row.textContent).toContain('Synthetic Hema HR');

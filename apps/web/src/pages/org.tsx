@@ -169,8 +169,8 @@ function EditMaster({ kind, master, onSaved, onConflict }: { kind: MasterKind; m
         Until (not included)
         <input type="date" value={form.validTo} onChange={(e) => setForm({ ...form, validTo: e.target.value })} />
       </label>
-      <button type="submit" disabled={save.isPending}>
-        Save {master.code}
+      <button type="submit" aria-label={`Save ${master.code}`} disabled={save.isPending}>
+        Save
       </button>
       <div className="wide">
         {unchanged && <p role="status">Nothing changed.</p>}
@@ -203,16 +203,23 @@ function MasterRow({ kind, master, canUpdate, onChanged, onSaved }: { kind: Mast
             <button
               type="button"
               className="link"
+              aria-label={`Edit ${master.code}`}
               aria-expanded={editing}
               onClick={() => {
                 setActive.reset();
                 setEditing(!editing);
               }}
             >
-              Edit {master.code}
+              Edit
             </button>{' '}
-            <button type="button" className="link" disabled={setActive.isPending} onClick={() => setActive.mutate()}>
-              {master.active ? 'Deactivate' : 'Reactivate'} {master.code}
+            <button
+              type="button"
+              className={master.active ? 'link danger' : 'link'}
+              aria-label={`${master.active ? 'Deactivate' : 'Reactivate'} ${master.code}`}
+              disabled={setActive.isPending}
+              onClick={() => setActive.mutate()}
+            >
+              {master.active ? 'Deactivate' : 'Reactivate'}
             </button>
             <Refusal error={setActive.error} noun={noun} />
             {editing && (
@@ -388,8 +395,8 @@ function CompanyDeactivation({ company, onDeactivated, onConflict }: { company: 
       <p className="hint">Refused while anyone is still employed or anyone else holds a role in it. Once deactivated, nobody can act in the company, you included, and nothing on these screens can bring it back.</p>
       {asked ? (
         <p>
-          <button type="button" disabled={deactivate.isPending} onClick={() => deactivate.mutate()}>
-            Confirm deactivating {company.code}
+          <button type="button" className="danger" aria-label={`Confirm deactivating ${company.code}`} disabled={deactivate.isPending} onClick={() => deactivate.mutate()}>
+            Confirm deactivating
           </button>{' '}
           <button type="button" className="secondary" onClick={() => setAsked(false)}>
             Keep it active
@@ -397,8 +404,8 @@ function CompanyDeactivation({ company, onDeactivated, onConflict }: { company: 
         </p>
       ) : (
         <p>
-          <button type="button" className="secondary" onClick={() => setAsked(true)}>
-            Deactivate {company.code}
+          <button type="button" className="danger" aria-label={`Deactivate ${company.code}`} onClick={() => setAsked(true)}>
+            Deactivate
           </button>
         </p>
       )}
@@ -612,8 +619,8 @@ function EditCity({ city, onSaved, onConflict }: { city: City; onSaved: () => vo
         Until (not included)
         <input type="date" value={form.validTo} onChange={(e) => setForm({ ...form, validTo: e.target.value })} />
       </label>
-      <button type="submit" disabled={save.isPending}>
-        Save {city.code}
+      <button type="submit" aria-label={`Save ${city.code}`} disabled={save.isPending}>
+        Save
       </button>
       <div className="wide">
         {unchanged && <p role="status">Nothing changed.</p>}
@@ -649,16 +656,23 @@ function CityRow({ city, canUpdate, onChanged, onSaved }: { city: City; canUpdat
             <button
               type="button"
               className="link"
+              aria-label={`Edit ${city.code}`}
               aria-expanded={editing}
               onClick={() => {
                 setActive.reset();
                 setEditing(!editing);
               }}
             >
-              Edit {city.code}
+              Edit
             </button>{' '}
-            <button type="button" className="link" disabled={setActive.isPending} onClick={() => setActive.mutate()}>
-              {city.active ? 'Deactivate' : 'Reactivate'} {city.code}
+            <button
+              type="button"
+              className={city.active ? 'link danger' : 'link'}
+              aria-label={`${city.active ? 'Deactivate' : 'Reactivate'} ${city.code}`}
+              disabled={setActive.isPending}
+              onClick={() => setActive.mutate()}
+            >
+              {city.active ? 'Deactivate' : 'Reactivate'}
             </button>
             <CityRefusal error={setActive.error} />
             {editing && (

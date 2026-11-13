@@ -182,10 +182,11 @@ const rows = (table: HTMLElement) => within(table).getAllByRole('row').slice(1);
 const term = (scope: HTMLElement, name: string) => within(scope).getByText(name, { selector: 'dt' }).nextElementSibling?.textContent;
 const findSection = async (title: string) => (await screen.findByRole('heading', { name: title })).closest('section') as HTMLElement;
 const button = (scope: HTMLElement, name: string | RegExp) => within(scope).getByRole('button', { name }) as HTMLButtonElement;
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function localTime(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getDate()} ${MON[d.getMonth()]} ${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
 
@@ -227,7 +228,7 @@ describe('settlement policy (FR-052; I-88)', () => {
     expect(rows(table).map(cells)).toEqual([
       [
         '1',
-        '2026-04-01',
+        '1 Apr 2026',
         'Active',
         'BASIC',
         'DA',
@@ -235,11 +236,11 @@ describe('settlement policy (FR-052; I-88)', () => {
         'EL up to 30',
         'NOTICE_REC: Monthly gross (every fixed earning) / 30',
         'GRATUITY',
-        U_OTHER,
+        'another user',
         `${localTime('2026-04-01T05:00:00.000Z')} by you`,
       ],
-      ['2', '2026-12-01', 'Draft: not in force until someone else activates it', 'BASIC', '—', 'No component: Basic + DA / 30', 'None', 'No component: Monthly gross (every fixed earning) / 26', '—', U_OTHER, '—'],
-      ['3', '2027-01-01', 'Draft: not in force until someone else activates it', 'BASIC', '—', 'No component: Basic + DA / 30', 'None', 'No component: Monthly gross (every fixed earning) / 26', '—', 'you', '—'],
+      ['2', '1 Dec 2026', 'Draft: not in force until someone else activates it', 'BASIC', '—', 'No component: Basic + DA / 30', 'None', 'No component: Monthly gross (every fixed earning) / 26', '—', 'another user', '—'],
+      ['3', '1 Jan 2027', 'Draft: not in force until someone else activates it', 'BASIC', '—', 'No component: Basic + DA / 30', 'None', 'No component: Monthly gross (every fixed earning) / 26', '—', 'you', '—'],
     ]);
     expect(
       screen.getByText(
@@ -315,7 +316,7 @@ describe('settlement policy (FR-052; I-88)', () => {
     expect(field('Encashable leave type 2').value).toBe('CL');
 
     fireEvent.click(button(form, 'Write the draft revision'));
-    expect((await screen.findByRole('status')).textContent).toBe('Revision 4 written as a draft from 2027-02-01. It is not in force until someone other than you activates it.');
+    expect((await screen.findByRole('status')).textContent).toBe('Revision 4 written as a draft from 1 Feb 2027. It is not in force until someone other than you activates it.');
     // The form starts again from the defaults.
     await waitFor(() => expect(field('Basic component (required)').value).toBe(''));
     expect(within(form).queryByLabelText('Encashable leave type 1')).toBeNull();
@@ -358,7 +359,7 @@ describe('settlement policy (FR-052; I-88)', () => {
     expect(bodyOf('POST', `/v1/settlements/policies/${P_DRAFT}/activate`)).toEqual({ expectedVersion: 1 });
 
     fireEvent.click(button(table, 'Activate revision 2'));
-    expect((await screen.findByRole('status')).textContent).toBe('Revision 2 of the settlement policy is active from 2026-12-01.');
+    expect((await screen.findByRole('status')).textContent).toBe('Revision 2 of the settlement policy is active from 1 Dec 2026.');
     expect(callsTo('POST', `/v1/settlements/policies/${P_MINE}/activate`)).toEqual([]);
   });
 });
@@ -369,7 +370,7 @@ describe('statutory rule packs (I-88)', () => {
     renderScreen([PACK_READ]);
     const gratuity = await screen.findByRole('list', { name: 'Revisions of GRATUITY' });
     expect(screen.getByRole('heading', { name: 'Gratuity (Payment of Gratuity Act, 1972) GRATUITY' })).toBeTruthy();
-    const draft = within(gratuity).getByRole('listitem', { name: 'GRATUITY revision 1, from 2018-03-29' });
+    const draft = within(gratuity).getByRole('listitem', { name: 'GRATUITY revision 1, from 29 Mar 2018' });
     expect(term(draft, 'State')).toBe('Inactive draft');
     expect(term(draft, 'Currency')).toBe('INR');
     expect(term(draft, 'Parameters')).toBe(
@@ -377,11 +378,13 @@ describe('statutory rule packs (I-88)', () => {
     );
     expect(term(draft, 'Statute reference')).toBe('Synthetic statute reference, s.4');
     expect(term(draft, 'Validated')).toBe('Not yet');
-    const validated = within(gratuity).getByRole('listitem', { name: 'GRATUITY revision 2, from 2026-04-01' });
+    const validated = within(gratuity).getByRole('listitem', { name: 'GRATUITY revision 2, from 1 Apr 2026' });
     expect(term(validated, 'State')).toBe('Validated, waiting for activation by another person');
     expect(term(validated, 'Source reference')).toBe('Synthetic gazette notification');
     expect(term(validated, 'Validation reference')).toBe('Synthetic legal review');
-    expect(term(validated, 'Validated')).toBe(`${localTime('2026-10-01T05:00:00.000Z')} by ${U_OTHER}`);
+    // Another account is named in words; its identifier stays in the tooltip for the audit trail.
+    expect(term(validated, 'Validated')).toBe(`${localTime('2026-10-01T05:00:00.000Z')} by another user`);
+    expect(within(validated).getByTitle(`User ${U_OTHER}`)).toBeTruthy();
     // A pack without words of its own shows its parameters as the server holds them.
     const pt = screen.getByRole('list', { name: 'Revisions of PT' });
     expect(term(within(pt).getByRole('listitem'), 'Parameters')).toBe('{"slabs":[]}');
@@ -442,7 +445,7 @@ describe('statutory rule packs (I-88)', () => {
       },
     });
     const view = renderScreen([PACK_READ, PACK_ACTIVATE]);
-    const item = await screen.findByRole('listitem', { name: 'GRATUITY revision 2, from 2026-04-01' });
+    const item = await screen.findByRole('listitem', { name: 'GRATUITY revision 2, from 1 Apr 2026' });
     // Only a validated revision is activated.
     expect(screen.queryByRole('button', { name: 'Activate GRATUITY revision 1' })).toBeNull();
     fireEvent.click(button(item, 'Activate GRATUITY revision 2'));
@@ -451,13 +454,13 @@ describe('statutory rule packs (I-88)', () => {
     expect(alert.textContent).toContain('SELF_APPROVAL');
     expect(bodyOf('POST', `/v1/statutory-rule-packs/${K_VALIDATED}/activate`)).toEqual({ expectedVersion: 3 });
     fireEvent.click(button(item, 'Activate GRATUITY revision 2'));
-    expect((await screen.findByRole('status')).textContent).toBe('GRATUITY revision 2 is active from 2026-04-01. A settlement calculated from now on uses it.');
+    expect((await screen.findByRole('status')).textContent).toBe('GRATUITY revision 2 is active from 1 Apr 2026. A settlement calculated from now on uses it.');
     view.unmount();
 
     // The validator (here the signed-in user) is told someone else activates it.
     serve({ 'GET /v1/statutory-rule-packs': [200, { ...PACKS, items: [pack({ id: K_VALIDATED, revision: 2, state: 'VALIDATED', validatedBy: U_ME, validatedAt: '2026-10-01T05:00:00.000Z' })] }] });
     renderScreen([PACK_READ, PACK_ACTIVATE]);
-    const own = await screen.findByRole('listitem', { name: 'GRATUITY revision 2, from 2018-03-29' });
+    const own = await screen.findByRole('listitem', { name: 'GRATUITY revision 2, from 29 Mar 2018' });
     expect(button(own, 'Activate GRATUITY revision 2').disabled).toBe(true);
     expect(within(own).getByText('You wrote or validated this revision, so someone else activates it.')).toBeTruthy();
   });

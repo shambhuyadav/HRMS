@@ -351,7 +351,7 @@ describe('tracker (FR-014)', () => {
     const vacancies = await screen.findByRole('table', { name: 'Vacancies' });
     expect(callsTo('GET', '/v1/hiring/tracker')[0]!.params.toString()).toBe('');
     const [vacancy] = rows(vacancies);
-    expect(cells(vacancy!)).toEqual(['REQ-000001 Synthetic backend engineer', 'Approved', '2', '1', '1', '2026-12-31', 'Applied 2 · Screening 1 · Hired 1', 'Applications']);
+    expect(cells(vacancy!)).toEqual(['REQ-000001 Synthetic backend engineer', 'Approved', '2', '1', '1', '31 Dec 2026', 'Applied 2 · Screening 1 · Hired 1', 'Applications']);
     expect(within(vacancy!).getByRole('link', { name: 'Applications for REQ-000001' }).getAttribute('href')).toBe(`/hiring/requisitions/${R1}/applications`);
 
     const open = screen.getByRole('table', { name: 'Open applications' });
@@ -427,7 +427,7 @@ describe('recruitment vendors (Hiring / Masters / Vendor)', () => {
     click(screen.getByRole('button', { name: 'Deactivate SYN-AGENCY' }));
     expect(await screen.findByText('SYN-AGENCY is now inactive.')).toBeTruthy();
     expect(bodyOf('PATCH', `/v1/hiring/vendors/${V1}`, 1)).toStrictEqual({ active: false, expectedVersion: 5 });
-    expect(await screen.findByText('No active vendors.')).toBeTruthy();
+    expect(await screen.findByText(/^No active vendors\./)).toBeTruthy();
     click(screen.getByLabelText('Show inactive vendors'));
     const table = await screen.findByRole('table', { name: 'Vendors' });
     expect(cells(rows(table)[0]!).slice(0, 3)).toEqual(['SYN-AGENCY', 'Synthetic Staffing Partners', 'inactive']);
@@ -483,14 +483,14 @@ describe('candidate register (FR-013)', () => {
     renderAt('/hiring/candidates', ['candidate.read.operational']);
     const table = await screen.findByRole('table', { name: 'Candidate register' });
     expect(callsTo('GET', '/v1/hiring/candidates')[0]!.params.toString()).toBe('page=1&pageSize=25');
-    expect(cells(rowWith(table, 'Asha Synthetic'))).toEqual(['CAN-000001', 'Asha Synthetic', 'Direct application', 'Kotlin, SQL', 'Given on 2026-10-01', '—', 'Active']);
+    expect(cells(rowWith(table, 'Asha Synthetic'))).toEqual(['CAN-000001', 'Asha Synthetic', 'Direct application', 'Kotlin, SQL', 'Given on 1 Oct 2026', '—', 'Active']);
     expect(cells(rowWith(table, 'Meera Synthetic'))).toEqual([
       'CAN-000003',
       'Meera Synthetic',
       'Recruitment vendor Synthetic Staffing (SYN-AGENCY)',
       'Kotlin, SQL',
       'Not recorded',
-      '2027-10-24',
+      '24 Oct 2027',
       'Retired duplicate',
     ]);
     expect(within(table).getByRole('link', { name: 'Asha Synthetic' }).getAttribute('href')).toBe(`/hiring/candidates/${C1}`);
@@ -605,7 +605,7 @@ describe('one candidate (FR-013, F1, DF02)', () => {
     const summary = await sectionOf('Candidate');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Asha Synthetic (CAN-000001)');
     expect(valueOf(summary, 'Private contact')).toBe('Recorded');
-    expect(valueOf(summary, 'Consent')).toBe('Given on 2026-10-01');
+    expect(valueOf(summary, 'Consent')).toBe('Given on 1 Oct 2026');
     expect(valueOf(summary, 'Retain until')).toBe('No date recorded');
     expect(screen.queryByRole('heading', { name: 'Private contact (confidential)' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'CV and documents (confidential)' })).toBeNull();
@@ -1215,7 +1215,7 @@ describe('one application (F1 stages)', () => {
     // One open offer at a time: the form goes once the draft is listed.
     await waitFor(() => expect(screen.queryByRole('form', { name: 'Prepare an offer' })).toBeNull());
     const offers = screen.getByRole('table', { name: 'Offers of the application' });
-    expect(cells(rows(offers)[0]!).slice(0, 3)).toEqual(['Draft', '2026-12-01', 'Not submitted']);
+    expect(cells(rows(offers)[0]!).slice(0, 3)).toEqual(['Draft', '1 Dec 2026', 'Not submitted']);
   });
 });
 
@@ -1248,7 +1248,7 @@ describe('offers (F1: approved requisition, confidential compensation, independe
     serve({ 'GET /v1/hiring/offers': [200, { items: [offer({ state: 'SUBMITTED', currentRevision: 1 })] }] });
     renderAt('/hiring/offers', RECRUITER);
     const table = await screen.findByRole('table', { name: 'Offers' });
-    expect(cells(rows(table)[0]!)).toEqual(['Ravi Synthetic CAN-000002', 'REQ-000001 Synthetic backend engineer', 'Waiting for approval', '2026-12-01', '1', formatDate('2026-10-22T06:00:00.000Z'), 'Open']);
+    expect(cells(rows(table)[0]!)).toEqual(['Ravi Synthetic CAN-000002', 'REQ-000001 Synthetic backend engineer', 'Waiting for approval', '1 Dec 2026', '1', formatDate('2026-10-22T06:00:00.000Z'), 'Open']);
     expect(within(table).getByRole('link', { name: 'Open the offer to Ravi Synthetic (CAN-000002)' }).getAttribute('href')).toBe(`/hiring/offers/${O1}`);
     // The approval queue belongs to the compensation approver only.
     expect(screen.queryByRole('region', { name: 'Offer approvals' })).toBeNull();
@@ -1286,7 +1286,7 @@ describe('offers (F1: approved requisition, confidential compensation, independe
     expect(valueOf(section, 'Monthly gross')).toBe(`${formatAmount('98765.4321', 'INR')} (exactly 98765.4321)`);
     expect(valueOf(section, 'Recorded')).toBe(`${formatDate('2026-10-23T06:00:00.000Z')} by you`);
     const revisions = within(section).getByRole('table', { name: 'Submitted revisions' });
-    expect(cells(rows(revisions)[0]!)).toEqual(['1', '2026-12-01', formatAmount('1200000.0000', 'INR'), '—', formatDate('2026-10-23T07:00:00.000Z')]);
+    expect(cells(rows(revisions)[0]!)).toEqual(['1', '1 Dec 2026', formatAmount('1200000.0000', 'INR'), '—', formatDate('2026-10-23T07:00:00.000Z')]);
     const history = screen.getByRole('table', { name: 'Approval history' });
     expect(headers(history)).toEqual(['Revision', 'Decision', 'Decided by', 'When', 'Reason']);
     expect(rows(history).map((r) => cells(r)[4])).toEqual(['Synthetic: check the band', '—']);
@@ -1400,13 +1400,13 @@ describe('offers (F1: approved requisition, confidential compensation, independe
     await waitFor(() => expect(callsTo('GET', `/v1/hiring/offers/${O1}`)).toHaveLength(2));
     await waitFor(() => expect(disabled(within(form).getByRole('button', { name: 'Save joining date' }))).toBe(false));
     click(within(form).getByRole('button', { name: 'Save joining date' }));
-    expect(await screen.findByText('Proposed joining date saved: 2026-12-15.')).toBeTruthy();
+    expect(await screen.findByText('Proposed joining date saved: 15 Dec 2026.')).toBeTruthy();
     expect(callsTo('PUT', `/v1/hiring/offers/${O1}`).map((x) => x.body)).toStrictEqual([
       { proposedJoiningDate: '2026-12-15', expectedVersion: 1 },
       { proposedJoiningDate: '2026-12-15', expectedVersion: 2 },
     ]);
     const summary = await sectionOf('Offer');
-    await waitFor(() => expect(valueOf(summary, 'Proposed joining date')).toBe('2026-12-15'));
+    await waitFor(() => expect(valueOf(summary, 'Proposed joining date')).toBe('15 Dec 2026'));
   });
 
   it('explains in words why a person cannot convert twice (FR-014, FR-013), naming no other record', async () => {
@@ -1455,7 +1455,7 @@ describe('offers (F1: approved requisition, confidential compensation, independe
     click(within(form).getByRole('button', { name: 'Record response' }));
     expect(await screen.findByText('Recorded the candidate’s acceptance.')).toBeTruthy();
     expect(bodyOf('POST', `/v1/hiring/offers/${O1}/response`, 1)).toStrictEqual({ response: 'ACCEPTED', respondedOn: '2026-10-24', expectedVersion: 4 });
-    expect(valueOf(await sectionOf('Offer'), 'Candidate responded on')).toBe('2026-10-24');
+    expect(valueOf(await sectionOf('Offer'), 'Candidate responded on')).toBe('24 Oct 2026');
   });
 
   it('withdraws a submitted offer with a required reason', async () => {
@@ -1692,18 +1692,18 @@ describe('offer letters (FR-014, FR-017, FR-018; DF09: never sent by the system;
 
       click(within(form).getByLabelText('The letter went to the offer’s candidate, Ravi Synthetic (CAN-000002)'));
       click(within(form).getByRole('button', { name: 'Record delivery' }));
-      expect((await within(form).findByRole('alert')).textContent).toBe('The delivery date cannot be before the letter was generated (2026-11-05).');
+      expect((await within(form).findByRole('alert')).textContent).toBe('The delivery date cannot be before the letter was generated (5 Nov 2026).');
       type(within(form).getByLabelText('Delivered on (required)'), '2026-11-06');
       await waitFor(() => expect(disabled(within(form).getByRole('button', { name: 'Record delivery' }))).toBe(false));
       click(within(form).getByRole('button', { name: 'Record delivery' }));
       expect((await within(section).findByRole('status')).textContent).toBe(
-        'Recorded the delivery of offer letter 2 to Ravi Synthetic (CAN-000002): Handed to the candidate in person on 2026-11-06.',
+        'Recorded the delivery of offer letter 2 to Ravi Synthetic (CAN-000002): Handed to the candidate in person on 6 Nov 2026.',
       );
       expect(callsTo('POST', `/v1/hiring/offer-letters/${L2}/delivery`).map((c) => c.body)).toStrictEqual([
         { deliveryMethod: 'IN_PERSON', deliveredOn: '2026-11-04', recipientConfirmed: true },
         { deliveryMethod: 'IN_PERSON', deliveredOn: '2026-11-06', recipientConfirmed: true },
       ]);
-      await waitFor(() => expect(cells(rows(within(section).getByRole('table', { name: 'Offer letters' }))[0]!)[4]).toBe('Delivered: Handed to the candidate in person on 2026-11-06'));
+      await waitFor(() => expect(cells(rows(within(section).getByRole('table', { name: 'Offer letters' }))[0]!)[4]).toBe('Delivered: Handed to the candidate in person on 6 Nov 2026'));
       // A recorded delivery is final: nothing more to record for it.
       expect(within(section).queryByRole('form', { name: 'Record the delivery of offer letter 2' })).toBeNull();
     } finally {
@@ -1734,7 +1734,7 @@ describe('offer letters (FR-014, FR-017, FR-018; DF09: never sent by the system;
     expect((await within(section).findByRole('alert')).textContent).toBe(
       'Offer letter 2: This letter’s delivery is already recorded, and a recorded delivery is final. The letters have been reloaded.',
     );
-    await waitFor(() => expect(cells(rows(within(section).getByRole('table', { name: 'Offer letters' }))[0]!)[4]).toBe('Delivered: Sent by post or courier on 2026-11-05'));
+    await waitFor(() => expect(cells(rows(within(section).getByRole('table', { name: 'Offer letters' }))[0]!)[4]).toBe('Delivered: Sent by post or courier on 5 Nov 2026'));
     expect(within(section).queryByRole('form', { name: 'Record the delivery of offer letter 2' })).toBeNull();
   });
 
@@ -1981,7 +1981,7 @@ describe('offer approvals (F1/C4: the independent eligible approver; ZT07 idempo
     renderQueue(APPROVER);
     const item = await screen.findByRole('listitem', { name: itemName });
     expect(valueOf(item, 'Revision under review')).toBe('2');
-    expect(valueOf(item, 'Proposed joining date')).toBe('2026-12-15');
+    expect(valueOf(item, 'Proposed joining date')).toBe('15 Dec 2026');
     expect(valueOf(item, 'Annual CTC')).toBe(formatAmount('1300000.2500', 'INR'));
     expect(within(item).queryByText('Monthly gross')).toBeNull();
     expect(within(item).getByRole('link', { name: 'Open the offer to Ravi Synthetic (CAN-000002)' }).getAttribute('href')).toBe(`/hiring/offers/${O1}`);

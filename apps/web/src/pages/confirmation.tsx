@@ -334,7 +334,7 @@ function decidedText(x: PendingException, result: ExceptionDecided): string {
 function localDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 const fetchCases = (view: TabView) => api<CaseList>(`/v1/confirmations?view=${view}`);
@@ -522,7 +522,7 @@ function CaseRegister({
         })}
       </div>
       <div role="tabpanel" id={`${baseId}-panel`} aria-labelledby={`${baseId}-tab-${view}`} style={PANEL}>
-        {list.isPending && <p className="hint">Loading cases…</p>}
+        {list.isPending && <p className="hint loading">Loading cases…</p>}
         {isForbidden(list.error) ? <NotPermitted>The selected role cannot view confirmation cases.</NotPermitted> : <ErrorNote error={list.error} />}
         {list.data && list.data.items.length === 0 && <Empty>{tab.empty}</Empty>}
         {list.data && list.data.items.length > 0 && <CaseTable items={list.data.items} showTiming={MIXED_TIMING.has(view)} selectedId={selectedId} onSelect={onSelect} />}
@@ -664,7 +664,7 @@ function CasePanel({ id, focusRequest, onClose }: { id: string; focusRequest: nu
           </button>
         }
       >
-        {detail.isPending && <p className="hint">Loading the case…</p>}
+        {detail.isPending && <p className="hint loading">Loading the case…</p>}
         {isForbidden(detail.error) ? (
           <NotPermitted>The selected role cannot open this confirmation case.</NotPermitted>
         ) : isNotFound(detail.error) ? (
@@ -972,7 +972,7 @@ function CaseExceptions({ kase, onCaseChanged }: { kase: CaseDetail; onCaseChang
         Exceptions
       </h3>
       <p className="hint">An approved due date override replaces the case’s due date; an approved extra extension allows one extension beyond the policy limit.</p>
-      {list.isPending && <p className="hint">Loading exceptions…</p>}
+      {list.isPending && <p className="hint loading">Loading exceptions…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot view this case’s exceptions.</NotPermitted> : <ErrorNote error={list.error} />}
       {list.data && items.length === 0 && <Empty>No exceptions have been proposed for this case.</Empty>}
       {items.length > 0 && (
@@ -1224,7 +1224,7 @@ function PendingExceptions({ onOpenCase }: { onOpenCase: ((caseId: string) => vo
     <div ref={region} role="region" aria-label="Pending exceptions" tabIndex={-1}>
       <Section title="Pending exceptions">
         <p className="hint">Due date overrides and extra extensions proposed by HR wait here for a decision by another HR user. Each decision needs a reason.</p>
-        {list.isPending && <p className="hint">Loading the waiting proposals…</p>}
+        {list.isPending && <p className="hint loading">Loading the waiting proposals…</p>}
         {isForbidden(list.error) ? <NotPermitted>The selected role cannot decide confirmation exceptions.</NotPermitted> : <ErrorNote error={list.error} />}
         {notice && (
           <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
@@ -1658,7 +1658,7 @@ export function ConfirmationPoliciesPage() {
               is retired by ending it. Equally specific policies that could apply to the same employee on overlapping dates are refused. Due dates add the duration to the joining date; a month-end date is
               clamped to the end of the destination month.
             </p>
-            {list.isPending && <p className="hint">Loading policies…</p>}
+            {list.isPending && <p className="hint loading">Loading policies…</p>}
             {isForbidden(list.error) ? <NotPermitted>The selected role cannot manage confirmation policies.</NotPermitted> : <ErrorNote error={list.error} />}
             {list.data && list.data.items.length === 0 && <Empty>No confirmation policies yet.</Empty>}
             {list.data && list.data.items.length > 0 && (
@@ -1725,14 +1725,15 @@ function PolicyTable({ items, onAction }: { items: Policy[]; onAction: (action: 
               </td>
               <td>{p.latestCaseStart ? `In use (latest start ${formatDate(p.latestCaseStart)})` : 'None'}</td>
               <td>
-                <div className="row">
+                {/* The row's actions side by side, never stacked in the narrow last column. */}
+                <div className="row" style={{ flexWrap: 'nowrap' }}>
                   {p.latest && (
                     <button type="button" className="link" aria-label={`New revision of ${policyLabel(p)}`} onClick={() => onAction({ kind: 'revise', id: p.id })}>
                       New revision
                     </button>
                   )}
                   {p.status !== 'ENDED' && (
-                    <button type="button" className="link" aria-label={`End ${policyLabel(p)}`} onClick={() => onAction({ kind: 'retire', id: p.id })}>
+                    <button type="button" className="link danger" aria-label={`End ${policyLabel(p)}`} onClick={() => onAction({ kind: 'retire', id: p.id })}>
                       End policy
                     </button>
                   )}
@@ -1764,21 +1765,26 @@ const termsBody = (t: TermsDraft) => ({
   ...(t.to ? { effectiveTo: t.to } : {}),
 });
 
+/** A duration and its unit read as one value ("6 calendar months"), so they sit side by side on a row of their own. */
+const DURATION_ROW: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.9rem 1rem' };
+
 function TermFields({ value, onChange }: { value: TermsDraft; onChange: (next: TermsDraft) => void }) {
   return (
     <>
-      <label>
-        Duration
-        <input type="number" step="1" required value={value.duration} onChange={(e) => onChange({ ...value, duration: e.target.value })} />
-      </label>
-      <label>
-        Unit
-        <select required value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value as TermsDraft['unit'] })}>
-          <option value="">Choose…</option>
-          <option value="CALENDAR_MONTHS">Calendar months</option>
-          <option value="CALENDAR_DAYS">Calendar days</option>
-        </select>
-      </label>
+      <div className="wide" style={DURATION_ROW}>
+        <label style={{ flex: '0 1 10rem' }}>
+          Duration
+          <input type="number" step="1" required value={value.duration} onChange={(e) => onChange({ ...value, duration: e.target.value })} />
+        </label>
+        <label style={{ flex: '0 1 14rem' }}>
+          Unit
+          <select required value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value as TermsDraft['unit'] })}>
+            <option value="">Choose…</option>
+            <option value="CALENDAR_MONTHS">Calendar months</option>
+            <option value="CALENDAR_DAYS">Calendar days</option>
+          </select>
+        </label>
+      </div>
       <label>
         Takes effect on
         <input type="date" required value={value.from} onChange={(e) => onChange({ ...value, from: e.target.value })} />

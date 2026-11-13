@@ -13,6 +13,14 @@ import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section } from '../ui';
 import { keepOnPage, ReportExport } from './leave-admin';
 
+/** A department, location or shift a filter offers: chosen by its name ("Mumbai Office"), the code only when it has none. */
+interface MasterOption {
+  id: string;
+  code: string;
+  name?: string | null;
+}
+const optionName = (o: MasterOption) => o.name || o.code;
+
 interface ControlRow {
   id: string;
   employeeId: string;
@@ -209,9 +217,9 @@ function AttendanceControlPage() {
     enabled: ready,
     queryFn: () => api<{ items: ControlRow[]; total: number; page: number; pageSize: number }>(`/v1/attendance/records?${params}&${pageParams(page)}`),
   });
-  const departments = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
-  const locations = useQuery({ queryKey: ['control-locations'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/org/locations'), enabled: can('org_master.read.operational') });
-  const shifts = useQuery({ queryKey: ['control-shifts'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/shifts'), enabled: can('shift.read.operational') });
+  const departments = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: MasterOption[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
+  const locations = useQuery({ queryKey: ['control-locations'], queryFn: () => api<{ items: MasterOption[] }>('/v1/org/locations'), enabled: can('org_master.read.operational') });
+  const shifts = useQuery({ queryKey: ['control-shifts'], queryFn: () => api<{ items: MasterOption[] }>('/v1/shifts'), enabled: can('shift.read.operational') });
   const opened = list.data?.items.find((r) => r.id === openId);
   const refresh = () => void qc.invalidateQueries({ queryKey: ['attendance-control'] });
   return (
@@ -248,7 +256,7 @@ function AttendanceControlPage() {
                 <option value="">All</option>
                 {departments.data.items.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.code}
+                    {optionName(d)}
                   </option>
                 ))}
               </select>
@@ -261,7 +269,7 @@ function AttendanceControlPage() {
                 <option value="">All</option>
                 {locations.data.items.map((l) => (
                   <option key={l.id} value={l.id}>
-                    {l.code}
+                    {optionName(l)}
                   </option>
                 ))}
               </select>
@@ -274,7 +282,7 @@ function AttendanceControlPage() {
                 <option value="">All</option>
                 {shifts.data.items.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.code}
+                    {optionName(s)}
                   </option>
                 ))}
               </select>
@@ -335,7 +343,7 @@ function AttendanceControlPage() {
                 {list.data.items.map((r) => (
                   <tr key={r.id}>
                     <td>{formatDate(r.workDate)}</td>
-                    <td>{`${r.employeeCode} ${r.employeeName}`}</td>
+                    <td>{`${r.employeeName} (${r.employeeCode})`}</td>
                     <td>{r.departmentCode ?? '—'}</td>
                     <td>{r.locationCode ?? '—'}</td>
                     <td>{r.shiftCode ?? '—'}</td>
@@ -348,8 +356,8 @@ function AttendanceControlPage() {
                     <td>{`${r.workedMinutes} of ${r.scheduledNetMinutes}`}</td>
                     <td>{`${r.policyCode} revision ${r.policyRevision}`}</td>
                     <td>
-                      <button type="button" className="link" onClick={() => setOpenId(openId === r.id ? null : r.id)}>
-                        Open {r.employeeCode}
+                      <button type="button" className="link" aria-label={`Open ${r.employeeCode}`} aria-expanded={openId === r.id} onClick={() => setOpenId(openId === r.id ? null : r.id)}>
+                        Open
                       </button>
                     </td>
                   </tr>
@@ -430,6 +438,8 @@ function processingNote(p: DashboardView['processing']): string {
 }
 
 const departmentsQuery = (ids: string[]) => ids.map((id) => `departmentId=${encodeURIComponent(id)}`).join('&');
+/** A department row by its name ("Engineering"), not its code. */
+const departmentLabel = (d: Pick<DashboardCounts, 'departmentCode' | 'departmentName'>) => d.departmentName ?? d.departmentCode ?? 'no department';
 
 function DashboardList({ date, departments, opened }: { date: string; departments: string[]; opened: OpenedCount }) {
   const [page, setPage] = useState(1);
@@ -440,7 +450,7 @@ function DashboardList({ date, departments, opened }: { date: string; department
     queryFn: () =>
       api<{ items: DashboardRow[]; total: number; page: number }>(`/v1/attendance/dashboard/employees?date=${date}&list=${opened.list}${choice ? `&${choice}` : ''}${where}&${pageParams(page)}`),
   });
-  const scope = opened.department ? ` in ${opened.department.departmentCode ?? 'no department'}` : '';
+  const scope = opened.department ? ` in ${departmentLabel(opened.department)}` : '';
   return (
     <Section title={`${dashboardText(opened.list)}${scope} on ${formatDate(date)}`}>
       <ErrorNote error={list.error} />
@@ -490,16 +500,17 @@ function AttendanceDashboardPage() {
   const choice = departmentsQuery(departments);
   const query = [date ? `date=${date}` : '', choice].filter(Boolean).join('&');
   const dashboard = useQuery({ queryKey: ['attendance-dashboard', query], queryFn: () => api<DashboardView>(`/v1/attendance/dashboard${query ? `?${query}` : ''}`) });
-  const options = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
+  const options = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: MasterOption[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
   const view = dashboard.data;
   const columns = view ? [...view.categories, 'LATE'] : [];
   const cell = (row: DashboardCounts, column: string, isTotal: boolean) => {
     const n = row.counts[column] ?? 0;
     if (n === 0) return '0';
+    // The number is what shows; what it counts is read out with it, the column heading and row already say it on screen.
     return (
       <button type="button" className="link" onClick={() => setOpened({ list: column, department: isTotal ? null : row })}>
         {String(n)}
-        <span className="hint">{` ${dashboardText(column)}${isTotal ? '' : ` in ${row.departmentCode ?? 'no department'}`}`}</span>
+        <span className="sr-only">{` ${dashboardText(column)}${isTotal ? '' : ` in ${departmentLabel(row)}`}`}</span>
       </button>
     );
   };
@@ -511,7 +522,7 @@ function AttendanceDashboardPage() {
             Date
             <input
               type="date"
-              value={date}
+              value={date || view?.date || ''}
               onChange={(e) => {
                 setDate(e.target.value);
                 setOpened(null);
@@ -523,6 +534,8 @@ function AttendanceDashboardPage() {
               Departments
               <select
                 multiple
+                // Tall enough for every department (up to 8 rows), so none is hidden behind the box's own scrollbar.
+                size={Math.min(Math.max(options.data.items.length, 2), 8)}
                 value={departments}
                 onChange={(e) => {
                   setDepartments(Array.from(e.target.selectedOptions, (o) => o.value));
@@ -531,7 +544,7 @@ function AttendanceDashboardPage() {
               >
                 {options.data.items.map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.code}
+                    {optionName(d)}
                   </option>
                 ))}
               </select>
@@ -542,12 +555,12 @@ function AttendanceDashboardPage() {
         <ErrorNote error={dashboard.error ?? options.error} />
         {view && (
           <>
-            <p role="status">
+            <p role="status" className="hint">
               {`${formatDate(view.date)}: `}
               {view.processing.state !== 'PROCESSED' && <Badge tone="warn">{view.processing.state === 'NOT_PROCESSED' ? 'not processed' : 'partly processed'}</Badge>} {processingNote(view.processing)}
             </p>
             {view.total.total > 0 && (
-              <table aria-label="Attendance by department">
+              <table aria-label="Attendance by department" className="wrap-head">
                 <thead>
                   <tr>
                     <th>Department</th>
@@ -560,7 +573,7 @@ function AttendanceDashboardPage() {
                 <tbody>
                   {view.departments.map((d) => (
                     <tr key={d.departmentId ?? 'none'}>
-                      <td>{d.departmentName ? `${d.departmentCode} ${d.departmentName}` : 'No department'}</td>
+                      <td>{d.departmentName ?? d.departmentCode ?? 'No department'}</td>
                       <td>{d.total}</td>
                       {columns.map((c) => (
                         <td key={c}>{cell(d, c, false)}</td>
@@ -568,7 +581,9 @@ function AttendanceDashboardPage() {
                     </tr>
                   ))}
                   <tr>
-                    <th scope="row">Total</th>
+                    <td>
+                      <strong>Total</strong>
+                    </td>
                     <td>{view.total.total}</td>
                     {columns.map((c) => (
                       <td key={c}>{cell(view.total, c, true)}</td>
@@ -669,8 +684,8 @@ function AttendanceReportsPage() {
   // The register's other layout is a report of its own, with the same filters (CL-047, CL-049 follow-up).
   const other = REPORT_LAYOUTS[code];
   const generated = other && form.layout === 'OTHER' ? other : def;
-  const departments = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
-  const shifts = useQuery({ queryKey: ['control-shifts'], queryFn: () => api<{ items: { id: string; code: string }[] }>('/v1/shifts'), enabled: can('shift.read.operational') });
+  const departments = useQuery({ queryKey: ['control-departments'], queryFn: () => api<{ items: MasterOption[] }>('/v1/org/departments'), enabled: can('org_master.read.operational') });
+  const shifts = useQuery({ queryKey: ['control-shifts'], queryFn: () => api<{ items: MasterOption[] }>('/v1/shifts'), enabled: can('shift.read.operational') });
   const ready = !!form.from && !!form.to && (code !== 'ABSCONDING_REPORT' || /^\d{1,3}$/.test(form.minimumDays));
   return (
     <Section title="Attendance reports">
@@ -719,7 +734,7 @@ function AttendanceReportsPage() {
               <option value="">All</option>
               {departments.data.items.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.code}
+                  {optionName(d)}
                 </option>
               ))}
             </select>
@@ -732,7 +747,7 @@ function AttendanceReportsPage() {
               <option value="">All</option>
               {shifts.data.items.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.code}
+                  {optionName(s)}
                 </option>
               ))}
             </select>
@@ -800,8 +815,9 @@ function AttendanceReportsPage() {
         </label>
       </form>
       <p className="hint">{`${generated.note} At most ${def.maxDays} days per request.`}</p>
-      {!ready && <p className="hint">{code === 'ABSCONDING_REPORT' ? 'Choose a period and the number of consecutive absent days.' : 'Choose a period.'}</p>}
-      {ready && <ReportExport key={generated.code} reportCode={generated.code} label={`Generate the ${generated.title.toLowerCase()}`} filters={attendanceReportFilters(code, form)} format={form.format} />}
+      {!ready && <p className="hint">{code === 'ABSCONDING_REPORT' ? 'Choose a period and the number of consecutive absent days.' : 'Choose a period (From and To) to generate the report.'}</p>}
+      {/* Always in view, so there is something to press; offered once the period (and run length) are filled in. */}
+      <ReportExport key={generated.code} reportCode={generated.code} label={`Generate the ${generated.title.toLowerCase()}`} filters={attendanceReportFilters(code, form)} format={form.format} disabled={!ready} />
     </Section>
   );
 }

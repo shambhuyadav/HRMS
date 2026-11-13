@@ -14,6 +14,7 @@ import { EMPLOYEE_SCREENS } from './pages/employee';
 import { MANAGER_CHANGE_SCREENS } from './pages/manager-change';
 import { ANNOUNCEMENT_SCREENS } from './pages/announcements';
 import { EMPLOYEE_HISTORY_SCREENS } from './pages/employee-history';
+import { ACCESS_TASK_QUEUES } from './pages/access-queues';
 import { EXIT_FINANCE_SCREENS, EXIT_FINANCE_TASK_QUEUES } from './pages/exit-finance';
 import { EXPENSE_ADMIN_SCREENS } from './pages/expense-admin';
 import { HOME_SCREENS } from './pages/home';
@@ -159,4 +160,6 @@ export const MODULE_TASK_QUEUES: readonly TaskQueue[] = [
   ...TAX_TASK_QUEUES,
   ...DOCUMENTS_TASK_QUEUES,
   ...EXIT_FINANCE_TASK_QUEUES,
+  // The System Administrator's access decisions (FR-096; F2 "Pending independent access grants").
+  ...ACCESS_TASK_QUEUES,
 ];

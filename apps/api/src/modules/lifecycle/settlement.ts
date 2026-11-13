@@ -63,7 +63,7 @@ const LIVE_STATES = ['DRAFT', 'SUBMITTED', 'REVIEWED', 'APPROVED', 'RELEASE_ELIG
 export const CALCULATION_STATUS = {
   status: 'AVAILABLE',
   reason:
-    'A draft is calculated from a versioned snapshot under the settlement policy and the statutory rule packs in force on the last working date (F1, DF05: no gratuity, encashment, notice or tax rule is assumed). An item whose policy, rule pack or record is missing is shown as such and blocks approval. Lines for other components are entered with a reason; review and approval stay independent.',
+    'A draft is calculated from a versioned snapshot under the settlement policy and the statutory rule packs in force on the last working date (no gratuity, encashment, notice or tax rule is assumed). An item whose policy, rule pack or record is missing is shown as such and blocks approval. Lines for other components are entered with a reason; review and approval stay independent.',
 } as const;
 
 export interface SettlementRow {

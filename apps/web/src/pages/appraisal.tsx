@@ -498,7 +498,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 function localDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function When({ at }: { at: string | null | undefined }) {
@@ -1271,11 +1271,10 @@ function RatingResults({ rating }: { rating: ManagerRating }) {
       {rating.split && rating.goalResult && rating.competencyResult && (
         <>
           {' '}
-          = ({rating.split.goalWeightPercent} × goal result {rating.goalResult} + {rating.split.competencyWeightPercent} × competency result {rating.competencyResult}) / 100, rounded half up to two
-          decimals
+          {`(${rating.split.goalWeightPercent}% goals at ${rating.goalResult}, ${rating.split.competencyWeightPercent}% competencies at ${rating.competencyResult})`}
         </>
       )}
-      {!rating.split && rating.goalResult && <> (the goal result alone: no competencies)</>}
+      {!rating.split && rating.goalResult && <> (goals only)</>}
     </p>
   );
 }
@@ -1565,7 +1564,7 @@ function SettingSection() {
   };
   return (
     <Section title="Cycle start month">
-      {setting.isPending && <p className="hint">Loading the setting…</p>}
+      {setting.isPending && <p className="hint loading">Loading the setting…</p>}
       <QueryProblem error={setting.error} forbidden="The selected role cannot view the appraisal setting." />
       {data &&
         (data.configured && data.cycleStartMonth !== null ? (
@@ -1628,7 +1627,7 @@ function CycleRegister() {
           </select>
         </label>
       </div>
-      {cycles.isPending && <p className="hint">Loading cycles…</p>}
+      {cycles.isPending && <p className="hint loading">Loading cycles…</p>}
       <QueryProblem error={cycles.error} forbidden="The selected role cannot view appraisal cycles." />
       {data && data.items.length === 0 && <Empty>No cycles yet.</Empty>}
       {data && data.items.length > 0 && (
@@ -1712,6 +1711,7 @@ function CycleForm({
   startMonth,
   onSubmit,
   children,
+  blockedReason = null,
 }: {
   initial: Cycle | null;
   label: string;
@@ -1720,6 +1720,8 @@ function CycleForm({
   startMonth: number | null;
   onSubmit: (body: CycleBody) => void;
   children?: ReactNode;
+  /** Why the form cannot be submitted yet, said beside its button (which is then disabled). */
+  blockedReason?: string | null;
 }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState(initial?.name ?? '');
@@ -1832,7 +1834,7 @@ function CycleForm({
         <input type="checkbox" checked={goalReview} onChange={(e) => setGoalReview(e.target.checked)} /> Goals are reviewed before they take effect (KRA review)
       </label>
       <fieldset style={GROUP} className="wide">
-        <legend>Result split (whole percentages adding to 100)</legend>
+        <legend>Result split</legend>
         <div className="row">
           <label>
             Goals %
@@ -1845,13 +1847,13 @@ function CycleForm({
         </div>
         <p className="hint" style={FLUSH}>
           {initial
-            ? 'Competencies 0 means the cycle does not assess them. Whether it does is fixed once an appraisal is enrolled; the split is fixed once one is submitted.'
-            : 'Leave both empty to use the company split in force on the start date. Competencies 0 means the cycle does not assess them.'}
+            ? 'Whole percentages that add up to 100. Competencies 0 means the cycle does not assess them. Whether it does is fixed once an appraisal is enrolled; the split is fixed once one is submitted.'
+            : 'Whole percentages that add up to 100, or leave both empty to use the company split. Competencies 0 means the cycle does not assess them.'}
         </p>
       </fieldset>
       <fieldset style={GROUP} className="wide">
-        <legend>Sections included (none is scored)</legend>
-        {catalogue.isPending && <p className="hint">Loading the sections…</p>}
+        <legend>Sections included</legend>
+        {catalogue.isPending && <p className="hint loading">Loading the sections…</p>}
         {(shown(catalogue)?.items ?? []).map((s) => (
           <label key={s.code}>
             <input
@@ -1863,11 +1865,14 @@ function CycleForm({
           </label>
         ))}
         <p className="hint" style={FLUSH}>
-          An included section must be filled by its party before they submit; an excluded one never blocks a submission.
+          None of these is scored. An included section must be filled in before its party submits; an excluded one never blocks a submission.
         </p>
       </fieldset>
       <fieldset style={GROUP} className="wide">
-        <legend>Windows (inclusive dates; leave both dates empty to leave a window unscheduled)</legend>
+        <legend>Windows</legend>
+        <p className="hint" style={FLUSH}>
+          Both dates are included. Leave both dates of a window empty to schedule it later.
+        </p>
         {WINDOWS.map((w) => (
           <div className="row" key={w.key}>
             <label>
@@ -1887,9 +1892,10 @@ function CycleForm({
         </p>
       )}
       <div className="row">
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || !!blockedReason}>
           {busy ? 'Saving…' : submitLabel}
         </button>
+        {blockedReason && <span className="hint">{blockedReason}</span>}
       </div>
       {children}
     </form>
@@ -1911,6 +1917,8 @@ function NewCycleSection() {
     },
   });
   const startMonth = shown(setting)?.cycleStartMonth ?? null;
+  // Cycles are refused until the start month is set: say so beside the button rather than after a refused attempt.
+  const blockedReason = shown(setting) && startMonth === null ? 'Set the cycle start month above first: cycles cannot be created until it is set.' : null;
   return (
     <Section title="New cycle">
       {created && (
@@ -1925,6 +1933,7 @@ function NewCycleSection() {
         submitLabel="Create the cycle"
         busy={create.isPending}
         startMonth={startMonth}
+        blockedReason={blockedReason}
         onSubmit={(body) => {
           setCreated(null);
           create.mutate(body);
@@ -1986,7 +1995,7 @@ function CycleDetailView({ id }: { id: string }) {
     },
   });
   const c = shown(cycle);
-  if (cycle.isPending) return <Section title="Appraisal cycle">{<p className="hint">Loading the cycle…</p>}</Section>;
+  if (cycle.isPending) return <Section title="Appraisal cycle">{<p className="hint loading">Loading the cycle…</p>}</Section>;
   if (!c) {
     return (
       <Section title="Appraisal cycle">
@@ -2196,7 +2205,7 @@ function AppraisalRegister() {
           </select>
         </label>
       </div>
-      {list.isPending && <p className="hint">Loading appraisals…</p>}
+      {list.isPending && <p className="hint loading">Loading appraisals…</p>}
       <QueryProblem error={list.error} forbidden="The selected role cannot view appraisals." />
       {data && data.items.length === 0 && <Empty>No appraisals match.</Empty>}
       {data && data.items.length > 0 && (
@@ -2355,7 +2364,7 @@ function AppraisalDetailView({ id }: { id: string }) {
   const query = useQuery({ queryKey: keys.appraisal(id), queryFn: () => api<Appraisal>(`/v1/appraisals/${id}`), retry: retryTransient });
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const a = shown(query);
-  if (query.isPending) return <Section title="Appraisal">{<p className="hint">Loading the appraisal…</p>}</Section>;
+  if (query.isPending) return <Section title="Appraisal">{<p className="hint loading">Loading the appraisal…</p>}</Section>;
   if (!a) {
     return (
       <Section title="Appraisal">
@@ -2907,7 +2916,7 @@ function AppraisalQueue({ kind }: { kind: QueueKind }) {
     <div ref={region} role="region" aria-label={queue.title} tabIndex={-1}>
       <Section title={`${queue.title}${data ? ` (${items.length})` : ''}`}>
         <p className="hint">{queue.hint}</p>
-        {tasks.isPending && <p className="hint">Loading the appraisals waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the appraisals waiting for you…</p>}
         <QueryProblem error={tasks.error} forbidden={queue.forbidden} />
         <Notice notice={notice} />
         {data && items.length === 0 && <Empty>{queue.empty}</Empty>}
@@ -3212,7 +3221,7 @@ function CycleReport({ cycleId }: { cycleId: string }) {
       <div className="row">
         <DepartmentSelect value={departmentId} onChange={setDepartmentId} />
       </div>
-      {report.isPending && <p className="hint">Loading the report…</p>}
+      {report.isPending && <p className="hint loading">Loading the report…</p>}
       <QueryProblem error={report.error} forbidden="The selected role cannot view appraisal reports." />
       {data && (
         <>
@@ -3536,7 +3545,7 @@ function OwnAppraisals() {
     <div className="stack">
       <Section title="My appraisal">
         <p className="hint">Your own appraisals only: your goals, where each stands, and your self-assessment. Manager and reviewer ratings and notes are never shown here, and no result is published to employees.</p>
-        {list.isPending && <p className="hint">Loading your appraisals…</p>}
+        {list.isPending && <p className="hint loading">Loading your appraisals…</p>}
         <QueryProblem error={list.error} forbidden="Your Employee role cannot view appraisals." />
         {data && data.items.length === 0 && <Empty>You have no appraisals yet.</Empty>}
         {data && data.items.length > 0 && (
@@ -3611,7 +3620,7 @@ function OwnAppraisal({ id }: { id: string }) {
     },
   });
   const a = shown(query);
-  if (query.isPending) return <Section title="Appraisal">{<p className="hint">Loading your appraisal…</p>}</Section>;
+  if (query.isPending) return <Section title="Appraisal">{<p className="hint loading">Loading your appraisal…</p>}</Section>;
   if (!a) {
     return (
       <Section title="Appraisal">
@@ -3719,7 +3728,7 @@ function OwnAppraisal({ id }: { id: string }) {
             </>
           ) : (
             <p role="note">
-              The self-entry window is not open today ({windowText(selfWindow).toLowerCase()}) and no exception is recorded, so entries are not accepted. Ask HR if you need an exception.
+              The self-entry window is not open today ({windowText(selfWindow).replace(/^Not /, 'not ')}) and no exception is recorded, so entries are not accepted. Ask HR if you need an exception.
             </p>
           )
         ) : working?.selfEntry ? (
@@ -3869,10 +3878,9 @@ function ScoringSection() {
   return (
     <Section title="Result split">
       <p className="hint">
-        How the weighted result combines goals and competencies: (goals % × goal result + competencies % × competency result) / 100, rounded once, half up, to two decimals. Without competencies the result is the goal result
-        alone. A new cycle takes the split in force on its start date and keeps its own copy.
+        How much goals and competencies each count towards the overall result. A new cycle uses the split in force on its start date and keeps it.
       </p>
-      {query.isPending && <p className="hint">Loading the split…</p>}
+      {query.isPending && <p className="hint loading">Loading the split…</p>}
       <QueryProblem error={query.error} forbidden="The selected role cannot view the result split." />
       {data && (
         <>
@@ -3958,7 +3966,7 @@ function CompetencyMasterSection() {
   const current = data?.items.find((k) => k.id === editing) ?? null;
   return (
     <Section title="Competencies">
-      {query.isPending && <p className="hint">Loading competencies…</p>}
+      {query.isPending && <p className="hint loading">Loading competencies…</p>}
       <QueryProblem error={query.error} forbidden="The selected role cannot view competencies." />
       {data && data.items.length === 0 && <Empty>No competencies yet.</Empty>}
       {data && data.items.length > 0 && (
@@ -4178,7 +4186,7 @@ function CompetencySetsSection() {
         Each set maps competencies, with weights totalling exactly 100, to a grade (optionally one designation, which then takes precedence). When an employee is enrolled, the set in force for their grade that day is copied
         into the appraisal and fixed.
       </p>
-      {query.isPending && <p className="hint">Loading the sets…</p>}
+      {query.isPending && <p className="hint loading">Loading the sets…</p>}
       <QueryProblem error={query.error} forbidden="The selected role cannot view competency sets." />
       {data && data.items.length === 0 && <Empty>No competency sets yet: appraisals are scored on goals alone.</Empty>}
       {data && data.items.length > 0 && (
@@ -4361,7 +4369,7 @@ function TrainingNeeds({ cycleId, departmentId }: { cycleId: string; departmentI
   return (
     <div style={SPACED}>
       <h3 style={H3}>Training needs (suggestions for training planning)</h3>
-      {query.isPending && <p className="hint">Loading training needs…</p>}
+      {query.isPending && <p className="hint loading">Loading training needs…</p>}
       <QueryProblem error={query.error} forbidden="Training needs are confidential: the selected role cannot see them." />
       {data && !data.sectionIncluded && <Empty>This cycle does not include the training needs section.</Empty>}
       {data && data.sectionIncluded && data.items.length === 0 && <Empty>No completed appraisal in scope has training needs yet.</Empty>}
@@ -4608,7 +4616,7 @@ function BellCurveView({ cycleId, departmentId, gradeId }: { cycleId: string; de
   return (
     <>
       <Section title="Rating distribution">
-        {curve.isPending && <p className="hint">Loading the distribution…</p>}
+        {curve.isPending && <p className="hint loading">Loading the distribution…</p>}
         <QueryProblem error={curve.error} forbidden="The selected role cannot view appraisal ratings." />
         {data && (
           <>

@@ -611,6 +611,30 @@ export function RoutingPage() {
   );
 }
 
+/** Who reviews a step, in words (the permission behind it is the server's business, not the reader's). */
+const RULE_WORDS: Readonly<Record<string, string>> = {
+  DIRECT_MANAGER: 'the direct manager',
+  HR_FALLBACK_LIST: 'the HR reviewer list',
+};
+const sentence = (code: string) => {
+  const words = code.replace(/_/g, ' ').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+/**
+ * A listed reviewer by name. The routing list carries only the account; the kind's candidates (who can decide it now, the same
+ * list the editor ticks from, fetched once per kind) give the person's name. One who can no longer decide is not a candidate,
+ * so they keep their account key.
+ */
+function ReviewerName({ kind, userId, accountKey }: { kind: string; userId: string; accountKey: string }) {
+  const candidates = useQuery({
+    queryKey: ['routing-candidates', kind],
+    queryFn: () => api<{ items: { userId: string; accountKey: string; employeeCode: string | null; displayName: string | null }[] }>(`/v1/workflows/${kind}/candidates`),
+  });
+  const name = candidates.data?.items.find((c) => c.userId === userId)?.displayName;
+  return <span title={accountKey}>{name ?? accountKey}</span>;
+}
+
 function ReviewerRouting() {
   const qc = useQueryClient();
   const routing = useQuery({ queryKey: ['routing'], queryFn: () => api<{ items: RoutingKind[] }>('/v1/workflows') });
@@ -621,8 +645,8 @@ function ReviewerRouting() {
         {routing.data?.items.map((k) => (
           <li key={k.kind}>
             <div>
-              <strong>{k.kind.replace(/_/g, ' ')}</strong>{' '}
-              <span className="hint">{k.steps.map((s) => `${s.sequence}. ${s.selectionRule.replace(/_/g, ' ').toLowerCase()} (${s.permission})`).join(' → ')}</span>
+              <strong>{sentence(k.kind)}</strong>{' '}
+              <span className="hint">{k.steps.map((s) => `Step ${s.sequence}: ${RULE_WORDS[s.selectionRule] ?? s.selectionRule.replace(/_/g, ' ').toLowerCase()}`).join(' → ')}</span>
             </div>
             {k.routingKind ? (
               <div className="hint">Uses the {k.routingKind.replace(/_/g, ' ')} fallback list.</div>
@@ -634,7 +658,7 @@ function ReviewerRouting() {
                     ? 'none'
                     : k.fallbackReviewers.map((r) => (
                         <Badge key={r.userId} tone={r.eligible ? 'good' : 'bad'}>
-                          {r.priority}. {r.accountKey}
+                          {r.priority}. <ReviewerName kind={k.kind} userId={r.userId} accountKey={r.accountKey} />
                           {r.eligible ? '' : ' (no longer eligible)'}
                         </Badge>
                       ))}
@@ -693,11 +717,11 @@ export function MobileLinkReviewPage() {
     <Section
       title="Mobile-app links"
       actions={
-        <div className="row">
-          <button type="button" className={state === 'PENDING' ? '' : 'secondary'} onClick={() => setState('PENDING')}>
+        <div className="row toggle-group">
+          <button type="button" aria-pressed={state === 'PENDING'} className={state === 'PENDING' ? '' : 'secondary'} onClick={() => setState('PENDING')}>
             Waiting for review
           </button>
-          <button type="button" className={state === 'ACTIVE' ? '' : 'secondary'} onClick={() => setState('ACTIVE')}>
+          <button type="button" aria-pressed={state === 'ACTIVE'} className={state === 'ACTIVE' ? '' : 'secondary'} onClick={() => setState('ACTIVE')}>
             Active
           </button>
         </div>
@@ -792,7 +816,7 @@ function localDateTime(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 const readableCode = (code: string) => code.replace(/_/g, ' ').toLowerCase();
@@ -864,7 +888,7 @@ export function NotificationRulesPage() {
           {scheduled}
         </p>
       )}
-      {rules.isPending && <p className="hint">Loading rules…</p>}
+      {rules.isPending && <p className="hint loading">Loading rules…</p>}
       <ErrorNote error={rules.error} />
       {rules.data && groups.length === 0 && <Empty>No notification rules are configured.</Empty>}
       <ul className="tasks">

@@ -396,7 +396,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 function localDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function When({ at }: { at: string | null | undefined }) {
@@ -1236,7 +1236,9 @@ function RequisitionRegister() {
       title="Requisition register"
       actions={
         canCreate && me?.employeeId ? (
-          <Link to={PATHS.newRequisition}>New requisition</Link>
+          <Link to={PATHS.newRequisition} className="primary">
+            New requisition
+          </Link>
         ) : undefined
       }
     >
@@ -1281,7 +1283,7 @@ function RequisitionRegister() {
           </select>
         </label>
       </div>
-      {list.isPending && <p className="hint">Loading requisitions…</p>}
+      {list.isPending && <p className="hint loading">Loading requisitions…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot view requisitions.</NotPermitted> : <ErrorNote error={list.error} />}
       {data && data.items.length === 0 && data.total > 0 && (
         <p className="hint">
@@ -1371,7 +1373,7 @@ function NewRequisitionScreen() {
   });
   let body: ReactNode;
   if (!can(REQ_CREATE)) body = <NotPermitted>The selected role cannot raise requisitions.</NotPermitted>;
-  else if (!me) body = <p className="hint">Loading your role…</p>;
+  else if (!me) body = <p className="hint loading">Loading your role…</p>;
   else if (!me.employeeId) body = <p className="hint">A requisition is raised by an employee; this account is not linked to an employee record, so it cannot raise one.</p>;
   else
     body = (
@@ -1448,7 +1450,7 @@ function RequisitionDetailView({ id }: { id: string }) {
           {notice}
         </p>
       )}
-      {detail.isPending && <p className="hint">Loading the requisition…</p>}
+      {detail.isPending && <p className="hint loading">Loading the requisition…</p>}
       {isForbidden(detail.error) ? (
         <NotPermitted>The selected role cannot view this requisition.</NotPermitted>
       ) : isNotFound(detail.error) ? (
@@ -1787,7 +1789,7 @@ function RequisitionQueue({ step }: { step: RequisitionStep }) {
     <div ref={region} role="region" aria-label={queue.title} tabIndex={-1}>
       <Section title={`${queue.title}${data ? ` (${items.length})` : ''}`}>
         <p className="hint">{queue.hint}</p>
-        {tasks.isPending && <p className="hint">Loading the requisitions waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the requisitions waiting for you…</p>}
         {isForbidden(tasks.error) ? <NotPermitted>The selected role cannot decide requisitions.</NotPermitted> : <ErrorNote error={tasks.error} />}
         {notice && (
           <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
@@ -2010,7 +2012,7 @@ function BudgetRegister() {
           <input type="date" value={on} onChange={(e) => setOn(e.target.value)} />
         </label>
       </div>
-      {list.isPending && <p className="hint">Loading budget lines…</p>}
+      {list.isPending && <p className="hint loading">Loading budget lines…</p>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot view manpower budgets.</NotPermitted> : <ErrorNote error={list.error} />}
       {data && data.items.length === 0 && <Empty>{filtered ? 'No budget lines match these filters.' : 'No budget lines in the selected role’s scope yet.'}</Empty>}
       {data && data.items.length > 0 && (
@@ -2300,7 +2302,7 @@ function BudgetDetailView({ id }: { id: string }) {
           {notice}
         </p>
       )}
-      {detail.isPending && <p className="hint">Loading the budget line…</p>}
+      {detail.isPending && <p className="hint loading">Loading the budget line…</p>}
       {isForbidden(detail.error) ? (
         <NotPermitted>The selected role cannot view this budget line.</NotPermitted>
       ) : isNotFound(detail.error) ? (
@@ -2516,7 +2518,7 @@ function BudgetQueue() {
     <div ref={region} role="region" aria-label="Manpower budget approvals" tabIndex={-1}>
       <Section title={`Manpower budget approvals${data ? ` (${items.length})` : ''}`}>
         <p className="hint">Budget revisions prepared by other HR users wait here. Approving puts the revision’s headcount in force; rejecting is final and needs a reason.</p>
-        {tasks.isPending && <p className="hint">Loading the revisions waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the revisions waiting for you…</p>}
         {isForbidden(tasks.error) ? <NotPermitted>The selected role cannot decide manpower budgets.</NotPermitted> : <ErrorNote error={tasks.error} />}
         {notice && (
           <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>

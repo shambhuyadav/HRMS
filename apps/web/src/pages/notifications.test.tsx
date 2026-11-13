@@ -68,51 +68,53 @@ describe('notification preferences panel (FR-083, FR-085, DF12)', () => {
   it('shows what is saved and that mandatory notices cannot be switched off', async () => {
     const calls = preferenceServer();
     renderPage(<NotificationPreferencesPanel />);
-    expect((await box('Publish my birthday to colleagues')).checked).toBe(false);
-    expect((await box('Receive colleagues’ birthdays')).checked).toBe(true);
-    expect((await box('Publish my work anniversary to colleagues')).checked).toBe(true);
-    expect((await box('Receive colleagues’ work anniversaries')).checked).toBe(false);
-    expect(screen.getByText(/mandatory and cannot be switched off/)).toBeTruthy();
+    expect((await box('Share my birthday with colleagues')).checked).toBe(false);
+    expect((await box('See colleagues’ birthdays')).checked).toBe(true);
+    expect((await box('Share my work anniversary with colleagues')).checked).toBe(true);
+    expect((await box('See colleagues’ work anniversaries')).checked).toBe(false);
+    expect(screen.getByText(/always reach you and cannot be switched off/)).toBeTruthy();
+    expect(screen.getByText(/Your occasions are hidden unless you share them/)).toBeTruthy();
     expect(calls[0]).toMatchObject({ url: PREFERENCES, method: 'GET' });
   });
 
   it('a toggle sends only that event and that choice, and the box then shows the saved answer', async () => {
     const calls = preferenceServer();
     renderPage(<NotificationPreferencesPanel />);
-    fireEvent.click(await box('Publish my birthday to colleagues'));
+    fireEvent.click(await box('Share my birthday with colleagues'));
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toEqual([{ url: PREFERENCES, method: 'PUT', body: { eventType: 'BIRTHDAY', publishCelebration: true } }]));
-    await waitFor(async () => expect((await box('Publish my birthday to colleagues')).checked).toBe(true));
+    await waitFor(async () => expect((await box('Share my birthday with colleagues')).checked).toBe(true));
 
-    fireEvent.click(await box('Receive colleagues’ work anniversaries'));
+    fireEvent.click(await box('See colleagues’ work anniversaries'));
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)).toEqual({ url: PREFERENCES, method: 'PUT', body: { eventType: 'WORK_ANNIVERSARY', receiveOptional: true } }));
-    await waitFor(async () => expect((await box('Receive colleagues’ work anniversaries')).checked).toBe(true));
+    await waitFor(async () => expect((await box('See colleagues’ work anniversaries')).checked).toBe(true));
   });
 
   it('FR-085: receipt by email is its own choice: the toggle sends only that, and the box shows the saved answer', async () => {
     const calls = preferenceServer();
     renderPage(<NotificationPreferencesPanel />);
-    expect((await box('Receive colleagues’ birthdays by email')).checked).toBe(true);
-    expect((await box('Receive colleagues’ work anniversaries by email')).checked).toBe(false);
+    expect((await box('Also email me about colleagues’ birthdays')).checked).toBe(true);
+    expect((await box('Also email me about colleagues’ work anniversaries')).checked).toBe(false);
     expect(screen.getByText(/never confidential details/)).toBeTruthy();
-    fireEvent.click(await box('Receive colleagues’ birthdays by email'));
+    fireEvent.click(await box('Also email me about colleagues’ birthdays'));
     await waitFor(() => expect(calls.filter((c) => c.method === 'PUT')).toEqual([{ url: PREFERENCES, method: 'PUT', body: { eventType: 'BIRTHDAY', receiveEmail: false } }]));
-    await waitFor(async () => expect((await box('Receive colleagues’ birthdays by email')).checked).toBe(false));
-    expect((await box('Receive colleagues’ birthdays')).checked).toBe(true);
+    await waitFor(async () => expect((await box('Also email me about colleagues’ birthdays')).checked).toBe(false));
+    expect((await box('See colleagues’ birthdays')).checked).toBe(true);
   });
 
   it('a refused save shows the refusal and leaves the box as saved', async () => {
     preferenceServer(true);
     renderPage(<NotificationPreferencesPanel />);
-    fireEvent.click(await box('Publish my birthday to colleagues'));
+    fireEvent.click(await box('Share my birthday with colleagues'));
     expect((await screen.findByRole('alert')).textContent).toContain('Synthetic refusal');
-    expect((await box('Publish my birthday to colleagues')).checked).toBe(false);
+    expect((await box('Share my birthday with colleagues')).checked).toBe(false);
   });
 
   it('sits on the inbox, for any user', async () => {
     const calls = mockApi((call) => (call.url === PREFERENCES ? [200, { items: [{ eventType: 'BIRTHDAY', publishCelebration: false, receiveOptional: true }] }] : [200, { items: [], unread: 0 }]));
     renderPage(<InboxPage />);
-    expect(await box('Publish my birthday to colleagues')).toBeTruthy();
-    expect(await screen.findByText('No notifications.')).toBeTruthy();
+    expect(await box('Share my birthday with colleagues')).toBeTruthy();
+    expect(await screen.findByText('No notifications yet.')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Inbox' })).toBeTruthy();
     expect(calls.map((c) => c.url)).toEqual(expect.arrayContaining(['/v1/me/notifications', PREFERENCES]));
   });
 });

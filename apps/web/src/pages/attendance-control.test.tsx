@@ -86,7 +86,7 @@ describe('attendance control (FR-021, E07)', () => {
     open();
     expect(calls.filter((c) => c.url.startsWith('/v1/attendance/records'))).toHaveLength(0);
     choosePeriod();
-    expect(await screen.findByText('SYN1 Synthetic One')).toBeTruthy();
+    expect(await screen.findByText('Synthetic One (SYN1)')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toBe('26 days');
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'PRESENT' } });
     fireEvent.change(screen.getByLabelText('Entity (minutes of)'), { target: { value: 'SHORTFALL' } });
@@ -123,7 +123,7 @@ describe('attendance control (FR-021, E07)', () => {
     });
     open();
     choosePeriod();
-    fireEvent.click(await screen.findByText('Open SYN1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open SYN1' }));
     expect(await screen.findByText('Biometric device')).toBeTruthy();
     expect(screen.getByText(/Result: Present, 480 of 480 minutes, policy DEFAULT revision 2/)).toBeTruthy();
     expect(await screen.findByText(/amended from Absent to Present/)).toBeTruthy();
@@ -141,7 +141,7 @@ describe('attendance control (FR-021, E07)', () => {
     });
     open();
     choosePeriod();
-    fireEvent.click(await screen.findByText('Open SYN1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open SYN1' }));
     expect(await screen.findByText('The result has not changed since it was first evaluated.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Amend to'), { target: { value: 'LEAVE' } });
     fireEvent.change(screen.getByLabelText('Reason for the amendment'), { target: { value: 'Synthetic reason' } });
@@ -159,7 +159,7 @@ describe('attendance control (FR-021, E07)', () => {
     });
     open();
     choosePeriod();
-    fireEvent.click(await screen.findByText('Open SYN1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open SYN1' }));
     expect(await screen.findByText(/A processed payroll used this day/)).toBeTruthy();
     expect(screen.queryByLabelText('Amend to')).toBeNull();
   });
@@ -176,7 +176,7 @@ describe('attendance control (FR-021, E07)', () => {
     session.permissions = [];
     open();
     choosePeriod();
-    await screen.findByText('SYN1 Synthetic One');
+    await screen.findByText('Synthetic One (SYN1)');
     expect(screen.queryByText('Export this list')).toBeNull();
   });
 });

@@ -4,10 +4,12 @@
 // is found by its exact key, never by listing other companies' users. Deactivating an account acts on a global record, so a
 // company administrator may do it only while the account has no live tie to another company (docs/03).
 import { writeAudit } from '../../audit/audit.js';
+import type { IdentityAdmin } from '../../auth/identity-admin.js';
 import { pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
+import { setSignInEnabled } from './accounts.js';
 import { type AccessGrant, assertNotOwnRecord, canAccessEmployee, employeeScopePredicate, SqlParams } from './authorize.js';
 
 export interface UserLinkInput {
@@ -156,7 +158,14 @@ export interface AccountStateInput {
  * user. Deactivating revokes every session of the account, so it stops on its next request. Assignments and links stay;
  * resolveAccess denies an inactive user.
  */
-export async function setAccountActive(tx: Queryable, admin: AccessGrant, userId: string, active: boolean, input: AccountStateInput): Promise<{ userId: string; active: boolean; version: number; sessionsRevoked: number }> {
+export async function setAccountActive(
+  tx: Queryable,
+  admin: AccessGrant,
+  userId: string,
+  active: boolean,
+  input: AccountStateInput,
+  identity: IdentityAdmin | null = null,
+): Promise<{ userId: string; active: boolean; version: number; sessionsRevoked: number }> {
   const { departments, locations, employees } = admin.filters;
   if (admin.scopeKind !== 'COMPANY' || departments.length + locations.length + employees.length > 0) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
   if (userId === admin.userId) throw selfRefusal();
@@ -168,7 +177,8 @@ export async function setAccountActive(tx: Queryable, admin: AccessGrant, userId
   const member = (
     await tx.query<{ ok: boolean }>(
       `select exists (select 1 from user_employee_link where company_id = $1 and user_id = $2)
-           or exists (select 1 from role_assignment where company_id = $1 and user_id = $2) as ok`,
+           or exists (select 1 from role_assignment where company_id = $1 and user_id = $2)
+           or exists (select 1 from company_user_account where company_id = $1 and user_id = $2) as ok`,
       [admin.companyId, userId],
     )
   ).rows[0]?.ok;
@@ -180,13 +190,16 @@ export async function setAccountActive(tx: Queryable, admin: AccessGrant, userId
       `select exists (select 1 from user_employee_link l where l.company_id <> $1 and l.user_id = $2
                          and (l.effective_to is null or l.effective_to > hrms_business_date(l.company_id, now())))
            or exists (select 1 from role_assignment ra where ra.company_id <> $1 and ra.user_id = $2 and ra.state in ('PENDING', 'ACTIVE')
-                         and (ra.effective_to is null or ra.effective_to > now())) as ok`,
+                         and (ra.effective_to is null or ra.effective_to > now()))
+           or exists (select 1 from company_user_account c where c.company_id <> $1 and c.user_id = $2) as ok`,
       [admin.companyId, userId],
     )
   ).rows[0]?.ok;
   if (elsewhere) throw new HttpError(409, 'ACCOUNT_SPANS_COMPANIES', 'This account also serves another company, so one company cannot change it');
 
-  const updated = (await tx.query<{ version: number }>(`update user_account set active = $2, updated_by = $3 where id = $1 returning version`, [userId, active, admin.userId])).rows[0]!;
+  const updated = (await tx.query<{ version: number; account_key: string }>(`update user_account set active = $2, updated_by = $3 where id = $1 returning version, account_key`, [userId, active, admin.userId])).rows[0]!;
+  // The sign-in follows (accounts.ts): an inactive account cannot sign in at the provider either, and is signed out there.
+  await setSignInEnabled(tx, identity, userId, updated.account_key, active);
   const sessionsRevoked = active ? 0 : ((await tx.query(`update user_session set revoked_at = now() where user_id = $1 and revoked_at is null`, [userId])).rowCount ?? 0);
   await writeAudit(tx, {
     companyId: admin.companyId,

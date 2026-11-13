@@ -49,7 +49,7 @@ const effectText = (effect: 'ALLOW' | 'DENY' | null) => (effect === null ? 'not 
 
 function ProposeForm({ roles, onDone }: { roles: CatalogueRole[]; onDone: () => void }) {
   const [roleCode, setRoleCode] = useState('');
-  const [change, setChange] = useState<ChangeKind>('REMOVE');
+  const [change, setChange] = useState<ChangeKind | ''>('');
   const [permission, setPermission] = useState('');
   const [reason, setReason] = useState('');
   const role = roles.find((r) => r.code === roleCode);
@@ -83,16 +83,19 @@ function ProposeForm({ roles, onDone }: { roles: CatalogueRole[]; onDone: () => 
             ))}
         </select>
       </label>
+      {/* No change is chosen for the proposer (it used to start on Remove); the options are short, the chosen one explained below. */}
       <label>
         Change
-        <select value={change} onChange={(e) => setChange(e.target.value as ChangeKind)}>
-          {(['REMOVE', 'ALLOW', 'DENY'] as const).map((k) => (
+        <select value={change} onChange={(e) => setChange(e.target.value as ChangeKind | '')}>
+          <option value="">Choose…</option>
+          {(['ALLOW', 'REMOVE', 'DENY'] as const).map((k) => (
             <option key={k} value={k}>
-              {CHANGE_LABEL[k]}
+              {CHANGE_SHORT[k]}
             </option>
           ))}
         </select>
       </label>
+      {change && <p className="hint wide">{CHANGE_LABEL[change]}</p>}
       <label>
         Permission
         <input list="role-permission-keys" placeholder="resource.action.group" value={permission} onChange={(e) => setPermission(e.target.value)} required />
@@ -106,7 +109,7 @@ function ProposeForm({ roles, onDone }: { roles: CatalogueRole[]; onDone: () => 
         Reason
         <input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} required />
       </label>
-      <button type="submit" disabled={propose.isPending || !roleCode || !permission.trim() || !reason.trim()}>
+      <button type="submit" disabled={propose.isPending || !roleCode || !change || !permission.trim() || !reason.trim()}>
         Propose change
       </button>
       <ErrorNote error={propose.error} />
@@ -171,7 +174,7 @@ export function RolePermissionsPage() {
               <th>Role</th>
               <th>Permission</th>
               <th>Change</th>
-              <th>Now</th>
+              <th>Current setting</th>
               <th>Reason</th>
               <th>Asked by</th>
               <th />
@@ -207,7 +210,6 @@ export function RolePermissionsPage() {
               <th>Reason</th>
               <th>Asked by</th>
               <th>Decided by</th>
-              <th>Result</th>
             </tr>
           </thead>
           <tbody>
@@ -217,7 +219,9 @@ export function RolePermissionsPage() {
                 <td>{c.permission}</td>
                 <td>{CHANGE_SHORT[c.change]}</td>
                 <td>
+                  {/* The decision and what it left in force, in one place (a separate Result column repeated it). */}
                   <StateBadge state={c.state} />
+                  {c.resultingAccess && <div className="hint">{`Now ${effectText(c.resultingAccess.effectAfter)}; ${c.resultingAccess.allowlistEntriesEnded} assignment entries ended`}</div>}
                 </td>
                 <td>
                   {c.reason}
@@ -227,7 +231,6 @@ export function RolePermissionsPage() {
                 <td>
                   {c.decidedByAccountKey} <span className="hint">{formatDate(c.decidedAt)}</span>
                 </td>
-                <td>{c.resultingAccess ? `Now ${effectText(c.resultingAccess.effectAfter)}; ${c.resultingAccess.allowlistEntriesEnded} assignment entries ended` : '—'}</td>
               </tr>
             ))}
           </tbody>

@@ -280,7 +280,7 @@ function PolicySection() {
             {notice}
           </p>
         )}
-        {list.isPending && <p className="hint">Loading the settlement policy…</p>}
+        {list.isPending && <p className="hint loading">Loading the settlement policy…</p>}
         <LoadProblem error={list.error} forbidden="The selected role cannot view the settlement policy." />
         {data && data.items.length === 0 && <Empty>No settlement policy revision yet: until one is active, the calculation shows encashment, notice recovery and gratuity as not configured.</Empty>}
         {data && data.items.length > 0 && <PolicyTable items={data.items} onNotice={setNotice} />}
@@ -654,7 +654,7 @@ function PackSection() {
           {notice}
         </p>
       )}
-      {list.isPending && <p className="hint">Loading the statutory rule packs…</p>}
+      {list.isPending && <p className="hint loading">Loading the statutory rule packs…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view the statutory rule packs." />
       {data && codes.length === 0 && <Empty>No statutory rule pack is known.</Empty>}
       {codes.map((code) => {

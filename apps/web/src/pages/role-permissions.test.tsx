@@ -77,6 +77,8 @@ describe('role permissions', () => {
     page();
     await screen.findByRole('option', { name: 'Employee' });
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'EMPLOYEE' } });
+    // No change is preselected (it used to start on Remove): the proposer chooses one.
+    fireEvent.change(screen.getByLabelText('Change'), { target: { value: 'REMOVE' } });
     fireEvent.change(screen.getByLabelText('Permission'), { target: { value: 'employee.list.operational' } });
     fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Synthetic' } });
     fireEvent.click(screen.getByText('Propose change'));

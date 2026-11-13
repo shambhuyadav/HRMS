@@ -5,7 +5,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { localDate } from '../api';
+import { formatDate, localDate } from '../api';
 import { SALARY_SCREENS } from './salary';
 
 const session = vi.hoisted(() => ({ permissions: [] as string[] }));
@@ -121,7 +121,7 @@ describe('salary master list (FR-029, E08)', () => {
     const table = await screen.findByRole('table', { name: 'Salary master' });
     const first = listCalls(calls)[0]!;
     expect(new URL(first.url, 'http://x').searchParams.toString()).toBe(`page=1&pageSize=25&date=${localDate()}`);
-    expect(screen.getByText('Salaries on 2026-07-01 (2)')).toBeTruthy();
+    expect(screen.getByText('Salaries on 1 Jul 2026 (2)')).toBeTruthy();
     const headers = within(table).getAllByRole('columnheader').map((h) => h.textContent);
     expect(headers).toEqual(['Employee', 'Status', 'Grade', 'Effective from', 'Effective to', 'Annual CTC', 'Monthly gross']);
     expect(table.textContent).not.toMatch(/in-hand/i);
@@ -131,7 +131,7 @@ describe('salary master list (FR-029, E08)', () => {
     expect(within(one).getByText('No end date')).toBeTruthy();
     expect(within(one).getByText('Active (confirmed)')).toBeTruthy();
     const two = within(table).getByText('SYN-2').closest('tr')!;
-    expect(within(two).getByText('2026-07-15')).toBeTruthy();
+    expect(within(two).getByText('15 Jul 2026')).toBeTruthy();
     expect(within(two).getByText('Notice')).toBeTruthy();
     expect(within(two).getByText('—')).toBeTruthy();
     // No export or upload is offered without those grants.
@@ -197,7 +197,7 @@ describe('salary and annual salary exports (FR-029, FR-065)', () => {
     fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'SYN-1' } });
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'ACTIVE_CONFIRMED' } });
     fireEvent.click(screen.getByRole('button', { name: 'Show' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Export salaries for 2026-02' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Export salaries for Feb 2026' }));
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1));
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ reportCode: 'SALARY_MASTER', filters: { from: '2026-02-01', to: '2026-02-28', search: 'SYN-1', status: 'ACTIVE_CONFIRMED' } });
     const requested = await screen.findByRole('list', { name: 'Requested exports' });
@@ -219,7 +219,7 @@ describe('salary and annual salary exports (FR-029, FR-065)', () => {
     const calls = mockApi({ 'POST /v1/reports': () => [403, { error: 'FORBIDDEN', message: 'Not permitted' }] });
     renderScreen('/salary-master');
     expect(screen.getByText(/can export salaries but cannot view them/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: `Export salaries on ${localDate()}` }));
+    fireEvent.click(screen.getByRole('button', { name: `Export salaries on ${formatDate(localDate())}` }));
     expect(await screen.findByText('The selected role cannot export salaries.')).toBeTruthy();
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ reportCode: 'SALARY_MASTER', filters: { from: localDate(), to: localDate() } });
     expect(listCalls(calls)).toEqual([]);

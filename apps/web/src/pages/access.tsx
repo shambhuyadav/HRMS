@@ -118,7 +118,7 @@ function localDay(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return formatDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
 }
 
 function todayLocal(): string {
@@ -216,10 +216,10 @@ const byId = (items: OrgItem[] | undefined) => new Map((items ?? []).map((i): [s
 
 export function AccessAdminPage() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint">Loading…</p>;
+  if (!me) return <p className="hint loading">Loading…</p>;
   if (!can(READ_USERS)) {
     return (
-      <Section title="Access administration">
+      <Section title="User access">
         <NotPermitted>The selected role cannot administer user access. Switch to a role that holds user administration.</NotPermitted>
       </Section>
     );
@@ -319,7 +319,7 @@ function AccessAdministration({ accountKey }: { accountKey: string }) {
 
   return (
     <>
-      <h1>Access administration</h1>
+      <h1>User access</h1>
       <p className="hint">
         A role grant starts as a proposal and gives no access until an independent approver approves it; neither its requester nor its beneficiary can approve it. Rejected and
         revoked grants stay on record.
@@ -328,11 +328,14 @@ function AccessAdministration({ accountKey }: { accountKey: string }) {
       {can(APPROVE_GRANT) && <PendingApprovals view={view} onSelectUser={select} />}
 
       <Section title={`Users${usersData ? ` (${usersData.total})` : ''}`}>
-        <label className="inline">
-          Search users
-          <input type="search" value={search} maxLength={100} placeholder="Account, employee code or name" onChange={(e) => setSearch(e.target.value)} />
-        </label>
-        {users.isPending && <p className="hint">Loading users…</p>}
+        {/* A filter row: the label sits above its field, as everywhere else. */}
+        <div className="inline">
+          <label className="inline">
+            Search users
+            <input type="search" value={search} maxLength={100} placeholder="Account or employee" onChange={(e) => setSearch(e.target.value)} />
+          </label>
+        </div>
+        {users.isPending && <p className="hint loading">Loading users…</p>}
         {isForbidden(users.error) ? <NotPermitted>The selected role cannot list users for access administration.</NotPermitted> : <ErrorNote error={users.error} />}
         {usersData && !users.isPlaceholderData && usersData.total === 0 && (
           <Empty>{query ? `No users match “${query}”.` : 'No users in your administrative scope.'}</Empty>
@@ -471,7 +474,7 @@ function UserAssignments({
           )}
         </dl>
       )}
-      {grants.isPending && <p className="hint">Loading assignments…</p>}
+      {grants.isPending && <p className="hint loading">Loading assignments…</p>}
       {isForbidden(grants.error) ? <NotPermitted>The selected role cannot read role assignments.</NotPermitted> : <ErrorNote error={grants.error} />}
       {items && items.length === 0 && <Empty>No role assignments for this user yet.</Empty>}
       {items && items.length > 0 && <GrantTable grants={items} view={view} />}
@@ -488,7 +491,7 @@ function PendingApprovals({ view, onSelectUser }: { view: GrantView; onSelectUse
   const items = shown(pending)?.items;
   return (
     <Section title={`Pending approvals${items ? ` (${items.length})` : ''}`}>
-      {pending.isPending && <p className="hint">Loading pending grants…</p>}
+      {pending.isPending && <p className="hint loading">Loading pending grants…</p>}
       {isForbidden(pending.error) ? <NotPermitted>The selected role cannot read role assignments.</NotPermitted> : <ErrorNote error={pending.error} />}
       {outcome && <OutcomeNote outcome={outcome} />}
       {items && items.length === 0 && <Empty>No grants are waiting for approval.</Empty>}
@@ -786,7 +789,7 @@ function ProposeGrant({
   if (roles.isPending) {
     return (
       <Section title={title}>
-        <p className="hint">Loading roles…</p>
+        <p className="hint loading">Loading roles…</p>
       </Section>
     );
   }

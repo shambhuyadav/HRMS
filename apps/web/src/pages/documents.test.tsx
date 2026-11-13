@@ -224,7 +224,7 @@ describe('company policies: the employee read view (FR-010, DF02)', () => {
       renderAt('/policies', [READ]);
       const table = await screen.findByRole('table', { name: 'Company policies' });
       expect(within(rowOf(table, 'Synthetic leave handbook')).getByText(/Version 1/)).toBeTruthy();
-      expect(rowOf(table, 'Synthetic leave handbook').textContent).toContain('2027-10-31');
+      expect(rowOf(table, 'Synthetic leave handbook').textContent).toContain('31 Oct 2027');
       // An expired version stays listed and says so in words.
       expect(within(rowOf(table, 'Synthetic travel policy')).getByText('expired')).toBeTruthy();
       expect(rowOf(table, 'Synthetic travel policy').textContent).toContain('Version 2');
@@ -262,7 +262,7 @@ describe('company policies: the employee read view (FR-010, DF02)', () => {
     });
     renderAt('/policies', [READ]);
     fireEvent.click(await screen.findByRole('button', { name: 'Download Synthetic leave handbook' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('has not been released by the malware scan yet');
+    expect((await screen.findByRole('alert')).textContent).toContain('This version is still being checked, so it cannot be opened yet.');
     cleanup();
 
     serve({ 'GET /v1/company-policies': [403, { error: 'FORBIDDEN', message: 'Not permitted' }] });
@@ -284,7 +284,7 @@ describe('company policies: the employee read view (FR-010, DF02)', () => {
       const table = await screen.findByRole('table', { name: 'Versions' });
       expect(within(table).getAllByRole('row')).toHaveLength(4);
       const third = rowOf(table, 'travel-v3.pdf');
-      expect(within(third).getByText('quarantined by the malware scan')).toBeTruthy();
+      expect(within(third).getByText('failed the safety check')).toBeTruthy();
       expect(within(third).getByText('cannot be opened')).toBeTruthy();
       expect(within(third).queryByRole('button')).toBeNull();
       const second = rowOf(table, 'travel-v2.pdf');
@@ -592,19 +592,19 @@ describe('bulk document mapping (FR-010, DF09, I-13, FR-106)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Stage 3 files' }));
     const results = await screen.findByRole('list', { name: 'Staging results' });
     const lines = within(results).getAllByRole('listitem').map((li) => li.textContent);
-    expect(lines[0]).toBe('a.pdf: Staged and released by the malware scan; it can be mapped.');
-    expect(lines[1]).toBe('b.pdf: Staged, but quarantined by the malware scan: it can never be mapped.');
+    expect(lines[0]).toBe('a.pdf: Staged and checked; it can be mapped.');
+    expect(lines[1]).toBe('b.pdf: Staged, but it failed the safety check, so it can never be mapped.');
     expect(lines[2]).toContain('c.pdf: You already staged a file with this name that is waiting to be mapped.');
     expect(screen.getByText('2 files staged, 1 file not staged.')).toBeTruthy();
     expect(callsTo('POST', '/v1/documents/bulk-uploads').map((c) => c.body!.fileName)).toEqual(['a.pdf', 'b.pdf', 'c.pdf']);
     expect(callsTo('POST', '/v1/documents/bulk-uploads')[0]!.body).toEqual({ fileName: 'a.pdf', contentBase64: btoa(PDF_TEXT) });
 
     const waiting = await screen.findByRole('table', { name: 'Files waiting to be mapped' });
-    expect(within(rowOf(waiting, 'a.pdf')).getByText('released')).toBeTruthy();
-    expect(within(rowOf(waiting, 'b.pdf')).getByText('quarantined by the malware scan')).toBeTruthy();
+    expect(within(rowOf(waiting, 'a.pdf')).getByText('passed')).toBeTruthy();
+    expect(within(rowOf(waiting, 'b.pdf')).getByText('failed the safety check')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Mapped' }));
     const mapped = await screen.findByRole('table', { name: 'Mapped files' });
-    expect(rowOf(mapped, 'old.pdf').textContent).toContain('2026-10-28');
+    expect(rowOf(mapped, 'old.pdf').textContent).toContain('28 Oct 2026');
   });
 
   it('downloads the published DOCUMENT_MAPPING_V1 template (DF09) beside the column list', async () => {
@@ -665,7 +665,7 @@ describe('bulk document mapping (FR-010, DF09, I-13, FR-106)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Discarded' }));
     const discarded = await screen.findByRole('table', { name: 'Discarded files' });
-    expect(rowOf(discarded, 'flagged.pdf').textContent).toContain('2026-10-29');
+    expect(rowOf(discarded, 'flagged.pdf').textContent).toContain('29 Oct 2026');
     expect(within(discarded).queryByRole('button', { name: /Discard/ })).toBeNull();
   });
 
@@ -712,7 +712,7 @@ describe('bulk document mapping (FR-010, DF09, I-13, FR-106)', () => {
     const list = await screen.findByRole('table', { name: 'Your mapping batches' });
     expect(callsTo('GET', '/v1/documents/mapping-imports')[0]!.search).toBe('?page=1&pageSize=25');
     expect(rowOf(list, 'held.csv').textContent).toContain('waiting for the scan');
-    expect(rowOf(list, 'held.csv').textContent).toContain('waiting for the malware scan');
+    expect(rowOf(list, 'held.csv').textContent).toContain('being checked');
     expect(rowOf(list, 'done.csv').textContent).toContain('committed');
     expect(rowOf(list, 'done.csv').textContent).toContain('3 mapped');
     expect(screen.queryByText(/Page 1 of/)).toBeNull();

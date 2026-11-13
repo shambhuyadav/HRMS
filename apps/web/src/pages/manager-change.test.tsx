@@ -79,7 +79,7 @@ describe('change manager screen (CL-020; FR-003, FR-009)', () => {
     fireEvent.change(field('Reason'), { target: { value: '  Team restructure  ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Change manager' }));
     expect(await screen.findByRole('status')).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toBe('2 people now report to Nikhil New from 2026-11-11.');
+    expect(screen.getByRole('status').textContent).toBe('2 people now report to Nikhil New from 11 Nov 2026.');
     const post = calls.find((c) => c.method === 'POST')!;
     expect(post.url).toBe('/v1/employees/manager-changes');
     expect(post.body).toEqual({ employeeIds: ['e1', 'e2'], managerEmployeeId: 'm2', effectiveFrom: '2026-11-11', reason: 'Team restructure' });

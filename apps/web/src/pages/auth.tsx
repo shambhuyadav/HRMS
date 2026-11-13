@@ -59,7 +59,7 @@ export function SignInPage() {
 
 function SignInContent() {
   const config = useQuery({ queryKey: ['sign-in-config'], queryFn: () => api<SignInConfig>('/sign-in/config'), retry: false, staleTime: Infinity });
-  if (config.isPending) return <main className="narrow"><p className="hint">Loading…</p></main>;
+  if (config.isPending) return <main className="narrow"><p className="hint loading">Loading…</p></main>;
   const c = config.data;
   if (c?.mode === 'OIDC') return window.location.pathname === CALLBACK_PATH ? <OidcCallback config={c} /> : <OidcSignIn config={c} />;
   if (c?.mode === 'NONE') {

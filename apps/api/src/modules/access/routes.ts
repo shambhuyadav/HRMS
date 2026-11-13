@@ -13,6 +13,8 @@ import {
   type RolePermissionChangeQuery,
   type RolePermissionProposal,
 } from './role-permissions.js';
+import type { IdentityAdmin } from '../../auth/identity-admin.js';
+import { type AccountChangeInput, createAccount, deleteAccount, getAccount, type NewAccountInput, resetPassword, updateAccount } from './accounts.js';
 import { type AccountStateInput, endUserLink, type EndUserLinkInput, linkUser, listUserLinks, setAccountActive, type UserLinkInput, type UserLinkQuery } from './user-admin.js';
 
 const uuid = { type: 'string', format: 'uuid' } as const;
@@ -92,8 +94,30 @@ const linkListQuery = {
   },
 } as const;
 
-export async function accessRoutes(app: FastifyInstance, opts: { db: Database }): Promise<void> {
+const personName = { type: 'string', minLength: 1, maxLength: 100 } as const;
+const newAccountSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['email', 'firstName', 'lastName'],
+  properties: { email: { type: 'string', minLength: 3, maxLength: 200 }, firstName: personName, lastName: personName },
+} as const;
+const accountChangeSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['expectedVersion'],
+  properties: { expectedVersion: { type: 'integer', minimum: 1 }, email: { type: 'string', minLength: 3, maxLength: 200 }, firstName: personName, lastName: personName },
+} as const;
+const resetSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['reason'],
+  properties: { reason: { type: 'string', minLength: 1, maxLength: 500 } },
+} as const;
+
+export async function accessRoutes(app: FastifyInstance, opts: { db: Database; identity?: IdentityAdmin | null }): Promise<void> {
   const { db } = opts;
+  // The sign-in provider's user administration (auth/identity-admin.ts); none on the development server.
+  const identity = opts.identity ?? null;
 
   app.get('/me/assignments', { config: { assignmentOptional: true } }, async (request) => {
     const actor = actorOf(request);
@@ -264,12 +288,45 @@ export async function accessRoutes(app: FastifyInstance, opts: { db: Database })
   app.post('/access/users/:id/deactivate', { schema: { params: idParams, body: reasonSchema } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'deactivate_user', ['operational'], { requireAll: true, recordKey: id });
-    return withTransaction(db, (tx) => setAccountActive(tx, grant, id, false, request.body as AccountStateInput));
+    return withTransaction(db, (tx) => setAccountActive(tx, grant, id, false, request.body as AccountStateInput, identity));
   });
 
   app.post('/access/users/:id/reactivate', { schema: { params: idParams, body: reasonSchema } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'deactivate_user', ['operational'], { requireAll: true, recordKey: id });
-    return withTransaction(db, (tx) => setAccountActive(tx, grant, id, true, request.body as AccountStateInput));
+    return withTransaction(db, (tx) => setAccountActive(tx, grant, id, true, request.body as AccountStateInput, identity));
+  });
+
+  // FR-001, the source system's User Master (0311; owner request of 13 Nov 2026): an account with its sign-in, created, changed,
+  // given a new temporary password, or deleted when never used (accounts.ts).
+  app.post('/access/accounts', { schema: { body: newAccountSchema } }, async (request, reply) => {
+    const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true });
+    const created = await withTransaction(db, (tx) => createAccount(tx, grant, identity, request.body as NewAccountInput));
+    reply.status(201);
+    return created;
+  });
+
+  app.get('/access/accounts/:id', { schema: { params: idParams } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
+    return getAccount(db, grant, identity, id);
+  });
+
+  app.patch('/access/accounts/:id', { schema: { params: idParams, body: accountChangeSchema } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => updateAccount(tx, grant, identity, id, request.body as AccountChangeInput));
+  });
+
+  app.post('/access/accounts/:id/reset-password', { schema: { params: idParams, body: resetSchema } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => resetPassword(tx, grant, identity, id, request.body as { reason: string }));
+  });
+
+  app.post('/access/accounts/:id/delete', { schema: { params: idParams, body: reasonSchema } }, async (request) => {
+    const { id } = request.params as { id: string };
+    const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
+    return withTransaction(db, (tx) => deleteAccount(tx, grant, identity, id, request.body as { expectedVersion: number; reason: string }));
   });
 }

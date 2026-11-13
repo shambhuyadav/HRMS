@@ -75,7 +75,7 @@ describe('correcting a returned request (web-4)', () => {
       'PUT /v1/work-requests/outdoor_duty/wr-1': { requestId: 'wr-1', revision: 2, state: 'SUBMITTED' },
     });
     renderPage(<WorkRequestsPage />);
-    expect(await within(await screen.findByRole('table')).findByText('2026-11-04 22:00–06:00 (ends the next day)')).toBeTruthy();
+    expect(await within(await screen.findByRole('table')).findByText('4 Nov 2026 22:00–06:00 (ends the next day)')).toBeTruthy();
     fireEvent.click(within(own()).getByText('Correct and resubmit'));
     const form = within(own()).getByText('Resubmit').closest('form')!;
     expect(within(form).getByText(/ends on the next day/)).toBeTruthy();
@@ -145,7 +145,7 @@ describe('raising a rejected request again (DF03, I-66)', () => {
     renderPage(<WorkRequestsPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Raise again the rejected Work on holiday request' }));
     const form = within(screen.getByRole('heading', { name: 'New outdoor duty or holiday work request' }).closest('section')!);
-    expect((form.getByLabelText('Kind') as HTMLSelectElement).value).toBe('holiday_work');
+    expect((form.getByLabelText('Type') as HTMLSelectElement).value).toBe('holiday_work');
     expect((form.getByLabelText('Purpose') as HTMLInputElement).value).toBe('Synthetic rejected purpose');
     fireEvent.click(form.getByText('Submit request'));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/v1/work-requests/holiday_work')).toBe(true));
@@ -154,7 +154,7 @@ describe('raising a rejected request again (DF03, I-66)', () => {
     await waitFor(() => expect((form.getByLabelText('Purpose') as HTMLInputElement).value).toBe(''));
     fireEvent.click(screen.getByRole('button', { name: 'Raise again the rejected Work on holiday request' }));
     expect(form.getByText('Make it an unlinked request')).toBeTruthy();
-    fireEvent.change(form.getByLabelText('Kind'), { target: { value: 'outdoor_duty' } });
+    fireEvent.change(form.getByLabelText('Type'), { target: { value: 'outdoor_duty' } });
     expect(form.queryByText('Make it an unlinked request')).toBeNull();
   });
 
@@ -251,8 +251,18 @@ describe('"Requests in my scope" starts at the local month and day', () => {
 });
 
 describe('"Requests in my scope" stays current (web-10)', () => {
+  it('is not shown to an own-scope role, where it would only repeat "My work requests"', async () => {
+    session.permissions = SELF;
+    const calls = mockApi({ 'GET /v1/employees/emp-1/work-requests': { items: [request({})] }, 'GET /v1/work-requests/outdoor_duty?': { items: [request({})] } });
+    renderPage(<WorkRequestsPage />);
+    expect(await within(own()).findByText('Synthetic site visit')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Requests in my scope' })).toBeNull();
+    expect(calls.some((c) => c.url.startsWith('/v1/work-requests/outdoor_duty?'))).toBe(false);
+  });
+
   it('is refreshed after submitting and after withdrawing', async () => {
     session.permissions = SELF;
+    session.scopeKind = 'COMPANY';
     const calls = mockApi({
       'GET /v1/employees/emp-1/work-requests': { items: [request({ state: 'SUBMITTED' })] },
       'GET /v1/work-requests/outdoor_duty?': { items: [] },

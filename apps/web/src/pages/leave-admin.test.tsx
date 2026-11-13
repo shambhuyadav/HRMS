@@ -96,19 +96,33 @@ describe('leave policies (FR-024, E06)', () => {
     expect(screen.getByText(/One revision has/).textContent).toContain('so it applies to nobody');
   });
 
+  it('names the employment types an eligibility code covers, with commas, and the types and statuses by name', async () => {
+    session.permissions = [P];
+    mockApi({
+      'GET /v1/leave/types': [200, types],
+      'GET /v1/leave/policies': [200, { items: [revision({ eligibility: 'PERMANENT_FIXED_TERM', mappings: [{ id: 'm-1', employmentType: 'PERMANENT', grade: null, location: null, priority: 1 }, { id: 'm-2', employmentType: 'FIXED_TERM', grade: null, location: null, priority: 1 }] })] }],
+      'GET /v1/leave/policy-options': [200, OPTIONS],
+    });
+    open('/leave/policies');
+    expect(await screen.findByText('(eligible: permanent, fixed term)')).toBeTruthy();
+    expect(screen.getAllByText('Active').some((el) => el.className.includes('badge'))).toBe(true);
+    expect(screen.getByRole('button', { name: 'Deactivate ANNUAL' }).textContent).toBe('Deactivate');
+    expect(screen.getAllByRole('option', { name: 'Annual' }).length).toBeGreaterThan(0);
+  });
+
   it('offers maintenance by duty: no activation without the activation duty, no change without the manage duty', async () => {
     session.permissions = [P];
     mockApi({ 'GET /v1/leave/types': [200, types], 'GET /v1/leave/policies': [200, { items: [revision({ state: 'DRAFT' })] }] });
     open('/leave/policies');
-    await screen.findByText('Edit ANNUAL revision 1');
-    expect(screen.queryByText('Activate ANNUAL revision 1')).toBeNull();
+    expect((await screen.findByRole('button', { name: 'Edit ANNUAL revision 1' })).textContent).toBe('Edit');
+    expect(screen.queryByRole('button', { name: 'Activate ANNUAL revision 1' })).toBeNull();
     expect(screen.getByText('Add leave type')).toBeTruthy();
     cleanup();
 
     session.permissions = [A];
     open('/leave/policies');
-    await screen.findByText('Activate ANNUAL revision 1');
-    expect(screen.queryByText('Edit ANNUAL revision 1')).toBeNull();
+    expect((await screen.findByRole('button', { name: 'Activate ANNUAL revision 1' })).textContent).toBe('Activate');
+    expect(screen.queryByRole('button', { name: 'Edit ANNUAL revision 1' })).toBeNull();
     expect(screen.queryByText('Add leave type')).toBeNull();
     expect(screen.queryByText('Create draft')).toBeNull();
   });
@@ -151,12 +165,12 @@ describe('leave policies (FR-024, E06)', () => {
       'POST /v1/leave/policies/p-1/mappings': (c) => (c.url.endsWith('/remove') ? [200, { policyVersion: 5 }] : [201, { id: 'm-2', policyVersion: 5 }]),
     });
     open('/leave/policies');
-    fireEvent.click(await screen.findByText('Map ANNUAL revision 1'));
-    await screen.findByRole('option', { name: 'G1' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Map ANNUAL revision 1' }));
+    await screen.findByRole('option', { name: /\(G1\)$/ });
     fireEvent.change(screen.getByLabelText('Grade'), { target: { value: 'g-1' } });
     fireEvent.click(screen.getByText('Add mapping'));
     await waitFor(() => expect(calls.filter((c) => c.url === '/v1/leave/policies/p-1/mappings').map((c) => c.body)).toEqual([{ expectedVersion: 4, gradeId: 'g-1' }]));
-    fireEvent.click(await screen.findByText('Remove employment type PERMANENT'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove employment type PERMANENT' }));
     await waitFor(() => expect(calls.filter((c) => c.url === '/v1/leave/policies/p-1/mappings/m-1/remove').map((c) => c.body)).toEqual([{ expectedVersion: 4 }]));
   });
 
@@ -169,7 +183,7 @@ describe('leave policies (FR-024, E06)', () => {
       'POST /v1/leave/policies/p-1/activate': () => (++tries === 1 ? [409, { error: 'POLICY_OVERLAP', message: 'overlap', details: { revisions: [{ policyId: 'p-0', revision: 1 }] } }] : [200, { id: 'p-1', state: 'ACTIVE', closed: ['p-0'] }]),
     });
     open('/leave/policies');
-    fireEvent.click(await screen.findByText('Activate ANNUAL revision 2'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Activate ANNUAL revision 2' }));
     fireEvent.click(screen.getByText('Confirm activation'));
     expect((await screen.findByRole('alert')).textContent).toContain('ties with revision 1');
     fireEvent.click(screen.getByLabelText(/End an earlier overlapping revision/));
@@ -181,7 +195,7 @@ describe('leave policies (FR-024, E06)', () => {
     session.permissions = [A];
     const calls = mockApi({ 'GET /v1/leave/types': [200, types], 'GET /v1/leave/policies': [200, { items: [revision({ version: 7 })] }], 'POST /v1/leave/policies/p-1/retire': [200, { id: 'p-1', state: 'RETIRED', effectiveTo: '2027-04-01' }] });
     open('/leave/policies');
-    fireEvent.click(await screen.findByText('Retire ANNUAL revision 1'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Retire ANNUAL revision 1' }));
     fireEvent.change(screen.getByLabelText('No longer applies from'), { target: { value: '2027-04-01' } });
     fireEvent.change(screen.getByLabelText('Reason for retiring'), { target: { value: 'Replaced (synthetic)' } });
     fireEvent.click(screen.getByText('Confirm retirement'));
@@ -227,6 +241,7 @@ describe('before accrual (FR-024 acceptance)', () => {
     });
     open('/leave/before-accrual');
     expect(calls).toHaveLength(0); // nothing is asked for before a month is chosen
+    expect(screen.getByText(/Choose an accrual month/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Accrual month'), { target: { value: '2026-02' } });
     expect(await screen.findByText('ANNUAL: no policy applies, so the run credits nothing for this type')).toBeTruthy();
     expect(screen.getByText('SICK: two policies tie, so the run stops on this employee')).toBeTruthy();
@@ -277,7 +292,7 @@ describe('leave year of a revision (FR-024; I-78 item 3)', () => {
     open('/leave/policies');
     expect(await screen.findByText(/leave year from April/)).toBeTruthy();
     expect(screen.getByText(/no leave year set, so nothing expires/)).toBeTruthy();
-    fireEvent.click(screen.getByText('Edit ANNUAL revision 1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit ANNUAL revision 1' }));
     const select = screen.getAllByLabelText('Leave year starts in').find((s) => (s as HTMLSelectElement).value === '4') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: '1' } });
     fireEvent.click(screen.getByText('Save draft'));
@@ -312,9 +327,12 @@ describe('employee leave ledger (FR-025)', () => {
       ],
     });
     open('/leave/ledger');
+    // Until there is something to show, the page says what to choose.
+    expect(screen.getByText('Choose an employee and a period to see their leave ledger.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Find an employee (code or name)'), { target: { value: 'syn' } });
-    await screen.findByRole('option', { name: 'SYN1 Synthetic One' });
+    await screen.findByRole('option', { name: 'Synthetic One (SYN1)' });
     fireEvent.change(screen.getByLabelText('Employee'), { target: { value: 'e-1' } });
+    expect(screen.getByText('Choose the period (From and To) to see the leave ledger.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-02-01' } });
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-03-31' } });
     const casual = await screen.findByRole('region', { name: 'CASUAL ledger' });

@@ -6,6 +6,7 @@
 // opens released ones through the request's evidence route (FR-027 with FR-106, I-22).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setSession } from '../api';
 import { ExpensesPage, LeavePage, PaymentsPage, ReportsPage, TasksPage } from './work';
@@ -39,7 +40,12 @@ function mockApi(routes: Record<string, Route>) {
   );
   return calls;
 }
-const renderPage = (ui: JSX.Element) => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>);
+const renderPage = (ui: JSX.Element) =>
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>
+    </MemoryRouter>,
+  );
 
 afterEach(() => {
   cleanup();
@@ -122,7 +128,7 @@ describe('expense claim submission (web-2)', () => {
     });
     renderPage(<ExpensesPage />);
     await fillClaim();
-    fireEvent.change(screen.getByLabelText('Paid in another currency (code, if not INR)'), { target: { value: 'eur' } });
+    fireEvent.change(screen.getByLabelText('Currency paid in'), { target: { value: 'EUR' } });
     expect(screen.getByLabelText('Amount (EUR)')).toBeTruthy();
     fireEvent.click(screen.getByText('Submit claim'));
     expect(await screen.findByText('Claim submitted for review.')).toBeTruthy();
@@ -439,6 +445,9 @@ describe('own leave records and the role scope (web-9)', () => {
     const calls = mockApi(LEAVE_ROUTES);
     renderPage(<LeavePage />);
     expect(await screen.findByText(/not in this role’s scope/)).toBeTruthy();
+    // Where to go next are real controls, not bold text.
+    expect(screen.getByRole('button', { name: 'Switch role' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Decisions' }).getAttribute('href')).toBe('/tasks');
     expect(calls.some((c) => c.url.startsWith('/v1/employees/emp-1/'))).toBe(false);
     expect(screen.queryByRole('alert')).toBeNull();
   });
@@ -528,14 +537,14 @@ describe('decision queues say what is decided (web-5)', () => {
     renderPage(<TasksPage />);
     await screen.findByRole('heading', { name: /Leave requests \(2\)/ });
     const leave = queue(/Leave requests/);
-    expect(within(leave).getByText('ANNUAL · 2026-11-02 – 2026-11-03 · 2.00 days')).toBeTruthy();
-    expect(within(leave).getByText('SICK · 2026-10-10 (half day) · 0.50 days')).toBeTruthy();
+    expect(within(leave).getByText('ANNUAL · 2 Nov 2026 – 3 Nov 2026 · 2.00 days')).toBeTruthy();
+    expect(within(leave).getByText('SICK · 10 Oct 2026 (half day) · 0.50 days')).toBeTruthy();
     expect(within(leave).getByText('cancel approved leave')).toBeTruthy();
     await screen.findByRole('heading', { name: /Outdoor duty and holiday work \(2\)/ });
     const work = queue(/Outdoor duty and holiday work/);
-    expect(within(work).getByText('Outdoor duty · 2026-11-04 22:00–06:00 (ends the next day)')).toBeTruthy();
+    expect(within(work).getByText('Outdoor duty · 4 Nov 2026 22:00–06:00 (ends the next day)')).toBeTruthy();
     expect(within(work).getByText('Synthetic night audit')).toBeTruthy();
-    expect(within(work).getByText('Work on holiday · 2026-11-08')).toBeTruthy();
+    expect(within(work).getByText('Work on holiday · 8 Nov 2026')).toBeTruthy();
     expect(within(work).getByText('Synthetic stock count')).toBeTruthy();
   });
 
@@ -581,7 +590,7 @@ describe('decision queues say what is decided (web-5)', () => {
     renderPage(<TasksPage />);
     await screen.findByRole('heading', { name: /Attendance corrections \(1\)/ });
     const section = queue(/Attendance corrections/);
-    expect(within(section).getByText('2026-10-20: absent → present')).toBeTruthy();
+    expect(within(section).getByText('20 Oct 2026: absent → present')).toBeTruthy();
     expect(within(section).getByText('Badge reader fault')).toBeTruthy();
     expect(within(section).queryByText('Return')).toBeNull();
     fireEvent.change(within(section).getByLabelText('Decision reason'), { target: { value: 'Synthetic badge log shows no entry' } });
@@ -757,8 +766,8 @@ describe('instants are shown as the local calendar day (web-12)', () => {
     renderPage(<TasksPage />);
     await screen.findByRole('heading', { name: /Leave requests \(2\)/ });
     const leave = queue(/Leave requests/);
-    expect(within(leave).getByText('SYN-1 · assigned 2026-10-25')).toBeTruthy();
-    expect(within(leave).getByText('ANNUAL · 2026-11-02 – 2026-11-03 · 2.00 days')).toBeTruthy();
+    expect(within(leave).getByText('SYN-1 · assigned 25 Oct 2026')).toBeTruthy();
+    expect(within(leave).getByText('ANNUAL · 2 Nov 2026 – 3 Nov 2026 · 2.00 days')).toBeTruthy();
   });
 });
 
@@ -921,7 +930,7 @@ describe('own claims: correcting and withdrawing (FR-074, BR-017, DF03)', () => 
     });
     renderPage(<ExpensesPage />);
     fireEvent.click(await screen.findByText('Correct'));
-    expect(await screen.findByText('A receipt on this claim failed the malware scan and was removed; attach another.')).toBeTruthy();
+    expect(await screen.findByText('A receipt on this claim failed the safety check and was removed; attach another.')).toBeTruthy();
     fireEvent.click(screen.getByText('Submit claim'));
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
     expect((calls.find((c) => c.method === 'PUT')!.body!.lines as Record<string, unknown>[])[0]).not.toHaveProperty('receipt');

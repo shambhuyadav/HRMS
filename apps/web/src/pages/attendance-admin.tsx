@@ -12,7 +12,7 @@
 // The server re-checks every duty and rule; this page only offers what the role can do.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
-import { api, ApiError, download, fileToBase64, idempotencyKey, pinSession } from '../api';
+import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey, pinSession } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
@@ -379,8 +379,10 @@ const overtimeText = (p: AttendancePolicy) =>
       ? `overtime candidates: ${OVERTIME_BASIS_TEXT[p.overtimeBasis] ?? p.overtimeBasis}, from ${p.overtimeMinimumMinutes} minutes, rounded down to ${p.overtimeRoundingMinutes}-minute units`
       : 'overtime on, its rules not set (cannot be activated)';
 
-const mappingText = (m: Mapping) => (m.grade || m.location ? [m.grade && `grade ${m.grade}`, m.location && `location ${m.location}`].filter(Boolean).join(', ') : 'the whole company');
-const periodText = (p: AttendancePolicy) => (p.effectiveTo ? `from ${p.effectiveFrom}, until before ${p.effectiveTo}` : `from ${p.effectiveFrom}`);
+/** A mapping in words; a location by its name where the page knows it (an inactive one shows its code). */
+const mappingText = (m: Mapping, locationName: (code: string) => string = (code) => code) =>
+  m.grade || m.location ? [m.grade && `grade ${m.grade}`, m.location && `location ${locationName(m.location)}`].filter(Boolean).join(', ') : 'the whole company';
+const periodText = (p: AttendancePolicy) => (p.effectiveTo ? `from ${formatDate(p.effectiveFrom)}, until before ${formatDate(p.effectiveTo)}` : `from ${formatDate(p.effectiveFrom)}`);
 const nameOf = (p: AttendancePolicy) => `${p.code} revision ${p.revision}`;
 
 /** Refusals of a policy change in plain words; any other is shown as the server sent it. */
@@ -512,7 +514,7 @@ function AddMapping({ policy, onDone }: { policy: AttendancePolicy; onDone: () =
         <option value="">Any</option>
         {items?.map((o) => (
           <option key={o.id} value={o.id}>
-            {o.code}
+            {key === 'gradeId' ? `${o.name} (${o.code})` : o.name}
           </option>
         ))}
       </select>
@@ -561,7 +563,6 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     if (err instanceof ApiError && err.code === 'STALE_VERSION') onChanged();
   };
   const edit = useMutation({ mutationFn: () => api(`/v1/attendance/policies/${policy.id}`, { method: 'PATCH', body: { expectedVersion: policy.version, ...draftBody(values) } }), onSuccess: done, onError: refreshOnError });
-  const remove = useMutation({ mutationFn: (mappingId: string) => api(`/v1/attendance/policies/${policy.id}/mappings/${mappingId}/remove`, { body: { expectedVersion: policy.version } }), onSuccess: onChanged, onError: refreshOnError });
   const activate = useMutation({ mutationFn: () => api(`/v1/attendance/policies/${policy.id}/activate`, { body: { expectedVersion: policy.version } }), onSuccess: done, onError: refreshOnError });
   const retireIt = useMutation({ mutationFn: () => api(`/v1/attendance/policies/${policy.id}/retire`, { body: { expectedVersion: policy.version, effectiveTo: retire.effectiveTo, reason: retire.reason.trim() } }), onSuccess: done, onError: refreshOnError });
   const name = nameOf(policy);
@@ -570,30 +571,25 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
     <>
       {policy.state === 'DRAFT' && canManage && (
         <>
-          <button type="button" className="link" onClick={() => toggle('edit')}>
-            Edit {name}
+          <button type="button" className="link" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => toggle('edit')}>
+            Edit
           </button>{' '}
-          <button type="button" className="link" onClick={() => toggle('map')}>
-            Map {name}
+          <button type="button" className="link" aria-label={`Map ${name}`} aria-expanded={open === 'map'} onClick={() => toggle('map')}>
+            Map
           </button>{' '}
-          {policy.mappings.map((m) => (
-            <button key={m.id} type="button" className="link" disabled={remove.isPending} onClick={() => remove.mutate(m.id)}>
-              Remove {mappingText(m)}
-            </button>
-          ))}
         </>
       )}
       {policy.state === 'DRAFT' && canActivate && (
-        <button type="button" className="link" disabled={activate.isPending} onClick={() => activate.mutate()}>
-          Activate {name}
+        <button type="button" className="link" aria-label={`Activate ${name}`} disabled={activate.isPending} onClick={() => activate.mutate()}>
+          Activate
         </button>
       )}
       {policy.state === 'ACTIVE' && canActivate && (
-        <button type="button" className="link" onClick={() => toggle('retire')}>
-          Retire {name}
+        <button type="button" className="link danger" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => toggle('retire')}>
+          Retire
         </button>
       )}
-      <PolicyRefusal error={remove.error ?? activate.error} />
+      <PolicyRefusal error={activate.error} />
       {open === 'edit' && (
         <form
           className="grid-form"
@@ -638,12 +634,47 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
   );
 }
 
+/** A revision's mappings in words; on a draft its maintainer can take one out from beside it. */
+function MappingList({ policy, locationName, canRemove, onChanged }: { policy: AttendancePolicy; locationName: (code: string) => string; canRemove: boolean; onChanged: () => void }) {
+  const remove = useMutation({
+    mutationFn: (mappingId: string) => api(`/v1/attendance/policies/${policy.id}/mappings/${mappingId}/remove`, { body: { expectedVersion: policy.version } }),
+    onSuccess: onChanged,
+    onError: (err: unknown) => {
+      if (err instanceof ApiError && err.code === 'STALE_VERSION') onChanged();
+    },
+  });
+  if (policy.mappings.length === 0) return null;
+  return (
+    <>
+      <ul>
+        {policy.mappings.map((m) => (
+          <li key={m.id}>
+            {mappingText(m, locationName)}
+            {canRemove && (
+              <>
+                {' '}
+                <button type="button" className="link" aria-label={`Remove ${mappingText(m)}`} disabled={remove.isPending} onClick={() => remove.mutate(m.id)}>
+                  Remove
+                </button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+      <PolicyRefusal error={remove.error} />
+    </>
+  );
+}
+
 export function AttendancePoliciesPage() {
   const { can } = useSession();
   const qc = useQueryClient();
   const canManage = can(MANAGE);
   const canActivate = can(ACTIVATE);
   const revisions = useQuery({ queryKey: ['attendance-policies'], queryFn: () => api<{ items: AttendancePolicy[] }>('/v1/attendance/policies') });
+  // Mappings carry codes; the form's choices give the locations' names.
+  const options = useQuery({ queryKey: ['attendance-policy-options'], enabled: canManage || canActivate, queryFn: () => api<{ grades: Option[]; locations: Option[] }>('/v1/attendance/policy-options') });
+  const locationName = (code: string) => options.data?.locations.find((l) => l.code === code)?.name ?? code;
   const refresh = () => void qc.invalidateQueries({ queryKey: ['attendance-policies'] });
   const items = revisions.data?.items ?? [];
   return (
@@ -675,13 +706,7 @@ export function AttendancePoliciesPage() {
                     {`Grace ${p.graceMinutes} minutes; present from ${Number(p.presentPercent)}%; half day from ${Number(p.halfDayPercent)}%; ${overtimeText(p)}`}
                   </td>
                   <td>
-                    {p.mappings.length > 0 && (
-                      <ul>
-                        {p.mappings.map((m) => (
-                          <li key={m.id}>{mappingText(m)}</li>
-                        ))}
-                      </ul>
-                    )}
+                    <MappingList key={p.version} policy={p} locationName={locationName} canRemove={p.state === 'DRAFT' && canManage} onChanged={refresh} />
                     {p.warnings.map((w) => (
                       <p key={w.code} role="note">
                         <Badge tone="warn">{w.code === 'UNMAPPED' ? 'unmapped' : 'overlap'}</Badge> {w.text}

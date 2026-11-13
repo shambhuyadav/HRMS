@@ -401,66 +401,72 @@ function RequestForm({ onNote }: { onNote: (text: string) => void }) {
   if (options.data && items.length === 0) return <Empty>The selected role holds no decisions that can be delegated.</Empty>;
   const ready = permission !== '' && delegate !== '' && from !== '' && to !== '' && !ask.isPending;
   return (
-    <form
-      className="stack"
-      onSubmit={(e: FormEvent) => {
-        e.preventDefault();
-        if (ready) ask.mutate();
-      }}
-    >
-      <label>
-        Decisions to delegate
-        <select
-          value={permission}
-          required
-          onChange={(e) => {
-            setPermission(e.target.value);
-            setDelegate('');
-          }}
-        >
-          <option value="">Choose…</option>
-          {items.map((o) => (
-            <option key={o.permission} value={o.permission}>
-              {`${kindsText(o.kinds)} (${o.permission})${o.confidential ? ', confidential' : ''}`}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Delegate
-        <select value={delegate} required disabled={permission === ''} onChange={(e) => setDelegate(e.target.value)}>
-          <option value="">Choose…</option>
-          {(candidates.data?.items ?? []).map((c) => (
-            <option key={c.userId} value={c.userId}>
-              {c.displayName ? `${c.displayName} (${c.employeeCode ?? c.accountKey})` : c.accountKey}
-            </option>
-          ))}
-        </select>
-      </label>
-      {candidates.data?.items.length === 0 && (
-        <p className="hint">Nobody else can take these decisions. A delegate needs their own approved assignment that holds this permission, in Assigned or Company scope, of equivalent authority.</p>
-      )}
-      <ErrorNote error={candidates.error} />
-      <label>
-        From (included)
-        <input type="datetime-local" required value={from} onChange={(e) => setFrom(e.target.value)} />
-      </label>
-      <label>
-        Until (not included)
-        <input type="datetime-local" required value={to} onChange={(e) => setTo(e.target.value)} />
-      </label>
-      <p className="hint">At most 30 calendar days. The delegate cannot delegate these decisions again and uses only their own permissions. Tasks already waiting for you stay with you.</p>
-      <label>
-        Purpose (optional)
-        <input maxLength={500} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
-      </label>
-      <div className="row">
-        <button type="submit" disabled={!ready}>
-          Ask for approval
-        </button>
-      </div>
-      <ErrorNote error={ask.error} />
-    </form>
+    <>
+      {/* The rules first, above the form, rather than between its rows. */}
+      <p className="hint">
+        At most 30 days. The delegation runs from the start time until just before the end time. The delegate cannot pass it on and uses only their own permissions;
+        tasks already waiting for you stay with you.
+      </p>
+      <form
+        className="grid-form"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          if (ready) ask.mutate();
+        }}
+      >
+        <label>
+          Decisions to delegate
+          <select
+            value={permission}
+            required
+            onChange={(e) => {
+              setPermission(e.target.value);
+              setDelegate('');
+            }}
+          >
+            <option value="">Choose…</option>
+            {items.map((o) => (
+              <option key={o.permission} value={o.permission}>
+                {`${kindsText(o.kinds)}${o.confidential ? ' (confidential)' : ''}`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Delegate
+          <select value={delegate} required disabled={permission === ''} onChange={(e) => setDelegate(e.target.value)}>
+            <option value="">Choose…</option>
+            {(candidates.data?.items ?? []).map((c) => (
+              <option key={c.userId} value={c.userId}>
+                {c.displayName ? `${c.displayName} (${c.employeeCode ?? c.accountKey})` : c.accountKey}
+              </option>
+            ))}
+          </select>
+        </label>
+        {candidates.data?.items.length === 0 && (
+          <p className="hint">Nobody else can take these decisions: the person you delegate to must already hold them in their own role. Ask your administrator.</p>
+        )}
+        <ErrorNote error={candidates.error} />
+        <label>
+          Starts
+          <input type="datetime-local" required value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          Ends (not included)
+          <input type="datetime-local" required value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <label>
+          Purpose (optional)
+          <input maxLength={500} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+        </label>
+        <div className="row">
+          <button type="submit" disabled={!ready}>
+            Ask for approval
+          </button>
+        </div>
+        <ErrorNote error={ask.error} />
+      </form>
+    </>
   );
 }
 
@@ -480,7 +486,8 @@ function MyDelegationsScreen() {
           <RequestForm onNote={setNote} />
         </Section>
       )}
-      <Section title="My delegations">
+      {/* A visible heading: the page is titled "My delegations", which a card of the same name would hide. */}
+      <Section title="Delegation history">
         {note && <Note>{note}</Note>}
         {mine.data?.items.length === 0 && <Empty>You have not given or received a delegation.</Empty>}
         {!!mine.data?.items.length && <DelegationTable items={mine.data.items} administering={false} onNote={setNote} />}

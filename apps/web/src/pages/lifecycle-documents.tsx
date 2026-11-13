@@ -1079,9 +1079,10 @@ export function NotPermitted({ children }: { children: ReactNode }) {
   );
 }
 
-export function Item({ term, children }: { term: string; children: ReactNode }) {
+/** One term of a details list; a wide one (a paragraph of text) takes the whole row instead of a narrow column. */
+export function Item({ term, children, wide = false }: { term: string; children: ReactNode; wide?: boolean }) {
   return (
-    <div>
+    <div className={wide ? 'kv-wide' : undefined}>
       <dt>{term}</dt>
       <dd>{children}</dd>
     </div>
@@ -1100,7 +1101,9 @@ export function LoadProblem({ error, forbidden, missing }: { error: unknown; for
 /** A user the API named: the signed-in user as "you", anyone else by the id the API returned. */
 export function UserRef({ userId }: { userId: string }) {
   const { me } = useSession();
-  return me?.userId === userId ? <>you</> : <code>{userId}</code>;
+  // No name is served for another account here, and a raw identifier means nothing on screen: the words say who, the tooltip
+  // keeps the identifier for matching against the audit trail.
+  return me?.userId === userId ? <>you</> : <span title={`User ${userId}`}>another user</span>;
 }
 
 /**
@@ -1331,7 +1334,7 @@ function TemplateList() {
   const items = list.data?.items ?? [];
   return (
     <Section title="Letter templates">
-      {list.isPending && <p className="hint">Loading the letter templates…</p>}
+      {list.isPending && <p className="hint loading">Loading the letter templates…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view letter templates." />
       {list.data && items.length === 0 && <Empty>No letter templates yet.</Empty>}
       {items.length > 0 && (
@@ -1385,7 +1388,7 @@ function PlaceholderReference() {
         Write a placeholder as {'{{name}}'}. Every placeholder a template uses is mandatory unless the template marks it optional, and a missing mandatory value blocks
         the final letter. These are the placeholders of employee letters; an offer letter template (letter type OFFER) has its own, which its editor lists.
       </p>
-      {placeholders.isPending && <p className="hint">Loading the approved placeholders…</p>}
+      {placeholders.isPending && <p className="hint loading">Loading the approved placeholders…</p>}
       <LoadProblem error={placeholders.error} forbidden="The selected role cannot view the approved placeholders." />
       {items.length > 0 && (
         <div style={SCROLL}>
@@ -1657,7 +1660,7 @@ function TemplateView({ id }: { id: string }) {
         <Link to={PATHS.templates}>All letter templates</Link>
       </p>
       <Section title="Template">
-        {detail.isPending && <p className="hint">Loading the template…</p>}
+        {detail.isPending && <p className="hint loading">Loading the template…</p>}
         <LoadProblem error={detail.error} forbidden="The selected role cannot view letter templates." missing="This letter template is not available." />
         {t && (
           <dl className="kv">
@@ -2106,7 +2109,7 @@ function StoredLetterList({ employeeId }: { employeeId: string }) {
         Final letters exactly as generated, newest first, each with the template revision it was made from and who generated it. Each is a confidential file. Sending
         delivers it to the employee’s own self-service with an in-app notice (never an e-mail attachment); it can also be downloaded for delivery by hand.
       </p>
-      {outputs.isPending && <p className="hint">Loading the stored letters…</p>}
+      {outputs.isPending && <p className="hint loading">Loading the stored letters…</p>}
       <LoadProblem error={outputs.error} forbidden="The selected role cannot read stored letters." missing="This employee is not in the selected role’s scope." />
       {outputs.data && items.length === 0 && <Empty>No letters have been generated for this employee.</Empty>}
       {items.length > 0 && <OutputTable items={items} employeeId={employeeId} />}
@@ -2225,7 +2228,7 @@ function ProcessList({ employeeId }: { employeeId: string }) {
         Choose the process the letter belongs to. Exit placeholders (resignation date, approved last working date) come from an approved exit only, never from a
         proposal.
       </p>
-      {processes.isPending && <p className="hint">Loading the employee’s processes…</p>}
+      {processes.isPending && <p className="hint loading">Loading the employee’s processes…</p>}
       <LoadProblem error={processes.error} forbidden="The selected role cannot list this employee’s processes." missing="This employee is not in the selected role’s scope." />
       {processes.data && items.length === 0 && <Empty>This employee has no processes yet, so no letter can be prepared.</Empty>}
       {items.length > 0 && (
@@ -2293,7 +2296,7 @@ function RestrictedNotes({ employeeId }: { employeeId: string }) {
           </>
         )}
       </p>
-      {notes.isPending && <p className="hint">Loading the restricted notes…</p>}
+      {notes.isPending && <p className="hint loading">Loading the restricted notes…</p>}
       <LoadProblem error={notes.error} forbidden="The selected role cannot read restricted HR notes." missing="This employee is not in the selected role’s scope." />
       {notes.data && items.length === 0 && <Empty>No restricted notes or warnings are recorded for this employee.</Empty>}
       {items.length > 0 && (
@@ -2350,7 +2353,7 @@ function ProcessLetters({ processId }: { processId: string }) {
       <h1>{p ? `Letters for ${p.employeeName} (${p.employeeCode})` : 'Process letters'}</h1>
       <Section title="Process">
         {!canRead && <p className="hint">The selected role cannot open this process, so its details are not shown here; the server checks every letter request.</p>}
-        {canRead && process.isPending && <p className="hint">Loading the process…</p>}
+        {canRead && process.isPending && <p className="hint loading">Loading the process…</p>}
         <LoadProblem error={process.error} forbidden="The selected role cannot open this process." missing="This process is not available in the selected role’s scope." />
         {p && (
           <>
@@ -2712,15 +2715,15 @@ function SettlementRegister() {
           Employee code contains
           <input value={employeeCode} maxLength={MAX_EMPLOYEE_CODE} onChange={(e) => setEmployeeCode(e.target.value)} />
         </label>
-        <label>
-          Month of the approved last working date
+        <label title="The month of the approved last working date">
+          Last working month
           <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
         </label>
-        <label>
-          Disbursement month (recorded payment date)
+        <label title="The month of the recorded payment date">
+          Paid in month
           <input type="month" value={disbursement} onChange={(e) => setDisbursement(e.target.value)} />
         </label>
-        <div className="row">
+        <div className="row filter-actions">
           <button type="submit">Show settlements</button>
           <button type="button" className="secondary" onClick={clear}>
             Clear filters
@@ -2732,7 +2735,7 @@ function SettlementRegister() {
           </p>
         )}
       </form>
-      {list.isPending && <p className="hint">Loading the settlements…</p>}
+      {list.isPending && <p className="hint loading">Loading the settlements…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view settlements." />
       {list.data && items.length === 0 && <Empty>{query ? 'No settlements match these filters.' : 'No settlements in the selected role’s scope yet.'}</Empty>}
       {items.length > 0 && (
@@ -2972,7 +2975,7 @@ function ApprovedExits() {
           <option value="SEPARATED">Separated</option>
         </select>
       </label>
-      {exits.isPending && <p className="hint">Loading the exits…</p>}
+      {exits.isPending && <p className="hint loading">Loading the exits…</p>}
       <LoadProblem error={exits.error} forbidden="The selected role cannot list exits." />
       {exits.data && items.length === 0 && <Empty>{state === 'APPROVED' ? 'No approved exits in the selected role’s scope.' : 'No separated exits in the selected role’s scope.'}</Empty>}
       {items.length > 0 && (
@@ -3090,7 +3093,7 @@ function ExitSettlements({ exitId }: { exitId: string }) {
       )}
       <Section title="Settlement revisions">
         <CalculationNote calculation={list.data?.calculation} />
-        {list.isPending && <p className="hint">Loading the settlement revisions…</p>}
+        {list.isPending && <p className="hint loading">Loading the settlement revisions…</p>}
         <LoadProblem error={list.error} forbidden="The selected role cannot view settlements." missing="This exit is not available in the selected role’s scope." />
         {list.data && items.length === 0 && <Empty>No settlement has been prepared for this exit yet.</Empty>}
         {items.length > 0 && (
@@ -3275,7 +3278,7 @@ function SettlementView({ id }: { id: string }) {
         </p>
       )}
       <Section title="Settlement">
-        {detail.isPending && <p className="hint">Loading the settlement…</p>}
+        {detail.isPending && <p className="hint loading">Loading the settlement…</p>}
         <LoadProblem error={detail.error} forbidden="The selected role cannot view settlements." missing="This settlement is not available in the selected role’s scope." />
         {s && (
           <>
@@ -3459,7 +3462,7 @@ function EarlierSnapshots({ s, current }: { s: SettlementDetail; current: Settle
   return (
     <details onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
       <summary>Earlier snapshots</summary>
-      {list.isFetching && !list.data && <p className="hint">Loading the earlier snapshots…</p>}
+      {list.isFetching && !list.data && <p className="hint loading">Loading the earlier snapshots…</p>}
       <LoadProblem error={list.error} forbidden="The selected role cannot read the calculation snapshots." />
       {list.data && earlier.length === 0 && <Empty>No earlier snapshot.</Empty>}
       {earlier.length > 0 && (
@@ -4685,7 +4688,7 @@ function SettlementQueueList({ kind }: { kind: QueueKind }) {
     <div ref={region} role="region" aria-label={q.title} tabIndex={-1}>
       <Section title={`${q.title}${tasks.data ? ` (${items.length})` : ''}`}>
         <p className="hint">{q.intro}</p>
-        {tasks.isPending && <p className="hint">Loading the settlements waiting for you…</p>}
+        {tasks.isPending && <p className="hint loading">Loading the settlements waiting for you…</p>}
         <LoadProblem error={tasks.error} forbidden="The selected role cannot list settlement tasks." />
         {notice && (
           <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>

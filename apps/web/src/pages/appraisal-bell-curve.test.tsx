@@ -133,7 +133,7 @@ describe('bell curve screen (CL-132; FR-044)', () => {
     await chooseCycle();
     expect(await screen.findByText(/Population:/)).toBeTruthy();
     const statement = screen.getByText(/Population:/).closest('p')!;
-    expect(statement.textContent).toContain('2026-04-01 to 2027-03-31');
+    expect(statement.textContent).toContain('1 Apr 2026 to 31 Mar 2027');
     expect(statement.textContent).toContain('10 completed appraisals');
     expect(screen.getByText(/the company default, revision 1 \(Synthetic company reference curve\)/)).toBeTruthy();
     expect(screen.getByText(/no rating is changed or limited by it/)).toBeTruthy();

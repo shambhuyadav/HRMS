@@ -100,7 +100,7 @@ describe('mandatory documents screen (CL-150)', () => {
     expect(rows[1]!.textContent).toContain('All employment types');
     expect(rows[1]!.textContent).toContain('in force');
     expect(rows[2]!.textContent).toContain('Intern only');
-    expect(rows[2]!.textContent).toContain('ended on 2026-11-01');
+    expect(rows[2]!.textContent).toContain('ended on 1 Nov 2026');
     expect(rows[2]!.textContent).toContain('Ended: Synthetic: no longer needed');
     // Read only: no forms, no End buttons; the report needs its own grant.
     expect(screen.queryByRole('form', { name: 'New mandatory document type' })).toBeNull();
@@ -127,7 +127,7 @@ describe('mandatory documents screen (CL-150)', () => {
     expect(within(add).getByText('Choose today or a later start date.')).toBeTruthy();
     change(add, 'Starts on', '2026-12-01');
     fireEvent.click(within(add).getByRole('button', { name: 'Make it mandatory' }));
-    expect(await screen.findByText('Aadhaar card is mandatory for Permanent employees from 2026-12-01.')).toBeTruthy();
+    expect(await screen.findByText('Aadhaar card is mandatory for Permanent employees from 1 Dec 2026.')).toBeTruthy();
     expect(bodiesTo('POST', '/v1/document-requirements')).toEqual([{ documentType: 'AADHAAR', employmentType: 'PERMANENT', effectiveFrom: '2026-12-01', reason: 'Synthetic: identity proof' }]);
     fireEvent.click(screen.getByRole('button', { name: 'End the requirement for PAN card' }));
     const end = screen.getByRole('form', { name: 'End a mandatory document type' });

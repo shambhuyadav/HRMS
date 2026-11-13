@@ -616,7 +616,7 @@ describe('cycles (FR-091, DF15)', () => {
     });
     renderPage([CYCLE_MANAGE, READ_OPERATIONAL]);
     const cycles = await findSection('Increment cycles');
-    await within(cycles).findByText('SERVICE');
+    await within(cycles).findByText('Service');
     // Only the active common-date cycle offers a review; the others say why.
     expect(within(cycles).getAllByRole('button', { name: 'Open review' })).toHaveLength(1);
     expect(within(cycles).getByText('Inactive cycle')).toBeTruthy();
@@ -748,7 +748,7 @@ describe('cycles (FR-091, DF15)', () => {
     serve();
     renderPage([CYCLE_MANAGE, READ_OPERATIONAL]);
     const cycles = await findSection('Increment cycles');
-    await within(cycles).findByText('SERVICE');
+    await within(cycles).findByText('Service');
     // Opened cases cannot be withdrawn, so the year is never prefilled.
     expect((within(cycles).getByLabelText('Review year') as HTMLInputElement).value).toBe('');
     fireEvent.submit(within(cycles).getByRole('form', { name: 'Open a review of ANNUAL revision 2' }));
@@ -1076,7 +1076,7 @@ describe('controls hidden without permissions (C1)', () => {
     expect(screen.queryByRole('button', { name: 'Open review' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Propose outcome for/ })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Propose an off-cycle change' })).toBeNull();
-    expect(screen.queryByRole('link', { name: 'Decision inbox' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Decisions' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Employee salary' })).toBeNull();
     expect(calls.every((c) => c.method === 'GET' && c.path === '/v1/increment-cases')).toBe(true);
   });
@@ -1085,7 +1085,7 @@ describe('controls hidden without permissions (C1)', () => {
     serve({ amounts: true });
     renderPage([CYCLE_MANAGE, READ_OPERATIONAL, READ_SALARY, PROPOSE, LIST_EMPLOYEES], { scopeKind: 'TEAM' });
     const cycles = await findSection('Increment cycles');
-    await within(cycles).findByText('SERVICE');
+    await within(cycles).findByText('Service');
     expect(within(cycles).queryByRole('button', { name: 'Open review' })).toBeNull();
     expect(within(cycles).getByText('Reviews are opened from a company-wide role')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Propose an off-cycle change' })).toBeNull();
@@ -1096,7 +1096,7 @@ describe('controls hidden without permissions (C1)', () => {
   it('links to the decision inbox for a role that decides increments, and decides nothing here', async () => {
     serve({ amounts: true });
     renderPage([READ_OPERATIONAL, READ_SALARY, APPROVE]);
-    const link = await screen.findByRole('link', { name: 'Decision inbox' });
+    const link = await screen.findByRole('link', { name: 'Decisions' });
     expect(link.getAttribute('href')).toBe('/tasks');
     await screen.findByText('SYN-302');
     expect(screen.queryByRole('button', { name: /approve|reject|return/i })).toBeNull();

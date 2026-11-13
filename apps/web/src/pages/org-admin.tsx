@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { type CSSProperties, Fragment, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { api, ApiError, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -8,6 +8,8 @@ import { Badge, Empty, ErrorNote, Section } from '../ui';
 const READ_USERS = 'access.read_users.operational';
 const LINK_USER = 'access.link_user.operational';
 const DEACTIVATE_USER = 'access.deactivate_user.operational';
+/** Create, edit, delete and reset the password of an account. */
+const MANAGE_ACCOUNTS = 'access.manage_accounts.operational';
 const READ_REFERENCE = 'reference_value.read.operational';
 const MANAGE_REFERENCE = 'reference_value.manage.operational';
 
@@ -38,8 +40,393 @@ interface UserLink {
   version: number;
 }
 
-function LinkForm({ onDone }: { onDone: () => void }) {
-  const [form, setForm] = useState({ accountKey: '', employeeCode: '', effectiveFrom: '', effectiveTo: '', reason: '' });
+/** GET /v1/access/accounts/:userId: what editing or deleting one account needs. */
+interface AccountDetail {
+  userId: string;
+  accountKey: string;
+  active: boolean;
+  version: number;
+  firstName: string | null;
+  lastName: string | null;
+  signInAccount: boolean;
+  /** Has signed in at least once. */
+  signedIn: boolean;
+  /** Never used, so it can be deleted; otherwise it is kept for the record and can only be deactivated. */
+  deletable: boolean;
+}
+
+interface AccountFields {
+  email: string;
+  firstName: string;
+  lastName: string;
+}
+
+interface CreatedAccount {
+  userId: string;
+  accountKey: string;
+  version: number;
+  temporaryPassword: string | null;
+}
+
+interface SavedAccount {
+  userId: string;
+  accountKey: string;
+  version: number;
+}
+
+interface ResetResult {
+  userId: string;
+  temporaryPassword: string | null;
+  sessionsRevoked: number;
+}
+
+/**
+ * A temporary password the server issued. It is held only in the page's state until Done, never in a query cache, and the
+ * mutation that brought it is dropped as soon as its form closes (gcTime 0).
+ */
+interface Issued {
+  kind: 'created' | 'reset';
+  accountKey: string;
+  temporaryPassword: string | null;
+  sessionsRevoked?: number;
+}
+
+const NO_FIELDS: AccountFields = { email: '', firstName: '', lastName: '' };
+/** Only the shape: a name, an @ and a domain with a dot. The server decides the rest. */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Refusals after which what the page shows is out of date: the list (and the open account) are loaded again. */
+const RELOAD_ON = new Set(['STALE_VERSION', 'NOT_FOUND', 'ACCOUNT_IN_USE', 'INVALID_STATE']);
+const NARROW: CSSProperties = { maxWidth: 560 };
+const SECRET: CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  fontSize: '1.05rem',
+  letterSpacing: '0.04em',
+  padding: '0.4rem 0.75rem',
+  border: '1px solid var(--line-strong)',
+  borderRadius: 6,
+  background: '#fff',
+  color: 'var(--text)',
+  userSelect: 'all',
+  wordBreak: 'break-all',
+};
+
+/** The account refusals in plain words; any other refusal falls back to the shared error note. */
+function accountRefusal(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null;
+  switch (error.code) {
+    case 'SELF_ACTION_NOT_ALLOWED':
+      return 'You cannot change your own account here; another administrator must do it.';
+    case 'ACCOUNT_EXISTS':
+      return 'An account with this email already exists. Use another email, or find that account in the list.';
+    case 'INVALID_EMAIL':
+      return 'The sign-in does not accept this email address. Enter the address the person signs in with, such as name@example.com.';
+    case 'SIGN_IN_PROVIDER_UNAVAILABLE':
+      return 'The sign-in service is not available right now, so this was not done. Try again in a few minutes.';
+    case 'STALE_VERSION':
+      return 'This account changed since you opened it, so nothing was saved. It has been reloaded: check it and try again.';
+    case 'ACCOUNT_SPANS_COMPANIES':
+      return 'This account also serves another company, so it cannot be changed from one company.';
+    case 'ACCOUNT_IN_USE':
+      return 'This account has been used, so it is kept for the record and cannot be deleted. Deactivate it instead.';
+    case 'INVALID_STATE':
+      return 'This account is inactive. Reactivate it before resetting its password.';
+    case 'NOT_FOUND':
+      return 'This account is no longer available in the selected company.';
+    default:
+      return null;
+  }
+}
+
+function AccountRefusal({ error }: { error: unknown }) {
+  if (!error) return null;
+  const text = accountRefusal(error);
+  return text === null ? (
+    <ErrorNote error={error} />
+  ) : (
+    <p role="alert" className="error">
+      {text}
+    </p>
+  );
+}
+
+/** Email and names of an account, new or changed. The email's shape is checked here before anything is sent. */
+function AccountForm({
+  label,
+  initial,
+  submitText,
+  pending,
+  error,
+  onSubmit,
+  onCancel,
+  children,
+}: {
+  label: string;
+  initial: AccountFields;
+  submitText: string;
+  pending: boolean;
+  error: unknown;
+  onSubmit: (fields: AccountFields) => void;
+  onCancel: () => void;
+  children?: ReactNode;
+}) {
+  const [form, setForm] = useState(initial);
+  const [problem, setProblem] = useState<string | null>(null);
+  return (
+    <form
+      className="grid-form"
+      aria-label={label}
+      onSubmit={(e) => {
+        e.preventDefault();
+        const fields = { email: form.email.trim(), firstName: form.firstName.trim(), lastName: form.lastName.trim() };
+        // An email kept as it was is the server's to judge (an older account key); a new one must look like an address.
+        const keptAsItWas = initial.email.trim() !== '' && fields.email === initial.email.trim();
+        if (!keptAsItWas && !EMAIL_SHAPE.test(fields.email)) {
+          setProblem('Enter the email address the person signs in with, such as name@example.com.');
+          return;
+        }
+        if (fields.firstName === '' || fields.lastName === '') {
+          setProblem('Enter the first name and the last name.');
+          return;
+        }
+        setProblem(null);
+        onSubmit(fields);
+      }}
+    >
+      <label>
+        Email (sign-in)
+        <input inputMode="email" autoComplete="off" spellCheck={false} required maxLength={200} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+      </label>
+      <label>
+        First name
+        <input required maxLength={100} value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} />
+      </label>
+      <label>
+        Last name
+        <input required maxLength={100} value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} />
+      </label>
+      <div className="row">
+        <button type="submit" disabled={pending}>
+          {submitText}
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      {children}
+      {problem ? (
+        <p role="alert" className="error">
+          {problem}
+        </p>
+      ) : (
+        <AccountRefusal error={error} />
+      )}
+    </form>
+  );
+}
+
+function NewAccountForm({ onCreated, onCancel }: { onCreated: (created: CreatedAccount) => void; onCancel: () => void }) {
+  const create = useMutation({
+    gcTime: 0,
+    mutationFn: (fields: AccountFields) => api<CreatedAccount>('/v1/access/accounts', { body: fields }),
+    onSuccess: onCreated,
+  });
+  return (
+    <AccountForm label="New account" initial={NO_FIELDS} submitText="Create account" pending={create.isPending} error={create.error} onSubmit={(fields) => create.mutate(fields)} onCancel={onCancel}>
+      <p className="hint wide" style={{ margin: 0 }}>
+        A temporary password is shown once the account is created. Its roles and its employee link are given separately.
+      </p>
+    </AccountForm>
+  );
+}
+
+const signedOutText = (sessions = 0) => (sessions === 0 ? 'They had no open session.' : `They are signed out of ${sessions} ${sessions === 1 ? 'session' : 'sessions'}.`);
+
+/** The temporary password, shown this once. Focus moves to it, so the page scrolls to it wherever the action was taken. */
+function IssuedPanel({ issued, linkPrefilled, onDone }: { issued: Issued; linkPrefilled: boolean; onDone: () => void }) {
+  const titleId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [copy, setCopy] = useState<'copied' | 'unavailable' | null>(null);
+  useEffect(() => {
+    setCopy(null);
+    heading.current?.focus();
+  }, [issued]);
+  const password = issued.temporaryPassword;
+  const title =
+    password !== null ? `Temporary password for ${issued.accountKey}` : issued.kind === 'created' ? `Account created for ${issued.accountKey}` : `Password reset for ${issued.accountKey}`;
+  const copyPassword = () => {
+    const clipboard = (navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    if (password === null || typeof clipboard?.writeText !== 'function') {
+      setCopy('unavailable');
+      return;
+    }
+    try {
+      clipboard.writeText(password).then(
+        () => setCopy('copied'),
+        () => setCopy('unavailable'),
+      );
+    } catch {
+      setCopy('unavailable');
+    }
+  };
+  return (
+    <div className="confirm-box" role="status" aria-labelledby={titleId}>
+      <h3 id={titleId} ref={heading} tabIndex={-1} style={{ margin: 0 }}>
+        {title}
+      </h3>
+      <p>{issued.kind === 'created' ? 'The account is created.' : `The password is reset. ${signedOutText(issued.sessionsRevoked)}`}</p>
+      {password !== null ? (
+        <>
+          <div className="row">
+            <code style={SECRET}>{password}</code>
+            <button type="button" className="secondary" onClick={copyPassword}>
+              Copy
+            </button>
+            {copy === 'copied' && <span className="ok">Copied.</span>}
+            {copy === 'unavailable' && <span className="hint">This browser did not allow copying: select the password and copy it by hand.</span>}
+          </div>
+          <p>Give it to the person privately. It works once: at their first sign-in they choose their own password and set up their authenticator app. It is not shown again.</p>
+        </>
+      ) : (
+        <p>This server has no sign-in provider, so there is no temporary password: the account signs in through the development sign-in.</p>
+      )}
+      {linkPrefilled && <p>To connect the account to an employee, use "Link an account to an employee" below: its account key is filled in.</p>}
+      <div className="row">
+        <button type="button" onClick={onDone}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordForm({ user, onReset, onRefused, onCancel }: { user: CompanyUser; onReset: (result: ResetResult) => void; onRefused: (error: unknown) => void; onCancel: () => void }) {
+  const [reason, setReason] = useState('');
+  const reset = useMutation({
+    gcTime: 0,
+    mutationFn: (why: string) => api<ResetResult>(`/v1/access/accounts/${user.userId}/reset-password`, { body: { reason: why } }),
+    onSuccess: onReset,
+    onError: onRefused,
+  });
+  return (
+    <form
+      className="confirm-box"
+      aria-label={`Reset the password of ${user.accountKey}`}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (reason.trim() !== '') reset.mutate(reason.trim());
+      }}
+    >
+      <p>
+        Reset the password of <strong>{user.accountKey}</strong>? They are signed out and must use the new temporary password.
+      </p>
+      <label style={NARROW}>
+        Reason
+        <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </label>
+      <div className="row">
+        <button type="submit" className="danger" disabled={reset.isPending || reason.trim() === ''}>
+          Reset password
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+      <AccountRefusal error={reset.error} />
+    </form>
+  );
+}
+
+/** One account opened for change: its details are read now (not for every row), with the version the change is checked against. */
+function AccountPanel({
+  user,
+  onSaved,
+  onDeleted,
+  onRefused,
+  onClose,
+}: {
+  user: CompanyUser;
+  onSaved: (saved: SavedAccount) => void;
+  onDeleted: () => void;
+  onRefused: (error: unknown) => void;
+  onClose: () => void;
+}) {
+  const detail = useQuery({ queryKey: ['access-account', user.userId], queryFn: () => api<AccountDetail>(`/v1/access/accounts/${user.userId}`) });
+  const save = useMutation({
+    mutationFn: ({ fields, version }: { fields: AccountFields; version: number }) =>
+      api<SavedAccount>(`/v1/access/accounts/${user.userId}`, { method: 'PATCH', body: { expectedVersion: version, ...fields } }),
+    onSuccess: onSaved,
+    onError: onRefused,
+  });
+  const remove = useMutation({
+    mutationFn: ({ version, reason }: { version: number; reason: string }) => api<{ userId: string; deleted: true }>(`/v1/access/accounts/${user.userId}/delete`, { body: { expectedVersion: version, reason } }),
+    onSuccess: onDeleted,
+    onError: onRefused,
+  });
+  const [deleting, setDeleting] = useState(false);
+  const [reason, setReason] = useState('');
+  const d = detail.data;
+  return (
+    <div className="stack">
+      {detail.isPending && <p className="hint loading">Loading the account…</p>}
+      <AccountRefusal error={detail.error} />
+      {d && (
+        <>
+          <AccountForm
+            key={d.version}
+            label={`Edit ${user.accountKey}`}
+            initial={{ email: d.accountKey, firstName: d.firstName ?? '', lastName: d.lastName ?? '' }}
+            submitText="Save"
+            pending={save.isPending}
+            error={save.error}
+            onSubmit={(fields) => save.mutate({ fields, version: d.version })}
+            onCancel={onClose}
+          />
+          <p className="hint" style={{ margin: 0 }}>
+            {d.signedIn ? 'Has signed in. ' : 'Has not signed in yet. '}
+            {d.deletable ? 'It has never been used, so it can be deleted.' : 'It has been used, so it is kept for the record: it can be deactivated, not deleted.'}
+          </p>
+          {d.deletable && !deleting && (
+            <div>
+              <button type="button" className="link danger" aria-label={`Delete ${user.accountKey}`} onClick={() => setDeleting(true)}>
+                Delete
+              </button>
+            </div>
+          )}
+          {d.deletable && deleting && (
+            <form
+              className="confirm-box"
+              aria-label={`Delete ${user.accountKey}`}
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (reason.trim() !== '') remove.mutate({ version: d.version, reason: reason.trim() });
+              }}
+            >
+              <p>
+                Delete <strong>{user.accountKey}</strong>? It has never been used, so it is removed for good.
+              </p>
+              <label style={NARROW}>
+                Reason
+                <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+              </label>
+              <div className="row">
+                <button type="submit" className="danger" disabled={remove.isPending || reason.trim() === ''}>
+                  Delete account
+                </button>
+                <button type="button" className="secondary" onClick={() => setDeleting(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </>
+      )}
+      <AccountRefusal error={remove.error} />
+    </div>
+  );
+}
+
+function LinkForm({ onDone, accountKey = '' }: { onDone: () => void; accountKey?: string }) {
+  const [form, setForm] = useState({ accountKey, employeeCode: '', effectiveFrom: '', effectiveTo: '', reason: '' });
   const link = useMutation({
     mutationFn: async () => {
       // The account is named by its exact key; the employee is found among the employees this administrator can see.
@@ -93,19 +480,22 @@ function LinkForm({ onDone }: { onDone: () => void }) {
       <button type="submit" disabled={link.isPending}>
         Link account
       </button>
-      <p className="muted">A link gives the account no permission. Its role assignments are granted separately.</p>
+      <p className="hint wide" style={{ margin: 0 }}>
+        A link gives the account no permission. Its role assignments are granted separately.
+      </p>
       <ErrorNote error={link.error} />
     </form>
   );
 }
 
-function ReasonAction({ label, onSubmit, pending }: { label: string; onSubmit: (reason: string) => void; pending: boolean }) {
+/** A row action that asks for a reason. The button shows just the verb; its accessible name (and the form's) says which row. */
+function ReasonAction({ verb, label, onSubmit, pending, danger }: { verb: string; label: string; onSubmit: (reason: string) => void; pending: boolean; danger?: boolean }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   if (!open) {
     return (
-      <button type="button" className="link" onClick={() => setOpen(true)}>
-        {label}
+      <button type="button" className={danger ? 'link danger' : 'link'} aria-label={label} onClick={() => setOpen(true)}>
+        {verb}
       </button>
     );
   }
@@ -132,11 +522,18 @@ function ReasonAction({ label, onSubmit, pending }: { label: string; onSubmit: (
 }
 
 export function UserAccountsPage() {
-  const { can } = useSession();
+  const { can, me } = useSession();
   const client = useQueryClient();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<CompanyUser | null>(null);
+  const [creating, setCreating] = useState(false);
+  /** The one row opened for a change (its panel shows under it). */
+  const [panel, setPanel] = useState<{ userId: string; kind: 'edit' | 'reset' } | null>(null);
+  const [issued, setIssued] = useState<Issued | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [linkPrefill, setLinkPrefill] = useState('');
+  const manage = can(MANAGE_ACCOUNTS);
   const users = useQuery({
     queryKey: ['access-users', search, page],
     queryFn: () => api<{ items: CompanyUser[]; total: number }>(`/v1/access/users?page=${page}&pageSize=25${search.trim() ? `&search=${encodeURIComponent(search.trim())}` : ''}`),
@@ -149,6 +546,32 @@ export function UserAccountsPage() {
   const refresh = () => {
     void client.invalidateQueries({ queryKey: ['access-users'] });
     void client.invalidateQueries({ queryKey: ['user-links'] });
+    void client.invalidateQueries({ queryKey: ['access-account'] });
+  };
+  const reloadIfStale = (error: unknown) => {
+    if (error instanceof ApiError && RELOAD_ON.has(error.code)) refresh();
+  };
+  const issue = (next: Issued) => {
+    setNotice(null);
+    setPanel(null);
+    setIssued(next);
+    refresh();
+  };
+  const saved = (account: SavedAccount) => {
+    setPanel(null);
+    setNotice(`Saved ${account.accountKey}.`);
+    if (selected?.userId === account.userId) setSelected({ ...selected, accountKey: account.accountKey });
+    refresh();
+  };
+  const deleted = (user: CompanyUser) => {
+    setPanel(null);
+    // The row goes at once; the reload that follows confirms it.
+    client.setQueriesData<{ items: CompanyUser[]; total: number }>({ queryKey: ['access-users'] }, (old) =>
+      old ? { items: old.items.filter((x) => x.userId !== user.userId), total: Math.max(0, old.total - 1) } : old,
+    );
+    if (selected?.userId === user.userId) setSelected(null);
+    setNotice(`Deleted ${user.accountKey}.`);
+    refresh();
   };
   const setActive = useMutation({
     mutationFn: ({ user, active, reason }: { user: CompanyUser; active: boolean; reason: string }) =>
@@ -161,18 +584,51 @@ export function UserAccountsPage() {
   });
   const pages = Math.max(1, Math.ceil((users.data?.total ?? 0) / 25));
   return (
-    <Section title={`User accounts${users.data ? ` (${users.data.total})` : ''}`}>
-      {can(LINK_USER) && <LinkForm onDone={refresh} />}
-      <label className="inline">
-        Search{' '}
-        <input
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setPage(1);
-          }}
-        />
-      </label>
+    <>
+    <Section
+      title={`User accounts${users.data ? ` (${users.data.total})` : ''}`}
+      actions={
+        manage ? (
+          <button type="button" aria-expanded={creating} onClick={() => setCreating(!creating)}>
+            New account
+          </button>
+        ) : undefined
+      }
+    >
+      {(issued || notice || (manage && creating)) && (
+        <div className="stack" style={{ marginBottom: '1rem' }}>
+          {issued && <IssuedPanel issued={issued} linkPrefilled={issued.kind === 'created' && can(LINK_USER)} onDone={() => setIssued(null)} />}
+          {notice && (
+            <p className="ok" role="status" style={{ margin: 0 }}>
+              {notice}
+            </p>
+          )}
+          {manage && creating && (
+            <Section title="New account">
+              <NewAccountForm
+                onCancel={() => setCreating(false)}
+                onCreated={(created) => {
+                  setCreating(false);
+                  if (can(LINK_USER)) setLinkPrefill(created.accountKey);
+                  issue({ kind: 'created', accountKey: created.accountKey, temporaryPassword: created.temporaryPassword });
+                }}
+              />
+            </Section>
+          )}
+        </div>
+      )}
+      <div className="inline">
+        <label className="inline">
+          Search
+          <input
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+          />
+        </label>
+      </div>
       {users.data?.items.length === 0 && <Empty>No accounts match.</Empty>}
       {users.data && users.data.items.length > 0 && (
         <table>
@@ -186,26 +642,77 @@ export function UserAccountsPage() {
             </tr>
           </thead>
           <tbody>
-            {users.data.items.map((u) => (
-              <tr key={u.userId}>
-                <td>{u.accountKey}</td>
-                <td>{u.employee ? `${u.employee.employeeCode} ${u.employee.displayName}` : '—'}</td>
-                <td>
-                  <Badge tone={u.active ? 'good' : 'warn'}>{u.active ? 'Active' : 'Inactive'}</Badge>
-                </td>
-                <td>
-                  {u.assignments.active} active, {u.assignments.pending} pending
-                </td>
-                <td>
-                  <button type="button" className="link" aria-label={`Show links of ${u.accountKey}`} onClick={() => setSelected(u)}>
-                    Links
-                  </button>{' '}
-                  {can(DEACTIVATE_USER) && (
-                    <ReasonAction key={`${u.userId}-${u.version}`} label={u.active ? `Deactivate ${u.accountKey}` : `Reactivate ${u.accountKey}`} pending={setActive.isPending} onSubmit={(reason) => setActive.mutate({ user: u, active: !u.active, reason })} />
+            {users.data.items.map((u) => {
+              // One's own account is changed by another administrator (the server refuses it too).
+              const own = me?.userId === u.userId;
+              const open = manage && !own && panel?.userId === u.userId ? panel.kind : null;
+              const toggle = (kind: 'edit' | 'reset') => {
+                setNotice(null);
+                setPanel(open === kind ? null : { userId: u.userId, kind });
+              };
+              return (
+                <Fragment key={u.userId}>
+                  <tr>
+                    <td>
+                      {u.accountKey}
+                      {own && <div className="hint">Your account</div>}
+                    </td>
+                    <td>{u.employee ? `${u.employee.displayName} (${u.employee.employeeCode})` : '—'}</td>
+                    <td>
+                      <Badge tone={u.active ? 'good' : 'warn'}>{u.active ? 'Active' : 'Inactive'}</Badge>
+                    </td>
+                    <td>
+                      {u.assignments.active} active, {u.assignments.pending} pending
+                    </td>
+                    <td>
+                      <button type="button" className="link" aria-label={`Show links of ${u.accountKey}`} onClick={() => setSelected(u)}>
+                        Links
+                      </button>{' '}
+                      {manage && !own && (
+                        <>
+                          <button type="button" className="link" aria-label={`Edit ${u.accountKey}`} aria-expanded={open === 'edit'} onClick={() => toggle('edit')}>
+                            Edit
+                          </button>{' '}
+                          {u.active && (
+                            <>
+                              <button type="button" className="link" aria-label={`Reset password of ${u.accountKey}`} aria-expanded={open === 'reset'} onClick={() => toggle('reset')}>
+                                Reset password
+                              </button>{' '}
+                            </>
+                          )}
+                        </>
+                      )}
+                      {can(DEACTIVATE_USER) && (
+                        <ReasonAction
+                          key={`${u.userId}-${u.version}`}
+                          danger={u.active}
+                          verb={u.active ? 'Deactivate' : 'Reactivate'}
+                          label={u.active ? `Deactivate ${u.accountKey}` : `Reactivate ${u.accountKey}`}
+                          pending={setActive.isPending}
+                          onSubmit={(reason) => setActive.mutate({ user: u, active: !u.active, reason })}
+                        />
+                      )}
+                    </td>
+                  </tr>
+                  {open && (
+                    <tr>
+                      <td colSpan={5}>
+                        {open === 'edit' ? (
+                          <AccountPanel user={u} onSaved={saved} onDeleted={() => deleted(u)} onRefused={reloadIfStale} onClose={() => setPanel(null)} />
+                        ) : (
+                          <ResetPasswordForm
+                            user={u}
+                            onRefused={reloadIfStale}
+                            onCancel={() => setPanel(null)}
+                            onReset={(result) => issue({ kind: 'reset', accountKey: u.accountKey, temporaryPassword: result.temporaryPassword, sessionsRevoked: result.sessionsRevoked })}
+                          />
+                        )}
+                      </td>
+                    </tr>
                   )}
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -239,12 +746,16 @@ export function UserAccountsPage() {
                 {links.data.items.map((l) => (
                   <tr key={l.id}>
                     <td>
-                      {l.employeeCode} {l.employeeName}
+                      {l.employeeName} ({l.employeeCode})
                     </td>
                     <td>{formatDate(l.effectiveFrom)}</td>
                     <td>{l.effectiveTo ? formatDate(l.effectiveTo) : '—'}</td>
                     <td>{l.inForce ? 'In force' : 'Not in force'}</td>
-                    <td>{can(LINK_USER) && (l.inForce || l.effectiveTo === null) && <ReasonAction key={`${l.id}-${l.version}`} label={`End link to ${l.employeeCode}`} pending={endLink.isPending} onSubmit={(reason) => endLink.mutate({ link: l, reason })} />}</td>
+                    <td>
+                      {can(LINK_USER) && (l.inForce || l.effectiveTo === null) && (
+                        <ReasonAction key={`${l.id}-${l.version}`} danger verb="End link" label={`End link to ${l.employeeCode}`} pending={endLink.isPending} onSubmit={(reason) => endLink.mutate({ link: l, reason })} />
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -254,6 +765,12 @@ export function UserAccountsPage() {
         </Section>
       )}
     </Section>
+    {can(LINK_USER) && (
+      <Section title="Link an account to an employee">
+        <LinkForm key={linkPrefill} accountKey={linkPrefill} onDone={refresh} />
+      </Section>
+    )}
+    </>
   );
 }
 
@@ -301,15 +818,22 @@ function ValueRow({ value, editable, codeProtected, onSaved }: { value: Referenc
         {editable && (
           <button
             type="button"
+            aria-label={`Save ${value.code}`}
             disabled={save.isPending || label.trim() === ''}
             onClick={() => save.mutate({ ...(label.trim() !== value.label ? { label: label.trim() } : {}), ...(!codeProtected && validTo !== (value.validTo ?? '') ? { validTo: validTo || null } : {}) })}
           >
-            Save {value.code}
+            Save
           </button>
         )}{' '}
         {editable && !codeProtected && (
-          <button type="button" className="link" disabled={save.isPending} onClick={() => save.mutate({ active: !value.active })}>
-            {value.active ? `Deactivate ${value.code}` : `Reactivate ${value.code}`}
+          <button
+            type="button"
+            className={value.active ? 'link danger' : 'link'}
+            aria-label={value.active ? `Deactivate ${value.code}` : `Reactivate ${value.code}`}
+            disabled={save.isPending}
+            onClick={() => save.mutate({ active: !value.active })}
+          >
+            {value.active ? 'Deactivate' : 'Reactivate'}
           </button>
         )}
         {editable && codeProtected && <span className="muted">Used by the application: stays in force</span>}

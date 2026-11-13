@@ -115,8 +115,8 @@ describe('asking for a delegation', () => {
     await within(delegate).findByRole('option', { name: 'Dev Synthetic (SYN-002)' });
     expect(calls.find((c) => c.path.startsWith('/v1/access/delegations/candidates'))!.path).toContain(encodeURIComponent(LEAVE));
     fireEvent.change(delegate, { target: { value: DEV.userId } });
-    fireEvent.change(screen.getByLabelText('From (included)'), { target: { value: '2026-11-10T10:00' } });
-    fireEvent.change(screen.getByLabelText('Until (not included)'), { target: { value: '2026-11-20T10:00' } });
+    fireEvent.change(screen.getByLabelText('Starts'), { target: { value: '2026-11-10T10:00' } });
+    fireEvent.change(screen.getByLabelText('Ends (not included)'), { target: { value: '2026-11-20T10:00' } });
     fireEvent.change(screen.getByLabelText('Purpose (optional)'), { target: { value: ' Cover (synthetic) ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ask for approval' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
@@ -156,8 +156,8 @@ describe('asking for a delegation', () => {
     const delegate = screen.getByLabelText('Delegate');
     await within(delegate).findByRole('option', { name: /Dev Synthetic/ });
     fireEvent.change(delegate, { target: { value: DEV.userId } });
-    fireEvent.change(screen.getByLabelText('From (included)'), { target: { value: '2026-11-10T10:00' } });
-    fireEvent.change(screen.getByLabelText('Until (not included)'), { target: { value: '2026-11-20T10:00' } });
+    fireEvent.change(screen.getByLabelText('Starts'), { target: { value: '2026-11-10T10:00' } });
+    fireEvent.change(screen.getByLabelText('Ends (not included)'), { target: { value: '2026-11-20T10:00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Ask for approval' }));
     expect((await screen.findByRole('alert')).textContent).toContain('REDELEGATION_NOT_ALLOWED');
   });

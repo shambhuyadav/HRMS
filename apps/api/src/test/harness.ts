@@ -6,6 +6,7 @@ import { uniq } from '../../../../db/tests/fixtures.js';
 import { startTestDatabase, type TestDatabase } from '../../../../db/tests/test-database.js';
 import { buildApp } from '../app.js';
 import { SYSTEM_ACTOR_ID } from '../audit/actors.js';
+import type { IdentityAdmin } from '../auth/identity-admin.js';
 import { type DevTokenConfig, devTokenVerifier, issueDevToken } from '../auth/tokens.js';
 import { createPool } from '../db/pool.js';
 import { ASSIGNMENT_HEADER, COMPANY_HEADER } from '../http/context.js';
@@ -88,14 +89,20 @@ export interface BulkJobResult {
  */
 const HARNESS_SERVING = { deadlineMs: 120_000, statementTimeoutMs: 15_000, lockTimeoutMs: 15_000 };
 
-export async function startHarness(): Promise<Harness> {
+export async function startHarness(options: { identity?: IdentityAdmin } = {}): Promise<Harness> {
   const testDb: TestDatabase = await startTestDatabase();
   const db = testDb.client;
   await db.query(`select set_config('hrms.grant_bootstrap', 'on', false)`);
   const pool = createPool(testDb.connectionString, 4);
   // scanInRequest: an upload answers its verdict at once, so a test can start from a released or quarantined file. Every deployment
   // leaves the verdict to the scan worker; worker/scan-worker.api.test.ts tests that path, and buildApp without this flag behaves so.
-  const app = buildApp({ db: pool, verifier: devTokenVerifier(tokenConfig), scanInRequest: true, serving: { read: HARNESS_SERVING, write: HARNESS_SERVING, batch: HARNESS_SERVING } });
+  const app = buildApp({
+    db: pool,
+    verifier: devTokenVerifier(tokenConfig),
+    scanInRequest: true,
+    serving: { read: HARNESS_SERVING, write: HARNESS_SERVING, batch: HARNESS_SERVING },
+    ...(options.identity ? { identity: options.identity } : {}),
+  });
 
   const one = async <T extends pg.QueryResultRow>(sql: string, params: unknown[] = []) => {
     const row = (await db.query<T>(sql, params)).rows[0];

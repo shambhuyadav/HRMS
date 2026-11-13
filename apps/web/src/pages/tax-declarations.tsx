@@ -165,7 +165,7 @@ function MyTaxDeclarationPanel() {
   const live = (fiscalPeriodCode: string) => data?.items.some((d) => d.fiscalPeriodCode === fiscalPeriodCode && !['RETURNED', 'REJECTED'].includes(d.state));
   return (
     <Section title="My tax declaration">
-      {list.isPending && <p className="hint">Loading your declarations…</p>}
+      {list.isPending && <p className="hint loading">Loading your declarations…</p>}
       <ErrorNote error={list.error} />
       {data?.configuration.status === 'NOT_CONFIGURED' && <p role="status">{data.configuration.message}</p>}
       {data && <p className="hint">{data.calculation.message}</p>}
@@ -268,7 +268,7 @@ function MyInvestmentProofsPanel() {
   const data = proofs.data;
   return (
     <Section title="My investment proofs">
-      {proofs.isPending && <p className="hint">Loading your proofs…</p>}
+      {proofs.isPending && <p className="hint loading">Loading your proofs…</p>}
       <ErrorNote error={proofs.error} />
       {data?.configuration.status === 'NOT_CONFIGURED' && <p role="status">{data.configuration.message}</p>}
       {data && <p className="hint">An accepted amount gives no tax relief by itself; no tax is calculated here.</p>}

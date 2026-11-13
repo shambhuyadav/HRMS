@@ -193,7 +193,7 @@ describe('payroll inputs and reports screens (CL-074 to CL-119)', () => {
     });
     show(TaxInputsPage);
     expect((await screen.findByRole('note')).textContent).toContain('Tax projection: not fed. These values change no tax until it does.');
-    expect(within(screen.getByRole('table', { name: 'Recorded inputs' })).getByText(/2026-05 motor car 2,400.50/)).toBeTruthy();
+    expect(within(screen.getByRole('table', { name: 'Recorded inputs' })).getByText(/May 2026 motor car 2,400.50/)).toBeTruthy();
     expect(screen.queryByText('Upload perquisites')).toBeNull();
     cleanup();
     session.permissions = ['payroll_tax_input.read.amount', 'payroll_tax_input.import.amount'];

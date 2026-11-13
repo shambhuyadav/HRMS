@@ -355,7 +355,7 @@ const pad = (n: number) => String(n).padStart(2, '0');
 function localDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return formatDate(iso);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDate(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 function When({ at }: { at: string | null | undefined }) {
   return at ? <time dateTime={at}>{localDateTime(at)}</time> : <>—</>;
@@ -647,23 +647,25 @@ function EmployeeSearch({ label, onPick, exclude = [] }: { label: string; onPick
 /** The plan owner: an employee found by search, or the signed-in user's own employee record. */
 function OwnerPicker({ value, onChange }: { value: { id: string; label: string } | null; onChange: (v: { id: string; label: string } | null) => void }) {
   const { me } = useSession();
+  // One labelled group, like the fields around it: who is chosen (or that nobody is), the quick choices, then the search.
   return (
-    <div className="wide">
-      <p style={FLUSH}>
-        Plan owner: <strong>{value ? value.label : 'nobody chosen yet'}</strong>{' '}
+    <fieldset className="wide">
+      <legend>Plan owner</legend>
+      <div className="row">
+        {value ? <strong>{value.label}</strong> : <span className="hint">Not chosen</span>}
         {value && (
           <button type="button" className="secondary" onClick={() => onChange(null)}>
             Clear the owner
           </button>
-        )}{' '}
+        )}
         {me?.employeeId && value?.id !== me.employeeId && (
           <button type="button" className="secondary" onClick={() => onChange({ id: me.employeeId!, label: me.displayName ?? 'Me' })}>
             Make me the owner
           </button>
         )}
-      </p>
+      </div>
       <EmployeeSearch label="Find the owner" onPick={(e) => onChange({ id: e.id, label: personLabel(e) })} />
-    </div>
+    </fieldset>
   );
 }
 
@@ -775,7 +777,7 @@ function PlansScreen() {
           to the end date, past after it. A cancelled plan is shown as cancelled whatever its dates.
         </p>
         <Refusal error={exporter.error} action="export" />
-        {list.isLoading && <p className="hint">Loading…</p>}
+        {list.isLoading && <p className="hint loading">Loading…</p>}
         <QueryProblem error={list.error} forbidden="The selected role cannot read training plans." />
         {data && data.items.length === 0 && <Empty>No training plans match.</Empty>}
         {data && data.items.length > 0 && (
@@ -1027,7 +1029,7 @@ function PlanScreen() {
       <p style={FLUSH}>
         <Link to={PATHS.plans}>Back to the training plans</Link>
       </p>
-      {detail.isLoading && <p className="hint">Loading…</p>}
+      {detail.isLoading && <p className="hint loading">Loading…</p>}
       <QueryProblem error={detail.error} forbidden="The selected role cannot read this plan." />
       {plan && (
         <>
@@ -1368,7 +1370,7 @@ function Participants({ plan }: { plan: PlanDetail }) {
           </label>
         </form>
         {data && !data.scope.companyWide && <p className="hint">Only the participants in the selected role’s scope are listed.</p>}
-        {list.isLoading && <p className="hint">Loading…</p>}
+        {list.isLoading && <p className="hint loading">Loading…</p>}
         <QueryProblem error={list.error} forbidden="The selected role cannot read the participants." />
         {data && data.items.length === 0 && <Empty>No participants{state ? ' in this state' : ' yet'}.</Empty>}
         {data && data.items.length > 0 && (
@@ -1565,7 +1567,7 @@ function FeedbackScreen() {
         }
       >
         <Refusal error={exporter.error} action="export" />
-        {summary.isLoading && <p className="hint">Loading…</p>}
+        {summary.isLoading && <p className="hint loading">Loading…</p>}
         <QueryProblem error={summary.error} forbidden="The selected role cannot read this feedback." />
         {s && <SummaryBody s={s} />}
       </Section>
@@ -1581,7 +1583,7 @@ function FeedbackScreen() {
             </select>
           </label>
         </form>
-        {register.isLoading && <p className="hint">Loading…</p>}
+        {register.isLoading && <p className="hint loading">Loading…</p>}
         <QueryProblem error={register.error} forbidden="The selected role cannot read the responses." />
         {r && <RegisterBody r={r} />}
       </Section>
@@ -1732,7 +1734,7 @@ function ParticipantScreen() {
   const t = shown(detail);
   return (
     <div className="stack">
-      {detail.isLoading && <p className="hint">Loading…</p>}
+      {detail.isLoading && <p className="hint loading">Loading…</p>}
       <QueryProblem error={detail.error} forbidden="The selected role cannot read this participation." />
       {t && (
         <>
@@ -1820,7 +1822,7 @@ function ParticipationList({ employeeId, linked, own }: { employeeId: string; li
   const withReasons = data?.items.some((t) => has(t, 'cancellationReason')) ?? false;
   return (
     <>
-      {list.isLoading && <p className="hint">Loading…</p>}
+      {list.isLoading && <p className="hint loading">Loading…</p>}
       <QueryProblem error={list.error} forbidden="The selected role cannot read these participations." />
       {data && data.items.length === 0 && <Empty>{own ? 'You have no training enrolments or assigned sessions yet.' : 'No training participations.'}</Empty>}
       {data && data.items.length > 0 && (
@@ -1961,7 +1963,7 @@ function OpenPlans() {
   const data = shown(list);
   return (
     <Section title="Training open for self-nomination">
-      {list.isLoading && <p className="hint">Loading…</p>}
+      {list.isLoading && <p className="hint loading">Loading…</p>}
       <QueryProblem error={list.error} forbidden="Your Employee role cannot see the training open for self-nomination." action="enrol" />
       {data && data.items.length === 0 && <Empty>No training is open for self-nomination at the moment.</Empty>}
       {data && data.items.length > 0 && (
@@ -2030,7 +2032,7 @@ function MyFeedback() {
   return (
     <Section title="My training feedback">
       <p className="hint">Feedback opens once your completion is recorded. It is given once and cannot be changed afterwards. Your comment is confidential.</p>
-      {list.isLoading && <p className="hint">Loading…</p>}
+      {list.isLoading && <p className="hint loading">Loading…</p>}
       <QueryProblem error={list.error} forbidden="Your Employee role cannot read your training feedback." action="feedback" />
       {data && data.items.length === 0 && <Empty>No completed training waits for feedback.</Empty>}
       <Notice notice={notice} />
