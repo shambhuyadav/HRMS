@@ -22,6 +22,33 @@ function admit(scope: WorkScope | undefined, text: unknown): void {
 
 const statementText = (first: unknown): unknown => (typeof first === 'object' && first !== null ? (first as { text?: unknown }).text : first);
 
+/**
+ * Slow statements (improvement plan L5): one warning line per statement slower than SLOW_QUERY_MS (in production 500 ms unless set;
+ * elsewhere only when set; 0 turns it off), with its duration and the first 300 characters of its SQL text. The values never appear:
+ * they travel apart from the text, as parameters. A gradual slowdown shows in the log long before the statement timeout cuts it off.
+ */
+const SLOW_MS = (() => {
+  const set = process.env.SLOW_QUERY_MS?.trim();
+  if (set && /^\d+$/.test(set)) return Number(set);
+  return process.env.NODE_ENV === 'production' ? 500 : 0;
+})();
+
+function timed<T>(result: T, text: unknown): T {
+  if (SLOW_MS <= 0 || !(result instanceof Promise)) return result;
+  const started = performance.now();
+  void result.then(
+    () => {
+      const ms = Math.round(performance.now() - started);
+      if (ms >= SLOW_MS) {
+        const sql = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, 300) : '(prepared statement)';
+        console.warn(JSON.stringify({ level: 'warn', msg: 'slow statement', ms, sql }));
+      }
+    },
+    () => undefined,
+  );
+  return result;
+}
+
 const wrapped = new WeakMap<pg.PoolClient, pg.PoolClient>();
 
 /**
@@ -44,7 +71,7 @@ function instrumentClient(client: pg.PoolClient): pg.PoolClient {
       }
       return Promise.reject(err);
     }
-    return (client.query as (...a: unknown[]) => unknown).apply(client, args);
+    return timed((client.query as (...a: unknown[]) => unknown).apply(client, args), statementText(args[0]));
   };
   const proxy = new Proxy(client, { get: (target, property) => (property === 'query' ? query : Reflect.get(target, property, target)) });
   wrapped.set(client, proxy);
@@ -59,7 +86,7 @@ export function instrumentDatabase(db: Database): Database {
       } catch (err) {
         return Promise.reject(err);
       }
-      return db.query<R>(text, values);
+      return timed(db.query<R>(text, values), text);
     },
     async connect(): Promise<pg.PoolClient> {
       const scope = currentScope();

@@ -2,6 +2,7 @@
 // authorised deployment step and is intentionally not wired here.
 import { buildApp } from './app.js';
 import { memoryIdentityAdmin } from './auth/identity-admin.js';
+import { assertNumericSettings } from './config.js';
 import { devTokenVerifier } from './auth/tokens.js';
 import { createPool } from './db/pool.js';
 import { localFileStore } from './storage/files.js';
@@ -9,6 +10,7 @@ import { localFileStore } from './storage/files.js';
 if (process.env.NODE_ENV === 'production') {
   throw new Error('server.ts is the development entry point and uses development tokens; do not run it in production');
 }
+assertNumericSettings();
 
 const databaseUrl = process.env.DATABASE_URL;
 const secret = process.env.DEV_TOKEN_SECRET;

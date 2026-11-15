@@ -338,12 +338,17 @@ function PackItem({ p, onNotice }: { p: PackRevision; onNotice: (text: string) =
         <Item term="Statute reference" wide>
           {p.statuteReference}
         </Item>
-        <Item term="Source reference" wide={!!p.sourceReference}>
-          {p.sourceReference ?? '—'}
-        </Item>
-        <Item term="Validation reference" wide={!!p.validationReference}>
-          {p.validationReference ?? '—'}
-        </Item>
+        {/* Recorded at validation: until then there is nothing to show, and "Validated: Not yet" below already says so. */}
+        {p.sourceReference && (
+          <Item term="Source reference" wide>
+            {p.sourceReference}
+          </Item>
+        )}
+        {p.validationReference && (
+          <Item term="Validation reference" wide>
+            {p.validationReference}
+          </Item>
+        )}
         <Item term="Written by">{p.createdBy ? <UserRef userId={p.createdBy} /> : '—'}</Item>
         <Item term="Validated">
           <Who at={p.validatedAt} by={p.validatedBy} />

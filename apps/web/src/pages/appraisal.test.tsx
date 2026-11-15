@@ -78,7 +78,6 @@ const RAVI = { id: '20000000-0000-4000-8000-000000000002', employeeCode: 'SYN-00
 const MEERA = { id: '20000000-0000-4000-8000-000000000003', employeeCode: 'SYN-003', displayName: 'Meera Synthetic', department: null };
 const AT = '2026-10-20T09:00:00.000Z';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Obj = Record<string, any>;
 
 const cycleWindows = { goalSetting: { opensOn: '2026-04-01', closesOn: '2026-12-31', openToday: true }, selfEntry: { opensOn: '2026-05-01', closesOn: '2027-01-31', openToday: true }, managerRating: null };

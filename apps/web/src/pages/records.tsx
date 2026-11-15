@@ -872,7 +872,7 @@ export function EmployeeDocumentsPage() {
                   <th>Expires</th>
                   <th>Uploaded</th>
                   <th>Status</th>
-                  <th />
+                  <th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>

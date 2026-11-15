@@ -176,7 +176,7 @@ function LeaveTypes({ canManage }: { canManage: boolean }) {
             <th>Name</th>
             <th>Pay</th>
             <th>Status</th>
-            <th />
+            <th scope="col"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -615,7 +615,7 @@ function LeavePoliciesPage() {
                 <th>Period</th>
                 <th>Values</th>
                 <th>Mapped to</th>
-                <th />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

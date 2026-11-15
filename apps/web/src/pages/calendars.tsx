@@ -77,7 +77,7 @@ function ReprocessNotice({ list }: { list: ReprocessList }) {
             <th scope="col">To reprocess</th>
             <th scope="col">Amended, kept</th>
             <th scope="col">Used by processed payroll, final</th>
-            <th scope="col" />
+            <th scope="col"><span className="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -932,7 +932,7 @@ export function WeeklyOffPage() {
               <th scope="col">Location</th>
               <th scope="col">In force today</th>
               <th scope="col">Entries</th>
-              <th scope="col" />
+              <th scope="col"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>

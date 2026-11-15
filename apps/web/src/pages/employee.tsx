@@ -1431,7 +1431,7 @@ function ListSectionView({ section, entries, ...changes }: SectionChangeProps & 
                   {f.label}
                 </th>
               ))}
-              {(manage || removed) && <th scope="col" />}
+              {(manage || removed) && <th scope="col"><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>

@@ -8,9 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildOrgTree, type OrgChartNode, OrgChartPage } from './org-chart';
 import { ORG_SCREENS } from './org';
 
-const session = vi.hoisted(() => ({ permissions: [] as string[] }));
+const session = vi.hoisted(() => ({ permissions: [] as string[], employeeId: null as string | null }));
 vi.mock('../session', () => ({
-  useSession: () => ({ stored: { companyId: 'c-1', assignmentId: 'a-1' }, me: { employeeId: null, scopeKind: 'COMPANY' }, can: (p: string) => session.permissions.includes(p) }),
+  useSession: () => ({ stored: { companyId: 'c-1', assignmentId: 'a-1' }, me: { employeeId: session.employeeId, scopeKind: 'COMPANY' }, can: (p: string) => session.permissions.includes(p) }),
 }));
 
 const node = (id: string, name: string, managerId: string | null, designation = 'Analyst'): OrgChartNode => ({
@@ -56,6 +56,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   session.permissions = [];
+  session.employeeId = null;
 });
 
 describe('organisation chart tree (CL-023)', () => {
@@ -136,5 +137,17 @@ describe('organisation chart page (FR-001, FR-003)', () => {
     serve(PEOPLE.slice(0, 2), true);
     show();
     expect(await screen.findByText(/shows the first 2 people only/)).toBeTruthy();
+  });
+
+  it('shows a manager’s direct team as a list that reports to them, without levels to open', async () => {
+    session.employeeId = 'm1';
+    serve([node('t1', 'Ravi Kumar', 'm1'), node('t2', 'Sana Ali', 'm1'), node('t3', 'Tara Bose', 'm1')]);
+    show();
+    const summary = await screen.findByLabelText('Chart summary');
+    expect(summary.textContent).toContain('3 people');
+    expect(summary.textContent).toContain('all report to you');
+    expect(summary.textContent).not.toContain('at the top');
+    expect(screen.queryByRole('button', { name: 'Expand all' })).toBeNull();
+    expect(within(screen.getByRole('tree', { name: 'Organisation chart' })).getAllByRole('treeitem')).toHaveLength(3);
   });
 });

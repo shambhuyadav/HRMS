@@ -297,7 +297,7 @@ export function EventsPage() {
                 <th scope="col">For</th>
                 <th scope="col">Description</th>
                 <th scope="col">State</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -440,7 +440,7 @@ export function TickerPage() {
                 <th scope="col">First day</th>
                 <th scope="col">Last day</th>
                 <th scope="col">State</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

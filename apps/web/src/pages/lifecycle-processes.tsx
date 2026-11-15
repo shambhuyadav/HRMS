@@ -83,7 +83,6 @@ const CODE = /^[A-Z][A-Z0-9_]{0,39}$/;
 const LONG_CODE = /^[A-Z][A-Z0-9_]{0,59}$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 /** Upload file names: no path separators, reserved characters or control characters (storage/files.ts). */
-// eslint-disable-next-line no-control-regex
 const FILE_NAME = /^[^/\\<>:"|?*\u0000-\u001f\u007f]+$/;
 const MAX_FILE_NAME = 255;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;

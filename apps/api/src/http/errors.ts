@@ -55,7 +55,14 @@ export function errorHandler(error: FastifyError & { code?: string }, request: F
     return reply.status(error.statusCode).send({ error: error.code, message: error.message, details: error.details });
   }
   if (error.validation) {
-    return reply.status(400).send({ error: 'INVALID_REQUEST', message: error.message });
+    // Improvement plan H2: the schema's wording ("body/email must match format \"email\"") names internal paths and reads as code
+    // to a person; the answer says it in words, and the detail goes to the log for whoever investigates (the rule and the field
+    // path only, never a submitted value: those stay out of logs, NFR-S11).
+    request.log.info(
+      { validation: error.validation.map((v) => ({ path: v.instancePath, rule: v.keyword })), context: error.validationContext },
+      'request refused by its schema',
+    );
+    return reply.status(400).send({ error: 'INVALID_REQUEST', message: 'Some of the information sent is missing or not in the expected form. Check it and try again.' });
   }
   // Fastify's own client errors keep their status (e.g. 413 for a body over the route limit), never a 500.
   if (typeof error.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 500 && error.code?.startsWith('FST_')) {

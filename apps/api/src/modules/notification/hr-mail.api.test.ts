@@ -29,7 +29,7 @@ let noEmail: Person;
 let left: Person;
 let other: Person;
 
-const SEND: 'hr_mail.send.message' = 'hr_mail.send.message';
+const SEND = 'hr_mail.send.message' as const;
 const csv = (lines: string[]) => Buffer.from(`${lines.join('\r\n')}\r\n`).toString('base64');
 const emailOn = () => vi.stubEnv('SMTP_HOST', '127.0.0.1');
 const review = (a: TestActor, body: object) => h.call(a, 'POST', '/v1/hr-mail/recipients', body);

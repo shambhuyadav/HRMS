@@ -103,7 +103,9 @@ function PendingTasks() {
               <th>Employee</th>
               <th>Assigned</th>
               <th>Due</th>
-              <th />
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -562,14 +564,14 @@ export function MyTeamPage() {
               <td>{m.designation ?? '—'}</td>
               <td>{m.location ?? '—'}</td>
               <td>{m.manager ?? '—'}</td>
-              <td>{formatDate(m.joiningDate)}</td>
+              <td className="nowrap">{formatDate(m.joiningDate)}</td>
               <td>
                 <StateBadge state={m.status} />
               </td>
               <td>
                 <StateBadge state={m.todayAttendance ?? 'NOT_PROCESSED'} />
               </td>
-              <td>{formatDate(m.nextReviewDate)}</td>
+              <td className="nowrap">{formatDate(m.nextReviewDate)}</td>
             </tr>
           ))}
         </tbody>
@@ -903,8 +905,20 @@ export function EmployeesPage() {
       )}{' '}
     </span>
   );
+  // The list's own actions, where people look for them (the card header), for the roles that may take them.
+  const headerActions =
+    can('employee.create.operational') || can('employee.import.operational') ? (
+      <div className="row">
+        {can('employee.import.operational') && <Link to="/imports">Import employees</Link>}
+        {can('employee.create.operational') && (
+          <Link to="/employees/new" className="primary">
+            New employee
+          </Link>
+        )}
+      </div>
+    ) : undefined;
   return (
-    <Section title={`Employees${list.data ? ` (${list.data.total})` : ''}`}>
+    <Section title={`Employees${list.data ? ` (${list.data.total})` : ''}`} actions={headerActions}>
       <div className="grid-form">
         <label className="inline">
           Search{' '}
@@ -998,7 +1012,11 @@ export function EmployeesPage() {
             <SortHeader column="designation" label="Designation" sort={sort} onSort={onSort} />
             <SortHeader column="joiningDate" label="Joined" sort={sort} onSort={onSort} />
             <SortHeader column="status" label="Status" sort={sort} onSort={onSort} />
-            {documents && <th />}
+            {documents && (
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>

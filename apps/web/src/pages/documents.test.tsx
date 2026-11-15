@@ -55,7 +55,6 @@ const V_TRAVEL_3 = '40000000-0000-4000-8000-000000000004';
 const V_RESTRICTED_1 = '40000000-0000-4000-8000-000000000005';
 const AT = '2026-10-01T05:00:00.000Z';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Obj = Record<string, any>;
 
 const current = (id: string, versionNumber: number, patch: Obj = {}) => ({

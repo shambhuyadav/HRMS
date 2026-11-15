@@ -158,7 +158,7 @@ function Branch({
 }
 
 export function OrgChartPage() {
-  const { can } = useSession();
+  const { can, me } = useSession();
   const chart = useQuery({ queryKey: ['org-chart'], queryFn: () => api<OrgChart>('/v1/org/chart') });
   const items = chart.data?.items;
   const tree = useMemo(() => buildOrgTree(items ?? []), [items]);
@@ -202,12 +202,17 @@ export function OrgChartPage() {
   const roots = shown ? tree.roots.filter((r) => shown.has(r.id)) : tree.roots;
   const visible = shown ? (id: string) => shown.has(id) : null;
   const linked = can(EMPLOYEE_READ);
+  // Nobody in view has a team of their own (a manager seeing their direct team): a list, not a tree — no levels to open, and
+  // "at the top" would only count everyone again. When they all report to the viewer, it says so.
+  const flat = people > 0 && managers === 0;
+  const commonManager = flat && tree.roots.every((r) => r.managerId === tree.roots[0]!.managerId) ? tree.roots[0]!.managerId : null;
+  const reportToViewer = commonManager !== null && commonManager === me?.employeeId;
 
   return (
     <Section
       title="Organisation chart"
       actions={
-        people > 0 && !shown ? (
+        people > 0 && !shown && !flat ? (
           <>
             <button type="button" className="secondary" onClick={() => setAll(true)}>
               Expand all
@@ -226,17 +231,23 @@ export function OrgChartPage() {
         <>
           <div className="org-stats" aria-label="Chart summary">
             <span>
-              <strong>{people}</strong> people
+              <strong>{people}</strong> {people === 1 ? 'person' : 'people'}
             </span>
-            <span>
-              <strong>{managers}</strong> with a team
-            </span>
-            <span>
-              <strong>{tree.roots.length}</strong> at the top
-            </span>
-            <span>
-              Widest team <strong>{widest}</strong>
-            </span>
+            {flat ? (
+              <span>{reportToViewer ? 'all report to you' : commonManager ? 'all with the same manager' : 'none with a team of their own'}</span>
+            ) : (
+              <>
+                <span>
+                  <strong>{managers}</strong> with a team
+                </span>
+                <span>
+                  <strong>{tree.roots.length}</strong> at the top
+                </span>
+                <span>
+                  Widest team <strong>{widest}</strong>
+                </span>
+              </>
+            )}
             <span className="hint">As of {formatDate(chart.data.asOf)}</span>
           </div>
           <label className="org-search">
@@ -258,8 +269,9 @@ export function OrgChartPage() {
             </ul>
           )}
           <p className="hint">
-            Everyone employed today (on probation, confirmed or serving notice) with their manager on {formatDate(chart.data.asOf)}. People whose manager is outside
-            what you may see, or who have none, start a branch.
+            {flat
+              ? `Everyone employed today (on probation, confirmed or serving notice) that you may see, as of ${formatDate(chart.data.asOf)}.`
+              : `Everyone employed today (on probation, confirmed or serving notice) with their manager on ${formatDate(chart.data.asOf)}. People whose manager is outside what you may see, or who have none, start a branch.`}
           </p>
         </>
       )}

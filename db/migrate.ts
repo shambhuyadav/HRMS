@@ -63,7 +63,7 @@ export async function migrate(client: pg.Client, options: MigrateOptions = {}): 
       newlyApplied.push(file);
     } catch (err) {
       await client.query('rollback');
-      throw new Error(`Migration ${file} failed: ${(err as Error).message}`);
+      throw new Error(`Migration ${file} failed: ${(err as Error).message}`, { cause: err });
     }
   }
   return newlyApplied;

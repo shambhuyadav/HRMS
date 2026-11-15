@@ -5,6 +5,7 @@
 // The email channel (FR-085) is read here once, from SMTP_HOST, SMTP_PORT, SMTP_SECURITY, SMTP_USER, SMTP_PASSWORD_FILE, SMTP_FROM and
 // APP_PUBLIC_URL (mail/config.ts): none set, it is off and nothing is sent; a partial or unsafe setting stops the worker at start-up.
 import { SYSTEM_ACTOR_ID } from './audit/actors.js';
+import { assertNumericSettings } from './config.js';
 import { createPool } from './db/pool.js';
 import { emailChannelFromEnv } from './mail/config.js';
 import { assertFieldKeysConfigured } from './security/field-crypto.js';
@@ -18,6 +19,8 @@ const required = (name: string) => {
   if (!value) throw new Error(`${name} must be set`);
   return value;
 };
+// A numeric setting that is set but not a number stops the worker here, named (config.ts).
+assertNumericSettings();
 // Effective-dated private profile changes are opened and sealed by the worker: fail at start-up, not at the first one.
 assertFieldKeysConfigured();
 

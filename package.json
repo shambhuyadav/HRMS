@@ -24,15 +24,23 @@
     "dev:api": "tsx apps/api/src/server.ts",
     "dev:worker": "tsx apps/api/src/worker.ts",
     "dev:web": "npm run dev -w apps/web",
-    "test:db": "vitest run db/tests"
+    "test:db": "vitest run db/tests",
+    "lint": "eslint apps db deploy scripts --max-warnings=0",
+    "lint:fix": "eslint apps db deploy scripts --fix",
+    "docs:errors": "node scripts/api-error-codes.mjs"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.10",
     "embedded-postgres": "17.10.0-beta.17",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
     "pg": "^8.13.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.72.2",
     "vitest": "^2.1.8"
   },
   "overrides": {

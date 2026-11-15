@@ -321,7 +321,7 @@ export function BiometricProfilesPage() {
                 <th scope="col">Lookback</th>
                 <th scope="col">Synced until</th>
                 <th scope="col">State</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -859,7 +859,7 @@ export function BiometricEmployeeMappingPage() {
                   <th scope="col">From</th>
                   <th scope="col">Until</th>
                   <th scope="col">State</th>
-                  <th scope="col" />
+                  <th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -1162,7 +1162,7 @@ function ExceptionList({ profileId }: { profileId: string }) {
                 <th scope="col">Event key</th>
                 <th scope="col">Device said</th>
                 <th scope="col">Kept on record</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

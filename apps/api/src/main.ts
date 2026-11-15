@@ -15,6 +15,7 @@
 // The development sign-in, the synthetic scanner and the in-request scan are refused in production by buildApp.
 import { buildApp } from './app.js';
 import { keycloakAdminConfigFromEnv, keycloakIdentityAdmin } from './auth/identity-admin.js';
+import { assertNumericSettings } from './config.js';
 import { type OidcProvider, oidcConfigFromEnv, oidcProvider } from './auth/oidc.js';
 import { sessionTokenVerifier } from './auth/tokens.js';
 import { createPool } from './db/pool.js';
@@ -28,6 +29,8 @@ const required = (name: string) => {
   return value;
 };
 
+// A numeric setting that is set but not a number stops the API here, named (config.ts).
+assertNumericSettings();
 const databaseUrl = required('DATABASE_URL');
 const secret = required('SESSION_TOKEN_SECRET');
 if (secret.length < 32) throw new Error('SESSION_TOKEN_SECRET must be at least 32 characters');

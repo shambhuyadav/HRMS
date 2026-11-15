@@ -70,7 +70,6 @@ const T_HIDDEN = '60000000-0000-4000-8000-000000000002';
 const AT = '2026-10-20T09:00:00.000Z';
 const TODAY = '2026-10-28';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Obj = Record<string, any>;
 interface Call {
   method: string;

@@ -273,7 +273,9 @@ export function LeavePage() {
               <th>Days</th>
               <th>State</th>
               <th>Documents</th>
-              <th />
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -668,7 +670,9 @@ export function ExpensesPage() {
               <th>Claimed</th>
               <th>State</th>
               <th>Payment</th>
-              <th />
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -1206,7 +1210,7 @@ export function PaymentsPage() {
               <th>Pending</th>
               <th>Can still prepare</th>
               <th>State</th>
-              <th />
+              <th scope="col"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>

@@ -2,6 +2,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { DevTokenConfig, TokenVerifier } from './auth/tokens.js';
 import type { IdentityAdmin } from './auth/identity-admin.js';
+import { apiDocsEnabled, registerApiDocs } from './http/api-docs.js';
 import type { OidcProvider } from './auth/oidc.js';
 import { signInRoutes } from './auth/sign-in-routes.js';
 import { devLoginRoutes, meRoutes } from './modules/access/me.js';
@@ -86,6 +87,8 @@ export interface AppDependencies {
    * User accounts screen. Without it (the development server) accounts are created alone and no temporary password is given.
    */
   identity?: IdentityAdmin | null;
+  /** Serve the OpenAPI description at /docs (http/api-docs.ts); by default on development servers only. */
+  apiDocs?: boolean;
   /** Request deadlines and transaction budgets per serving class (http/deadline.ts); else the environment, else the defaults. */
   serving?: ServingBudgetOverrides;
   /**
@@ -126,6 +129,8 @@ export function buildApp(deps: AppDependencies): FastifyInstance {
   });
   const sessions = deps.sessions ?? postgresSessionStore(deps.db);
   registerActorContext(app, deps.verifier, sessions);
+  // The OpenAPI description of the routes registered below (http/api-docs.ts): development servers only unless asked for.
+  if (deps.apiDocs ?? apiDocsEnabled()) registerApiDocs(app);
 
   // Liveness only; no dependency details are exposed.
   app.get('/health', async () => ({ status: 'ok' }));

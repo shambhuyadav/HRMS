@@ -331,7 +331,7 @@ export function MyAttendancePage() {
                 <th>Date</th>
                 <th>Status</th>
                 <th>Worked</th>
-                <th />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

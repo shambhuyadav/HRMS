@@ -274,7 +274,7 @@ function MasterPage({ kind }: { kind: MasterKind }) {
                 <th scope="col">From</th>
                 <th scope="col">Until</th>
                 <th scope="col">State</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -864,7 +864,7 @@ export function CitiesPage() {
                 <th scope="col">From</th>
                 <th scope="col">Until</th>
                 <th scope="col">State of record</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

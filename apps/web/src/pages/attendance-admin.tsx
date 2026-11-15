@@ -691,7 +691,7 @@ export function AttendancePoliciesPage() {
                 <th scope="col">Period</th>
                 <th scope="col">Thresholds</th>
                 <th scope="col">Mapped to</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

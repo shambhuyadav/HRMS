@@ -382,7 +382,7 @@ function CategoriesSection() {
               <th scope="col">Name</th>
               <th scope="col">Limit counts per</th>
               <th scope="col">Status</th>
-              <th scope="col" />
+              <th scope="col"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
@@ -472,7 +472,7 @@ export function ExpensePoliciesPage() {
                 <th scope="col">Period</th>
                 <th scope="col">Values</th>
                 <th scope="col">Rules</th>
-                <th scope="col" />
+                <th scope="col"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>

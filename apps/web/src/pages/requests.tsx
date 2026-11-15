@@ -571,7 +571,7 @@ export function WorkRequestsPage() {
                   <th>Purpose</th>
                   <th>State</th>
                   <th>Evidence</th>
-                  <th />
+                  <th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -736,7 +736,7 @@ function WorkRequestRegister() {
               <th>When</th>
               <th>Purpose</th>
               <th>State</th>
-              {can('work_request.cancel.operational') && <th />}
+              {can('work_request.cancel.operational') && <th scope="col"><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>

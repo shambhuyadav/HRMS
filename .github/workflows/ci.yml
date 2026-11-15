@@ -1,0 +1,59 @@
+# Continuous integration (improvement plan C4): every push to main and every pull request is type-checked, linted and tested, and the
+# history is scanned for committed secrets. The API and database tests start their own PostgreSQL (embedded-postgres), so no service
+# container is needed. Deployment stays manual (deploy/README.md): CI never touches the server.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Type check, lint and web tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test -w apps/web -- --maxWorkers=2 --minWorkers=1
+
+  api:
+    name: API and database tests
+    runs-on: ubuntu-latest
+    # The full suite starts many embedded databases; on a standard runner it takes well over an hour.
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx vitest run --maxWorkers=2 --minWorkers=1 apps/api db
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

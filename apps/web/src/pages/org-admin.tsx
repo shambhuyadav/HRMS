@@ -638,7 +638,9 @@ export function UserAccountsPage() {
               <th>Employee</th>
               <th>State</th>
               <th>Assignments</th>
-              <th />
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -739,7 +741,9 @@ export function UserAccountsPage() {
                   <th>From</th>
                   <th>Until</th>
                   <th>State</th>
-                  <th />
+                  <th>
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -896,7 +900,7 @@ export function ReferenceValuesPage() {
               <th>From</th>
               <th>Until</th>
               <th>State</th>
-              <th />
+              <th scope="col"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>

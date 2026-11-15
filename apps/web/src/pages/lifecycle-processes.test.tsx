@@ -137,7 +137,7 @@ const manager = (permissions: string[]): Context => ({ permissions, roleCode: 'R
 /** Asha in her Employee OWN context (H3). */
 const asha = (permissions: string[]): Context => ({ permissions, roleCode: 'EMPLOYEE', scopeKind: 'OWN', userId: U_ASHA, employeeId: E_ASHA, assignmentId: ASSIGNMENT_OWN });
 
-function use(ctx: Context) {
+function actAs(ctx: Context) {
   session.loaded = ctx.loaded ?? true;
   session.permissions = ctx.permissions;
   session.roleCode = ctx.roleCode;
@@ -213,7 +213,7 @@ const testClient = (staleTime = 0) => new QueryClient({ defaultOptions: { querie
 
 /** Renders the module's screens at a path, routed as the app routes them (so links and route params work). */
 function renderAt(entry: string, ctx: Context, client = testClient()) {
-  use(ctx);
+  actAs(ctx);
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[entry]}>
@@ -229,7 +229,7 @@ function renderAt(entry: string, ctx: Context, client = testClient()) {
 
 /** Renders one exported decision queue or My ESS panel on its own, as the inbox or the ESS hub would. */
 function renderPart(Part: ComponentType, ctx: Context) {
-  use(ctx);
+  actAs(ctx);
   return render(
     <QueryClientProvider client={testClient()}>
       <MemoryRouter>

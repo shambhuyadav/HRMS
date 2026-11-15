@@ -81,6 +81,22 @@ describe('exposure', () => {
   });
 });
 
+describe('business gauges (M9)', () => {
+  it('reads jobs, outbound events, waiting tasks and open sessions from the database at each scrape, as totals without ids', async () => {
+    const app = buildApp({ db: h.pool, verifier: verifier(), metricsToken: token });
+    const text = (await app.inject({ method: 'GET', url: METRICS_PATH, headers: { authorization: `Bearer ${token}` } })).body;
+    expect(text).toContain('hrms_business_gauges_up 1');
+    for (const state of ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED']) expect(sample(text, 'hrms_bulk_jobs', `state="${state}"`)).toBeGreaterThanOrEqual(0);
+    expect(sample(text, 'hrms_outbox_events', 'state="pending"')).toBeGreaterThanOrEqual(0);
+    expect(sample(text, 'hrms_outbox_events', 'state="failed"')).toBeGreaterThanOrEqual(0);
+    // The harness's actors hold open sessions.
+    expect(Number(/^hrms_sessions_open (\d+)$/m.exec(text)?.[1])).toBeGreaterThan(0);
+    expect(/^hrms_approval_tasks_pending \d+$/m.test(text)).toBe(true);
+    expect(text).not.toMatch(UUID);
+    await app.close();
+  });
+});
+
 describe('causes of retryable answers', () => {
   it('names an unreachable database as a connection failure, whether a SQLSTATE or a socket error says so', () => {
     const metrics = new ServingMetrics();

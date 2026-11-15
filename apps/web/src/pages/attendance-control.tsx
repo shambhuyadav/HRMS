@@ -336,7 +336,7 @@ function AttendanceControlPage() {
                   <th>Status</th>
                   <th>Minutes</th>
                   <th>Policy</th>
-                  <th />
+                  <th scope="col"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>

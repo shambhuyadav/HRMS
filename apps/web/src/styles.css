@@ -337,6 +337,8 @@ tbody tr:last-child td { border-bottom: none; }
 td:last-child:has(> button.link):not(:has(> :not(button):not(.sr-only))) { width: 1%; white-space: nowrap; }
 /* A list in a cell starts on the row's first line, without the paragraph margins of a list in text. */
 td ul, td ol { margin: 0; padding-left: 1.1rem; }
+/* A date or code cell stays on one line ("3 Nov 2026", not "3 Nov" over "2026"). */
+td.nowrap { white-space: nowrap; }
 td li + li { margin-top: 0.15rem; }
 /* A row's own heading in the body (a Total row) reads as a bold cell of that row, not as a grey column header. */
 tbody th[scope='row'] { background: none; color: var(--text); font-size: inherit; font-weight: 700; text-transform: none; letter-spacing: 0; white-space: normal; border-radius: 0; }

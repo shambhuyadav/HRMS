@@ -66,7 +66,6 @@ const T_OWN_DONE = '40000000-0000-4000-8000-000000000004';
 const AT = '2026-10-20T09:00:00.000Z';
 const SLOW = { timeout: 4000 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Obj = Record<string, any>;
 interface Call {
   method: string;

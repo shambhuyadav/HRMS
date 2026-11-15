@@ -327,7 +327,9 @@ function SensitiveChangePanel({ category, title }: { category: Category; title: 
               <th>Effective</th>
               <th>Status</th>
               <th>Notes</th>
-              <th />
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>

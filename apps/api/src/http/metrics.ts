@@ -4,6 +4,8 @@
 //   hrms_http_request_statements          histogram  method, route, status_class (database statements per /v1 request)
 //   hrms_http_unavailable_total           counter    route, cause (retryable 503s: deadline, lock_timeout, pool_wait, ...)
 //   hrms_db_pool_connections              gauge      state (total, idle, waiting; node-postgres pool counters)
+//   hrms_bulk_jobs, hrms_outbox_events    gauge      state (business gauges read at each scrape; businessGauges below)
+//   hrms_approval_tasks_pending, hrms_sessions_open, hrms_business_gauges_up   gauge
 // Labels are bounded: the route pattern as registered (never the URL, so never an id, code or search term), the
 // method, the status class and a cause name. No user, company, assignment, session or request id is ever a label, and
 // nothing of a request or answer body is recorded.
@@ -134,6 +136,55 @@ export class ServingMetrics {
   }
 }
 
+interface Queryable {
+  query(text: string): Promise<{ rows: Record<string, unknown>[] }>;
+}
+const canQuery = (pool: unknown): pool is Queryable => typeof (pool as Queryable | null)?.query === 'function';
+const BULK_STATES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED'] as const;
+
+/**
+ * Business gauges (improvement plan M9; ADR-09 capacity planning), read from the database at each scrape: background jobs by
+ * state, outbound events waiting or failed, approval tasks waiting for a decision, open sign-in sessions. Totals across the
+ * deployment only — no company, person or record is ever a label — from one statement over indexed or small tables. If it fails
+ * the scrape still answers, with hrms_business_gauges_up 0.
+ */
+export async function businessGauges(pool: unknown): Promise<string> {
+  if (!canQuery(pool)) return '';
+  let row: Record<string, unknown>;
+  try {
+    row = (
+      await pool.query(`
+        select (select coalesce(json_object_agg(state, n), '{}'::json) from (select state, count(*) as n from bulk_job group by state) b) as bulk,
+               (select count(*) from outbox_event where published_at is null and failed_at is null) as outbox_pending,
+               (select count(*) from outbox_event where failed_at is not null) as outbox_failed,
+               (select count(*) from approval_task where state = 'PENDING') as tasks_pending,
+               (select count(*) from user_session where revoked_at is null and expires_at > now()) as sessions_open`)
+    ).rows[0]!;
+  } catch {
+    return '# HELP hrms_business_gauges_up Whether the business gauges could be read at this scrape.\n# TYPE hrms_business_gauges_up gauge\nhrms_business_gauges_up 0\n';
+  }
+  const bulk = (row.bulk ?? {}) as Record<string, number | string>;
+  const lines = [
+    '# HELP hrms_business_gauges_up Whether the business gauges could be read at this scrape.',
+    '# TYPE hrms_business_gauges_up gauge',
+    'hrms_business_gauges_up 1',
+    '# HELP hrms_bulk_jobs Background jobs, by state.',
+    '# TYPE hrms_bulk_jobs gauge',
+    ...BULK_STATES.map((s) => `hrms_bulk_jobs{state="${s}"} ${Number(bulk[s] ?? 0)}`),
+    '# HELP hrms_outbox_events Outbound events (notifications, integrations) waiting to be sent, and those that failed for good.',
+    '# TYPE hrms_outbox_events gauge',
+    `hrms_outbox_events{state="pending"} ${Number(row.outbox_pending ?? 0)}`,
+    `hrms_outbox_events{state="failed"} ${Number(row.outbox_failed ?? 0)}`,
+    '# HELP hrms_approval_tasks_pending Approval tasks waiting for a decision.',
+    '# TYPE hrms_approval_tasks_pending gauge',
+    `hrms_approval_tasks_pending ${Number(row.tasks_pending ?? 0)}`,
+    '# HELP hrms_sessions_open Sign-in sessions open now (not ended, not expired).',
+    '# TYPE hrms_sessions_open gauge',
+    `hrms_sessions_open ${Number(row.sessions_open ?? 0)}`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
 const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest();
 
 function presentedToken(request: FastifyRequest): string {
@@ -171,7 +222,7 @@ export function registerMetrics(app: FastifyInstance, options: { token: string; 
       return { error: 'UNAUTHENTICATED', message: 'A valid metrics token is required' };
     }
     reply.type('text/plain; version=0.0.4; charset=utf-8');
-    return metrics.render(options.pool);
+    return metrics.render(options.pool) + (await businessGauges(options.pool));
   });
   return metrics;
 }

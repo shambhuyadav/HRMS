@@ -1223,6 +1223,7 @@ function RequisitionRegister() {
     }, 300);
     return () => clearTimeout(t);
     // Only typing starts a search; the address changing (back/forward) does not resend what was typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `update` changes with the address, which must not start a search
   }, [typed]);
 
   const query = listQuery(filters);
