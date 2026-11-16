@@ -119,9 +119,6 @@ interface PagedList<T> {
 
 const DELIVERY_STATES = ['QUEUED', 'DELIVERED', 'RETRY_PENDING', 'FAILED', 'SUPPRESSED'];
 const STATE_TONES: Record<string, 'good' | 'warn' | 'bad'> = { DELIVERED: 'good', RETRY_PENDING: 'warn', RETRYING: 'warn', SUPPRESSED: 'warn', FAILED: 'bad' };
-/** A rule's event type as the server keeps it (modules/notification/routes.ts). */
-const EVENT_CODE = /^[A-Z][A-Z0-9_]{0,59}$/;
-
 const readable = (code: string) => code.replace(/_/g, ' ').toLowerCase();
 const when = (iso: string) => new Date(iso).toLocaleString();
 const StateText = ({ state }: { state: string }) => <Badge tone={STATE_TONES[state] ?? 'neutral'}>{readable(state)}</Badge>;
@@ -190,15 +187,20 @@ export function DeliveryLogPage() {
   const allowed = can(READ_DELIVERY);
   const scopeKey = `${stored?.companyId ?? '-'}:${stored?.assignmentId ?? '-'}`;
   const [state, setState] = useState('');
-  const [typed, setTyped] = useState('');
+  const [category, setCategory] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
-  const category = typed.trim().toUpperCase().replace(/[\s-]+/g, '_');
-  const categoryInvalid = category !== '' && !EVENT_CODE.test(category);
+  // The Event filter offers the event codes the log holds (in words), not a box to type a code into. Without the list (a refusal or a
+  // failure) the filter offers "All" only; the log itself still shows.
+  const categories = useQuery({
+    queryKey: ['notification-delivery-categories', scopeKey],
+    enabled: allowed,
+    queryFn: () => api<{ items: string[] }>('/v1/notifications/delivery/categories'),
+  });
   const log = useQuery({
     queryKey: ['notification-delivery', scopeKey, state, category, from, to, page],
-    enabled: allowed && !categoryInvalid,
+    enabled: allowed,
     queryFn: () =>
       api<PagedList<DeliveryRow>>(
         `/v1/notifications/delivery?${pageParams(page)}${state ? `&state=${state}` : ''}${category ? `&category=${encodeURIComponent(category)}` : ''}${from ? `&from=${from}` : ''}${to ? `&to=${to}` : ''}`,
@@ -239,14 +241,20 @@ export function DeliveryLogPage() {
           </label>
           <label className="inline">
             Event{' '}
-            <input
-              value={typed}
-              placeholder="EXPENSE_DECIDED"
+            <select
+              value={category}
               onChange={(e) => {
-                setTyped(e.target.value);
+                setCategory(e.target.value);
                 setPage(1);
               }}
-            />
+            >
+              <option value="">All</option>
+              {(categories.data?.items ?? []).map((c) => (
+                <option key={c} value={c}>
+                  {readable(c)}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="inline">
             From{' '}
@@ -271,7 +279,7 @@ export function DeliveryLogPage() {
             />
           </label>
           {can(EXPORT_DELIVERY) && (
-            <button type="button" className="secondary" disabled={!from || !to || categoryInvalid || exportLog.isPending} onClick={() => exportLog.mutate()}>
+            <button type="button" className="secondary" disabled={!from || !to || exportLog.isPending} onClick={() => exportLog.mutate()}>
               Export this log
             </button>
           )}
@@ -279,7 +287,6 @@ export function DeliveryLogPage() {
         {can(EXPORT_DELIVERY) && (!from || !to) && <p className="hint">An export covers a period: choose both dates.</p>}
         {exportLog.isSuccess && <p className="ok">Export requested. Download it from Reports when it is ready.</p>}
         <ErrorNote error={exportLog.error} />
-        {categoryInvalid && <p className="hint">An event code has letters, digits and underscores and starts with a letter.</p>}
         {log.isFetching && !log.data && <p className="hint loading">Loading the log…</p>}
         {log.data?.items.length === 0 && <Empty>No notifications match.</Empty>}
         {log.data && log.data.items.length > 0 && (

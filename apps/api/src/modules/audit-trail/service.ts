@@ -19,6 +19,16 @@ export function isCompanyWide(grant: AccessGrant): boolean {
   return grant.scopeKind === 'COMPANY' && departments.length + locations.length + employees.length === 0;
 }
 
+// Read from audit_event_record_idx (company_id, resource_code, ...) alone.
+const AUDIT_KINDS_SQL = 'select distinct resource_code from audit_event where company_id = $1 order by resource_code limit 1000';
+
+/** The record kinds the trail holds, for the viewer's "Record kind" choices (same duty and scope as the events; codes only). */
+export async function listAuditResources(db: Queryable, grant: AccessGrant): Promise<{ items: string[] }> {
+  assertCompanyWide(grant);
+  const rows = await db.query<{ resource_code: string }>(AUDIT_KINDS_SQL, [grant.companyId]);
+  return { items: rows.rows.map((r) => r.resource_code) };
+}
+
 export function assertCompanyWide(grant: AccessGrant): void {
   if (!isCompanyWide(grant)) throw new HttpError(403, 'FORBIDDEN', 'Audit access needs an unrestricted company-scope assignment');
 }

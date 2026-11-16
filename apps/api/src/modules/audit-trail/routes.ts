@@ -9,6 +9,7 @@ import {
   decideHold,
   employeePayrollTrace,
   listAuditEvents,
+  listAuditResources,
   listHolds,
   listRetentionRules,
   proposeRetentionRule,
@@ -57,6 +58,12 @@ export async function auditTrailRoutes(app: FastifyInstance, opts: { db: Databas
       return listAuditEvents(db, grant, request.query as AuditQuery & Sorting & { page: number; pageSize: number });
     },
   );
+
+  // The record kinds the trail holds, for the viewer's "Record kind" choices; same duty and scope as the events.
+  app.get('/audit/resources', async (request) => {
+    const grant = await requireAccess(db, request, 'audit', 'read', ['operational']);
+    return listAuditResources(db, grant);
+  });
 
   // FR-057: from an employee's assignment revisions to the payroll runs that used them; identifiers and dates, no amounts.
   app.get(

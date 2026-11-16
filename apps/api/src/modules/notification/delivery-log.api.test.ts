@@ -151,6 +151,25 @@ describe('delivery log filters and paging (FR-085)', () => {
     expect((await log(support, '?category=LOG_GAMMA')).items).toEqual([]);
     expect((await log(supportB, '?category=LOG_GAMMA')).items.map((r) => r.id)).toEqual([elsewhere]);
   });
+
+  it('lists the event codes it holds for the Event filter, once each and sorted, in its permission and its company', async () => {
+    await notify(A, 'LOG_ZETA', employee.user, 'DELIVERED', null);
+    await notify(A, 'LOG_ZETA', other.user, 'FAILED', 'MISSING_PLACEHOLDER');
+    await notify(A, 'LOG_EPSILON', employee.user, 'DELIVERED', null);
+    await notify(B, 'LOG_ONLY_IN_B', supportB.user, 'DELIVERED', null);
+    const res = await h.call(support, 'GET', `${DELIVERY}/categories`);
+    expect(res.statusCode, res.body).toBe(200);
+    const codes = (res.json() as { items: string[] }).items;
+    expect(codes).toEqual([...codes].sort());
+    expect(new Set(codes).size).toBe(codes.length);
+    expect(codes).toEqual(expect.arrayContaining(['LOG_EPSILON', 'LOG_ZETA']));
+    expect(codes).not.toContain('LOG_ONLY_IN_B');
+    expect(JSON.stringify(res.json())).not.toContain('SECRET-MESSAGE');
+    expect((await h.call(employee, 'GET', `${DELIVERY}/categories`)).statusCode).toBe(403);
+    const inB = (await h.call(supportB, 'GET', `${DELIVERY}/categories`)).json() as { items: string[] };
+    expect(inB.items).toContain('LOG_ONLY_IN_B');
+    expect(inB.items).not.toContain('LOG_ZETA');
+  });
 });
 
 describe('events that failed to dispatch (notify-14; FR-061, BR-034)', () => {

@@ -241,6 +241,15 @@ export async function notificationRoutes(app: FastifyInstance, opts: { db: Datab
     return pageOf(db, `${DELIVERY_LIST_SELECT} where ${deliveryCondition('$1', p, q, grant)}`, p.values, `"occurredAt" desc, id`, q, 200);
   });
 
+  // The event codes the log holds, for the Event filter's choices: under the log's own permission, company and row scope, so a code
+  // is offered only when a row the viewer may see carries it. Codes only, never a message.
+  app.get('/notifications/delivery/categories', async (request) => {
+    const grant = await requireAccess(db, request, 'notification', 'read_delivery', ['operational']);
+    const p = new SqlParams([grant.companyId]);
+    const rows = await db.query<{ category: string }>(`select distinct n.category from notification n where ${deliveryCondition('$1', p, {}, grant)} order by 1 limit 500`, p.values);
+    return { items: rows.rows.map((r) => r.category) };
+  });
+
   // FR-061, BR-034: an event that failed to dispatch has no notification to show in the log above, so it is listed here:
   // retrying, or given up on after its last retry. Topic, attempts and the error class only, never the payload.
   app.get('/notifications/delivery/failed-events', { schema: { querystring: failedEventsQuery } }, async (request) => {

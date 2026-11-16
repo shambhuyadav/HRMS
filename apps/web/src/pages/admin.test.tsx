@@ -78,9 +78,14 @@ describe('audit trail (FR-058)', () => {
 
   it('exports the events shown: the record filters applied with the period, not what is typed and not yet shown (BR-026)', async () => {
     session.permissions = ['audit.read.operational', 'audit.export.operational'];
-    const calls = mockApi({ 'GET /v1/audit/events': { items: [EVENT], total: 1 }, 'POST /v1/reports': { id: 'r-1', state: 'QUEUED' } });
+    const calls = mockApi({
+      'GET /v1/audit/events': { items: [EVENT], total: 1 },
+      'GET /v1/audit/resources': { items: ['employee', 'leave_request'] },
+      'POST /v1/reports': { id: 'r-1', state: 'QUEUED' },
+    });
     renderPage(<AuditTrailPage />);
     await screen.findByText('displayName, workEmail');
+    await screen.findByRole('option', { name: 'Leave request' });
     fireEvent.change(screen.getByLabelText('Record kind'), { target: { value: 'employee' } });
     fireEvent.change(screen.getByLabelText('Record id'), { target: { value: EVENT.recordKey } });
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-10-01' } });
@@ -92,6 +97,25 @@ describe('audit trail (FR-058)', () => {
     fireEvent.click(screen.getByText('Export these events'));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ reportCode: 'AUDIT_TRAIL', filters: { resource: 'employee', recordKey: EVENT.recordKey, from: '2026-10-01', to: '2026-10-24' } });
+  });
+
+  it('"Record kind" offers the kinds the trail holds, in words, and only "All" without that list', async () => {
+    session.permissions = ['audit.read.operational'];
+    mockApi({ 'GET /v1/audit/events': { items: [EVENT], total: 1 }, 'GET /v1/audit/resources': { items: ['employee', 'leave_request'] } });
+    renderPage(<AuditTrailPage />);
+    await screen.findByRole('option', { name: 'Leave request' });
+    const kind = screen.getByLabelText('Record kind') as HTMLSelectElement;
+    expect([...kind.options].map((o) => [o.value, o.text])).toEqual([
+      ['', 'All'],
+      ['employee', 'Employee'],
+      ['leave_request', 'Leave request'],
+    ]);
+    cleanup();
+    mockApi({ 'GET /v1/audit/events': { items: [EVENT], total: 1 }, 'GET /v1/audit/resources': new Reply(() => [500, { error: 'INTERNAL', message: 'down' }]) });
+    renderPage(<AuditTrailPage />);
+    await screen.findByText('displayName, workEmail');
+    expect([...(screen.getByLabelText('Record kind') as HTMLSelectElement).options].map((o) => o.text)).toEqual(['All']);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('sorts on the server by a column heading: newest first until one is chosen, the next click reverses it, a new sort starts at page 1 (FR-056)', async () => {

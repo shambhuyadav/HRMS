@@ -72,6 +72,30 @@ describe('audit trail read (FR-058, DF02)', () => {
     expect(page2.total).toBe(all.total);
     expect(page2.items).toHaveLength(1);
   });
+
+  it('lists the record kinds the trail holds, once each and sorted, under the same duty and company scope', async () => {
+    // Another company's employee is recorded under the same kind; a kind only that company has is not offered here.
+    await h.call(hrB, 'POST', '/v1/employees', h.newEmployeeBody(B));
+    const res = await h.call(auditor, 'GET', '/v1/audit/resources');
+    expect(res.statusCode, res.body).toBe(200);
+    const kinds = (res.json() as { items: string[] }).items;
+    expect(kinds).toContain('employee');
+    expect(kinds).toEqual([...kinds].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)));
+    expect(new Set(kinds).size).toBe(kinds.length);
+    const seen = new Set((await events(auditor, '?pageSize=100')).items.map((e) => e.resource));
+    for (const k of seen) expect(kinds).toContain(k);
+    const inB = (await h.one<{ kinds: string[] }>(`select coalesce(array_agg(distinct resource_code), '{}') as kinds from audit_event where company_id = $1`, [B.id])).kinds;
+    const inA = (await h.one<{ kinds: string[] }>(`select coalesce(array_agg(distinct resource_code), '{}') as kinds from audit_event where company_id = $1`, [A.id])).kinds;
+    expect([...kinds].sort()).toEqual([...inA].sort());
+    expect(inB.length).toBeGreaterThan(0);
+
+    const own = (await h.call(hr, 'POST', '/v1/employees', h.newEmployeeBody(A))).json().id as string;
+    const self = await h.actor(A, 'EMPLOYEE', { employeeId: own });
+    expect((await h.call(self, 'GET', '/v1/audit/resources')).statusCode).toBe(403);
+    expect((await h.call(hr, 'GET', '/v1/audit/resources')).statusCode).toBe(403);
+    const filtered = await h.actor(A, 'AUDITOR', { departmentFilter: A.dept });
+    expect((await h.call(filtered, 'GET', '/v1/audit/resources')).statusCode).toBe(403);
+  });
 });
 
 describe('audit export (FR-058, DF09)', () => {

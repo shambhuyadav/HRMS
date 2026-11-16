@@ -22,6 +22,12 @@ interface AuditEvent {
   reasonRecorded: boolean;
 }
 
+/** A record kind as a person reads it: "leave_request" is "Leave request". */
+const kindWords = (code: string) => {
+  const words = code.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 /** The columns GET /v1/audit/events sorts by (audit-trail/service.ts); newest first until one is chosen. */
 type AuditSort = 'occurredAt' | 'resource' | 'action' | 'actor';
 
@@ -38,6 +44,8 @@ export function AuditTrailPage() {
   const query = new URLSearchParams({ page: String(page), pageSize: '50', ...sortParams(sort) });
   for (const [k, v] of Object.entries(applied)) if (v) query.set(k, v);
   const events = useQuery({ queryKey: ['audit-events', applied, page, sort], queryFn: () => api<{ items: AuditEvent[]; total: number }>(`/v1/audit/events?${query.toString()}`) });
+  // "Record kind" offers the kinds the trail holds, in words; without that list (a refusal or a failure) it offers "All" only.
+  const kinds = useQuery({ queryKey: ['audit-resources'], queryFn: () => api<{ items: string[] }>('/v1/audit/resources') });
   // BR-026: the export holds the events shown: the same record filters and period, not just the period.
   const exportFilters = Object.fromEntries(Object.entries(applied).filter(([, v]) => v));
   const exportReport = useMutation({ mutationFn: () => api<{ id: string }>('/v1/reports', { body: { reportCode: 'AUDIT_TRAIL', filters: exportFilters } }) });
@@ -55,11 +63,18 @@ export function AuditTrailPage() {
       >
         <label>
           Record kind
-          <input value={filters.resource} placeholder="e.g. employee" onChange={(e) => setFilters({ ...filters, resource: e.target.value.trim().toLowerCase() })} />
+          <select value={filters.resource} onChange={(e) => setFilters({ ...filters, resource: e.target.value })}>
+            <option value="">All</option>
+            {(kinds.data?.items ?? []).map((k) => (
+              <option key={k} value={k}>
+                {kindWords(k)}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           Record id
-          <input value={filters.recordKey} onChange={(e) => setFilters({ ...filters, recordKey: e.target.value.trim() })} />
+          <input value={filters.recordKey} placeholder="Optional: one record’s id" onChange={(e) => setFilters({ ...filters, recordKey: e.target.value.trim() })} />
         </label>
         <label>
           From

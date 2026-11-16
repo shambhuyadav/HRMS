@@ -350,15 +350,19 @@ table.wrap-head th { white-space: normal; vertical-align: bottom; }
   .content table:has(> thead) { display: block; }
   .content table:has(> thead) > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .content table:has(> thead) > tbody { display: flex; flex-direction: column; gap: 0.6rem; }
-  .content table:has(> thead) > tbody > tr { display: block; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0.2rem 0.8rem; background: var(--surface); }
+  .content table:has(> thead) > tbody > tr { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0.2rem 0.8rem; background: var(--surface); }
   .content table:has(> thead) > tbody > tr > td,
   .content table:has(> thead) > tbody > tr > th { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.2rem 0.75rem; padding: 0.45rem 0; border-bottom: 1px solid var(--line); text-align: right; white-space: normal; width: auto; }
   .content table:has(> thead) > tbody > tr > :last-child { border-bottom: 0; }
   .content table:has(> thead) > tbody > tr > [data-label]::before { content: attr(data-label); flex: none; max-width: 48%; text-align: left; color: var(--muted); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
   .content table:has(> thead) > tbody > tr:hover > td { background: none; }
-  /* The row's first value (its name, code or date) heads its card. */
-  .content table:has(> thead) > tbody > tr > :first-child { justify-content: flex-start; text-align: left; font-weight: 600; }
-  .content table:has(> thead) > tbody > tr > :first-child::before { content: none; }
+  /* The row's first value (its name, code or date) heads its card; when a code comes first and the name second, the name heads it
+     (App.tsx marks that cell data-card-title) and the code is an ordinary line. */
+  .content table:has(> thead) > tbody > tr:not(:has(> [data-card-title])) > :first-child,
+  .content table:has(> thead) > tbody > tr > [data-card-title] { justify-content: flex-start; text-align: left; font-weight: 600; }
+  .content table:has(> thead) > tbody > tr:not(:has(> [data-card-title])) > :first-child::before,
+  .content table:has(> thead) > tbody > tr > [data-card-title]::before { content: none; }
+  .content table:has(> thead) > tbody > tr > [data-card-title] { order: -1; }
   .content table:has(> thead) > tbody > tr > td > .empty { width: 100%; }
 }
 .pager { display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end; margin-top: 1rem; font-size: 0.86rem; color: var(--muted); }

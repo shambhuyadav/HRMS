@@ -4,6 +4,7 @@ import { Link, NavLink, Navigate, Route, Routes, matchPath, useLocation } from '
 import { api } from './api';
 import { groupIcon, Icon, navIcon } from './icons';
 import { useSession } from './session';
+import { labelTableCells } from './table-cards';
 import { AccessAdminPage } from './pages/access';
 import { AuditTrailPage, MobileLinkReviewPage, RetentionPage, RoutingPage } from './pages/admin';
 import { SelectRolePage, SignInPage } from './pages/auth';
@@ -330,29 +331,14 @@ export function App() {
     return () => watcher.disconnect();
   }, [pathname, stored?.assignmentId]);
   // On a phone a table's rows read as stacked cards, each value under its column's name (styles.css, max-width 560px): every body
-  // cell carries the name of its column, kept up to date as pages render.
+  // cell carries the name of its column, and the cell that heads the card is marked (table-cards.ts), kept up to date as pages render.
   useEffect(() => {
     const main = mainRef.current;
     if (!main || typeof MutationObserver === 'undefined') return undefined;
     let frame = 0;
     const label = () => {
       frame = 0;
-      for (const table of Array.from(main.querySelectorAll('table'))) {
-        const head = table.tHead?.rows[0];
-        if (!head) continue;
-        const names: string[] = [];
-        for (const cell of Array.from(head.cells)) for (let i = 0; i < cell.colSpan; i++) names.push(cell.textContent?.trim() ?? '');
-        for (const body of Array.from(table.tBodies)) {
-          for (const row of Array.from(body.rows)) {
-            let column = 0;
-            for (const cell of Array.from(row.cells)) {
-              const name = names[column] ?? '';
-              if (name && cell.getAttribute('data-label') !== name) cell.setAttribute('data-label', name);
-              column += cell.colSpan;
-            }
-          }
-        }
-      }
+      labelTableCells(main);
     };
     const watcher = new MutationObserver(() => {
       if (!frame) frame = requestAnimationFrame(label);

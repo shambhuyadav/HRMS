@@ -13,6 +13,7 @@ const READ_DELIVERY = 'notification.read_delivery.operational';
 const PREFERENCES = '/v1/me/notification-preferences';
 const DELIVERY = '/v1/notifications/delivery';
 const FAILED = '/v1/notifications/delivery/failed-events';
+const CATEGORIES = '/v1/notifications/delivery/categories';
 
 const session = vi.hoisted(() => ({ permissions: [] as string[] }));
 vi.mock('../session', () => ({
@@ -133,13 +134,20 @@ describe('delivery log (FR-061, FR-085)', () => {
     ...over,
   });
   const failedEvent = (over: Record<string, unknown> = {}) => ({ id: 'e-1', topic: 'expense.decided', state: 'FAILED', occurredAt: '2026-11-02T04:30:00.000Z', attempts: 4, failureCode: 'PG_23514', nextAttemptAt: null, failedAt: '2026-11-02T05:00:00.000Z', ...over });
-  const server = (over: { rows?: object[]; total?: number; events?: object[]; eventsTotal?: number } = {}) =>
+  const server = (over: { rows?: object[]; total?: number; events?: object[]; eventsTotal?: number; categories?: string[] } = {}) =>
     mockApi((call) =>
       call.url.startsWith(FAILED)
         ? [200, { items: over.events ?? [failedEvent()], total: over.eventsTotal ?? (over.events ?? [failedEvent()]).length }]
-        : [200, { items: over.rows ?? [row()], total: over.total ?? (over.rows ?? [row()]).length }],
+        : call.url === CATEGORIES
+          ? [200, { items: over.categories ?? ['EXPENSE_DECIDED', 'LEAVE_SUBMITTED'] }]
+          : [200, { items: over.rows ?? [row()], total: over.total ?? (over.rows ?? [row()]).length }],
     );
-  const logUrls = (calls: Call[]) => calls.filter((c) => c.url.startsWith(DELIVERY) && !c.url.startsWith(FAILED)).map((c) => c.url);
+  const logUrls = (calls: Call[]) => calls.filter((c) => c.url.startsWith(DELIVERY) && !c.url.startsWith(FAILED) && c.url !== CATEGORIES).map((c) => c.url);
+  /** Chooses an event once the list of the log's event codes has arrived. */
+  const chooseEvent = async (words: string) => {
+    await screen.findByRole('option', { name: words });
+    fireEvent.change(screen.getByLabelText('Event'), { target: { value: words.toUpperCase().replace(/ /g, '_') } });
+  };
 
   it('is one screen in the menu, under its permission, and asks nothing without it', async () => {
     expect(NOTIFICATION_SCREENS.map((s) => [s.path, s.title, s.permission, s.nav])).toEqual([['/notifications/delivery', 'Delivery log', READ_DELIVERY, true]]);
@@ -172,10 +180,10 @@ describe('delivery log (FR-061, FR-085)', () => {
     fireEvent.change(screen.getAllByLabelText('State')[0]!, { target: { value: 'FAILED' } });
     await waitFor(() => expect(logUrls(calls)).toContain(`${DELIVERY}?page=1&pageSize=25&state=FAILED`));
 
-    fireEvent.change(screen.getByLabelText('Event'), { target: { value: 'expense decided' } });
+    await chooseEvent('expense decided');
     await waitFor(() => expect(logUrls(calls)).toContain(`${DELIVERY}?page=1&pageSize=25&state=FAILED&category=EXPENSE_DECIDED`));
 
-    const pager = screen.getByRole('navigation', { name: 'Pages of the delivery log' });
+    const pager = await screen.findByRole('navigation', { name: 'Pages of the delivery log' });
     expect(pager.textContent).toContain('Page 1 of 3 · 60 notifications');
     fireEvent.click(within(pager).getByRole('button', { name: 'Next page' }));
     await waitFor(() => expect(logUrls(calls)).toContain(`${DELIVERY}?page=2&pageSize=25&state=FAILED&category=EXPENSE_DECIDED`));
@@ -192,13 +200,21 @@ describe('delivery log (FR-061, FR-085)', () => {
     cleanup();
 
     session.permissions = [READ_DELIVERY, 'notification.export.operational'];
-    const calls = mockApi((call) => (call.method === 'POST' ? [202, { id: 'r-1', state: 'QUEUED' }] : call.url.startsWith(FAILED) ? [200, { items: [], total: 0 }] : [200, { items: [row()], total: 1 }]));
+    const calls = mockApi((call) =>
+      call.method === 'POST'
+        ? [202, { id: 'r-1', state: 'QUEUED' }]
+        : call.url.startsWith(FAILED)
+          ? [200, { items: [], total: 0 }]
+          : call.url === CATEGORIES
+            ? [200, { items: ['EXPENSE_DECIDED'] }]
+            : [200, { items: [row()], total: 1 }],
+    );
     renderPage(<DeliveryLogPage />);
     await screen.findByRole('table', { name: 'Delivery log' });
     const button = screen.getByRole('button', { name: 'Export this log' }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     fireEvent.change(screen.getAllByLabelText('State')[0]!, { target: { value: 'FAILED' } });
-    fireEvent.change(screen.getByLabelText('Event'), { target: { value: 'expense decided' } });
+    await chooseEvent('expense decided');
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-11-01' } });
     fireEvent.change(screen.getByLabelText('To'), { target: { value: '2026-11-03' } });
     await waitFor(() => expect(button.disabled).toBe(false));
@@ -210,15 +226,24 @@ describe('delivery log (FR-061, FR-085)', () => {
     });
   });
 
-  it('an event code the server would refuse is explained and not sent', async () => {
+  it('the Event filter offers the event codes the log holds, in words, and only "All" without that list', async () => {
     session.permissions = [READ_DELIVERY];
-    const calls = server();
+    const calls = server({ categories: ['EXPENSE_DECIDED', 'LEAVE_SUBMITTED'] });
+    renderPage(<DeliveryLogPage />);
+    await screen.findByRole('option', { name: 'leave submitted' });
+    const choices = within(screen.getByLabelText('Event')).getAllByRole('option');
+    expect(choices.map((o) => [o.textContent, (o as HTMLOptionElement).value])).toEqual([
+      ['All', ''],
+      ['expense decided', 'EXPENSE_DECIDED'],
+      ['leave submitted', 'LEAVE_SUBMITTED'],
+    ]);
+    expect(calls.filter((c) => c.url === CATEGORIES)).toHaveLength(1);
+    cleanup();
+
+    mockApi((call) => (call.url === CATEGORIES ? [500, { error: 'INTERNAL', message: 'synthetic failure' }] : call.url.startsWith(FAILED) ? [200, { items: [], total: 0 }] : [200, { items: [row()], total: 1 }]));
     renderPage(<DeliveryLogPage />);
     await screen.findByRole('table', { name: 'Delivery log' });
-    const before = logUrls(calls).length;
-    fireEvent.change(screen.getByLabelText('Event'), { target: { value: '9 lives!' } });
-    expect(await screen.findByText(/letters, digits and underscores/)).toBeTruthy();
-    expect(logUrls(calls)).toHaveLength(before);
+    expect(within(screen.getByLabelText('Event')).getAllByRole('option').map((o) => o.textContent)).toEqual(['All']);
   });
 
   it('an empty match says so, and a refusal is shown as it is', async () => {
