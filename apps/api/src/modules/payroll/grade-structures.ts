@@ -6,7 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Queryable } from '../../db/queryable.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess, requireAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
 import { actorOf, advisoryLock, assertInScope, audit, requireCompanyScope } from './common.js';
@@ -17,9 +17,6 @@ const METHODS: Method[] = ['PERCENT_OF_CTC', 'PERCENT_OF_COMPONENT', 'FIXED_MONT
 const CTC_HEADS = ['EARNING', 'REIMBURSEMENT', 'EMPLOYER_CONTRIBUTION'];
 const GROSS_HEADS = ['EARNING', 'REIMBURSEMENT'];
 
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v);
 
 // ---------------------------------------------------------------------------------------------------------------

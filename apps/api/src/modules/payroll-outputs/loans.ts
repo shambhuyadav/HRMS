@@ -19,7 +19,7 @@
 // outstandingLoans); it computes no recovery.
 import { type Paging, pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import {
@@ -44,10 +44,6 @@ import { ownEmployee } from './payslips.js';
 
 /** Recoveries recognised per call (CP-08 bounded work; an engineering bound). */
 export const RECOVERY_CHUNK = 500;
-
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 
 const reassertLoan = (tx: Queryable, grant: AccessGrant, action: 'request' | 'decide' | 'disburse' | 'recover') => reassertAccess(tx, grant, 'payroll_loan', action, ['loan']);
 

@@ -15,11 +15,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, type FormEvent, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ApiError, formatDate, formatUnits, localDate } from '../api';
+import { api, ApiError, formatDate, formatUnits, isConflict, localDate, retryTransient } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, Section } from '../ui';
-import { isConflict, Item, labelOf, LoadProblem, NotPermitted, PACK_STATE_LABEL, RATE_BASIS_LABEL, Refusal, retryTransient, UserRef, when, type Words } from './lifecycle-documents';
+import { Badge, Empty, NotPermitted, Section } from '../ui';
+import { Item, labelOf, LoadProblem, PACK_STATE_LABEL, RATE_BASIS_LABEL, Refusal, UserRef, when, type Words } from './lifecycle-documents';
 
 // ---------------------------------------------------------------------------------------------------------
 // Permission keys (modules/lifecycle/settlement-calculation-routes.ts; payroll and lifecycle registrations; migration 0235) and paths
@@ -222,8 +222,8 @@ function SettlementSettingsScreen() {
         working date. Both are dated: a change is a new revision, and a revision takes effect only once a second person has activated it.
       </p>
       <p role="note">
-        <Badge tone="warn">two people</Badge> A statutory value is used only once one authorised person has validated it and another has activated it; until then an
-        employee it applies to is blocked with RULE_PACK_NOT_CONFIGURED.
+        <Badge tone="warn">two people</Badge> A statutory value is used only once one authorised person has validated it and another has activated it; until then the
+        settlement of an employee it applies to stops, with “Rule pack not configured”.
       </p>
       {can(SETTLEMENT_READ) && (
         <p className="row">

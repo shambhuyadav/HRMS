@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey, pinSession } from '../api';
+import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey, pinSession, retryTransient } from '../api';
 import { HELD_BATCH_CHECK_INTERVAL_MS, HELD_BATCH_MAX_CHECKS } from '../held-batch-timing';
 import { useSession } from '../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
@@ -539,8 +539,6 @@ function BatchScan({ state }: { state: string | null }) {
   // A batch from before import files were scanned: never committed (imports/jobs.ts commitBatch).
   return <Badge>not scanned</Badge>;
 }
-
-const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
 
 /**
  * The follow-up calls of one import: resuming a batch held for the malware scan from its stored file (still held, or

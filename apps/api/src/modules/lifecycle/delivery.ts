@@ -13,6 +13,7 @@ import type { FileStore } from '../../storage/files.js';
 import { type AccessGrant, canAccessEmployee } from '../access/authorize.js';
 import { actorOf, advisoryLock, assertNotSelf, audit } from './common.js';
 import { renderStatement } from './settlement.js';
+import { ownEmployee } from '../access/grant.js';
 
 export type StatementFormat = 'PDF' | 'XLSX';
 
@@ -193,11 +194,6 @@ export async function deliveriesOf(db: Queryable, companyId: string, source: { l
     )
   ).rows;
   return rows.map(view);
-}
-
-function ownEmployee(grant: AccessGrant): string {
-  if (!grant.linkedEmployeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
-  return grant.linkedEmployeeId;
 }
 
 /** BR-053: the employee's own delivered letters and statements, newest first (titles and dates; the files open one by one). */

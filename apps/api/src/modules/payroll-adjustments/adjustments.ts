@@ -8,7 +8,7 @@
 // and held, unvalued, and approval is refused (H2: an unresolved policy "blocks adjustment approval, not a guessed deduction").
 import { type Paging, pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
 import { type ValuationPolicy, valuationPolicyOn } from '../payroll/calculate.js';
@@ -42,10 +42,6 @@ export function valuationOf(policy: ValuationPolicy | null) {
 }
 
 const valuationNow = async (db: Queryable, grant: AccessGrant) => valuationOf(await valuationPolicyOn(db, grant.companyId, grant.businessDate));
-
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 
 const reassert = (tx: Queryable, grant: AccessGrant, action: 'propose') => reassertAccess(tx, grant, 'payroll_adjustment', action, ['amount']);
 

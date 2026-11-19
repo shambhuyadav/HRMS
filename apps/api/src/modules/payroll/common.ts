@@ -6,6 +6,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, canAccessEmployee, employeeScopePredicate, resolveAccess, SqlParams } from '../access/authorize.js';
 import { linkEvidence, MAX_EVIDENCE_DOCUMENTS } from '../employee/evidence.js';
+import { isIsoDate } from '../../http/validation.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,8 +18,7 @@ export interface Actor {
 
 export const actorOf = (grant: AccessGrant): Actor => ({ companyId: grant.companyId, userId: grant.userId, assignmentId: grant.assignmentId });
 
-/** A real calendar date in ISO form (no silent roll-over such as 2026-02-30). */
-export const isIsoDate = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+export { isIsoDate };
 
 export function requireDate(value: string, field: string, code = 'INVALID_DATE'): string {
   if (!isIsoDate(value)) throw new HttpError(422, code, `The ${field} is not a valid date`, { field });

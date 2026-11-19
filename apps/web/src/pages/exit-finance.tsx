@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, download, formatAmount, formatDate, idempotencyKey, localDate } from '../api';
+import { api, ApiError, download, formatAmount, formatDate, idempotencyKey, localDate, retryTransient } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Empty, ErrorNote, Section, StateBadge } from '../ui';
@@ -25,7 +25,6 @@ export const EXIT_FINANCE_PATHS = {
 } as const;
 
 const AMOUNT = /^\d{1,15}(\.\d{1,4})?$/;
-const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
 const enc = encodeURIComponent;
 
 // ---------------------------------------------------------------------------------------------------------

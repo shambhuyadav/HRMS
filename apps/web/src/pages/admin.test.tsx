@@ -64,6 +64,12 @@ describe('audit trail (FR-058)', () => {
     renderPage(<AuditTrailPage />);
     expect(await screen.findByText('displayName, workEmail')).toBeTruthy();
     expect(screen.getByText('personal')).toBeTruthy();
+    // The record kind, action and role read as words, not codes.
+    const row = screen.getByText('displayName, workEmail').closest('tr')!;
+    expect(within(row).getByText('Create')).toBeTruthy();
+    expect(row.textContent).toContain('Employee');
+    expect(row.textContent).toContain('(HR administrator)');
+    expect(row.textContent).not.toMatch(/CREATE|HR_ADMINISTRATOR/);
     const exportButton = screen.getByText('Export these events') as HTMLButtonElement;
     expect(exportButton.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText('From'), { target: { value: '2026-10-01' } });

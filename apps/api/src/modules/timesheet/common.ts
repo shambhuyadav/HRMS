@@ -4,14 +4,15 @@ import { writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { isIsoDate } from '../../http/validation.js';
+import { ownEmployee } from '../access/grant.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Employee statuses in which time can be recorded and allocated (DF04: employed and activated). */
 export const ACTIVE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'] as const;
 
-/** A real calendar date in ISO form (no silent roll-over such as 2026-02-30). */
-export const isIsoDate = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+export { isIsoDate };
 
 export const addDays = (d: string, n: number): string => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
@@ -108,10 +109,7 @@ export function assertCompanyWide(grant: AccessGrant): void {
   }
 }
 
-export function ownEmployee(grant: AccessGrant): string {
-  if (!grant.linkedEmployeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
-  return grant.linkedEmployeeId;
-}
+export { ownEmployee };
 
 /** Minutes as exact decimal hours ('7.25'): minutes are whole quarter hours, so two decimals are exact. */
 export function hoursOf(minutes: number): string {

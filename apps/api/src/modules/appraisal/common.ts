@@ -4,6 +4,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import { type AccessGrant, OWN_ESS_ROLE_CODES, taskDelegationLive } from '../access/authorize.js';
 import { lockTransaction } from '../workflow/engine.js';
+import { isIsoDate } from '../../http/validation.js';
 
 export const APPRAISAL_KIND = 'appraisal';
 /** F1 explicit second reviewer level: its own typed transaction, routed with the appraisal list. */
@@ -300,7 +301,7 @@ export function requireText(value: string | null | undefined, field: string): st
   return v;
 }
 
-export const isIsoDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+export { isIsoDate };
 
 export function requireDate(value: string, field: string): string {
   if (!isIsoDate(value)) throw new HttpError(422, 'INVALID_DATE', 'The date is not a valid calendar date', { field });

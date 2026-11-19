@@ -208,7 +208,7 @@ describe('settlement settings: export for the navigation step', () => {
     renderScreen([]);
     expect(
       screen.getByText(
-        'A statutory value is used only once one authorised person has validated it and another has activated it; until then an employee it applies to is blocked with RULE_PACK_NOT_CONFIGURED.',
+        'A statutory value is used only once one authorised person has validated it and another has activated it; until then the settlement of an employee it applies to stops, with “Rule pack not configured”.',
         { exact: false },
       ),
     ).toBeTruthy();

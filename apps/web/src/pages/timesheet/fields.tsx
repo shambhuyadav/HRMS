@@ -1,0 +1,142 @@
+// Employee and job choices for the timesheet forms.
+
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { api, type EmployeeHit, isForbidden, readable, retryTransient } from '../../api';
+import { useSession } from '../../session';
+import { Empty, ErrorNote, NotPermitted } from '../../ui';
+import { EMPLOYEE_LIST, MASTER_READ, shown, useKeys } from './shared';
+import type { Project, ProjectDetail } from './types';
+
+// ---------------------------------------------------------------------------------------------------------
+// Employee and job choices for the forms
+// ---------------------------------------------------------------------------------------------------------
+interface Choice {
+  id: string;
+  label: string;
+}
+
+/** An employee: the signed-in one, the current one, or one found by an employee search (employee.list). */
+export function EmployeeField({ label, value, current, onChange }: { label: string; value: string; current?: Choice | null; onChange: (id: string) => void }) {
+  const { can, me } = useSession();
+  const keys = useKeys();
+  const canSearch = can(EMPLOYEE_LIST);
+  const [picked, setPicked] = useState<Choice | null>(null);
+  const [search, setSearch] = useState('');
+  const [term, setTerm] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setTerm(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  const hits = useQuery({
+    queryKey: keys.employeeSearch(term),
+    queryFn: () => api<{ items: EmployeeHit[] }>(`/v1/employees?${new URLSearchParams({ search: term, page: '1', pageSize: '25' }).toString()}`),
+    enabled: canSearch && term !== '',
+    retry: retryTransient,
+  });
+  const choices: Choice[] = [];
+  const offer = (c: Choice) => {
+    if (!choices.some((x) => x.id === c.id)) choices.push(c);
+  };
+  if (me?.employeeId) offer({ id: me.employeeId, label: me.displayName ? `You (${me.displayName})` : 'You' });
+  if (current) offer(current);
+  if (picked) offer(picked);
+  const choose = (e: EmployeeHit) => {
+    const c = { id: e.id, label: `${e.displayName} (${e.employeeCode})` };
+    setPicked(c);
+    onChange(c.id);
+    setSearch('');
+    setTerm('');
+  };
+  const found = term !== '' ? hits.data : undefined;
+  const lower = label.toLowerCase();
+  return (
+    <>
+      <label>
+        {label}
+        <select required value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Choose…</option>
+          {choices.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {canSearch ? (
+        <div className="wide">
+          <label>
+            Find {choices.length > 0 ? `another ${lower}` : `the ${lower}`}
+            <input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
+          </label>
+          {term !== '' && hits.isLoading && <p className="hint">Searching…</p>}
+          {isForbidden(hits.error) ? <NotPermitted>The selected role cannot search employees.</NotPermitted> : <ErrorNote error={hits.error} />}
+          {found && found.items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
+          {found && found.items.length > 0 && (
+            <ul className="choices" aria-label={`Matching employees for ${lower}`}>
+              {found.items.map((e) => (
+                <li key={e.id}>
+                  <button type="button" aria-label={`Choose ${e.displayName} (${e.employeeCode}) as ${lower}`} onClick={() => choose(e)}>
+                    {e.displayName} ({e.employeeCode}) · {readable(e.status).toLowerCase()}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <p className="hint wide">The selected role cannot search employees, so only the choices above are offered.</p>
+      )}
+    </>
+  );
+}
+
+/** A job of an active project (timesheet_master.read): the project first, then one of its active jobs. */
+export function JobField({ projectId, jobId, onProject, onJob }: { projectId: string; jobId: string; onProject: (id: string) => void; onJob: (id: string) => void }) {
+  const { can } = useSession();
+  const keys = useKeys();
+  const canRead = can(MASTER_READ);
+  const projects = useQuery({ queryKey: keys.projectList('true'), queryFn: () => api<{ items: Project[] }>('/v1/timesheet/projects?active=true'), enabled: canRead, retry: retryTransient });
+  const detail = useQuery({
+    queryKey: keys.project(projectId),
+    queryFn: () => api<ProjectDetail>(`/v1/timesheet/projects/${encodeURIComponent(projectId)}`),
+    enabled: canRead && projectId !== '',
+    retry: retryTransient,
+  });
+  if (!canRead) return <p className="hint wide">The selected role cannot list projects and jobs, so no job can be chosen here.</p>;
+  const jobs = (shown(detail)?.jobs ?? []).filter((j) => j.active);
+  return (
+    <>
+      <label>
+        Project
+        <select
+          required
+          value={projectId}
+          onChange={(e) => {
+            onProject(e.target.value);
+            onJob('');
+          }}
+        >
+          <option value="">Choose…</option>
+          {(shown(projects)?.items ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.code}: {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Job
+        <select required value={jobId} disabled={projectId === ''} onChange={(e) => onJob(e.target.value)}>
+          <option value="">{projectId === '' ? 'Choose a project first' : 'Choose…'}</option>
+          {jobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              {j.code}: {j.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <ErrorNote error={projects.error ?? detail.error} />
+    </>
+  );
+}

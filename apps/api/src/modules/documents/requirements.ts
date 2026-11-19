@@ -12,6 +12,7 @@ import { type Database, withTransaction } from '../../db/transaction.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { auditDenial, requireAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { isCompanyWide } from '../access/grant.js';
 
 const RESOURCE = 'document_requirement';
 const uuid = { type: 'string', format: 'uuid' } as const;
@@ -44,11 +45,6 @@ const COLUMNS = `r.id, json_build_object('code', t.code, 'label', t.label) as "d
 const FROM = `document_requirement r
   join reference_value t on t.company_id = r.company_id and t.id = r.document_type_id
   left join reference_value et on et.company_id = r.company_id and et.id = r.employment_type_id`;
-
-function isCompanyWide(grant: AccessGrant): boolean {
-  const { departments, locations, employees } = grant.filters;
-  return grant.scopeKind === 'COMPANY' && departments.length + locations.length + employees.length === 0;
-}
 
 /** Every requirement of the company (in force first, then future, then ended), with the choices the form offers. */
 export async function listRequirements(db: Queryable, grant: AccessGrant) {

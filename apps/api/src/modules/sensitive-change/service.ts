@@ -16,6 +16,7 @@ import { type AccessGrant, canAccessEmployee, resolveAccess, taskDelegationLive 
 import { type PayrollCutoffWarning, payrollCutoffWarning } from '../payroll/cutoff.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
 import { buildProposal, type Category, FIELDS, maskedBank, maskTail, type Values } from './fields.js';
+import { ownEmployee } from '../access/grant.js';
 
 export const SENSITIVE_CHANGE_KIND = 'sensitive_change';
 const OPEN_STATES = ['DRAFT', 'SUBMITTED', 'IN_REVIEW', 'APPROVED', 'SCHEDULED'];
@@ -45,11 +46,6 @@ const REQUEST_COLUMNS = `r.id, r.employee_id, r.transaction_id, r.category, r.ba
 const requestBinding = (companyId: string, employeeId: string, id: string) => ({ purpose: 'sensitive_change.proposed', companyId, ownerId: employeeId, recordId: id });
 const revisionBinding = (companyId: string, employeeId: string, id: string) => ({ purpose: 'private_profile.revision', companyId, ownerId: employeeId, recordId: id });
 const openSealed = (companyId: string, r: Pick<RequestRow, 'id' | 'employee_id' | 'proposed_payload'>) => openJson<Sealed>(r.proposed_payload, requestBinding(companyId, r.employee_id, r.id));
-
-function ownEmployee(grant: AccessGrant): string {
-  if (!grant.linkedEmployeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
-  return grant.linkedEmployeeId;
-}
 
 /** Serialises everything that bases on or appends to one employee's category (after any transaction lock). */
 async function lockCategory(tx: Queryable, companyId: string, employeeId: string, category: Category): Promise<void> {

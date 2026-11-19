@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Queryable } from '../../db/queryable.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
 import { writeAudit } from '../../audit/audit.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess, requireAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
 
@@ -17,10 +17,6 @@ export const COMPANY_CURRENCY = 'INR';
 const VIEW = `select c.id, c.currency_code as "currencyCode", r.minor_unit as "minorUnit", c.purpose, c.state, c.reason, c.created_by as "createdBy", c.created_at as "createdAt",
     c.activated_by as "activatedBy", c.activated_at as "activatedAt", c.retired_at as "retiredAt", c.version
   from company_currency c join currency r on r.code = c.currency_code`;
-
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 
 /** Is `code` enabled for expenses in this company today? */
 export async function expenseCurrencyEnabled(db: Queryable, companyId: string, code: string): Promise<boolean> {

@@ -2,7 +2,7 @@
 // receive it; an approver is offered approval only when independent, and a rejection or an early end needs a reason; the end
 // says that open tasks do not move; a decision task shows that the user acts as a delegate and in which role (FR-096); the
 // server's refusals are shown as they are. Synthetic data only.
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -284,7 +284,10 @@ describe('the "delegated" indication on decision tasks (FR-096)', () => {
   it('every decision queue row shows it (the rule above is the same component everywhere)', () => {
     const rows: Record<string, number> = { appraisal: 1, assets: 1, 'hiring-pipeline': 1, 'hiring-requisitions': 2, 'lifecycle-documents': 1, 'lifecycle-processes': 1, timesheet: 2, payroll: 4, ess: 1, work: 2 };
     for (const [page, count] of Object.entries(rows)) {
-      const source = readFileSync(`${process.cwd()}/src/pages/${page}.tsx`, 'utf8');
+      // A page's source is its module and, once split, the modules in its folder (pages/payroll.tsx and pages/payroll/*).
+      const folder = `${process.cwd()}/src/pages/${page}`;
+      const files = [`${folder}.tsx`, ...(existsSync(folder) ? readdirSync(folder).filter((f) => /\.tsx?$/.test(f)).map((f) => `${folder}/${f}`) : [])];
+      const source = files.map((f) => readFileSync(f, 'utf8')).join('\n');
       expect(source.split('<DelegatedBadge taskId=').length - 1, page).toBe(count);
     }
   });

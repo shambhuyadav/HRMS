@@ -14,17 +14,13 @@ import { predecessorRequestSql, rejectedPredecessor } from '../workflow/predeces
 import { amendRecord, refuseIfPayrollLocked } from '../attendance/service.js';
 import { updateEmployee } from '../employee/service.js';
 import { cancelActiveApproval, type Decision, decideTask, lockTransaction, myOpenTasks, startApproval } from '../workflow/engine.js';
+import { ownEmployee } from '../access/grant.js';
 
 /** DF04 permitted operational fields for self-service requests (initial set; extending it is a configuration change). */
 export const PROFILE_FIELDS = ['displayName', 'workEmail'] as const;
 export type ProfileChanges = Partial<Record<(typeof PROFILE_FIELDS)[number], string>>;
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function ownEmployee(grant: AccessGrant): string {
-  if (!grant.linkedEmployeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
-  return grant.linkedEmployeeId;
-}
 
 async function setState(tx: Queryable, table: string, companyId: string, id: string, transactionId: string, state: string, actor: string, extra = '') {
   await tx.query(`update business_transaction set state = $3, updated_by = $4 where company_id = $1 and id = $2`, [companyId, transactionId, state, actor]);

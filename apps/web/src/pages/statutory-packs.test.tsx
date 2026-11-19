@@ -128,7 +128,15 @@ function renderScreen(permissions: string[]) {
     </QueryClientProvider>,
   );
 }
-const revision = async (name: string) => (await screen.findByRole('heading', { name })).closest('li') as HTMLElement;
+/** A revision under its pack's section, by the pack's name and the revision's heading ("Revision 1, from 1 Jun 2018"). */
+const revision = async (pack: string, heading: string) =>
+  within(await screen.findByRole('list', { name: `Revisions of ${pack}` }))
+    .getByRole('heading', { name: heading })
+    .closest('li') as HTMLElement;
+const PF = 'Provident fund (synthetic title)';
+const ESIC = 'Employees’ state insurance (synthetic title)';
+const PT_MH = 'Professional tax, Maharashtra';
+const PT_KA = 'Professional tax, Karnataka';
 const term = (scope: HTMLElement, name: string) => within(scope).getByText(name, { selector: 'dt' }).nextElementSibling?.textContent;
 
 afterEach(() => {
@@ -146,15 +154,18 @@ describe('statutory packs: reading', () => {
   it('shows each revision with its state, statute and values in words, and no action without the duties', async () => {
     serve({ 'GET /v1/statutory-rule-packs': [200, PACKS] });
     renderScreen([READ]);
-    const pf = await revision('PF revision 1, from 1 Jun 2018');
+    const pf = await revision(PF, 'Revision 1, from 1 Jun 2018');
     expect(term(pf, 'State')).toBe('Inactive draft');
+    // Each pack's section carries its name; no heading shows a pack code.
+    expect(screen.getByRole('heading', { name: PF })).toBeTruthy();
+    expect(screen.queryAllByRole('heading').filter((h) => /\b(PF|ESIC|PT_MH|PT_KA)\b/.test(h.textContent ?? ''))).toEqual([]);
     expect(term(pf, 'Values')).toContain('Employee 12% and employer 12% of PF wages up to INR 15,000.00');
     expect(term(pf, 'Values')).toContain('pension 8.33% of wages up to INR 15,000.00');
     expect(term(pf, 'Values')).toContain('rounded to the nearest whole unit, half up');
     expect(term(pf, 'Statute reference')).toContain('Code on Social Security, 2020');
-    const esic = await revision('ESIC revision 1, from 1 Jul 2019');
+    const esic = await revision(ESIC, 'Revision 1, from 1 Jul 2019');
     expect(term(esic, 'Values')).toContain('for monthly wages up to INR 21,000.00; contribution periods start in April and October');
-    const mh = await revision('PT_MH revision 1, from 1 Apr 2023');
+    const mh = await revision(PT_MH, 'Revision 1, from 1 Apr 2023');
     const slabs = within(mh).getByRole('table', { name: 'Monthly slabs' });
     expect(within(slabs).getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
       ['INR 7,500.00', 'INR 0.00', '—'],
@@ -208,13 +219,13 @@ describe('statutory packs: reading', () => {
       ],
     });
     renderScreen([READ]);
-    const lwf = await revision('LWF_MH revision 1, from 1 Apr 2023');
+    const lwf = await revision('Labour welfare fund, Maharashtra', 'Revision 1, from 1 Apr 2023');
     expect(term(lwf, 'Values')).toContain('State MH; contributions with the wages of June and December');
     expect(within(lwf).getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
       ['INR 3,000.00', 'INR 6.00', 'INR 18.00'],
       ['No upper limit', 'INR 12.00', 'INR 36.00'],
     ]);
-    const tax = await revision('INCOME_TAX revision 1, from 1 Apr 2026');
+    const tax = await revision('Income tax on salary (synthetic title)', 'Revision 1, from 1 Apr 2026');
     const values = term(tax, 'Values')!;
     expect(values).toContain('Financial year 2026-27; an employee who chooses no regime is taxed under the new regime.');
     expect(values).toContain('New regime: standard deduction INR 75,000.00; rebate of up to INR 60,000.00 on taxable income up to INR 12,00,000.00, with marginal relief just above it');
@@ -239,14 +250,14 @@ describe('statutory packs: two people, and retirement', () => {
       [`POST /v1/statutory-rule-packs/${K_PF}/validate`]: [200, pack({ state: 'VALIDATED', version: 2 })],
     });
     renderScreen([READ, VALIDATE]);
-    const form = await screen.findByRole('form', { name: 'Validate PF revision 1' });
+    const form = await screen.findByRole('form', { name: `Validate revision 1 of ${PF}` });
     fireEvent.change(within(form).getByLabelText(/Source reference/), { target: { value: 'Synthetic gazette' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Record the validation' }));
     expect((await within(form).findByRole('alert')).textContent).toBe('Record how the values were validated against the law in force for the period.');
     expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
     fireEvent.change(within(form).getByLabelText(/Validation reference/), { target: { value: 'Synthetic legal check' } });
     fireEvent.click(within(form).getByRole('button', { name: 'Record the validation' }));
-    expect((await screen.findByRole('status')).textContent).toContain('PF revision 1 is validated');
+    expect((await screen.findByRole('status')).textContent).toContain(`Revision 1 of ${PF} is validated`);
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ sourceReference: 'Synthetic gazette', validationReference: 'Synthetic legal check', expectedVersion: 1 });
   });
 
@@ -256,11 +267,11 @@ describe('statutory packs: two people, and retirement', () => {
       [`POST /v1/statutory-rule-packs/${K_KA}/activate`]: [403, { error: 'SELF_APPROVAL', message: 'no' }],
     });
     renderScreen([READ, ACTIVATE]);
-    const esic = await revision('ESIC revision 1, from 1 Jul 2019');
-    expect((within(esic).getByRole('button', { name: 'Activate ESIC revision 1' }) as HTMLButtonElement).disabled).toBe(true);
+    const esic = await revision(ESIC, 'Revision 1, from 1 Jul 2019');
+    expect((within(esic).getByRole('button', { name: `Activate revision 1 of ${ESIC}` }) as HTMLButtonElement).disabled).toBe(true);
     expect(within(esic).getByText('You wrote or validated this revision, so someone else activates it.')).toBeTruthy();
-    const ka = await revision('PT_KA revision 1, from 1 Apr 2023');
-    fireEvent.click(within(ka).getByRole('button', { name: 'Activate PT_KA revision 1' }));
+    const ka = await revision(PT_KA, 'Revision 1, from 1 Apr 2023');
+    fireEvent.click(within(ka).getByRole('button', { name: `Activate revision 1 of ${PT_KA}` }));
     expect(await within(ka).findByText('Activated by someone other than the person who wrote or validated it.')).toBeTruthy();
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ expectedVersion: 2 });
   });
@@ -271,12 +282,14 @@ describe('statutory packs: two people, and retirement', () => {
       [`POST /v1/statutory-rule-packs/${K_MH}/retire`]: [200, { ...PACKS.items[2], state: 'RETIRED', version: 4 }],
     });
     renderScreen([READ, ACTIVATE]);
-    const form = await screen.findByRole('form', { name: 'Retire PT_MH revision 1' });
-    fireEvent.click(within(form).getByRole('button', { name: 'Retire PT_MH revision 1' }));
+    const form = await screen.findByRole('form', { name: `Retire revision 1 of ${PT_MH}` });
+    fireEvent.click(within(form).getByRole('button', { name: `Retire revision 1 of ${PT_MH}` }));
     expect((await within(form).findByRole('alert')).textContent).toBe('Record why the revision is retired.');
     fireEvent.change(within(form).getByLabelText(/Reason for retiring/), { target: { value: 'Synthetic: new slabs from April' } });
-    fireEvent.click(within(form).getByRole('button', { name: 'Retire PT_MH revision 1' }));
+    fireEvent.click(within(form).getByRole('button', { name: `Retire revision 1 of ${PT_MH}` }));
     await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ reason: 'Synthetic: new slabs from April', expectedVersion: 3 }));
-    expect((await screen.findByRole('status')).textContent).toContain('PT_MH revision 1 is retired');
+    const notice = (await screen.findByRole('status')).textContent ?? '';
+    expect(notice).toContain(`Revision 1 of ${PT_MH} is retired`);
+    expect(notice).not.toMatch(/[A-Z]+_[A-Z_]+/);
   });
 });

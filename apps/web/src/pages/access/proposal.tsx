@@ -1,0 +1,315 @@
+// Proposal (FR-067): a pending grant for the selected user, inside the chosen role's ceiling.
+
+import { useMutation } from '@tanstack/react-query';
+import { type FormEvent, useId, useState } from 'react';
+import { api, isForbidden } from '../../api';
+import { Badge, Empty, ErrorNote, NotPermitted, Section } from '../../ui';
+import { atLocalMidnight, type CataloguePermission, type CatalogueRole, CLASS_LABEL, GROUP, type OrgItem, type OrgQuery, type ProposalBody, type RolesQuery, SCOPE_LABEL, type ScopeKind, SCOPES, shown, TEXTAREA, todayLocal, useRefreshAccess } from './shared';
+
+// ---------------------------------------------------------------------------------------------------------
+// Proposal (FR-067): a pending grant for the selected user, inside the chosen role's ceiling
+// ---------------------------------------------------------------------------------------------------------
+
+export function ProposeGrant({
+  userId,
+  userLabel,
+  roles,
+  orgDepartments,
+  orgLocations,
+}: {
+  userId: string;
+  userLabel: string;
+  roles: RolesQuery;
+  orgDepartments: OrgQuery;
+  orgLocations: OrgQuery;
+}) {
+  const title = `Propose a grant for ${userLabel}`;
+  const catalogue = shown(roles);
+  if (roles.isPending) {
+    return (
+      <Section title={title}>
+        <p className="hint loading">Loading roles…</p>
+      </Section>
+    );
+  }
+  if (!catalogue) {
+    return (
+      <Section title={title}>
+        {isForbidden(roles.error) ? <NotPermitted>The selected role cannot read the role catalogue.</NotPermitted> : <ErrorNote error={roles.error} />}
+      </Section>
+    );
+  }
+  const active = catalogue.items.filter((r) => r.active);
+  return (
+    <Section title={title}>
+      {active.length === 0 ? <Empty>No active roles can be granted.</Empty> : <ProposeForm userId={userId} roles={active} orgDepartments={orgDepartments} orgLocations={orgLocations} />}
+    </Section>
+  );
+}
+
+const defaultDuties = (role: CatalogueRole | undefined): ReadonlySet<string> =>
+  new Set((role?.permissions ?? []).filter((p) => p.defaultDuty && !p.confidential).map((p) => p.key));
+
+function toggled(set: ReadonlySet<string>, value: string): ReadonlySet<string> {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
+
+function groupByResource(permissions: CataloguePermission[]): [string, CataloguePermission[]][] {
+  const groups = new Map<string, CataloguePermission[]>();
+  for (const p of permissions) {
+    const resource = p.key.split('.')[0] ?? p.key;
+    const list = groups.get(resource);
+    if (list) list.push(p);
+    else groups.set(resource, [p]);
+  }
+  return [...groups.entries()];
+}
+
+/** What a scope filter picker offers: the active entries of the last list the server returned (none before one). */
+const pickable = (q: OrgQuery): OrgItem[] => (q.data?.items ?? []).filter((i) => i.active);
+
+function ProposeForm({ userId, roles, orgDepartments, orgLocations }: { userId: string; roles: CatalogueRole[]; orgDepartments: OrgQuery; orgLocations: OrgQuery }) {
+  const refresh = useRefreshAccess();
+  const id = useId();
+  const [roleCode, setRoleCode] = useState('');
+  const [scopeKind, setScopeKind] = useState<ScopeKind | ''>('');
+  const [from, setFrom] = useState(todayLocal);
+  const [to, setTo] = useState('');
+  const [checked, setChecked] = useState<ReadonlySet<string>>(() => new Set());
+  const [purpose, setPurpose] = useState('');
+  const [departments, setDepartments] = useState<ReadonlySet<string>>(() => new Set());
+  const [locations, setLocations] = useState<ReadonlySet<string>>(() => new Set());
+
+  const propose = useMutation({
+    mutationFn: (body: ProposalBody) => api<{ id: string; state: string }>('/v1/access/assignments', { method: 'POST', body }),
+    onSuccess: () => {
+      setRoleCode('');
+      setScopeKind('');
+      setTo('');
+      setChecked(new Set());
+      setPurpose('');
+      setDepartments(new Set());
+      setLocations(new Set());
+      refresh();
+    },
+  });
+
+  const departmentOptions = pickable(orgDepartments);
+  const locationOptions = pickable(orgLocations);
+  const role = roles.find((r) => r.code === roleCode);
+  const eligible = !!role && role.accessClass !== 'OTHER';
+  const chosen = role ? role.permissions.filter((p) => checked.has(p.key) && (!p.confidential || eligible)) : [];
+  const needsPurpose = chosen.some((p) => p.confidential);
+  const fromIso = from ? atLocalMidnight(from) : null;
+  const toIso = to ? atLocalMidnight(to) : null;
+
+  const missing: string[] = [];
+  if (!role) missing.push('a role');
+  if (!scopeKind) missing.push('a scope');
+  if (!fromIso) missing.push('an effective-from date');
+  if (to && !toIso) missing.push('a valid effective-to date');
+  if (chosen.length === 0) missing.push('at least one permission');
+  if (needsPurpose && !purpose.trim()) missing.push('a business purpose for the confidential permissions');
+  const missingId = `${id}-missing`;
+
+  const chooseRole = (code: string) => {
+    const next = roles.find((r) => r.code === code);
+    setRoleCode(code);
+    setScopeKind(next?.defaultScope ?? '');
+    setChecked(defaultDuties(next));
+    propose.reset();
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (missing.length > 0 || !role || !scopeKind || !fromIso || propose.isPending) return;
+    // Exactly the entries the pickers show as chosen, in list order.
+    const pick = (ids: ReadonlySet<string>, options: OrgItem[]) => options.filter((i) => ids.has(i.id)).map((i) => i.id);
+    const deps = pick(departments, departmentOptions);
+    const locs = pick(locations, locationOptions);
+    const text = purpose.trim();
+    propose.mutate({
+      userId,
+      roleCode: role.code,
+      scopeKind,
+      effectiveFrom: fromIso,
+      ...(toIso ? { effectiveTo: toIso } : {}),
+      permissions: chosen.map((p) => p.key),
+      ...(deps.length > 0 || locs.length > 0 ? { filters: { ...(deps.length > 0 ? { departments: deps } : {}), ...(locs.length > 0 ? { locations: locs } : {}) } } : {}),
+      ...(text ? { purpose: text } : {}),
+    });
+  };
+
+  const showFilters = departmentOptions.length > 0 || locationOptions.length > 0;
+
+  return (
+    <form className="grid-form" onSubmit={submit} aria-label="Propose a grant">
+      <label>
+        Role
+        <select required value={roleCode} onChange={(e) => chooseRole(e.target.value)}>
+          <option value="">Choose a role</option>
+          {roles.map((r) => (
+            <option key={r.code} value={r.code}>
+              {r.name} ({CLASS_LABEL[r.accessClass] ?? r.accessClass})
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Scope
+        <select required disabled={!role} value={scopeKind} onChange={(e) => setScopeKind(e.target.value as ScopeKind | '')}>
+          <option value="" disabled>
+            Choose a scope
+          </option>
+          {SCOPES.map((s) => (
+            <option key={s} value={s}>
+              {SCOPE_LABEL[s]}
+              {role?.defaultScope === s ? ' (role default)' : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Effective from
+        <input type="date" required value={from} onChange={(e) => setFrom(e.target.value)} />
+      </label>
+      <label>
+        Effective to (optional)
+        <input type="date" value={to} aria-describedby={`${id}-to`} onChange={(e) => setTo(e.target.value)} />
+      </label>
+      <p className="hint wide" id={`${id}-to`}>
+        Access ends at the start of the effective-to day, which must be after the effective-from date.
+      </p>
+
+      {role && <PermissionPicker role={role} checked={checked} chosenCount={chosen.length} onToggle={(key) => setChecked((prev) => toggled(prev, key))} />}
+
+      <OrgFilter legend="Restrict to departments (optional)" query={orgDepartments} options={departmentOptions} selected={departments} onToggle={(v) => setDepartments((prev) => toggled(prev, v))} />
+      <OrgFilter legend="Restrict to locations (optional)" query={orgLocations} options={locationOptions} selected={locations} onToggle={(v) => setLocations((prev) => toggled(prev, v))} />
+      {showFilters && (
+        <p className="hint wide">
+          Chosen departments and locations narrow the grant: an employee must be in one of the chosen departments (if any) and in one of the chosen locations (if any). Leave
+          both empty for no restriction.
+        </p>
+      )}
+
+      <label className="wide">
+        {needsPurpose ? 'Business purpose (required for confidential permissions)' : 'Business purpose (optional)'}
+        <textarea rows={2} maxLength={500} required={needsPurpose} value={purpose} style={TEXTAREA} onChange={(e) => setPurpose(e.target.value)} />
+      </label>
+
+      <div className="wide row">
+        <button type="submit" disabled={missing.length > 0 || propose.isPending} aria-describedby={role && missing.length > 0 ? missingId : undefined}>
+          Propose grant
+        </button>
+        {role && (
+          <button type="button" className="secondary" onClick={() => setChecked(defaultDuties(role))}>
+            Reset to default duties
+          </button>
+        )}
+      </div>
+      {role && missing.length > 0 && (
+        <p className="hint wide" id={missingId}>
+          Still needed: {missing.join(', ')}.
+        </p>
+      )}
+      {propose.isSuccess && (
+        <p className="ok wide" role="status">
+          Proposed — needs independent approval
+        </p>
+      )}
+      {propose.error && (
+        <div className="wide">
+          <ErrorNote error={propose.error} />
+        </div>
+      )}
+    </form>
+  );
+}
+
+/** The role's ceiling: default duties pre-checked; confidential permissions never pre-checked and clearly labelled. */
+function PermissionPicker({ role, checked, chosenCount, onToggle }: { role: CatalogueRole; checked: ReadonlySet<string>; chosenCount: number; onToggle: (key: string) => void }) {
+  const hintId = useId();
+  const eligible = role.accessClass !== 'OTHER';
+  const hasConfidential = role.permissions.some((p) => p.confidential);
+  if (role.permissions.length === 0) return <p className="hint wide">This role has no permissions in its ceiling.</p>;
+  return (
+    <fieldset className="wide">
+      <legend>
+        Permissions ({chosenCount} of {role.permissions.length} selected)
+      </legend>
+      <p className="hint">
+        The role&apos;s default duties are pre-selected.
+        {hasConfidential && eligible && ' Confidential permissions are never pre-selected; choosing one needs a business purpose.'}
+      </p>
+      {hasConfidential && !eligible && (
+        <p className="hint" id={hintId}>
+          Confidential permissions are disabled: only Admin or Manager roles can hold confidential permissions.
+        </p>
+      )}
+      {groupByResource(role.permissions).map(([resource, perms]) => (
+        <fieldset key={resource} style={GROUP}>
+          <legend className="hint">{resource.replace(/_/g, ' ')}</legend>
+          <div className="row">
+            {perms.map((p) => {
+              const disabled = p.confidential && !eligible;
+              return (
+                <label key={p.key} className="check">
+                  <input
+                    type="checkbox"
+                    checked={!disabled && checked.has(p.key)}
+                    disabled={disabled}
+                    aria-describedby={disabled ? hintId : undefined}
+                    onChange={() => onToggle(p.key)}
+                  />
+                  <code>{p.key}</code>
+                  {p.confidential && <Badge tone="warn">confidential</Badge>}
+                  {p.defaultDuty && <span className="hint">default duty</span>}
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      ))}
+    </fieldset>
+  );
+}
+
+/** A scope filter picker; shown whenever it has entries to offer, so every chosen entry that is sent is visible. */
+function OrgFilter({
+  legend,
+  query,
+  options,
+  selected,
+  onToggle,
+}: {
+  legend: string;
+  query: OrgQuery;
+  options: OrgItem[];
+  selected: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+}) {
+  if (options.length === 0) {
+    // Not readable by the selected role (never requested, or refused): no picker. Any other failure is shown.
+    return query.error && !isForbidden(query.error) ? (
+      <div className="wide">
+        <ErrorNote error={query.error} />
+      </div>
+    ) : null;
+  }
+  return (
+    <fieldset className="wide">
+      <legend>{legend}</legend>
+      <div className="row">
+        {options.map((i) => (
+          <label key={i.id} className="check">
+            <input type="checkbox" checked={selected.has(i.id)} onChange={() => onToggle(i.id)} />
+            {i.name} <span className="hint">{i.code}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}

@@ -6,12 +6,12 @@
 // part is being retried, the error class in plain words. A job still queued or running is asked about again every few
 // seconds; once it is completed or failed, it is not asked about again. Nothing here changes a job.
 import { useQuery } from '@tanstack/react-query';
-import { type ReactNode, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, formatDate, formatMonth } from '../api';
+import { api, ApiError, formatDate, formatMonth, readable, retryTransient } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, Section } from '../ui';
+import { Badge, Empty, ErrorNote, Item, Section } from '../ui';
 
 /** GET /v1/bulk-jobs/:id (modules/bulk/service.ts jobView). */
 export interface BulkJob {
@@ -96,11 +96,6 @@ const ERROR_TEXT: Record<string, string> = {
   POLICY_AMBIGUOUS: 'More than one attendance policy applies equally to an employee.',
 };
 
-function readable(code: string): string {
-  const text = code.replace(/_/g, ' ').toLowerCase();
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
 export const jobKindLabel = (kind: string) => KIND_LABEL[kind] ?? readable(kind);
 export const exclusionReasonLabel = (code: string) => EXCLUSION_REASON_LABEL[code] ?? readable(code);
 
@@ -119,8 +114,6 @@ const count = (value: unknown): number | null => (typeof value === 'number' && N
 const formatInstant = (value: string | null) => (value ? new Date(value).toLocaleString() : '—');
 
 const isStatus = (error: unknown, status: number) => error instanceof ApiError && error.status === status;
-/** A refusal or bad request will not change on retry; only transient failures are retried (once). */
-const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
 
 /** Query keys carry the selected company and assignment: jobs belong to the role they were started with. */
 function useJobKeys() {
@@ -147,15 +140,6 @@ export function useBulkJob(jobId: string, options: { poll?: boolean } = {}) {
 
 function StateBadge({ state }: { state: string }) {
   return <Badge tone={STATE_TONE[state] ?? 'neutral'}>{STATE_LABEL[state] ?? readable(state)}</Badge>;
-}
-
-function Item({ term, children }: { term: string; children: ReactNode }) {
-  return (
-    <div>
-      <dt>{term}</dt>
-      <dd>{children}</dd>
-    </div>
-  );
 }
 
 /** What the job was started for, in words (from its parameters and the fixed values of its result). */

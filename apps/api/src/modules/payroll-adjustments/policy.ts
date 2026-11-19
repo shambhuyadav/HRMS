@@ -4,7 +4,7 @@
 // the INPUT basis) and recovered through (a DEDUCTION head on the INPUT basis; without one a negative case is not approved), and what
 // one timesheet unit is: a day of the origin month, or an hour of such a day.
 import type { Queryable } from '../../db/queryable.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
 import { actorOf, advisoryLock, audit, requireCompanyScope } from '../payroll/common.js';
@@ -25,10 +25,6 @@ export interface ValuationPolicyInput {
   timesheetUnit: 'DAY' | 'HOUR';
   hoursPerDay?: string | null | undefined;
 }
-
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 
 export async function listValuationPolicies(db: Queryable, grant: AccessGrant) {
   return { items: (await db.query(`${VIEW} where v.company_id = $1 order by v.revision`, [grant.companyId])).rows };

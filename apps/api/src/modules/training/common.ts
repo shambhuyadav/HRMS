@@ -3,6 +3,8 @@ import { enqueueEvent, writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, OWN_ESS_ROLE_CODES } from '../access/authorize.js';
+import { isIsoDate } from '../../http/validation.js';
+import { isCompanyWide } from '../access/grant.js';
 
 /** Employment states in which an employee can be nominated or confirmed (as for other own requests). */
 export const ACTIVE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'] as const;
@@ -35,8 +37,7 @@ export type PlanView = (typeof PLAN_VIEWS)[number];
 /** F1 date view in SQL (migration 0036 hrms_training_plan_view), for a plan alias and a business-date parameter. */
 export const viewSql = (alias: string, dayParam: string) => `hrms_training_plan_view(${alias}.state, ${alias}.start_date, ${alias}.end_date, ${dayParam}::date)`;
 
-/** A real calendar date in ISO form (no silent roll-over such as 2026-02-30). */
-export const isIsoDate = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+export { isIsoDate };
 
 export function requireDate(value: string, field: string): string {
   if (!isIsoDate(value)) throw new HttpError(422, 'INVALID_DATE', `The ${field} is not a valid date`, { field });
@@ -52,10 +53,7 @@ export const likePattern = (search: string) => `%${search.replace(/[\\%_]/g, (ch
  * Plans are company records, not employee-scoped: maintaining them needs an unrestricted company-scope assignment
  * (as for organisation masters and the asset register).
  */
-export function isCompanyWide(grant: AccessGrant): boolean {
-  const { departments, locations, employees } = grant.filters;
-  return grant.scopeKind === 'COMPANY' && departments.length + locations.length + employees.length === 0;
-}
+export { isCompanyWide };
 
 export function assertCompanyWide(grant: AccessGrant): void {
   if (!isCompanyWide(grant)) throw new HttpError(403, 'FORBIDDEN', 'Maintaining training plans needs an unrestricted company-scope assignment');

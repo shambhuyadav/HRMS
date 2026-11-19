@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { type Paging, pageOf } from '../../db/paging.js';
 import type { Queryable } from '../../db/queryable.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { openJson, sealJson } from '../../security/field-crypto.js';
 import { type AccessGrant, employeeScopePredicate, SqlParams } from '../access/authorize.js';
@@ -51,9 +51,6 @@ export const NOT_CONFIGURED_MESSAGE = 'Your company has not activated a tax rule
 const CALCULATION = { status: 'NOT_CONFIGURED', message: 'No tax is calculated here. Accepting a declaration or proof gives no relief by itself and changes no payroll.' } as const;
 
 const notConfigured = () => new HttpError(409, 'NOT_CONFIGURED', NOT_CONFIGURED_MESSAGE, { code: 'TAX_RULE_PACK_NOT_CONFIGURED', needs: ['activated tax rule pack for the fiscal period (H3, F4)'] });
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 
 // ---------------------------------------------------------------------------------------------------------------
 // Rule pack registry (payroll configuration duties; no calculation content)

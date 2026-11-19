@@ -1,6 +1,6 @@
 // Small shared UI pieces. Status is always shown as text, never by colour alone (DF10).
 import { createContext, type ReactNode, useContext } from 'react';
-import { ApiError } from './api';
+import { ApiError, localDateTime } from './api';
 
 /** A role's scope in plain words (FR-096: the acting scope is always visible). */
 const SCOPE_WORDS: Readonly<Record<string, string>> = { COMPANY: 'Company-wide', TEAM: 'My team', ASSIGNED: 'Assigned people', OWN: 'My own record' };
@@ -63,6 +63,40 @@ export function ErrorNote({ error }: { error: unknown }) {
       {details?.errors && <div>{details.errors.map((x) => `line ${x.line}: ${x.code}`).join('; ')}</div>}
       {details?.lines && <div>{details.lines.map((x) => `line ${x.line} needs a reason (${x.flags.join(', ')})`).join('; ')}</div>}
     </div>
+  );
+}
+
+/** What the selected role may not do here, said beside the place it would be done. */
+export function NotPermitted({ children }: { children: ReactNode }) {
+  return (
+    <p role="note">
+      <Badge tone="warn">not permitted</Badge> {children}
+    </p>
+  );
+}
+
+/** One term and its value in a `dl.kv` list. */
+export function Item({ term, children }: { term: string; children: ReactNode }) {
+  return (
+    <div>
+      <dt>{term}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+/** An instant as its local day and time, or a dash when there is none. */
+export function When({ at }: { at: string | null | undefined }) {
+  return at ? <time dateTime={at}>{localDateTime(at)}</time> : <>—</>;
+}
+
+/** The outcome of the last action: a status when it worked, an alert when it did not. */
+export function Notice({ notice }: { notice: { text: string; ok: boolean } | null }) {
+  if (!notice) return null;
+  return (
+    <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
+      {notice.text}
+    </p>
   );
 }
 

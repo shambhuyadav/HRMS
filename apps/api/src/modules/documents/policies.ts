@@ -20,6 +20,7 @@ import { auditDenial, reassertAccess, requireAccess } from '../../http/guard.js'
 import { decodeUpload, downloadHeaders, type FileStore, MAX_UPLOAD_BYTES, UPLOAD_FILE_NAME } from '../../storage/files.js';
 import { type ScanProvider, scanAttachment } from '../../storage/scan.js';
 import type { AccessGrant } from '../access/authorize.js';
+import { isCompanyWide } from '../access/grant.js';
 
 export type Classification = 'OPERATIONAL' | 'CONFIDENTIAL';
 const CLASSIFICATIONS = ['OPERATIONAL', 'CONFIDENTIAL'] as const;
@@ -48,11 +49,6 @@ interface FileInput {
   contentBase64: string;
   expiresOn?: string;
   changeNote?: string;
-}
-
-function isCompanyWide(grant: AccessGrant): boolean {
-  const { departments, locations, employees } = grant.filters;
-  return grant.scopeKind === 'COMPANY' && departments.length + locations.length + employees.length === 0;
 }
 
 function checkExpiry(expiresOn: string | undefined, businessDate: string): void {

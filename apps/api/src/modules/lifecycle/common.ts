@@ -6,6 +6,7 @@ import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, canAccessEmployee } from '../access/authorize.js';
 import { assertStatusTransition, type StatusSourceKind, withStatusSource } from '../employee/status.js';
 import { decidedOnBehalfOf, decidedOnBehalfOfUser } from '../workflow/engine.js';
+import { isIsoDate } from '../../http/validation.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ACTIVE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED'] as const;
@@ -18,8 +19,7 @@ export interface Actor {
 
 export const actorOf = (grant: AccessGrant): Actor => ({ companyId: grant.companyId, userId: grant.userId, assignmentId: grant.assignmentId });
 
-/** A real calendar date in ISO form (no silent roll-over such as 2026-02-30). */
-export const isIsoDate = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+export { isIsoDate };
 
 export function requireDate(value: string, code = 'INVALID_DATE', field = 'date'): string {
   if (!isIsoDate(value)) throw new HttpError(422, code, `The ${field} is not a valid date`, { field });

@@ -9,15 +9,13 @@ import { type Paging, pageMeta, pageOf, type Sorting, sortedBy } from '../../db/
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError, notFound } from '../../http/errors.js';
 import { type AccessGrant, SqlParams } from '../access/authorize.js';
+import { isCompanyWide } from '../access/grant.js';
 
 export const RETENTION_RESOURCES = ['audit_event'] as const;
 export type RetentionResource = (typeof RETENTION_RESOURCES)[number];
 
 /** Audit records are not employee-scoped, so only an unrestricted company-scope assignment may read them. */
-export function isCompanyWide(grant: AccessGrant): boolean {
-  const { departments, locations, employees } = grant.filters;
-  return grant.scopeKind === 'COMPANY' && departments.length + locations.length + employees.length === 0;
-}
+export { isCompanyWide };
 
 // Read from audit_event_record_idx (company_id, resource_code, ...) alone.
 const AUDIT_KINDS_SQL = 'select distinct resource_code from audit_event where company_id = $1 order by resource_code limit 1000';

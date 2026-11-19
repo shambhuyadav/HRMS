@@ -6,7 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Queryable } from '../../db/queryable.js';
 import { type Database, withTransaction } from '../../db/transaction.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess, requireAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
 import { actorOf, audit, requireCompanyScope } from './common.js';
@@ -16,10 +16,6 @@ export const EXTERNAL_CODE = /^[A-Z][A-Z0-9_-]{0,39}$/;
 const VIEW = `select x.id, x.external_code as "externalCode", x.name, pc.code as "componentCode", to_char(x.effective_from, 'YYYY-MM-DD') as "effectiveFrom", x.reason, x.state,
     x.created_by as "createdBy", x.activated_by as "activatedBy", x.activated_at as "activatedAt", x.retired_at as "retiredAt", x.version
   from payroll_external_deduction x join pay_component pc on pc.company_id = x.company_id and pc.id = x.component_id`;
-
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 
 export type ExternalResolution = { componentCode: string } | { error: 'EXTERNAL_CODE_UNKNOWN' | 'EXTERNAL_CODE_UNMAPPED' | 'EXTERNAL_CODE_RETIRED' };
 

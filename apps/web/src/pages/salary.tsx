@@ -5,12 +5,12 @@
 // the estimated in-hand is the server's (BR-011; I-80, decided under owner delegation, 6 Nov 2026), shown with the server's
 // own note on how it is made, and "Not available" where the server makes none.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type FormEvent, type ReactNode, useRef, useState } from 'react';
-import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatMonth, idempotencyKey, localDate, pinSession } from '../api';
+import { type CSSProperties, type FormEvent, useRef, useState } from 'react';
+import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatMonth, idempotencyKey, isForbidden, localDate, pinSession, retryTransient } from '../api';
 import { isReportRefusal, reportProblem } from '../report-failures';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
+import { Empty, ErrorNote, NotPermitted, Section, StateBadge } from '../ui';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from './records';
 
 const SALARY_READ = 'salary.read.salary';
@@ -33,20 +33,9 @@ const STATUSES: { value: string; label: string }[] = [
 const statusLabel = (code: string) => STATUSES.find((s) => s.value === code)?.label ?? code;
 
 const SCROLL: CSSProperties = { overflowX: 'auto' };
-const isForbidden = (error: unknown) => error instanceof ApiError && error.status === 403;
 /** C4: a refusal of the past, not of salaries: today and later still answer. */
 const needsHistoryGrant = (error: unknown) => error instanceof ApiError && error.code === 'HISTORY_GRANT_REQUIRED';
 const HISTORY_GRANT_NOTE = 'Earlier dates and whole months need the salary history grant, which the selected role does not hold. Today and later dates are available.';
-/** A refusal or bad request will not change on retry; only transient failures are retried (once). */
-const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
-
-function NotPermitted({ children }: { children: ReactNode }) {
-  return (
-    <p role="note">
-      <Badge tone="warn">not permitted</Badge> {children}
-    </p>
-  );
-}
 
 /** A decimal string the server returned, with its currency. Never computed here. */
 const money = (value: string, currency: string) => formatAmount(value, currency);

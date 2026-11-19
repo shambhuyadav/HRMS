@@ -17,6 +17,7 @@ import { HttpError, notFound } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import type { AccessGrant } from '../access/authorize.js';
 import { type FileFormat, isOutputCode, OUTPUT_CODES, OUTPUTS, type OutputCode, sampleOf } from './outputs.js';
+import { isIsoDate } from '../../http/validation.js';
 
 /** An unrestricted company-scope assignment without denied scopes: company configuration and company files need one. */
 export function companyWide(grant: AccessGrant): boolean {
@@ -27,8 +28,6 @@ export function companyWide(grant: AccessGrant): boolean {
 export function requireCompanyWide(grant: AccessGrant): void {
   if (!companyWide(grant)) throw new HttpError(403, 'COMPANY_SCOPE_REQUIRED', 'This needs an assignment with unrestricted company scope');
 }
-
-const isIsoDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 
 function text(value: unknown, field: string, max: number, required: true): string;
 function text(value: unknown, field: string, max: number, required: false): string | null;

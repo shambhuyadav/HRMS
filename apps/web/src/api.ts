@@ -18,6 +18,23 @@ export class ApiError extends Error {
   }
 }
 
+/** React Query `retry`: one more try after a network failure or a server error; a refusal (4xx) is the answer and is not repeated. */
+export const retryTransient = (failureCount: number, error: Error) => !(error instanceof ApiError && error.status < 500) && failureCount < 1;
+/** The server refused the request for the selected role (403). */
+export const isForbidden = (error: unknown) => error instanceof ApiError && error.status === 403;
+/** The record is not there, or not visible to the selected role (404). */
+export const isNotFound = (error: unknown) => error instanceof ApiError && error.status === 404;
+/** The record changed since it was loaded, or the change clashes with its state (409). */
+export const isConflict = (error: unknown) => error instanceof ApiError && error.status === 409;
+
+/** One row of an employee search (GET /v1/employees). */
+export interface EmployeeHit {
+  id: string;
+  employeeCode: string;
+  displayName: string;
+  status: string;
+}
+
 let current: SessionState | null = null;
 let onUnauthenticated: () => void = () => undefined;
 
@@ -177,3 +194,22 @@ export const formatUnits = (value: string | number | null | undefined) => {
 };
 export const formatAmount = (value: string | null | undefined, currency = 'INR') =>
   value === null || value === undefined ? '—' : `${currency} ${Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** An instant as its local day and time ("3 Nov 2026 14:05"); a value that is not an instant reads as formatDate gives it. */
+export function localDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return formatDate(iso);
+  return `${formatDate(iso)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** A code in words: "LEAVE_REQUEST" reads "Leave request". */
+export function readable(code: string): string {
+  const text = code.replace(/_/g, ' ').toLowerCase();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** A count with its noun: "1 day", "3 days"; `many` for an irregular plural. */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A person as lists show them: "Asha Rao (T001)". */
+export const personLabel = (p: { displayName: string; employeeCode: string }) => `${p.displayName} (${p.employeeCode})`;

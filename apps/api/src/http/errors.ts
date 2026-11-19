@@ -13,6 +13,10 @@ export class HttpError extends Error {
 
 export const notFound = () => new HttpError(404, 'NOT_FOUND', 'Resource not found');
 export const forbidden = () => new HttpError(403, 'FORBIDDEN', 'Not permitted');
+/** Throws: the row's version moved since the caller read it (optimistic concurrency), so the change is refused. */
+export const stale = (): never => {
+  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
+};
 
 // PostgreSQL integrity errors become client errors without leaking constraint internals or values.
 const PG_ERRORS: Record<string, { status: number; code: string; message: string }> = {

@@ -11,11 +11,11 @@
 // server returned and says its refusals in plain words (the conventions of lifecycle-documents.tsx, whose helpers it shares).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type CSSProperties, type FormEvent, useId, useMemo, useState } from 'react';
-import { api, ApiError, formatAmount, formatDate } from '../api';
+import { api, ApiError, formatAmount, formatDate, isConflict, retryTransient } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Badge, Empty, Section } from '../ui';
-import { isConflict, Item, labelOf, LoadProblem, PACK_STATE_LABEL, Refusal, retryTransient, UserRef, when, type Words } from './lifecycle-documents';
+import { Item, labelOf, LoadProblem, PACK_STATE_LABEL, Refusal, UserRef, when, type Words } from './lifecycle-documents';
 
 const PACK_READ = 'statutory_pack.read.operational';
 const PACK_VALIDATE = 'statutory_pack.validate.operational';
@@ -291,9 +291,9 @@ function StatutoryPacksScreen() {
             {revisions.length === 0 ? (
               <Empty>No revision yet.</Empty>
             ) : (
-              <ul className="tasks" aria-label={`Revisions of ${code}`}>
+              <ul className="tasks" aria-label={`Revisions of ${titleOf(code)}`}>
                 {revisions.map((p) => (
-                  <PackItem key={p.id} p={p} onNotice={setNotice} />
+                  <PackItem key={p.id} p={p} name={titleOf(code)} onNotice={setNotice} />
                 ))}
               </ul>
             )}
@@ -319,13 +319,14 @@ function Who({ at, by }: { at: string | null; by: string | null }) {
   );
 }
 
-function PackItem({ p, onNotice }: { p: PackRevision; onNotice: (text: string) => void }) {
+/** One revision, under its pack's section: headed by its number and date; `name` is the pack's name, for labels and messages. */
+function PackItem({ p, name, onNotice }: { p: PackRevision; name: string; onNotice: (text: string) => void }) {
   const { can } = useSession();
   const titleId = `${useId()}-title`;
   return (
     <li aria-labelledby={titleId}>
       <h4 id={titleId} style={H4}>
-        {`${p.code} revision ${p.revision}, from ${formatDate(p.effectiveFrom)}`}
+        {`Revision ${p.revision}, from ${formatDate(p.effectiveFrom)}`}
       </h4>
       <dl className="kv">
         <Item term="State">
@@ -357,15 +358,15 @@ function PackItem({ p, onNotice }: { p: PackRevision; onNotice: (text: string) =
           <Who at={p.activatedAt} by={p.activatedBy} />
         </Item>
       </dl>
-      {p.state === 'DRAFT' && can(PACK_VALIDATE) && <ValidatePack p={p} onNotice={onNotice} />}
-      {p.state === 'VALIDATED' && can(PACK_ACTIVATE) && <ActivatePack p={p} onNotice={onNotice} />}
-      {p.state === 'ACTIVE' && can(PACK_ACTIVATE) && <RetirePack p={p} onNotice={onNotice} />}
+      {p.state === 'DRAFT' && can(PACK_VALIDATE) && <ValidatePack p={p} name={name} onNotice={onNotice} />}
+      {p.state === 'VALIDATED' && can(PACK_ACTIVATE) && <ActivatePack p={p} name={name} onNotice={onNotice} />}
+      {p.state === 'ACTIVE' && can(PACK_ACTIVATE) && <RetirePack p={p} name={name} onNotice={onNotice} />}
     </li>
   );
 }
 
 /** A DRAFT revision is validated: where its values were obtained and how they were checked, against its version. */
-function ValidatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: string) => void }) {
+function ValidatePack({ p, name, onNotice }: { p: PackRevision; name: string; onNotice: (text: string) => void }) {
   const qc = useQueryClient();
   const key = usePackKey();
   const [source, setSource] = useState('');
@@ -376,7 +377,7 @@ function ValidatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: strin
     onSuccess: (r) => {
       setSource('');
       setValidation('');
-      onNotice(`${r.code} revision ${r.revision} is validated. It is used once someone other than its author and its validator activates it.`);
+      onNotice(`Revision ${r.revision} of ${name} is validated. It is used once someone other than its author and its validator activates it.`);
       void qc.invalidateQueries({ queryKey: key });
     },
     onError: (error) => {
@@ -397,7 +398,7 @@ function ValidatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: strin
     validate.mutate({ sourceReference: s, validationReference: v, expectedVersion: p.version });
   };
   return (
-    <form className="stack" aria-label={`Validate ${p.code} revision ${p.revision}`} onSubmit={submit}>
+    <form className="stack" aria-label={`Validate revision ${p.revision} of ${name}`} onSubmit={submit}>
       <label>
         Source reference: where the values were obtained (required)
         <input value={source} maxLength={MAX_REFERENCE} disabled={validate.isPending} onChange={(e) => setSource(e.target.value)} />
@@ -422,7 +423,7 @@ function ValidatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: strin
 }
 
 /** A VALIDATED revision is activated against its version by someone who neither wrote nor validated it. */
-function ActivatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: string) => void }) {
+function ActivatePack({ p, name, onNotice }: { p: PackRevision; name: string; onNotice: (text: string) => void }) {
   const { me } = useSession();
   const qc = useQueryClient();
   const key = usePackKey();
@@ -431,7 +432,7 @@ function ActivatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: strin
   const activate = useMutation({
     mutationFn: () => api<PackRevision>(`/v1/statutory-rule-packs/${encodeURIComponent(p.id)}/activate`, { body: { expectedVersion: p.version } }),
     onSuccess: (r) => {
-      onNotice(`${r.code} revision ${r.revision} is active from ${formatDate(r.effectiveFrom)}. Payroll and settlements calculated from now on use it.`);
+      onNotice(`Revision ${r.revision} of ${name} is active from ${formatDate(r.effectiveFrom)}. Payroll and settlements calculated from now on use it.`);
       void qc.invalidateQueries({ queryKey: key });
     },
     onError: (error) => {
@@ -446,7 +447,7 @@ function ActivatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: strin
         </p>
       )}
       <div className="row">
-        <button type="button" aria-label={`Activate ${p.code} revision ${p.revision}`} disabled={activate.isPending || involved} aria-describedby={involved ? hintId : undefined} onClick={() => activate.mutate()}>
+        <button type="button" aria-label={`Activate revision ${p.revision} of ${name}`} disabled={activate.isPending || involved} aria-describedby={involved ? hintId : undefined} onClick={() => activate.mutate()}>
           Activate
         </button>
       </div>
@@ -456,7 +457,7 @@ function ActivatePack({ p, onNotice }: { p: PackRevision; onNotice: (text: strin
 }
 
 /** An ACTIVE revision is retired, with a reason; from then on nothing is valued under it. */
-function RetirePack({ p, onNotice }: { p: PackRevision; onNotice: (text: string) => void }) {
+function RetirePack({ p, name, onNotice }: { p: PackRevision; name: string; onNotice: (text: string) => void }) {
   const qc = useQueryClient();
   const key = usePackKey();
   const [reason, setReason] = useState('');
@@ -465,7 +466,7 @@ function RetirePack({ p, onNotice }: { p: PackRevision; onNotice: (text: string)
     mutationFn: (body: { reason: string; expectedVersion: number }) => api<PackRevision>(`/v1/statutory-rule-packs/${encodeURIComponent(p.id)}/retire`, { body }),
     onSuccess: (r) => {
       setReason('');
-      onNotice(`${r.code} revision ${r.revision} is retired. Without another active revision, employees it applied to are blocked with RULE_PACK_NOT_CONFIGURED.`);
+      onNotice(`Revision ${r.revision} of ${name} is retired. Until another revision is active, payroll and settlements stop for any employee it applied to.`);
       void qc.invalidateQueries({ queryKey: key });
     },
     onError: (error) => {
@@ -484,7 +485,7 @@ function RetirePack({ p, onNotice }: { p: PackRevision; onNotice: (text: string)
     retire.mutate({ reason: r, expectedVersion: p.version });
   };
   return (
-    <form className="stack" aria-label={`Retire ${p.code} revision ${p.revision}`} onSubmit={submit}>
+    <form className="stack" aria-label={`Retire revision ${p.revision} of ${name}`} onSubmit={submit}>
       <label>
         Reason for retiring (required)
         <input value={reason} maxLength={MAX_REFERENCE} disabled={retire.isPending} onChange={(e) => setReason(e.target.value)} />
@@ -495,7 +496,7 @@ function RetirePack({ p, onNotice }: { p: PackRevision; onNotice: (text: string)
         </p>
       )}
       <div className="row">
-        <button type="submit" className="danger" aria-label={`Retire ${p.code} revision ${p.revision}`} disabled={retire.isPending}>
+        <button type="submit" className="danger" aria-label={`Retire revision ${p.revision} of ${name}`} disabled={retire.isPending}>
           Retire
         </button>
       </div>

@@ -16,7 +16,7 @@
 // allocation is never repeated: only a definitive FAILED or CANCELLED outcome (or a reversal) frees capacity for a
 // replacement manifest, which is again independently authorised (BR-052).
 import type { Queryable } from '../../db/queryable.js';
-import { HttpError, notFound } from '../../http/errors.js';
+import { HttpError, notFound, stale } from '../../http/errors.js';
 import { reassertAccess } from '../../http/guard.js';
 import { openJson, sealJson } from '../../security/field-crypto.js';
 import type { FileStore } from '../../storage/files.js';
@@ -31,10 +31,6 @@ const PAGE = 500;
 
 /** Production refuses synthetic test-only templates (FR-102 brief; H8). */
 export const isProduction = (): boolean => process.env.NODE_ENV === 'production';
-
-const stale = (): never => {
-  throw new HttpError(409, 'STALE_VERSION', 'The record changed; reload and retry');
-};
 
 const bankBinding = (companyId: string, employeeId: string, revisionId: string) => ({ purpose: 'private_profile.revision', companyId, ownerId: employeeId, recordId: revisionId });
 const fileBinding = (companyId: string, batchId: string) => ({ purpose: 'payroll_bank.file', companyId, ownerId: batchId, recordId: batchId });

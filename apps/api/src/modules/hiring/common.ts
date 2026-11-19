@@ -4,6 +4,7 @@ import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import type { AccessGrant } from '../access/authorize.js';
 import { decidedOnBehalfOf } from '../workflow/engine.js';
+import { isIsoDate } from '../../http/validation.js';
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ACTIVE_EMPLOYEE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'];
@@ -122,7 +123,7 @@ export async function assertConvertible(tx: Queryable, companyId: string, candid
   if (block) throw new HttpError(409, block, CONVERSION_BLOCKS[block]);
 }
 
-export const isIsoDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+export { isIsoDate };
 
 export function requireDate(value: string, field: string): string {
   if (!isIsoDate(value)) throw new HttpError(422, 'INVALID_DATE', 'The date is not a valid calendar date', { field });

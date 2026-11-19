@@ -6,7 +6,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, ApiError, formatDate } from '../api';
+import { api, ApiError, formatDate, plural } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
 import { Empty, ErrorNote, Section } from '../ui';
@@ -23,8 +23,6 @@ interface Result {
   moved: { taskId: string; supersededTaskId: string; ownerEmployeeId: string }[];
   left: number;
 }
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function refusal(error: unknown): string | null {
   if (!(error instanceof ApiError)) return null;

@@ -21,6 +21,7 @@ import { reassertAccess } from '../../http/guard.js';
 import { openJson, sealJson } from '../../security/field-crypto.js';
 import { type AccessGrant, assertNotOwnRecord, canAccessEmployee } from '../access/authorize.js';
 import { maskTail } from '../sensitive-change/fields.js';
+import { isIsoDate } from '../../http/validation.js';
 
 type FieldKind = 'text' | 'reference' | 'date' | 'year' | 'boolean';
 
@@ -148,8 +149,6 @@ export function recordSectionDictionary() {
     ],
   };
 }
-
-const isIsoDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
 
 /** Serialises every change to one employee's record sections. */
 async function lockSections(tx: Queryable, companyId: string, employeeId: string): Promise<void> {

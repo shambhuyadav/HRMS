@@ -3,14 +3,15 @@ import { writeAudit } from '../../audit/audit.js';
 import type { Queryable } from '../../db/queryable.js';
 import { HttpError } from '../../http/errors.js';
 import { type AccessGrant, OWN_ESS_ROLE_CODES } from '../access/authorize.js';
+import { isIsoDate } from '../../http/validation.js';
+import { isCompanyWide } from '../access/grant.js';
 
 /** Employment states in which an employee can receive an item or ask for one (as for other own requests). */
 export const ACTIVE_STATUSES = ['ACTIVE_PROBATION', 'ACTIVE_CONFIRMED', 'NOTICE'] as const;
 
 export const CATEGORY_LIST = 'ASSET_CATEGORY';
 
-/** A real calendar date in ISO form (no silent roll-over such as 2026-02-30). */
-export const isIsoDate = (v: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+export { isIsoDate };
 
 export function requireDate(value: string, field: string): string {
   if (!isIsoDate(value)) throw new HttpError(422, 'INVALID_DATE', `The ${field} is not a valid date`, { field });
@@ -21,10 +22,7 @@ export function requireDate(value: string, field: string): string {
  * The register is company property, not employee-scoped, and it shows who holds each item: like organisation
  * masters, it needs an unrestricted company-scope assignment.
  */
-export function isCompanyWide(grant: AccessGrant): boolean {
-  const { departments, locations, employees } = grant.filters;
-  return grant.scopeKind === 'COMPANY' && departments.length + locations.length + employees.length === 0;
-}
+export { isCompanyWide };
 
 export function assertCompanyWide(grant: AccessGrant): void {
   if (!isCompanyWide(grant)) throw new HttpError(403, 'FORBIDDEN', 'The asset register needs an unrestricted company-scope assignment');

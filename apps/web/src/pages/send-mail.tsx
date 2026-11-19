@@ -6,7 +6,7 @@
 // says plainly that email is off and offers no send. The email channel sends plain text only, so there is no attachment.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useMemo, useRef, useState } from 'react';
-import { api, ApiError, fileToBase64, idempotencyKey } from '../api';
+import { api, ApiError, fileToBase64, idempotencyKey, plural } from '../api';
 import type { ScreenRoute } from '../screens';
 import { Empty, ErrorNote, Section } from '../ui';
 import type { OrgChart, OrgChartNode } from './org-chart';
@@ -66,8 +66,6 @@ const CONTENT_RULES: Record<string, string> = {
   ACCOUNT_IDENTIFIER: 'an account number',
   LINK: 'a link',
 };
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function refusal(error: unknown): string | null {
   if (!(error instanceof ApiError)) return null;

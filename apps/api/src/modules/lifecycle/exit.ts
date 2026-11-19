@@ -41,6 +41,7 @@ import { requireVerifiedEvidence } from '../payroll/common.js';
 import { cancelOpenProcess, clearanceStatus, lockClearance } from './processes.js';
 import { cancelLiveSettlement } from './settlement.js';
 import { HR_ENTERED_TYPES, lastWorkingDateProblem, requestDateOf, ruleOf, SEPARATION_RULES, type SeparationType } from './separation-types.js';
+import { ownEmployee } from '../access/grant.js';
 
 export const EXIT_KIND = 'exit_case';
 export const WITHDRAWAL_KIND = 'exit_withdrawal';
@@ -67,11 +68,6 @@ const EXIT_COLUMNS = `x.id, x.employee_id, x.transaction_id, x.state, x.separati
   to_char(x.proposed_leaving_date, 'YYYY-MM-DD') as proposed_leaving_date, to_char(x.recommended_leaving_date, 'YYYY-MM-DD') as recommended_leaving_date,
   to_char(x.approved_leaving_date, 'YYYY-MM-DD') as approved_leaving_date, to_char(x.leaving_date, 'YYYY-MM-DD') as leaving_date,
   x.contractual_notice_days, x.prior_status_code, x.released_at, x.version`;
-
-function ownEmployee(grant: AccessGrant): string {
-  if (!grant.linkedEmployeeId) throw new HttpError(403, 'FORBIDDEN', 'Not permitted');
-  return grant.linkedEmployeeId;
-}
 
 async function exitEvent(
   tx: Queryable,
