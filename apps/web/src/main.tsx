@@ -1,10 +1,15 @@
+// The base stylesheet comes first, so the stylesheets of individual screens (imported by their components, under styles/) build on it.
+import './styles.css';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { SessionProvider } from './session';
-import './styles.css';
+import { applyTheme, chosenTheme } from './theme';
+
+// A theme chosen on this device applies before the first screen is drawn (without a choice the device setting applies).
+applyTheme(chosenTheme());
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -8,6 +8,7 @@ import { useSession } from '../../session';
 import { Icon, type IconName } from '../../icons';
 import { Badge, Empty, ErrorNote, scopeWords, Section } from '../../ui';
 import { AnnouncementsPanel } from '../announcements';
+import { HomeCharts } from './home-charts';
 import { flatRow, SimpleTable, words } from './shared';
 
 interface SourceList {
@@ -346,6 +347,8 @@ export function DashboardPage() {
           </ul>
         </Section>
       )}
+      {/* Charts from the lists the role can already open (home-charts.tsx); none applying, they take no room. */}
+      {d?.state === 'OK' && <HomeCharts businessDate={d.businessDate} />}
       {d?.state === 'OK' && (
         <div className="dash-columns">
           <PendingTasks />

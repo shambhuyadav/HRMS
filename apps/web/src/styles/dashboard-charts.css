@@ -1,0 +1,154 @@
+/* Home dashboard charts (owner's request of 20 Nov 2026), drawn by pages/home/charts.tsx and home-charts.tsx. Every colour is a token
+   from styles.css (the chart slots, the status set and the neutrals), so the light and dark themes both apply; nothing here names a
+   colour of its own. Marks are thin, parts are separated by a 2px gap of the surface rather than a border, text keeps the text
+   tokens (a series colour never colours text), and the status tints pair with their own text colour as the badges do.
+   Selectors are scoped under the dashboard's own classes: this sheet may load before styles.css. */
+
+/* ---- The charts row: after the figures and quick actions, before pending tasks; it takes no room when no chart applies. ---- */
+.dash-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 1.25rem; align-items: start; }
+.dash-charts:empty { display: none; }
+.dash-charts > .card { min-width: 0; }
+.dash-charts .card-header > button.dash-chart-toggle { font-size: 0.82rem; white-space: nowrap; }
+.dash-charts .dash-chart-foot { display: inline-block; margin-top: 1rem; font-size: 0.8rem; font-weight: 600; }
+/* Quiet notes and captions, in the muted text (not the boxed hint a card gives a p.hint). */
+.dash-charts .dash-chart-note { margin: 0.75rem 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
+.dash-charts .dash-chart-caption { margin: 0 0 0.65rem; color: var(--muted); font-size: 0.82rem; }
+.dash-charts .dash-chart-caption + .dash-chart-note { margin: 0 0 0.65rem; }
+.dash-charts .dash-chart-lead { margin: 0 0 0.5rem; color: var(--muted); font-size: 0.86rem; }
+.dash-charts .dash-chart-lead strong { color: var(--text); font-size: 1.45rem; font-weight: 650; letter-spacing: -0.02em; margin-right: 0.2rem; }
+
+/* ---- Fills, by meaning ----------------------------------------------------------------------------------------------------------- */
+.dash-charts .dash-fill-series1 { background: var(--series-1); }
+/* Pending: a lighter step of the same hue as taken. */
+.dash-charts .dash-fill-series1-soft { background: var(--series-1); opacity: 0.42; }
+.dash-charts .dash-fill-track { background: var(--chart-track); }
+.dash-charts .dash-fill-good { background: var(--good); }
+.dash-charts .dash-fill-warn { background: var(--warn); }
+.dash-charts .dash-fill-bad { background: var(--bad); }
+.dash-charts .dash-fill-info { background: var(--info); }
+.dash-charts .dash-fill-off { background: var(--faint); }
+.dash-charts .dash-fill-none { background: var(--chart-track); }
+
+/* ---- Legend: a swatch shaped like the mark, the name, then the figure ------------------------------------------------------------- */
+.dash-charts .dash-legend { list-style: none; margin: 0 0 0.75rem; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: 0.82rem; color: var(--body); }
+.dash-charts .dash-legend > li { display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.dash-charts .dash-legend strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.dash-charts .dash-swatch { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 3px; }
+/* A light swatch (the track, a day not calculated) keeps a hairline so it is seen on the surface. */
+.dash-charts .dash-swatch.dash-fill-track, .dash-charts .dash-swatch.dash-fill-none { box-shadow: inset 0 0 0 1px var(--line-strong); }
+
+/* ---- Thin segmented bar: 8px, fully rounded ends, 2px surface gaps; the hit area is the 24px row, not just the paint. ---------- */
+.dash-charts .dash-bar-frame { position: relative; }
+.dash-charts .dash-bar { display: flex; align-items: center; gap: 2px; height: 24px; border-radius: 999px; }
+.dash-charts .dash-bar-part { flex: 1 1 0; min-width: 4px; height: 100%; display: flex; align-items: center; }
+.dash-charts .dash-bar-part > i { display: block; width: 100%; height: 8px; transition: height 0.12s; }
+.dash-charts .dash-bar-part:first-child > i { border-radius: 999px 0 0 999px; }
+.dash-charts .dash-bar-part:last-child > i { border-radius: 0 999px 999px 0; }
+.dash-charts .dash-bar-part:only-child > i { border-radius: 999px; }
+/* The pointed-at part lifts. */
+.dash-charts .dash-bar-part:hover > i { height: 12px; }
+
+/* ---- Tooltip: the value first and strong, its name after; a short stroke of the mark's fill keys it. -------------------------- */
+.dash-charts .dash-chart-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  width: max-content;
+  max-width: min(260px, 100%);
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--body);
+}
+.dash-charts .dash-tip-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0.1rem 0.4rem; }
+.dash-charts .dash-tip-line strong { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.dash-charts .dash-tip-label { color: var(--muted); }
+.dash-charts .dash-tip-key { display: inline-block; flex: none; width: 12px; height: 3px; border-radius: 2px; }
+.dash-charts .dash-tip-key.dash-fill-track, .dash-charts .dash-tip-key.dash-fill-none { box-shadow: inset 0 0 0 1px var(--line-strong); }
+
+/* ---- My leave: a meter list (name and figure, the bar, then the other figures) ---------------------------------------------- */
+.dash-charts .dash-meters { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.9rem; }
+.dash-charts .dash-meter { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.dash-charts .dash-meter-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.15rem 0.75rem; }
+.dash-charts .dash-meter-name { color: var(--text); font-weight: 600; font-size: 0.9rem; overflow-wrap: anywhere; }
+.dash-charts .dash-meter-figure { color: var(--muted); font-size: 0.84rem; }
+.dash-charts .dash-meter-figure strong { color: var(--text); font-size: 1.05rem; font-weight: 650; }
+.dash-charts .dash-meter-sub { color: var(--muted); font-size: 0.8rem; }
+
+/* ---- My attendance: the month as a calendar, Monday first ---------------------------------------------------------------------- */
+.dash-charts .dash-cal-frame { position: relative; max-width: 440px; }
+.dash-charts .dash-cal { display: flex; flex-direction: column; gap: 4px; }
+.dash-charts .dash-cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.dash-charts .dash-cal-head { padding-bottom: 2px; text-align: center; font-size: 0.7rem; font-weight: 600; color: var(--muted); }
+.dash-charts .dash-day {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 42px;
+  padding: 3px 4px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  cursor: default;
+}
+.dash-charts .dash-day-num { font-size: 0.68rem; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dash-charts .dash-day-code { align-self: center; font-size: 0.74rem; font-weight: 700; line-height: 1.1; color: var(--muted); }
+/* The legend's chip: a small day tile with the code, so the legend reads like the calendar (tinted by the rules below). */
+.dash-charts .dash-day-chip {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
+}
+/* The status tints, each with its own text colour (as the badges): readable in both themes. */
+.dash-charts .dash-day-good { background: var(--good-soft); border-color: var(--good-edge); }
+.dash-charts .dash-day-good .dash-day-code, .dash-charts .dash-day-chip.dash-day-good { color: var(--good); }
+.dash-charts .dash-day-warn { background: var(--warn-soft); border-color: var(--warn-edge); }
+.dash-charts .dash-day-warn .dash-day-code, .dash-charts .dash-day-chip.dash-day-warn { color: var(--warn); }
+.dash-charts .dash-day-bad { background: var(--bad-soft); border-color: var(--bad-edge); }
+.dash-charts .dash-day-bad .dash-day-code, .dash-charts .dash-day-chip.dash-day-bad { color: var(--bad); }
+.dash-charts .dash-day-info { background: var(--info-soft); border-color: var(--info-edge); }
+.dash-charts .dash-day-info .dash-day-code, .dash-charts .dash-day-chip.dash-day-info { color: var(--info); }
+.dash-charts .dash-day-off { background: var(--surface-sunken); border-color: var(--line-strong); }
+.dash-charts .dash-day-none { background: var(--surface); border-color: var(--line-strong); }
+.dash-charts .dash-day-future { background: transparent; border-color: var(--line); }
+.dash-charts .dash-day-blank { border-color: transparent; background: transparent; }
+.dash-charts .dash-day-today { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); }
+.dash-charts .dash-day:not(.dash-day-blank):hover { border-color: var(--line-hover); }
+.dash-charts .dash-day-today:hover { border-color: var(--text); }
+
+/* ---- My team today: who is on leave, absent or has an exception, by name -------------------------------------------------------- */
+.dash-charts .dash-people { margin: 0.25rem 0 0; display: flex; flex-direction: column; gap: 0.55rem; }
+.dash-charts .dash-people > div { display: grid; grid-template-columns: minmax(8.5rem, max-content) minmax(0, 1fr); gap: 0.15rem 0.75rem; align-items: baseline; }
+.dash-charts .dash-people dt { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--muted); font-size: 0.82rem; font-weight: 500; }
+.dash-charts .dash-people dd { margin: 0; color: var(--body); font-size: 0.87rem; overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  .dash-charts .dash-people > div { grid-template-columns: minmax(0, 1fr); }
+  .dash-charts .dash-day { min-height: 38px; padding: 2px 3px 3px; }
+  .dash-charts .dash-cal, .dash-charts .dash-cal-row { gap: 3px; }
+}
+
+/* Forced colours: the marks keep their fills (the system would blank them); the day tiles keep their outlines, and the codes and
+   figures still carry every value. */
+@media (forced-colors: active) {
+  .dash-charts .dash-bar-part > i, .dash-charts .dash-swatch, .dash-charts .dash-tip-key { forced-color-adjust: none; }
+}

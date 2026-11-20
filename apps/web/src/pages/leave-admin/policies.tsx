@@ -436,7 +436,7 @@ export function LeavePoliciesPage() {
     <>
       <LeaveTypes canManage={canManage} />
       <Section title="Policy revisions">
-        <form className="grid-form" onSubmit={keepOnPage}>
+        <form className="grid-form filter-bar" onSubmit={keepOnPage}>
           <label>
             Leave type
             <select value={filters.leaveType} onChange={(e) => setFilters({ ...filters, leaveType: e.target.value })}>

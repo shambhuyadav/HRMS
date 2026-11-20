@@ -4,13 +4,26 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, formatDate } from '../../api';
+import { placeFact, type ProfileFact, ProfileHeader, profileSubtitle } from '../../profile-header';
+import { type BarSection, SectionBar } from '../../section-bar';
 import { useSession } from '../../session';
 import { Empty, Section } from '../../ui';
-import { ActivationPanel, Changes } from './changes';
-import { Fact, PrivateDetails, RecordFacts } from './record';
-import { RecordSectionsPanel } from './record-sections';
+import { ActivationPanel, Changes, changeDuties } from './changes';
+import { Fact, PrivateDetails, privateDetailsOffered, RecordFacts } from './record';
+import { RECORD_SECTIONS_TITLE, RecordSectionsPanel, recordSectionsOffered } from './record-sections';
 import { ReadProblem } from './refusals';
-import { EMPLOYEE_ACTIVATE, EMPLOYEE_HISTORY, EMPLOYEE_LIST, type EmployeeRecord, type EmploymentHistory, enc, keys } from './shared';
+import { EMPLOYEE_ACTIVATE, EMPLOYEE_HISTORY, EMPLOYEE_LIST, type EmployeeRecord, type EmploymentHistory, employmentTypeLabel, enc, keys } from './shared';
+
+const HISTORY_TITLE = 'Employment history';
+
+/** The record's key facts for its header card: only what the record itself answered. */
+function headerFacts(e: EmployeeRecord): ProfileFact[] {
+  return [
+    ...placeFact(e.assignment?.departmentName, e.assignment?.locationName),
+    { icon: 'calendar', text: `Joined ${formatDate(e.joiningDate)}`, title: 'Date joined' },
+    ...(e.manager ? [{ icon: 'users' as const, text: `Reports to ${e.manager.displayName}`, title: 'Reporting manager' }] : []),
+  ];
+}
 
 /**
  * Status changes, joining date corrections, job assignments and managers are read on the one employee history (FR-089;
@@ -21,7 +34,7 @@ function HistorySection({ employeeId }: { employeeId: string }) {
   const history = useQuery({ queryKey: keys.history(employeeId), queryFn: () => api<EmploymentHistory>(`/v1/employees/${enc(employeeId)}/history`) });
   const h = history.data;
   return (
-    <Section title="Employment history">
+    <Section title={HISTORY_TITLE}>
       <p>
         <Link to={`/employee-history/${employeeId}`}>Status and employment history</Link>
       </p>
@@ -89,13 +102,32 @@ function EmployeeRecordView({ id }: { id: string }) {
   const employee = record.data;
   // Either document grant reaches the documents page, as on the employee list (FR-010).
   const documents = can('document.read.document') || can('document.upload.document');
+  const title = employee ? `${employee.displayName} (${employee.employeeCode})` : '';
+  // The bar names the sections this record shows, under the same duties that show them.
+  const sections: BarSection[] = employee
+    ? [
+        { key: 'overview', label: 'Overview', heading: title },
+        ...(employee.status === 'DRAFT' && can(EMPLOYEE_ACTIVATE) ? [{ key: 'activation', label: 'Activation', heading: 'Activation' }] : []),
+        ...(changeDuties(can, employee).offered ? [{ key: 'changes', label: 'Changes', heading: 'Change this record' }] : []),
+        ...(privateDetailsOffered(can) ? [{ key: 'private', label: 'Private details', heading: 'Private details' }] : []),
+        ...(recordSectionsOffered(can) ? [{ key: 'family', label: 'Family and qualifications', heading: RECORD_SECTIONS_TITLE }] : []),
+        ...(can(EMPLOYEE_HISTORY) ? [{ key: 'history', label: 'History', heading: HISTORY_TITLE }] : []),
+      ]
+    : [];
   return (
     <>
       {can(EMPLOYEE_LIST) && <Link className="back-link" to="/employees">← Employees</Link>}
       {record.error ? <ReadProblem error={record.error} /> : null}
       {employee && (
         <>
-          <Section title={`${employee.displayName} (${employee.employeeCode})`} actions={documents ? <Link to={`/employees/${employee.id}/documents`}>Documents</Link> : undefined}>
+          <ProfileHeader
+            name={employee.displayName}
+            subtitle={profileSubtitle(employee.employeeCode, employee.assignment?.designationName, employmentTypeLabel(employee.employmentType))}
+            status={employee.status}
+            facts={headerFacts(employee)}
+          />
+          <SectionBar sections={sections} />
+          <Section title={title} actions={documents ? <Link to={`/employees/${employee.id}/documents`}>Documents</Link> : undefined}>
             {notice && <p role="status">{notice}</p>}
             <RecordFacts employee={employee} />
           </Section>

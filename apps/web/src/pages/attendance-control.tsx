@@ -225,7 +225,7 @@ function AttendanceControlPage() {
   return (
     <>
       <Section title="Attendance control">
-        <form className="grid-form" onSubmit={keepOnPage}>
+        <form className="grid-form filter-bar" onSubmit={keepOnPage}>
           <label>
             From
             <input type="date" required value={filters.from} onChange={(e) => set('from', e.target.value)} />
@@ -517,7 +517,7 @@ function AttendanceDashboardPage() {
   return (
     <>
       <Section title="Attendance dashboard">
-        <form className="grid-form" onSubmit={keepOnPage}>
+        <form className="grid-form filter-bar" onSubmit={keepOnPage}>
           <label>
             Date
             <input
@@ -689,7 +689,7 @@ function AttendanceReportsPage() {
   const ready = !!form.from && !!form.to && (code !== 'ABSCONDING_REPORT' || /^\d{1,3}$/.test(form.minimumDays));
   return (
     <Section title="Attendance reports">
-      <form className="grid-form" onSubmit={keepOnPage}>
+      <form className="grid-form filter-bar" onSubmit={keepOnPage}>
         <label>
           Report
           <select

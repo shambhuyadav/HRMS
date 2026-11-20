@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
 import { api, formatDate, readable, retryTransient } from '../../api';
+import { FormProgress } from '../../form-progress';
 import { useSession } from '../../session';
 import { Badge, Empty, Section } from '../../ui';
 import { Missing, Note } from './pickers';
@@ -379,9 +380,16 @@ function FieldListEditor({ part, sources, fields, onChange, newKey }: { part: st
   );
 }
 
+/**
+ * The template form's required fields, by their labels, for its steps (form-progress.tsx): the form's own check (submit below)
+ * refuses a template without its code, name, currency or bank specification reference, and the format is always sent.
+ */
+const TEMPLATE_REQUIRED = ['Template code', 'Template name', 'Currency', 'Bank specification reference', 'Delimiter', 'Line ending', 'Amount decimals', 'Decimal separator', 'Date format', 'File extension'];
+
 function TemplateForm({ basis, onClearBasis }: { basis: TemplateFull | null; onClearBasis: () => void }) {
   const keys = useKeys();
   const qc = useQueryClient();
+  const formRef = useRef<HTMLFormElement>(null);
   const seq = useRef(0);
   const newKey = () => ++seq.current;
   const drafts = (list: FieldSpecRow[] | undefined) => (list ?? []).map((f) => ({ key: newKey(), source: f.source, value: f.value ?? '', maxLength: f.maxLength ? String(f.maxLength) : '' }));
@@ -455,105 +463,119 @@ function TemplateForm({ basis, onClearBasis }: { basis: TemplateFull | null; onC
       },
     });
   };
+  // The fields keep their order, labels and checks; they are only grouped, and the steps above the form follow the groups. This form
+  // checks its required fields in code (submit above), so the steps are told which they are.
   return (
-    <Section title={basis ? `New version of ${basis.templateCode}` : 'New bank file template'}>
-      <p className="hint">Saving the same template code again creates its next version. Transcribe the bank’s accepted specification exactly: values are never shortened or changed to fit, and a row that does not fit stops the whole file.</p>
-      {basis && (
-        <button type="button" className="secondary" onClick={onClearBasis}>
-          Start from an empty template instead
-        </button>
-      )}
-      <form onSubmit={submit} aria-label="Bank file template" className="grid-form">
-        <label>
-          Template code
-          <input value={f.templateCode} onChange={(e) => set({ templateCode: e.target.value })} maxLength={40} autoComplete="off" />
-        </label>
-        <label>
-          Template name
-          <input value={f.name} onChange={(e) => set({ name: e.target.value })} maxLength={200} autoComplete="off" />
-        </label>
-        <label>
-          Currency
-          <input value={f.currencyCode} onChange={(e) => set({ currencyCode: e.target.value })} maxLength={3} autoComplete="off" />
-        </label>
-        <label>
-          Bank specification reference
-          <input value={f.spec} onChange={(e) => set({ spec: e.target.value })} maxLength={500} autoComplete="off" />
-        </label>
-        <label className="check wide">
-          <input type="checkbox" checked={f.testOnly} onChange={(e) => set({ testOnly: e.target.checked })} /> Test only (synthetic; refused in production)
-        </label>
-        <label>
-          Delimiter
-          <select value={f.delimiter} onChange={(e) => set({ delimiter: e.target.value })}>
-            {Object.entries(DELIMITER_LABEL).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Line ending
-          <select value={f.lineEnding} onChange={(e) => set({ lineEnding: e.target.value })}>
-            <option value="CRLF">CRLF</option>
-            <option value="LF">LF</option>
-          </select>
-        </label>
-        <label>
-          Amount decimals
-          <select value={f.decimals} onChange={(e) => set({ decimals: e.target.value })}>
-            {['0', '1', '2', '3', '4'].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Decimal separator
-          <select value={f.separator} onChange={(e) => set({ separator: e.target.value })}>
-            <option value=".">Point (.)</option>
-            <option value=",">Comma (,)</option>
-          </select>
-        </label>
-        <label>
-          Date format
-          <select value={f.dateFormat} onChange={(e) => set({ dateFormat: e.target.value })}>
-            {DATE_FORMATS.map((d) => (
-              <option key={d} value={d}>
-                {d}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          File extension
-          <select value={f.extension} onChange={(e) => set({ extension: e.target.value })}>
-            <option value="csv">csv</option>
-            <option value="txt">txt</option>
-          </select>
-        </label>
-        <label className="check wide">
-          <input type="checkbox" checked={f.header !== null} onChange={(e) => set({ header: e.target.checked ? (f.header ?? []) : null })} /> Header record
-        </label>
-        {f.header !== null && <FieldListEditor part="Header" sources={CONTROL_SOURCES} fields={f.header} onChange={(header) => set({ header })} newKey={newKey} />}
-        <FieldListEditor part="Detail" sources={DETAIL_SOURCES} fields={f.detail} onChange={(detail) => set({ detail })} newKey={newKey} />
-        <label className="check wide">
-          <input type="checkbox" checked={f.trailer !== null} onChange={(e) => set({ trailer: e.target.checked ? (f.trailer ?? []) : null })} /> Trailer record
-        </label>
-        {f.trailer !== null && <FieldListEditor part="Trailer" sources={CONTROL_SOURCES} fields={f.trailer} onChange={(trailer) => set({ trailer })} newKey={newKey} />}
-        <div className="row">
-          <button type="submit" disabled={create.isPending}>
-            {create.isPending ? 'Saving…' : 'Save as a draft version'}
+    <>
+      <FormProgress form={formRef} label="Bank file template" required={TEMPLATE_REQUIRED} />
+      <Section title={basis ? `New version of ${basis.templateCode}` : 'New bank file template'}>
+        <p className="hint">Saving the same template code again creates its next version. Transcribe the bank’s accepted specification exactly: values are never shortened or changed to fit, and a row that does not fit stops the whole file.</p>
+        {basis && (
+          <button type="button" className="secondary" onClick={onClearBasis}>
+            Start from an empty template instead
           </button>
-        </div>
-        <Missing text={problem} />
-        <div className="wide">
-          <Note text={note} />
-          <Problem error={create.error} act="template" />
-        </div>
-      </form>
-    </Section>
+        )}
+        <form ref={formRef} onSubmit={submit} aria-label="Bank file template" className="grid-form">
+          <fieldset className="form-step">
+            <legend>The template</legend>
+            <label>
+              Template code
+              <input value={f.templateCode} onChange={(e) => set({ templateCode: e.target.value })} maxLength={40} autoComplete="off" />
+            </label>
+            <label>
+              Template name
+              <input value={f.name} onChange={(e) => set({ name: e.target.value })} maxLength={200} autoComplete="off" />
+            </label>
+            <label>
+              Currency
+              <input value={f.currencyCode} onChange={(e) => set({ currencyCode: e.target.value })} maxLength={3} autoComplete="off" />
+            </label>
+            <label>
+              Bank specification reference
+              <input value={f.spec} onChange={(e) => set({ spec: e.target.value })} maxLength={500} autoComplete="off" />
+            </label>
+            <label className="check wide">
+              <input type="checkbox" checked={f.testOnly} onChange={(e) => set({ testOnly: e.target.checked })} /> Test only (synthetic; refused in production)
+            </label>
+          </fieldset>
+          <fieldset className="form-step">
+            <legend>File format</legend>
+            <label>
+              Delimiter
+              <select value={f.delimiter} onChange={(e) => set({ delimiter: e.target.value })}>
+                {Object.entries(DELIMITER_LABEL).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Line ending
+              <select value={f.lineEnding} onChange={(e) => set({ lineEnding: e.target.value })}>
+                <option value="CRLF">CRLF</option>
+                <option value="LF">LF</option>
+              </select>
+            </label>
+            <label>
+              Amount decimals
+              <select value={f.decimals} onChange={(e) => set({ decimals: e.target.value })}>
+                {['0', '1', '2', '3', '4'].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Decimal separator
+              <select value={f.separator} onChange={(e) => set({ separator: e.target.value })}>
+                <option value=".">Point (.)</option>
+                <option value=",">Comma (,)</option>
+              </select>
+            </label>
+            <label>
+              Date format
+              <select value={f.dateFormat} onChange={(e) => set({ dateFormat: e.target.value })}>
+                {DATE_FORMATS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              File extension
+              <select value={f.extension} onChange={(e) => set({ extension: e.target.value })}>
+                <option value="csv">csv</option>
+                <option value="txt">txt</option>
+              </select>
+            </label>
+          </fieldset>
+          <fieldset className="form-step">
+            <legend>Records and their fields</legend>
+            <label className="check wide">
+              <input type="checkbox" checked={f.header !== null} onChange={(e) => set({ header: e.target.checked ? (f.header ?? []) : null })} /> Header record
+            </label>
+            {f.header !== null && <FieldListEditor part="Header" sources={CONTROL_SOURCES} fields={f.header} onChange={(header) => set({ header })} newKey={newKey} />}
+            <FieldListEditor part="Detail" sources={DETAIL_SOURCES} fields={f.detail} onChange={(detail) => set({ detail })} newKey={newKey} />
+            <label className="check wide">
+              <input type="checkbox" checked={f.trailer !== null} onChange={(e) => set({ trailer: e.target.checked ? (f.trailer ?? []) : null })} /> Trailer record
+            </label>
+            {f.trailer !== null && <FieldListEditor part="Trailer" sources={CONTROL_SOURCES} fields={f.trailer} onChange={(trailer) => set({ trailer })} newKey={newKey} />}
+          </fieldset>
+          <div className="row">
+            <button type="submit" disabled={create.isPending}>
+              {create.isPending ? 'Saving…' : 'Save as a draft version'}
+            </button>
+          </div>
+          <Missing text={problem} />
+          <div className="wide">
+            <Note text={note} />
+            <Problem error={create.error} act="template" />
+          </div>
+        </form>
+      </Section>
+    </>
   );
 }

@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api, formatDate } from '../api';
+import { placeFact, type ProfileFact, ProfileHeader, profileSubtitle } from '../profile-header';
+import { type BarSection, SectionBar } from '../section-bar';
 import { useSession } from '../session';
 import { Empty, ErrorNote, Section, StateBadge } from '../ui';
 import { canRaiseAgain, followedRequests, RaiseAgainNote, RaisedAgainHint } from './requests';
@@ -17,6 +19,21 @@ interface OwnRecord {
   joiningDate: string;
   status: string;
   assignment?: { departmentName?: string; locationName?: string; designationName?: string } | null;
+  /** In the same answer when the server sends them; the header card shows them, nothing else does. */
+  employmentType?: string;
+  manager?: { displayName: string } | null;
+}
+
+/** The words of an employment type code: FIXED_TERM reads "Fixed term". */
+const typeWords = (code: string | undefined) => (code ? code.charAt(0) + code.slice(1).replace(/_/g, ' ').toLowerCase() : null);
+
+/** The header card's facts: only what the record answered. */
+function ownFacts(r: OwnRecord): ProfileFact[] {
+  return [
+    ...placeFact(r.assignment?.departmentName, r.assignment?.locationName),
+    { icon: 'calendar', text: `Joined ${formatDate(r.joiningDate)}`, title: 'Date joined' },
+    ...(r.manager?.displayName ? [{ icon: 'users' as const, text: `Reports to ${r.manager.displayName}`, title: 'Reporting manager' }] : []),
+  ];
 }
 interface ProfileChange {
   id: string;
@@ -82,8 +99,22 @@ export function MyProfilePage() {
 
   if (!employeeId) return <Empty>No employee record is linked to this account.</Empty>;
   const r = record.data;
+  // The bar names the sections shown, under the same duties and answers that show them.
+  const sections: BarSection[] = [
+    { key: 'record', label: 'My record', heading: 'My record' },
+    ...(can('profile_change.submit.operational') ? [{ key: 'ask', label: 'Ask for a change', heading: 'Ask for a change' }] : []),
+    ...(changes.data ? [{ key: 'requests', label: 'Change requests', heading: 'My change requests' }] : []),
+    ...(links.data ? [{ key: 'mobile', label: 'Mobile app', heading: 'Mobile app' }] : []),
+  ];
   return (
     <>
+      {/* The card and the bar come with the record, together, so neither moves the other once it is read. */}
+      {r && (
+        <>
+          <ProfileHeader name={r.displayName} subtitle={profileSubtitle(r.employeeCode, r.assignment?.designationName, typeWords(r.employmentType))} status={r.status} facts={ownFacts(r)} />
+          <SectionBar sections={sections} />
+        </>
+      )}
       <Section title="My record">
         {r && (
           <dl className="kv">

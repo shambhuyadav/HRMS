@@ -133,7 +133,7 @@ export function EmployeesPage() {
     ) : undefined;
   return (
     <Section title={`Employees${list.data ? ` (${list.data.total})` : ''}`} actions={headerActions}>
-      <div className="grid-form">
+      <div className="grid-form filter-bar">
         <label className="inline">
           Search{' '}
           <input

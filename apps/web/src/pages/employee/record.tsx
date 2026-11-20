@@ -88,6 +88,9 @@ function PrivateValues({ title, category }: { title: string; category: PrivateCa
   );
 }
 
+/** The private details are offered under either grant. */
+export const privateDetailsOffered = (can: (permission: string) => boolean) => can(EMPLOYEE_PRIVATE) || can(EMPLOYEE_BANK);
+
 /**
  * FR-008: private details under the role's own grant, read only when asked for and not kept once left. The server leaves out
  * every category the grant does not reach and masks the bank values without the bank group; this page shows what it answers.
@@ -101,7 +104,7 @@ export function PrivateDetails({ employeeId }: { employeeId: string }) {
     gcTime: 0,
     queryFn: () => api<PrivateProfile>(`/v1/employees/${enc(employeeId)}/private-profile`),
   });
-  if (!can(EMPLOYEE_PRIVATE) && !can(EMPLOYEE_BANK)) return null;
+  if (!privateDetailsOffered(can)) return null;
   return (
     <Section
       title="Private details"

@@ -4,7 +4,9 @@ import { Link, NavLink, Navigate, Route, Routes, matchPath, useLocation } from '
 import { api } from './api';
 import { groupIcon, Icon, navIcon } from './icons';
 import { useSession } from './session';
+import { markFittingCards } from './sticky-heads';
 import { labelTableCells } from './table-cards';
+import { useMediaQuery, useTheme } from './theme';
 import { AccessAdminPage } from './pages/access';
 import { AuditTrailPage, MobileLinkReviewPage, RetentionPage, RoutingPage } from './pages/admin';
 import { SelectRolePage, SignInPage } from './pages/auth';
@@ -258,6 +260,36 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () =>
   );
 }
 
+/** The phone's bottom bar offers the first four of these the role may open (as in the menu), then "More" for the full menu. */
+const PHONE_BAR_PATHS: readonly string[] = ['/', '/me', '/team', '/leave', '/tasks', '/employees', '/inbox'];
+
+/** Phone width, where the bottom bar is shown (the same width at which tables read as cards, styles.css). */
+const PHONE_QUERY = '(max-width: 560px)';
+
+/**
+ * On a phone, the everyday pages within thumb's reach at the bottom of the screen, and the full menu behind "More". Rendered only at
+ * phone width, so a larger screen (and assistive technology there) has one menu, not two.
+ */
+function PhoneBar({ menuOpen, onMenu, onNavigate }: { menuOpen: boolean; onMenu: () => void; onNavigate: () => void }) {
+  const { me, can } = useSession();
+  const entries = visibleNav(can, me ?? null);
+  const picks = PHONE_BAR_PATHS.flatMap((path) => entries.filter((n) => n.to === path)).slice(0, 4);
+  return (
+    <nav className="phone-bar" aria-label="Shortcuts">
+      {picks.map((n) => (
+        <NavLink key={n.to} to={n.to} end={n.to === '/' || n.to === '/me'} onClick={onNavigate}>
+          <Icon name={navIcon(n.to)} size={20} />
+          <span>{n.label}</span>
+        </NavLink>
+      ))}
+      <button type="button" aria-expanded={menuOpen} onClick={onMenu}>
+        <Icon name="menu" size={20} />
+        <span>More</span>
+      </button>
+    </nav>
+  );
+}
+
 /**
  * A page that fails while rendering shows a message inside the shell, instead of taking the whole application (menu and header)
  * down with it. Moving to another page clears it.
@@ -313,6 +345,8 @@ export function App() {
   const { stored, me, contextFailed, retryContext, switchRole, signOut } = useSession();
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { theme, toggle: toggleTheme } = useTheme();
+  const phone = useMediaQuery(PHONE_QUERY);
   const page = pageOf(pathname);
   useEffect(() => {
     document.title = page.title === 'HRMS' ? 'HRMS' : `${page.title} · HRMS`;
@@ -335,18 +369,25 @@ export function App() {
   useEffect(() => {
     const main = mainRef.current;
     if (!main || typeof MutationObserver === 'undefined') return undefined;
+    // The same pass marks the cards whose tables fit their width, so those lists keep their headings in view (sticky-heads.ts); a
+    // change of window size re-checks them.
     let frame = 0;
     const label = () => {
       frame = 0;
       labelTableCells(main);
+      markFittingCards(main);
     };
-    const watcher = new MutationObserver(() => {
+    const later = () => {
       if (!frame) frame = requestAnimationFrame(label);
-    });
+    };
+    const watcher = new MutationObserver(later);
     watcher.observe(main, { childList: true, subtree: true });
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(later);
+    resized?.observe(main);
     label();
     return () => {
       watcher.disconnect();
+      resized?.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
   }, [me, stored?.assignmentId]);
@@ -356,7 +397,7 @@ export function App() {
   // A sign-in name without a display name shows its part before the "@" (the whole address is in the tooltip), not a cut-off address.
   const name = me ? (me.displayName ?? me.accountKey.replace(/@.*$/, '')) : '';
   return (
-    <div className={`shell${menuOpen ? ' menu-open' : ''}`}>
+    <div className={`shell${menuOpen ? ' menu-open' : ''}${phone && me ? ' has-phone-bar' : ''}`}>
       <aside className="side">
         <div className="side-brand">
           <span className="brand-mark" aria-hidden="true" />
@@ -402,6 +443,17 @@ export function App() {
             <button type="button" className="ghost" aria-label="Switch role" title="Switch role" onClick={switchRole}>
               <Icon name="swap" size={16} />
               <span>Switch role</span>
+            </button>
+            {/* The theme switch: pressed means the dark theme is on (theme.ts keeps the choice on this device). */}
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Dark theme"
+              aria-pressed={theme === 'dark'}
+              title={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}
+              onClick={toggleTheme}
+            >
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
             </button>
             <NavLink to="/inbox" className="icon-button" aria-label="Notifications" title="Notifications">
               <Icon name="bell" size={19} />
@@ -459,6 +511,7 @@ export function App() {
             </PageTitleContext.Provider>
           )}
         </main>
+        {phone && me && <PhoneBar menuOpen={menuOpen} onMenu={() => setMenuOpen(!menuOpen)} onNavigate={() => setMenuOpen(false)} />}
       </div>
     </div>
   );

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, formatDate, isForbidden, readable, retryTransient } from '../../api';
+import { FormProgress } from '../../form-progress';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, NotPermitted, Section, StateBadge } from '../../ui';
 import { useOrgList } from './lookups';
@@ -243,6 +244,7 @@ export function NewRequisitionScreen() {
       navigate(PATHS.requisition(created.id), { state: { notice: `Draft ${created.code} saved. Check its budget, then submit it for approval.` } });
     },
   });
+  const formRef = useRef<HTMLFormElement>(null);
   let body: ReactNode;
   if (!can(REQ_CREATE)) body = <NotPermitted>The selected role cannot raise requisitions.</NotPermitted>;
   else if (!me) body = <p className="hint loading">Loading your role…</p>;
@@ -251,7 +253,7 @@ export function NewRequisitionScreen() {
     body = (
       <>
         <p className="hint">The draft is yours until you submit it: your direct manager validates it, then an HR Administrator approves its budget and headcount.</p>
-        <RequisitionForm initial={null} busy={create.isPending} submitLabel="Save draft" onSubmit={(input) => create.mutate(input)} />
+        <RequisitionForm initial={null} busy={create.isPending} submitLabel="Save draft" onSubmit={(input) => create.mutate(input)} formRef={formRef} />
         <Refusal error={create.error} action="create" />
       </>
     );
@@ -261,6 +263,8 @@ export function NewRequisitionScreen() {
         <Link to={PATHS.requisitions}>Back to requisitions</Link>
       </p>
       <h1>New requisition</h1>
+      {/* The form's groups as steps, above its card so they stay in view while the form scrolls; shown once the form is. */}
+      <FormProgress form={formRef} label="New requisition" />
       <Section title="Requisition details">{body}</Section>
     </>
   );

@@ -141,7 +141,7 @@ function WithoutPolicyList() {
   });
   return (
     <Section title="Employees without a policy, before accrual">
-      <form className="grid-form" onSubmit={keepOnPage}>
+      <form className="grid-form filter-bar" onSubmit={keepOnPage}>
         <label>
           Accrual month
           <input
@@ -243,7 +243,7 @@ export function LeaveLedgerPage() {
   });
   return (
     <Section title="Employee leave ledger">
-      <form className="grid-form" onSubmit={keepOnPage}>
+      <form className="grid-form filter-bar" onSubmit={keepOnPage}>
         <label>
           Find an employee (code or name)
           <input value={search} onChange={(e) => setSearch(e.target.value)} maxLength={100} />

@@ -4,6 +4,8 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, formatDate } from '../../api';
+import { placeFact, type ProfileFact, ProfileHeader, profileSubtitle } from '../../profile-header';
+import { type BarSection, SectionBar } from '../../section-bar';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, nextSort, Section, SortHeader, type SortState, sortParams, StateBadge } from '../../ui';
 import { flatRow, format, SimpleTable, words } from './shared';
@@ -314,10 +316,52 @@ function TabSectionView({ name, section }: { name: string; section: TabSection }
 export function TeamMemberPage() {
   const { id } = useParams();
   const detail = useQuery({ queryKey: ['member', id], queryFn: () => api<{ tabs: Record<string, Tab> }>(`/v1/my-team/${id}`) });
+  const tabs = detail.data?.tabs ?? {};
+  // The header card reads the work profile and, when the server sent it, today's department and manager from the reporting history.
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
+  const profile = (tabs.workProfile?.data ?? {}) as Record<string, unknown>;
+  const name = text(profile.displayName);
+  const code = text(profile.employeeCode);
+  const inForce = (kind: string) =>
+    text(
+      (tabs.employmentAndReporting?.items ?? [])
+        .filter((r) => r.kind === kind && (r.effectiveTo === null || r.effectiveTo === undefined))
+        .at(-1)?.detail,
+    );
+  const manager = inForce('MANAGER');
+  const joined = text(profile.joiningDate);
+  const type = text(profile.employmentType);
+  const facts: ProfileFact[] = [
+    ...placeFact(inForce('ASSIGNMENT'), null),
+    ...(joined ? [{ icon: 'calendar' as const, text: `Joined ${formatDate(joined)}`, title: 'Date joined' }] : []),
+    ...(manager ? [{ icon: 'users' as const, text: `Reports to ${manager}`, title: 'Reporting manager' }] : []),
+  ];
+  // The bar names each tab the server returned, in its order, in short words so they fit one line.
+  const barLabels: Record<string, string> = {
+    workProfile: 'Profile',
+    employmentAndReporting: 'Reporting',
+    attendance: 'Attendance',
+    leave: 'Leave',
+    skillsAndTraining: 'Training',
+    goalsAndTasks: 'Goals',
+    history: 'History',
+    compensation: 'Compensation',
+    privateInformation: 'Private',
+  };
+  const sections: BarSection[] = Object.keys(tabs).map((key) => ({ key, label: barLabels[key] ?? TAB_TITLES[key] ?? key, heading: TAB_TITLES[key] ?? key }));
   return (
     <>
       <Link className="back-link" to="/team">← My team</Link>
-      {Object.entries(detail.data?.tabs ?? {}).map(([key, tab]) => (
+      {name && (
+        <ProfileHeader
+          name={name}
+          subtitle={code ? profileSubtitle(code, null, type ? type.charAt(0) + words(type).slice(1) : null) : 'Team member'}
+          status={text(profile.status)}
+          facts={facts}
+        />
+      )}
+      <SectionBar sections={sections} />
+      {Object.entries(tabs).map(([key, tab]) => (
         <Section key={key} title={TAB_TITLES[key] ?? key}>
           {tab.items && tab.items.length === 0 && <Empty>Nothing recorded yet.</Empty>}
           {tab.items && tab.items.length > 0 && (key === 'history' ? <HistoryRows rows={tab.items as unknown as HistoryRow[]} /> : <SimpleTable rows={tab.items} />)}

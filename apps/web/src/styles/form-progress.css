@@ -1,0 +1,152 @@
+/* A long form in steps (form-progress.tsx; owner's request of 20 Nov 2026): the form's groups as numbered steps above it, each
+   ticked once its required fields are filled, with the share of required fields filled; the strip stays at the top of the page while
+   the form scrolls. A group of the form (fieldset.form-step) carries the same number beside its title. Every field stays where it was.
+   Every colour is a token of styles.css, so the light and dark themes both follow. */
+
+/* ---- The steps strip ---------------------------------------------------------------------------------------------------------- */
+/* A band of the page's own background, so what scrolls under the strip never shows around it; its padding is taken back by its
+   margins, so the space between the cards stays the page's own. A sticky box stops at the page's top padding (styles.css .content:
+   1.75rem, 1.25rem from 920px down); the strip is lifted by that much, so it meets the top bar with nothing scrolling past above. */
+.content { --form-progress-lift: 1.75rem; }
+.form-progress {
+  position: sticky;
+  top: calc(-1 * var(--form-progress-lift, 0rem));
+  z-index: 4;
+  margin: -0.5rem 0;
+  padding: 0.5rem 0;
+  background: var(--bg);
+}
+.form-progress-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+.form-progress-steps {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.form-progress-steps::-webkit-scrollbar { display: none; }
+.form-progress-steps li { flex: 1 1 0; min-width: max-content; display: flex; }
+.form-progress-steps button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--body);
+  font-weight: 500;
+  text-align: left;
+  box-shadow: none;
+}
+.form-progress-steps button:hover:not(:disabled) { background: var(--surface-soft); border-color: transparent; color: var(--text); }
+.form-progress-steps button[aria-current='step'] { background: var(--surface-soft); border-color: var(--line); }
+.form-progress-steps button:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+.form-progress-mark {
+  flex: none;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: var(--muted);
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.form-progress-steps button[aria-current='step'] .form-progress-mark { color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.form-progress-steps li.done .form-progress-mark { color: var(--good); background: var(--good-soft); box-shadow: inset 0 0 0 1px var(--good-edge); }
+.form-progress-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.form-progress-name { font-size: 0.85rem; font-weight: 600; color: var(--text); white-space: nowrap; }
+.form-progress-state { font-size: 0.74rem; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.form-progress-steps li.done .form-progress-state { color: var(--good); }
+.form-progress-meter { display: flex; align-items: center; gap: 0.75rem; padding: 0 0.2rem; }
+.form-progress-track { position: relative; flex: 1; height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
+.form-progress-fill { position: absolute; inset: 0; border-radius: inherit; background: var(--accent-bright); transform-origin: left center; transition: transform 0.25s ease, background 0.25s; }
+.form-progress-meter.complete .form-progress-fill { background: var(--good); }
+.form-progress-count { flex: none; font-size: 0.78rem; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.form-progress-meter.complete .form-progress-count { color: var(--good); }
+
+/* ---- A group of the form ------------------------------------------------------------------------------------------------------ */
+/* A step is a row of the form's own grid with a grid of its own, laid out as the form lays out its fields; steps are parted by a
+   hairline. The title is not drawn on the frame: floated, it is an ordinary item across the step's first row. */
+.grid-form:has(> .form-step) { counter-reset: form-step; }
+.grid-form > fieldset.form-step {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.95rem 1.1rem;
+  align-items: end;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  scroll-margin-top: 7.75rem;
+}
+.grid-form > fieldset.form-step + fieldset.form-step { padding-top: 1.15rem; border-top: 1px solid var(--line); }
+.form-step > legend {
+  float: left;
+  grid-column: 1 / -1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.form-step > legend::before {
+  counter-increment: form-step;
+  content: counter(form-step);
+  content: counter(form-step) / '';
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-edge);
+}
+.form-step > * { min-width: 0; }
+.form-step > .wide, .form-step > p, .form-step > fieldset, .form-step > details, .form-step > [role='alert'], .form-step > .error { grid-column: 1 / -1; }
+/* As in the form grid: a field with help under it lines the step's fields up along the top. */
+.form-step:has(> div > label + p.hint) { align-items: start; }
+
+/* ---- Smaller screens ---------------------------------------------------------------------------------------------------------- */
+@media (max-width: 920px) {
+  .content { --form-progress-lift: 1.25rem; }
+}
+@media (max-width: 560px) {
+  .form-progress-card { padding: 0.45rem 0.5rem 0.65rem; gap: 0.5rem; }
+  .form-progress-steps li { flex: none; }
+  .form-progress-steps button { padding: 0.35rem 0.5rem; gap: 0.45rem; }
+  .form-progress-state { display: none; }
+  .form-progress-meter { flex-wrap: wrap; gap: 0.3rem 0.75rem; }
+  .grid-form > fieldset.form-step { scroll-margin-top: 6.5rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .form-progress-fill, .form-progress-mark { transition: none; }
+}

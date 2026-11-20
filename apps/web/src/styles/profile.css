@@ -1,0 +1,109 @@
+/* A person's record (profile-header.tsx, section-bar.tsx; owner's request of 20 Nov 2026): a header card with the initials and the
+   key facts, and the record's sections as a bar of tab-like links that stays at the top of the page while it scrolls. Every colour is
+   a token of styles.css, so the light and dark themes both follow. */
+
+/* ---- Header card ------------------------------------------------------------------------------------------------------------ */
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem 1.25rem;
+  padding: 1.35rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: inset 0 3px 0 var(--accent-bright), var(--shadow-xs);
+}
+/* The initials stand in for a photo (the system keeps none): the top bar's avatar, larger. */
+.profile-avatar {
+  flex: none;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: var(--info);
+  background: var(--info-soft);
+  box-shadow: inset 0 0 0 1px var(--info-edge);
+  user-select: none;
+}
+.profile-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.profile-title { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.65rem; }
+.profile-name { margin: 0; font-size: 1.3rem; font-weight: 650; line-height: 1.25; letter-spacing: -0.015em; color: var(--text); overflow-wrap: anywhere; }
+.profile-sub { margin: 0; font-size: 0.9rem; font-weight: 500; color: var(--body); overflow-wrap: anywhere; }
+.profile-facts { list-style: none; margin: 0.45rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem 1.35rem; font-size: 0.84rem; color: var(--muted); }
+.profile-facts li { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; overflow-wrap: anywhere; }
+.profile-facts .icon { color: var(--faint); }
+
+/* ---- Section bar ------------------------------------------------------------------------------------------------------------ */
+/* One height, known to the page: the column headings of a long list stick just under the bar, and a section chosen on the bar
+   comes to rest below it, not behind it. A sticky box stops at the page's top padding (styles.css .content: 1.75rem, 1.25rem from
+   920px down); the bar is lifted by that much, so it meets the top bar with nothing scrolling past above it. */
+.content:has(> .section-bar) { --section-bar-h: 3.6rem; --section-bar-lift: 1.75rem; }
+/* A band of the page's own background, so what scrolls under the bar never shows around it. Its padding is taken back by its
+   margins, so the space between the cards stays the page's own. */
+.section-bar {
+  position: sticky;
+  top: calc(-1 * var(--section-bar-lift, 0rem));
+  z-index: 4;
+  height: var(--section-bar-h, 3.6rem);
+  margin: -0.5rem 0;
+  padding: 0.5rem 0;
+  background: var(--bg);
+}
+.section-bar ul {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 100%;
+  margin: 0;
+  padding: 3px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.section-bar ul::-webkit-scrollbar { display: none; }
+.section-bar li { flex: none; display: flex; }
+.section-bar a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.9rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+}
+.section-bar a:hover { background: var(--surface-soft); color: var(--text); }
+.section-bar a[aria-current='true'] { background: var(--accent-soft); color: var(--accent); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.section-bar a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: -2px; }
+.content:has(> .section-bar) > section { scroll-margin-top: calc(var(--section-bar-h) + 0.75rem); }
+/* The bar takes the top of the page: a list's sticky column headings (styles.css, sticky-heads.ts) stop just under it. */
+@media (min-width: 561px) {
+  .content:has(> .section-bar) .card[data-fit] table > thead > tr > th { top: calc(var(--section-bar-h) - var(--section-bar-lift)); }
+}
+
+/* ---- Smaller screens -------------------------------------------------------------------------------------------------------- */
+@media (max-width: 920px) {
+  .content:has(> .section-bar) { --section-bar-lift: 1.25rem; }
+}
+@media (max-width: 560px) {
+  .profile-card { align-items: flex-start; gap: 0.85rem; padding: 1.05rem 1rem; }
+  .profile-avatar { width: 48px; height: 48px; font-size: 1.05rem; }
+  .profile-name { font-size: 1.12rem; }
+  .profile-facts { flex-direction: column; gap: 0.3rem; }
+  .content:has(> .section-bar) { --section-bar-h: 3.4rem; }
+  .section-bar a { padding: 0 0.75rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .section-bar a { transition: none; }
+}

@@ -547,6 +547,12 @@ function PayrollIdentifiersView({ identifiers, ...changes }: SectionChangeProps 
   );
 }
 
+/** The record sections are offered under the private-details grant or the payroll-identifier grant. */
+export const recordSectionsOffered = (can: (permission: string) => boolean) => can(EMPLOYEE_PRIVATE) || can(EMPLOYEE_PAYROLL_ID);
+
+/** The record sections' title, as the panel's heading reads it. */
+export const RECORD_SECTIONS_TITLE = 'Family, qualifications and prior employment';
+
 /**
  * FR-008 record sections (I-82 item 2) under the role's own grant, read only when asked for and not kept once left. The server
  * leaves out every part the grant does not read and masks the identifiers without the payroll-identifier group; this page shows
@@ -567,7 +573,7 @@ export function RecordSectionsPanel({ employeeId }: { employeeId: string }) {
     placeholderData: keepPreviousData,
     queryFn: () => api<RecordSectionsAnswer>(`/v1/employees/${enc(employeeId)}/record-sections${includeRemoved ? '?includeRemoved=true' : ''}`),
   });
-  if (!can(EMPLOYEE_PRIVATE) && !can(EMPLOYEE_PAYROLL_ID)) return null;
+  if (!recordSectionsOffered(can)) return null;
   const reload = () => void qc.invalidateQueries({ queryKey: keys.recordSections(employeeId) });
   const changes: SectionChangeProps = {
     employeeId,
@@ -585,7 +591,7 @@ export function RecordSectionsPanel({ employeeId }: { employeeId: string }) {
   const identifiers = data?.['payroll-identifiers'];
   return (
     <Section
-      title="Family, qualifications and prior employment"
+      title={RECORD_SECTIONS_TITLE}
       actions={
         <button type="button" className="secondary" aria-expanded={shown} onClick={() => setShown(!shown)}>
           {shown ? 'Hide family, qualifications and prior employment' : 'Show family, qualifications and prior employment'}

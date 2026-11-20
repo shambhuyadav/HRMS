@@ -1,6 +1,8 @@
 // The requisition form (FR-011 fields): a new draft, or the requester's draft being changed.
-import { type FormEvent, useId, useState } from 'react';
+import { type FormEvent, type RefObject, useId, useState } from 'react';
 import { ErrorNote } from '../../ui';
+// The form's groups (fieldset.form-step) are laid out there, wherever the form is shown.
+import '../../styles/form-progress.css';
 import { HiringManagerField, MasterSelect, useMasterOptions } from './lookups';
 import { EMPLOYMENT_TYPE_CODE, EMPLOYMENT_TYPE_SUGGESTIONS, GROUP, H3, parseSkills, type RequisitionDetail, type RequisitionInput, SPACED, TEXTAREA, wholeNumber } from './shared';
 
@@ -14,6 +16,7 @@ export function RequisitionForm({
   submitLabel,
   onSubmit,
   onCancel,
+  formRef,
 }: {
   initial: RequisitionDetail | null;
   /** Sending, or the requisition is reloading: nothing is sent meanwhile. */
@@ -21,6 +24,8 @@ export function RequisitionForm({
   submitLabel: string;
   onSubmit: (input: RequisitionInput) => void;
   onCancel?: () => void;
+  /** The form element, for a page that shows the form's progress beside it. */
+  formRef?: RefObject<HTMLFormElement>;
 }) {
   const id = useId();
   const [title, setTitle] = useState(initial?.title ?? '');
@@ -91,75 +96,85 @@ export function RequisitionForm({
 
   const typesId = `${id}-types`;
   const exceptionHint = `${id}-exception`;
+  // The fields keep their order, labels and checks; they are only grouped, so a page can show the groups as steps (form-progress.tsx).
   return (
-    <form className="grid-form" aria-label={initial ? `Edit draft ${initial.code}` : 'New requisition'} onSubmit={submit} noValidate>
-      <label className="wide">
-        Position title
-        <input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-      </label>
-      {!masters.fromOrg && (
-        <p className="hint wide">
-          The selected role cannot list the company’s departments, locations and designations, so the choices come from your team and the requisitions you can see.
-        </p>
-      )}
-      <MasterSelect label="Department" value={departmentId} options={masters.options.departments} loading={masters.loading} onChange={setDepartmentId} />
-      <MasterSelect label="Location" value={locationId} options={masters.options.locations} loading={masters.loading} onChange={setLocationId} />
-      <MasterSelect label="Designation" value={designationId} options={masters.options.designations} loading={masters.loading} onChange={setDesignationId} />
-      {masters.error ? (
-        <div className="wide">
-          <ErrorNote error={masters.error} />
-        </div>
-      ) : null}
-      <label>
-        Employment type
-        <input required list={typesId} maxLength={60} value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} />
-      </label>
-      {/* Outside the label, so the suggestions do not become part of the field's name. */}
-      <datalist id={typesId}>
-        {EMPLOYMENT_TYPE_SUGGESTIONS.map(([code, label]) => (
-          <option key={code} value={code}>
-            {label}
-          </option>
-        ))}
-      </datalist>
-      <label>
-        Vacancies
-        <input type="number" required min={1} step={1} inputMode="numeric" value={vacancies} onChange={(e) => setVacancies(e.target.value)} />
-      </label>
-      <label>
-        Target date
-        <input type="date" required value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
-      </label>
-      <fieldset className="wide" style={GROUP}>
-        <legend>New or replacement</legend>
-        <div className="row">
-          <label className="check">
-            <input type="radio" name={`${id}-reason-type`} value="NEW" required checked={reasonType === 'NEW'} onChange={() => setReasonType('NEW')} /> New position
-          </label>
-          <label className="check">
-            <input type="radio" name={`${id}-reason-type`} value="REPLACEMENT" required checked={reasonType === 'REPLACEMENT'} onChange={() => setReasonType('REPLACEMENT')} />{' '}
-            Replacement
-          </label>
-        </div>
+    <form ref={formRef} className="grid-form" aria-label={initial ? `Edit draft ${initial.code}` : 'New requisition'} onSubmit={submit} noValidate>
+      <fieldset className="form-step">
+        <legend>The position</legend>
+        <label className="wide">
+          Position title
+          <input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        {!masters.fromOrg && (
+          <p className="hint wide">
+            The selected role cannot list the company’s departments, locations and designations, so the choices come from your team and the requisitions you can see.
+          </p>
+        )}
+        <MasterSelect label="Department" value={departmentId} options={masters.options.departments} loading={masters.loading} onChange={setDepartmentId} />
+        <MasterSelect label="Location" value={locationId} options={masters.options.locations} loading={masters.loading} onChange={setLocationId} />
+        <MasterSelect label="Designation" value={designationId} options={masters.options.designations} loading={masters.loading} onChange={setDesignationId} />
+        {masters.error ? (
+          <div className="wide">
+            <ErrorNote error={masters.error} />
+          </div>
+        ) : null}
+        <label>
+          Employment type
+          <input required list={typesId} maxLength={60} value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} />
+        </label>
+        {/* Outside the label, so the suggestions do not become part of the field's name. */}
+        <datalist id={typesId}>
+          {EMPLOYMENT_TYPE_SUGGESTIONS.map(([code, label]) => (
+            <option key={code} value={code}>
+              {label}
+            </option>
+          ))}
+        </datalist>
+        <label>
+          Vacancies
+          <input type="number" required min={1} step={1} inputMode="numeric" value={vacancies} onChange={(e) => setVacancies(e.target.value)} />
+        </label>
+        <label>
+          Target date
+          <input type="date" required value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
+        </label>
       </fieldset>
-      <label className="wide">
-        Reason for the requisition
-        <textarea required maxLength={2000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
-      <label className="wide">
-        Skills (one per line, or separated by commas)
-        <textarea maxLength={5200} rows={3} value={skills} onChange={(e) => setSkills(e.target.value)} style={TEXTAREA} />
-      </label>
-      <HiringManagerField value={hiringManagerId} current={initial?.hiringManager ?? null} onChange={setHiringManagerId} />
-      <label className="wide">
-        Budget exception reason
-        <textarea maxLength={2000} rows={2} value={exception} aria-describedby={exceptionHint} onChange={(e) => setException(e.target.value)} style={TEXTAREA} />
-      </label>
-      <p className="hint wide" id={exceptionHint}>
-        {exceeds
-          ? 'Required to submit: this requisition exceeds its approved budget or has none. The HR approver approves the exception explicitly.'
-          : 'Needed only when the requisition exceeds its approved budget or no budget covers it; the budget check is shown once the draft is saved.'}
-      </p>
+      <fieldset className="form-step">
+        <legend>Why it is needed</legend>
+        <fieldset className="wide" style={GROUP}>
+          <legend>New or replacement</legend>
+          <div className="row">
+            <label className="check">
+              <input type="radio" name={`${id}-reason-type`} value="NEW" required checked={reasonType === 'NEW'} onChange={() => setReasonType('NEW')} /> New position
+            </label>
+            <label className="check">
+              <input type="radio" name={`${id}-reason-type`} value="REPLACEMENT" required checked={reasonType === 'REPLACEMENT'} onChange={() => setReasonType('REPLACEMENT')} />{' '}
+              Replacement
+            </label>
+          </div>
+        </fieldset>
+        <label className="wide">
+          Reason for the requisition
+          <textarea required maxLength={2000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
+        </label>
+        <label className="wide">
+          Skills (one per line, or separated by commas)
+          <textarea maxLength={5200} rows={3} value={skills} onChange={(e) => setSkills(e.target.value)} style={TEXTAREA} />
+        </label>
+      </fieldset>
+      <fieldset className="form-step">
+        <legend>Hiring manager and budget</legend>
+        <HiringManagerField value={hiringManagerId} current={initial?.hiringManager ?? null} onChange={setHiringManagerId} />
+        <label className="wide">
+          Budget exception reason
+          <textarea maxLength={2000} rows={2} value={exception} aria-describedby={exceptionHint} onChange={(e) => setException(e.target.value)} style={TEXTAREA} />
+        </label>
+        <p className="hint wide" id={exceptionHint}>
+          {exceeds
+            ? 'Required to submit: this requisition exceeds its approved budget or has none. The HR approver approves the exception explicitly.'
+            : 'Needed only when the requisition exceeds its approved budget or no budget covers it; the budget check is shown once the draft is saved.'}
+        </p>
+      </fieldset>
       {problem && (
         <p role="alert" className="error wide">
           {problem}

@@ -380,15 +380,21 @@ function CloseDraftForm({ employee, onSaved, onConflict, close }: FormProps & { 
   );
 }
 
-export function Changes(props: FormProps) {
-  const { can } = useSession();
-  const { employee } = props;
+/** The changes the role may make to this record; the record offers its changes only when one of them holds. */
+export function changeDuties(can: (permission: string) => boolean, employee: EmployeeRecord) {
   const draft = employee.status === 'DRAFT';
   const update = can(EMPLOYEE_UPDATE);
   const edit = update || (can(EMPLOYEE_UPDATE_PERSONAL) && (employee.dateOfBirth !== undefined || employee.serviceAnniversaryDate !== undefined));
   const assign = can(SHIFT_ASSIGN);
   const closeDraft = draft && can(EMPLOYEE_DEACTIVATE);
-  if (!edit && !update && !assign && !closeDraft) return null;
+  return { draft, update, edit, assign, closeDraft, offered: edit || update || assign || closeDraft };
+}
+
+export function Changes(props: FormProps) {
+  const { can } = useSession();
+  const { employee } = props;
+  const { draft, update, edit, assign, closeDraft, offered } = changeDuties(can, employee);
+  if (!offered) return null;
   return (
     <Section title="Change this record">
       <div className="action-bar">
