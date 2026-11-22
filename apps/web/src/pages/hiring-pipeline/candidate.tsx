@@ -1,7 +1,19 @@
 // One candidate: the operational record, its duplicate flags, its applications and a new one, and the private contact.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleCheckIcon } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, ChoiceRow, FilterBar, FormField, FormGrid, LabelledFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, Section } from '../../ui';
@@ -9,7 +21,7 @@ import { CandidateDocuments } from './candidate-documents';
 import { CANDIDATE_FIELDS, CandidateFields, candidatePatch, candidateProblem, candidateValues, type CandidateValues } from './candidates';
 import { FlagList } from './duplicates';
 import { APPLY_WORDS, CANDIDATE_WORDS, CONTACT_WORDS, LoadProblem, Refusal } from './refusals';
-import { APPLICATION_MANAGE, APPLICATION_READ, BASIS_LABEL, CANDIDATE_MANAGE, CANDIDATE_READ, CandidateStateBadge, CONSENT_LABEL, CONTACT_MANAGE, CONTACT_READ, Denied, DOCUMENT_READ, DOCUMENT_UPLOAD, Done, enc, GROUP, H3, labelOf, LIST, Missing, Notice, PAGE_SIZE, PATHS, Problem, REQUISITION_READ, SCROLL, SR_ONLY, StageBadge, useKeys, useRefresh, UUID } from './shared';
+import { APPLICATION_MANAGE, APPLICATION_READ, BASIS_LABEL, CANDIDATE_MANAGE, CANDIDATE_READ, CandidateStateBadge, CONSENT_LABEL, CONTACT_MANAGE, CONTACT_READ, Denied, DOCUMENT_READ, DOCUMENT_UPLOAD, enc, labelOf, Missing, Notice, PAGE_SIZE, PATHS, Problem, REQUISITION_READ, StageBadge, useKeys, useRefresh, UUID } from './shared';
 import type { ApplicationView, CandidateView, Contact, ContactSaved, RequisitionPage, RequisitionView } from './types';
 import { useActiveVendors } from './vendors';
 
@@ -35,11 +47,9 @@ function CandidateDetail({ id }: { id: string }) {
   const reloading = detail.isFetching && !detail.isPending;
   return (
     <>
-      <p>
-        <Link className="back-link" to={PATHS.candidates}>← Candidates</Link>
-      </p>
+      <BackLink to={PATHS.candidates}>← Candidates</BackLink>
       <h1>{c ? `${c.fullName} (${c.candidateCode})` : 'Candidate'}</h1>
-      {detail.isPending && <p className="hint loading">Loading the candidate…</p>}
+      {detail.isPending && <LoadingLine>Loading the candidate…</LoadingLine>}
       <LoadProblem error={detail.error} forbidden="The selected role cannot view this candidate." missing="This candidate is not available in the selected role’s scope." />
       {c && (
         <>
@@ -61,12 +71,12 @@ function CandidateDetail({ id }: { id: string }) {
               <Item term="Registered">{formatDate(c.createdAt)}</Item>
             </dl>
             {c.state === 'DUPLICATE' && (
-              <p className="hint">This record was retired as a duplicate: it takes no new applications, and its history and applications are kept as they are.</p>
+              <Hint>This record was retired as a duplicate: it takes no new applications, and its history and applications are kept as they are.</Hint>
             )}
           </Section>
           {can(CANDIDATE_MANAGE) && <EditCandidateForm candidate={c} busy={reloading} />}
           <Section title={`Possible duplicates (${c.duplicateFlags.length})`}>
-            <p className="hint">A flag means this record shares a private email address or phone number with another record. A person reviews each flag; records are never merged.</p>
+            <Hint>A flag means this record shares a private email address or phone number with another record. A person reviews each flag; records are never merged.</Hint>
             <Notice text={flagNotice} />
             {c.duplicateFlags.length === 0 ? (
               <Empty>No likely matches are flagged for this candidate.</Empty>
@@ -141,27 +151,31 @@ function EditCandidateForm({ candidate: c, busy }: { candidate: CandidateView; b
   };
   return (
     <Section title="Change the candidate">
-      <form className="grid-form" aria-label="Change the candidate" onSubmit={submit} noValidate>
+      <FormGrid aria-label="Change the candidate" onSubmit={submit} noValidate>
         <CandidateFields values={typed} set={set} vendors={vendors} currentVendor={c.vendor} showState={c.state !== 'DUPLICATE'} />
-        {c.state === 'DUPLICATE' && <p className="hint wide">A retired duplicate stays retired; its other details can still be corrected.</p>}
+        {c.state === 'DUPLICATE' && <Hint>A retired duplicate stays retired; its other details can still be corrected.</Hint>}
         {changedMeanwhile && (
-          <p className="hint wide" role="status">
+          <Hint role="status">
             Someone changed this candidate meanwhile: the details above show the latest values. Your unsaved changes are kept; save again to apply them.
-          </p>
+          </Hint>
         )}
         <Problem text={problem} />
         {save.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={save.error} words={CANDIDATE_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={save.isPending || busy}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={save.isPending || busy}>
             Save changes
-          </button>
-        </div>
-        {save.isSuccess && <Done>Candidate saved.</Done>}
-      </form>
+          </Button>
+        </ButtonRow>
+        {save.isSuccess && (
+          <StatusNote tone="success" role="status">
+            Candidate saved.
+          </StatusNote>
+        )}
+      </FormGrid>
     </Section>
   );
 }
@@ -176,51 +190,51 @@ function CandidateApplications({ candidate: c }: { candidate: CandidateView }) {
   const canOpen = can(APPLICATION_READ);
   return (
     <Section title={`Applications (${c.applications.length})`}>
-      <p className="hint">A candidate may apply to several requisitions; each application is decided on its own.</p>
-      {c.applications.length === 0 ? (
-        <Empty>No applications yet.</Empty>
-      ) : (
-        <div style={SCROLL}>
-          <table aria-label={`Applications of ${c.candidateCode}`}>
-            <thead>
-              <tr>
-                <th scope="col">Requisition</th>
-                <th scope="col">Stage</th>
-                <th scope="col">In stage since</th>
-                {canOpen && (
-                  <th scope="col">
-                    <span style={SR_ONLY}>Application</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {c.applications.map((a) => (
-                <tr key={a.applicationId}>
-                  <td>
-                    {canOpen ? <Link to={PATHS.requisitionApplications(a.requisitionId)}>{a.requisitionCode}</Link> : a.requisitionCode} <span className="hint">{a.title}</span>
-                  </td>
-                  <td>
-                    <StageBadge stage={a.stage} />
-                  </td>
-                  <td>{formatDate(a.stageEnteredAt)}</td>
-                  {canOpen && (
-                    <td>
-                      <Link to={PATHS.application(a.applicationId)} aria-label={`Open the application for ${a.requisitionCode}`}>
-                        Open
-                      </Link>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <Hint>A candidate may apply to several requisitions; each application is decided on its own.</Hint>
+      {c.applications.length === 0 ? <Empty>No applications yet.</Empty> : <CandidateApplicationTable candidate={c} canOpen={canOpen} />}
       {can(APPLICATION_MANAGE) &&
         can(REQUISITION_READ) &&
-        (c.state === 'ACTIVE' ? <ApplyToRequisition candidate={c} /> : <p className="hint">Only an active candidate record can apply to a requisition.</p>)}
+        (c.state === 'ACTIVE' ? <ApplyToRequisition candidate={c} /> : <Hint>Only an active candidate record can apply to a requisition.</Hint>)}
     </Section>
+  );
+}
+
+function CandidateApplicationTable({ candidate: c, canOpen }: { candidate: CandidateView; canOpen: boolean }) {
+  return (
+    <Table aria-label={`Applications of ${c.candidateCode}`}>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Requisition</TableHead>
+          <TableHead scope="col">Stage</TableHead>
+          <TableHead scope="col">In stage since</TableHead>
+          {canOpen && (
+            <TableHead scope="col">
+              <span className="sr-only">Application</span>
+            </TableHead>
+          )}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {c.applications.map((a) => (
+          <TableRow key={a.applicationId}>
+            <TableCell>
+              {canOpen ? <Link to={PATHS.requisitionApplications(a.requisitionId)}>{a.requisitionCode}</Link> : a.requisitionCode} <Hint as="span">{a.title}</Hint>
+            </TableCell>
+            <TableCell>
+              <StageBadge stage={a.stage} />
+            </TableCell>
+            <TableCell>{formatDate(a.stageEnteredAt)}</TableCell>
+            {canOpen && (
+              <RowActionsCell>
+                <Link to={PATHS.application(a.applicationId)} aria-label={`Open the application for ${a.requisitionCode}`}>
+                  Open
+                </Link>
+              </RowActionsCell>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -250,67 +264,71 @@ function ApplyToRequisition({ candidate: c }: { candidate: CandidateView }) {
   const applied = new Set(c.applications.map((a) => a.requisitionId));
   return (
     <>
-      <h3 style={H3}>Apply to a requisition</h3>
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setTerm(search.trim());
-        }}
-      >
-        <label className="inline">
-          Find an approved requisition
-          <input type="search" maxLength={100} value={search} placeholder="Code or title" onChange={(e) => setSearch(e.target.value)} />
-        </label>
-        <button type="submit" className="secondary">
-          Search requisitions
-        </button>
-      </form>
-      {term !== null && hits.isPending && <p className="hint">Searching…</p>}
+      <CardSubheading>Apply to a requisition</CardSubheading>
+      <FilterBar asChild>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setTerm(search.trim());
+          }}
+        >
+          <FormField>
+            Find an approved requisition
+            <Input type="search" maxLength={100} value={search} placeholder="Code or title" onChange={(e) => setSearch(e.target.value)} />
+          </FormField>
+          <Button type="submit" variant="outline">
+            Search requisitions
+          </Button>
+        </form>
+      </FilterBar>
+      {term !== null && hits.isPending && <Hint>Searching…</Hint>}
       <LoadProblem error={hits.error} forbidden="The selected role cannot search requisitions." />
       {hits.data && hits.data.items.length === 0 && <Empty>No approved requisitions match.</Empty>}
       {hits.data && hits.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Approved requisitions">
-            <thead>
-              <tr>
-                <th scope="col">Requisition</th>
-                <th scope="col">Vacancies</th>
-                <th scope="col">Target date</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Action</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+        // The table and its "refine the search" line are one result: the line stays a quiet line under the table, not a card's note.
+        <div>
+          <Table aria-label="Approved requisitions">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Requisition</TableHead>
+                <TableHead scope="col">Vacancies</TableHead>
+                <TableHead scope="col">Target date</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Action</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {hits.data.items.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    {r.code} <span className="hint">{r.title}</span>
-                  </td>
-                  <td>{r.vacancies}</td>
-                  <td>{formatDate(r.targetDate)}</td>
-                  <td>
-                    {applied.has(r.id) ? (
-                      <span className="hint">Already applied</span>
-                    ) : (
-                      <button type="button" disabled={add.isPending} aria-label={`Apply to ${r.code}`} onClick={() => add.mutate(r)}>
-                        Apply
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <TableRow key={r.id}>
+                  <TableCell>
+                    {r.code} <Hint as="span">{r.title}</Hint>
+                  </TableCell>
+                  <TableCell>{r.vacancies}</TableCell>
+                  <TableCell>{formatDate(r.targetDate)}</TableCell>
+                  <RowActionsCell>
+                    <RowActions>
+                      {applied.has(r.id) ? (
+                        <Hint as="span">Already applied</Hint>
+                      ) : (
+                        <Button type="button" size="sm" disabled={add.isPending} aria-label={`Apply to ${r.code}`} onClick={() => add.mutate(r)}>
+                          Apply
+                        </Button>
+                      )}
+                    </RowActions>
+                  </RowActionsCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-          {hits.data.total > hits.data.items.length && <p className="hint">Showing the first {hits.data.items.length} of {hits.data.total}; refine the search.</p>}
+            </TableBody>
+          </Table>
+          {hits.data.total > hits.data.items.length && <Hint>Showing the first {hits.data.items.length} of {hits.data.total}; refine the search.</Hint>}
         </div>
       )}
       <Refusal error={add.error} words={APPLY_WORDS} />
       {add.isSuccess && (
-        <p className="ok" role="status">
+        <StatusNote tone="success" role="status">
           Application created for {add.data.requisition.code} at the applied stage. <Link to={PATHS.application(add.data.id)}>Open the application</Link>
-        </p>
+        </StatusNote>
       )}
     </>
   );
@@ -345,19 +363,19 @@ function PrivateContact({ candidate: c }: { candidate: CandidateView }) {
       <p>{c.contactRecorded ? 'A private contact is recorded for this candidate.' : 'No private contact is recorded for this candidate.'}</p>
       {canRead && (
         <>
-          <div className="row">
+          <ButtonRow>
             {shown ? (
-              <button type="button" className="secondary" onClick={hide}>
+              <Button type="button" variant="outline" onClick={hide}>
                 Hide private contact
-              </button>
+              </Button>
             ) : (
-              <button type="button" className="secondary" onClick={() => setShown(true)}>
+              <Button type="button" variant="outline" onClick={() => setShown(true)}>
                 Show private contact
-              </button>
+              </Button>
             )}
-          </div>
-          <p className="hint">Each look at the private contact is recorded in the audit trail.</p>
-          {shown && contact.isPending && <p className="hint loading">Loading the private contact…</p>}
+          </ButtonRow>
+          <Hint>Each look at the private contact is recorded in the audit trail.</Hint>
+          {shown && contact.isPending && <LoadingLine>Loading the private contact…</LoadingLine>}
           {shown && <Refusal error={contact.error} words={CONTACT_WORDS} />}
           {data && (
             <dl className="kv" aria-label="Private contact">
@@ -413,60 +431,61 @@ function ContactForm({ candidate: c, onSaved }: { candidate: CandidateView; onSa
   const saved = save.isSuccess ? save.data : undefined;
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Record the private contact
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-        <label>
+      <CardSubheading id={`${id}-title`}>Record the private contact</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+        <FormField>
           Email address
-          <input type="email" maxLength={254} value={email} disabled={removeEmail} onChange={(e) => setEmail(e.target.value)} />
-        </label>
-        <label>
+          <Input type="email" maxLength={254} value={email} disabled={removeEmail} onChange={(e) => setEmail(e.target.value)} />
+        </FormField>
+        <FormField>
           Phone number
-          <input type="tel" maxLength={40} value={phone} disabled={removePhone} onChange={(e) => setPhone(e.target.value)} />
-        </label>
+          <Input type="tel" maxLength={40} value={phone} disabled={removePhone} onChange={(e) => setPhone(e.target.value)} />
+        </FormField>
         {c.contactRecorded && (
-          <fieldset className="wide" style={GROUP}>
-            <legend>Remove a recorded value</legend>
-            <div className="row">
-              <label className="check">
+          <LabelledFieldset legend="Remove a recorded value">
+            <ChoiceRow>
+              <CheckField>
                 <input type="checkbox" checked={removeEmail} onChange={(e) => setRemoveEmail(e.target.checked)} /> Remove the recorded email address
-              </label>
-              <label className="check">
+              </CheckField>
+              <CheckField>
                 <input type="checkbox" checked={removePhone} onChange={(e) => setRemovePhone(e.target.checked)} /> Remove the recorded phone number
-              </label>
-            </div>
-          </fieldset>
+              </CheckField>
+            </ChoiceRow>
+          </LabelledFieldset>
         )}
-        <p className="hint wide">A blank field keeps what is recorded. A match with another candidate’s contact is flagged for review; records are never merged.</p>
+        <Hint>A blank field keeps what is recorded. A match with another candidate’s contact is flagged for review; records are never merged.</Hint>
         <Problem text={problem} />
         {save.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={save.error} words={CONTACT_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={save.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={save.isPending}>
             Save private contact
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         {saved && <ContactSavedNote saved={saved} candidateId={c.id} />}
-      </form>
+      </FormGrid>
     </>
   );
 }
 
 const CONTACT_FIELD_LABEL: Record<string, string> = { email: 'email address', phone: 'phone number' };
 
+/** The saved contact, and any new duplicate flags it raised, as one status: the outcome as its title, the flags below it. */
 function ContactSavedNote({ saved, candidateId }: { saved: ContactSaved; candidateId: string }) {
   const changed = saved.changedFields.map((f) => CONTACT_FIELD_LABEL[f] ?? f);
   return (
-    <div className="wide" role="status">
-      <p className="ok">{changed.length > 0 ? `Private contact saved: ${changed.join(' and ')} changed.` : 'Private contact saved: nothing changed.'}</p>
+    <Alert variant="success" role="status" className="col-span-full">
+      <CircleCheckIcon aria-hidden="true" />
+      <AlertTitle asChild>
+        <p className="ok m-0">{changed.length > 0 ? `Private contact saved: ${changed.join(' and ')} changed.` : 'Private contact saved: nothing changed.'}</p>
+      </AlertTitle>
       {saved.duplicateFlags.length > 0 && (
-        <>
-          <p>Flagged for duplicate review (nothing was merged):</p>
-          <ul style={LIST} aria-label="New duplicate flags">
+        <AlertDescription className="block">
+          <p className="m-0">Flagged for duplicate review (nothing was merged):</p>
+          <ul className="m-0 pl-[1.1rem]" aria-label="New duplicate flags">
             {saved.duplicateFlags.map((f) => {
               const other = f.candidate.id === candidateId ? f.matchedCandidate : f.candidate;
               return (
@@ -476,9 +495,9 @@ function ContactSavedNote({ saved, candidateId }: { saved: ContactSaved; candida
               );
             })}
           </ul>
-        </>
+        </AlertDescription>
       )}
-    </div>
+    </Alert>
   );
 }
 

@@ -1,9 +1,10 @@
 // Shared by the letter and settlement screens: permission keys, paths and limits, labels, query keys, styles and small pieces.
 import { useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type ReactNode, useMemo } from 'react';
+import { type ReactNode, useMemo } from 'react';
+import { Hint } from '@/components/hint';
 import { ApiError, formatAmount, formatDate, isForbidden, isNotFound, readable } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, NotPermitted, pageParams } from '../../ui';
+import { Badge, Empty, ErrorNote, NotPermitted, pageParams, WarningNote } from '../../ui';
 import type { Calculation } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -288,14 +289,21 @@ export const isSelf = (error: unknown) => error instanceof ApiError && error.cod
 
 
 // ---------------------------------------------------------------------------------------------------------
-// Shared pieces
+// Layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026). The shared helpers (FormField, Hint, Table …) cover fields, hints
+// and tables; these cover the rows, frames and folds this module has and they do not.
 // ---------------------------------------------------------------------------------------------------------
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.5rem 0 0' };
-export const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
-export const LETTER: CSSProperties = { whiteSpace: 'pre-wrap', fontFamily: 'inherit', border: '1px solid var(--line)', borderRadius: 6, padding: '0.75rem', margin: '0.5rem 0', background: 'var(--surface)' };
-export const GROUP: CSSProperties = { border: '1px solid var(--line)', borderRadius: 6, padding: '0.5rem 0.75rem', margin: 0, minWidth: 0 };
-export const SR_ONLY: CSSProperties = { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 };
+/** A field and its button side by side, bottoms aligned, wrapping on a narrow screen; each FormField in it is `w-auto`. */
+export const FIELD_ROW = 'flex flex-wrap items-end gap-x-[1.1rem] gap-y-[0.95rem]';
+/** Links side by side, under a page's title or in a card (the old `p.row`). */
+export const LINK_ROW = 'flex flex-wrap items-center gap-x-4 gap-y-1';
+/** A letter's text with its own line breaks, in a quiet frame, in the page's font (not the browser's monospace). */
+export const LETTER = 'my-2 rounded-md border border-border bg-card p-3 [font-family:inherit] whitespace-pre-wrap';
+/** A button whose label is a long sentence: it wraps onto a second line on a phone instead of running out of the card. */
+export const WRAPPING_BUTTON = 'h-auto min-h-[var(--control-h)] shrink py-1.5 whitespace-normal';
+/** A folded part (`<details>`: a revision's text, the earlier snapshots); its summary names it. */
+export const FOLD = 'group/fold';
+/** The summary of a FOLD, in the accent colour, with room under it while the part is open; a 44px target on a phone. */
+export const FOLD_SUMMARY = 'w-max cursor-pointer text-[0.86rem] font-semibold text-[var(--accent)] group-open/fold:mb-[0.6rem] phone:py-3';
 
 /**
  * Query keys carry the selected company and assignment: the app keeps one query cache across role switches, and an
@@ -384,7 +392,7 @@ export function Money({ value, currency }: { value: string | null | undefined; c
   return (
     <>
       {formatAmount(value, currency)}
-      {finer && <span className="hint"> (exactly {value})</span>}
+      {finer && <Hint as="span"> (exactly {value})</Hint>}
     </>
   );
 }
@@ -399,11 +407,7 @@ export function SettlementState({ state }: { state: string }) {
  */
 export function CalculationNote({ calculation }: { calculation: Calculation | undefined }) {
   if (!calculation) return null;
-  if (calculation.status === 'AVAILABLE') return <p className="hint">{calculation.reason}</p>;
-  return (
-    <p role="note">
-      <Badge tone="warn">calculation {labelOf(CALCULATION_AVAILABILITY_LABEL, calculation.status).toLowerCase()}</Badge> {calculation.reason}
-    </p>
-  );
+  if (calculation.status === 'AVAILABLE') return <Hint>{calculation.reason}</Hint>;
+  return <WarningNote badge={`calculation ${labelOf(CALCULATION_AVAILABILITY_LABEL, calculation.status).toLowerCase()}`}>{calculation.reason}</WarningNote>;
 }
 

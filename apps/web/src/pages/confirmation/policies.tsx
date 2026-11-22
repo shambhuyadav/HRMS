@@ -1,11 +1,19 @@
 // Confirmation policies (FR-080, BR-029, DF11): every dated revision, a new policy, a new revision, an end date.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type FormEvent, useState } from 'react';
+import { type FormEvent, useState } from 'react';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, isForbidden, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, NotPermitted, Section } from '../../ui';
+import { Badge, Empty, ErrorNote, NotPermitted, Notice, Section } from '../../ui';
 import { PlainRefusal } from './case-panel';
-import { MANAGE_POLICIES, SCROLL, SR_ONLY, useKeys } from './shared';
+import { MANAGE_POLICIES, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Confirmation policies (FR-080, BR-029, DF11): every dated revision, a new policy, a new revision, an end date.
@@ -72,107 +80,102 @@ export function ConfirmationPoliciesPage() {
   };
   const selected = list.data?.items.find((p) => p.id === action?.id);
 
-  return (
-    <>
-      <h1>Confirmation policies</h1>
-      {!canManage ? (
+  if (!canManage) {
+    return (
+      <>
+        <h1>Confirmation policies</h1>
         <Section title="Policies">
           <NotPermitted>The selected role cannot manage confirmation policies.</NotPermitted>
         </Section>
-      ) : (
-        <>
-          <Section title="Policies">
-            <p className="hint">
-              A case takes the most specific policy that applies on the employee’s joining date and keeps it. A policy in use never changes: a change of terms is a new revision from a later date, and a policy
-              is retired by ending it. Equally specific policies that could apply to the same employee on overlapping dates are refused. Due dates add the duration to the joining date; a month-end date is
-              clamped to the end of the destination month.
-            </p>
-            {list.isPending && <p className="hint loading">Loading policies…</p>}
-            {isForbidden(list.error) ? <NotPermitted>The selected role cannot manage confirmation policies.</NotPermitted> : <ErrorNote error={list.error} />}
-            {list.data && list.data.items.length === 0 && <Empty>No confirmation policies yet.</Empty>}
-            {list.data && list.data.items.length > 0 && (
-              <PolicyTable
-                items={list.data.items}
-                onAction={(next) => {
-                  setDone(null);
-                  setAction(next);
-                }}
-              />
-            )}
-            {done && (
-              <p className="ok" role="status">
-                {done}
-              </p>
-            )}
-          </Section>
-          {action?.kind === 'revise' && selected && <RevisionForm key={selected.id} policy={selected} onSaved={saved} onConflict={reload} onClose={() => setAction(null)} />}
-          {action?.kind === 'retire' && selected && <RetireForm key={selected.id} policy={selected} onSaved={saved} onConflict={reload} onClose={() => setAction(null)} />}
-          {list.data && <CreatePolicyForm applicability={list.data.applicability} onSaved={saved} />}
-        </>
-      )}
+      </>
+    );
+  }
+  return (
+    <>
+      <h1>Confirmation policies</h1>
+      <Section title="Policies">
+        <Hint>
+          A case takes the most specific policy that applies on the employee’s joining date and keeps it. A policy in use never changes: a change of terms is a new revision from a later date, and a policy
+          is retired by ending it. Equally specific policies that could apply to the same employee on overlapping dates are refused. Due dates add the duration to the joining date; a month-end date is
+          clamped to the end of the destination month.
+        </Hint>
+        {list.isPending && <LoadingLine>Loading policies…</LoadingLine>}
+        {isForbidden(list.error) ? <NotPermitted>The selected role cannot manage confirmation policies.</NotPermitted> : <ErrorNote error={list.error} />}
+        {list.data && list.data.items.length === 0 && <Empty>No confirmation policies yet.</Empty>}
+        {list.data && list.data.items.length > 0 && (
+          <PolicyTable
+            items={list.data.items}
+            onAction={(next) => {
+              setDone(null);
+              setAction(next);
+            }}
+          />
+        )}
+        {done && <Notice notice={{ text: done, ok: true }} />}
+      </Section>
+      {action?.kind === 'revise' && selected && <RevisionForm key={selected.id} policy={selected} onSaved={saved} onConflict={reload} onClose={() => setAction(null)} />}
+      {action?.kind === 'retire' && selected && <RetireForm key={selected.id} policy={selected} onSaved={saved} onConflict={reload} onClose={() => setAction(null)} />}
+      {list.data && <CreatePolicyForm applicability={list.data.applicability} onSaved={saved} />}
     </>
   );
 }
 
 function PolicyTable({ items, onAction }: { items: Policy[]; onAction: (action: PolicyAction) => void }) {
   return (
-    <div style={SCROLL}>
-      <table aria-label="Confirmation policies">
-        <thead>
-          <tr>
-            <th scope="col">Policy</th>
-            <th scope="col">Applies to</th>
-            <th scope="col">Duration</th>
-            <th scope="col">Counted from</th>
-            <th scope="col">From</th>
-            <th scope="col">Until</th>
-            <th scope="col">Status</th>
-            <th scope="col">Cases</th>
-            <th scope="col">
-              <span style={SR_ONLY}>Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((p) => (
-            <tr key={p.id}>
-              <td>
-                {p.code} <span className="hint">revision {p.revision}</span>
-              </td>
-              <td>{appliesTo(p)}</td>
-              <td>
-                {p.duration} {UNIT_LABEL[p.durationUnit]}
-              </td>
-              <td>
-                {p.startBasis === 'JOINING_DATE' ? 'Joining date' : readable(p.startBasis)}
-                {p.startDayInclusive ? ', counted as day one' : ''}
-              </td>
-              <td>{formatDate(p.effectiveFrom)}</td>
-              <td>{p.effectiveTo ? formatDate(p.effectiveTo) : 'No end date'}</td>
-              <td>
-                <Badge tone={p.status === 'IN_FORCE' ? 'good' : 'neutral'}>{POLICY_STATUS_LABEL[p.status]}</Badge>
-              </td>
-              <td>{p.latestCaseStart ? `In use (latest start ${formatDate(p.latestCaseStart)})` : 'None'}</td>
-              <td>
-                {/* The row's actions side by side, never stacked in the narrow last column. */}
-                <div className="row" style={{ flexWrap: 'nowrap' }}>
-                  {p.latest && (
-                    <button type="button" className="link" aria-label={`New revision of ${policyLabel(p)}`} onClick={() => onAction({ kind: 'revise', id: p.id })}>
-                      New revision
-                    </button>
-                  )}
-                  {p.status !== 'ENDED' && (
-                    <button type="button" className="link danger" aria-label={`End ${policyLabel(p)}`} onClick={() => onAction({ kind: 'retire', id: p.id })}>
-                      End policy
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label="Confirmation policies">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Policy</TableHead>
+          <TableHead scope="col">Applies to</TableHead>
+          <TableHead scope="col">Duration</TableHead>
+          <TableHead scope="col">Counted from</TableHead>
+          <TableHead scope="col">From</TableHead>
+          <TableHead scope="col">Until</TableHead>
+          <TableHead scope="col">Status</TableHead>
+          <TableHead scope="col">Cases</TableHead>
+          <TableHead scope="col">
+            <span className="sr-only">Actions</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((p) => (
+          <TableRow key={p.id}>
+            <TableCell>
+              {p.code} <Hint as="span">revision {p.revision}</Hint>
+            </TableCell>
+            <TableCell>{appliesTo(p)}</TableCell>
+            <TableCell>
+              {p.duration} {UNIT_LABEL[p.durationUnit]}
+            </TableCell>
+            <TableCell>
+              {p.startBasis === 'JOINING_DATE' ? 'Joining date' : readable(p.startBasis)}
+              {p.startDayInclusive ? ', counted as day one' : ''}
+            </TableCell>
+            <TableCell>{formatDate(p.effectiveFrom)}</TableCell>
+            <TableCell>{p.effectiveTo ? formatDate(p.effectiveTo) : 'No end date'}</TableCell>
+            <TableCell>
+              <Badge tone={p.status === 'IN_FORCE' ? 'good' : 'neutral'}>{POLICY_STATUS_LABEL[p.status]}</Badge>
+            </TableCell>
+            <TableCell>{p.latestCaseStart ? `In use (latest start ${formatDate(p.latestCaseStart)})` : 'None'}</TableCell>
+            <RowActionsCell>
+              <RowActions>
+                {p.latest && (
+                  <Button type="button" variant="outline" size="sm" aria-label={`New revision of ${policyLabel(p)}`} onClick={() => onAction({ kind: 'revise', id: p.id })}>
+                    New revision
+                  </Button>
+                )}
+                {p.status !== 'ENDED' && (
+                  <Button type="button" variant="danger" size="sm" aria-label={`End ${policyLabel(p)}`} onClick={() => onAction({ kind: 'retire', id: p.id })}>
+                    End policy
+                  </Button>
+                )}
+              </RowActions>
+            </RowActionsCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -185,7 +188,12 @@ interface TermsDraft {
 const NO_TERMS: TermsDraft = { duration: '', unit: '', from: '', to: '' };
 
 /** Required fields only; every rule on the values (positive duration, end after start, overlap, cases in use) is the server's. */
-const missingTerm = (t: TermsDraft) => (!t.duration.trim() ? 'Enter the duration.' : !t.unit ? 'Choose whether the duration is in calendar months or days.' : !t.from ? 'Enter the date the policy takes effect.' : null);
+function missingTerm(t: TermsDraft): string | null {
+  if (!t.duration.trim()) return 'Enter the duration.';
+  if (!t.unit) return 'Choose whether the duration is in calendar months or days.';
+  if (!t.from) return 'Enter the date the policy takes effect.';
+  return null;
+}
 const termsBody = (t: TermsDraft) => ({
   duration: Number(t.duration),
   durationUnit: t.unit,
@@ -195,45 +203,41 @@ const termsBody = (t: TermsDraft) => ({
 });
 
 /** A duration and its unit read as one value ("6 calendar months"), so they sit side by side on a row of their own. */
-const DURATION_ROW: CSSProperties = { display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '0.9rem 1rem' };
+const DURATION_ROW = 'col-span-full flex flex-wrap items-end gap-[0.9rem_1rem]';
 
 function TermFields({ value, onChange }: { value: TermsDraft; onChange: (next: TermsDraft) => void }) {
   return (
     <>
-      <div className="wide" style={DURATION_ROW}>
-        <label style={{ flex: '0 1 10rem' }}>
+      <div className={DURATION_ROW}>
+        <FormField className="flex-[0_1_10rem]">
           Duration
-          <input type="number" step="1" required value={value.duration} onChange={(e) => onChange({ ...value, duration: e.target.value })} />
-        </label>
-        <label style={{ flex: '0 1 14rem' }}>
+          <Input type="number" step="1" required value={value.duration} onChange={(e) => onChange({ ...value, duration: e.target.value })} />
+        </FormField>
+        <FormField className="flex-[0_1_14rem]">
           Unit
-          <select required value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value as TermsDraft['unit'] })}>
+          <NativeSelect required value={value.unit} onChange={(e) => onChange({ ...value, unit: e.target.value as TermsDraft['unit'] })}>
             <option value="">Choose…</option>
             <option value="CALENDAR_MONTHS">Calendar months</option>
             <option value="CALENDAR_DAYS">Calendar days</option>
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       </div>
-      <label>
+      <FormField>
         Takes effect on
-        <input type="date" required value={value.from} onChange={(e) => onChange({ ...value, from: e.target.value })} />
-      </label>
-      <label>
+        <Input type="date" required value={value.from} onChange={(e) => onChange({ ...value, from: e.target.value })} />
+      </FormField>
+      <FormField>
         Ends on (optional)
-        <input type="date" value={value.to} onChange={(e) => onChange({ ...value, to: e.target.value })} />
-      </label>
-      <p className="hint wide">Counted from the employee’s joining date. An employee joining on the end date or later no longer gets this policy.</p>
+        <Input type="date" value={value.to} onChange={(e) => onChange({ ...value, to: e.target.value })} />
+      </FormField>
+      <Hint>Counted from the employee’s joining date. An employee joining on the end date or later no longer gets this policy.</Hint>
     </>
   );
 }
 
 function FormProblem({ text }: { text: string | null }) {
   if (!text) return null;
-  return (
-    <p role="alert" className="error wide">
-      {text}
-    </p>
-  );
+  return <Notice notice={{ text, ok: false }} />;
 }
 
 function CreatePolicyForm({ applicability, onSaved }: { applicability: PolicyList['applicability']; onSaved: (message: string) => void }) {
@@ -272,56 +276,56 @@ function CreatePolicyForm({ applicability, onSaved }: { applicability: PolicyLis
   };
   return (
     <Section title="New policy">
-      <form className="grid-form" aria-label="New policy" onSubmit={submit}>
-        <label>
+      <FormGrid aria-label="New policy" onSubmit={submit}>
+        <FormField>
           Code
-          <input required maxLength={40} value={code} placeholder="e.g. INTERN_SHORT" onChange={(e) => setCode(e.target.value)} />
-        </label>
-        <label>
+          <Input required maxLength={40} value={code} placeholder="e.g. INTERN_SHORT" onChange={(e) => setCode(e.target.value)} />
+        </FormField>
+        <FormField>
           Employment type
-          <select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)}>
+          <NativeSelect value={employmentType} onChange={(e) => setEmploymentType(e.target.value)}>
             <option value="">Any</option>
             {applicability.employmentTypes.map((t) => (
               <option key={t.code} value={t.code}>
                 {t.label}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Grade
-          <select value={gradeId} onChange={(e) => setGradeId(e.target.value)}>
+          <NativeSelect value={gradeId} onChange={(e) => setGradeId(e.target.value)}>
             <option value="">Any</option>
             {applicability.grades.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Location
-          <select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+          <NativeSelect value={locationId} onChange={(e) => setLocationId(e.target.value)}>
             <option value="">Any</option>
             {applicability.locations.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         <TermFields value={terms} onChange={setTerms} />
-        <label className="wide">
+        <CheckField className="col-span-full">
           <input type="checkbox" checked={inclusive} onChange={(e) => setInclusive(e.target.checked)} /> Count the joining day as day one (the review falls due one day earlier; kept by every later
           revision)
-        </label>
+        </CheckField>
         <FormProblem text={problem} />
-        <div className="wide row">
-          <button type="submit" disabled={create.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={create.isPending}>
             Create policy
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
       <PlainRefusal error={create.error} />
     </Section>
   );
@@ -347,24 +351,24 @@ function RevisionForm({ policy, onSaved, onConflict, onClose }: { policy: Policy
     <Section
       title={`New revision of ${policy.code}`}
       actions={
-        <button type="button" className="secondary" onClick={onClose}>
+        <Button type="button" variant="outline" onClick={onClose}>
           Close
-        </button>
+        </Button>
       }
     >
-      <p className="hint">
+      <Hint>
         It applies to the same employees as revision {policy.revision} ({appliesTo(policy)}), which closes on the new date.
         {policy.latestCaseStart ? ` The date must come after ${formatDate(policy.latestCaseStart)}, the latest start of a case under it.` : ''} Cases already opened keep their policy and due date.
-      </p>
-      <form className="grid-form" aria-label={`New revision of ${policy.code}`} onSubmit={submit}>
+      </Hint>
+      <FormGrid aria-label={`New revision of ${policy.code}`} onSubmit={submit}>
         <TermFields value={terms} onChange={setTerms} />
         <FormProblem text={problem} />
-        <div className="wide row">
-          <button type="submit" disabled={revise.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={revise.isPending}>
             Create revision
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
       <PlainRefusal error={revise.error} />
     </Section>
   );
@@ -390,27 +394,27 @@ function RetireForm({ policy, onSaved, onConflict, onClose }: { policy: Policy; 
     <Section
       title={`End ${policyLabel(policy)}`}
       actions={
-        <button type="button" className="secondary" onClick={onClose}>
+        <Button type="button" variant="outline" onClick={onClose}>
           Close
-        </button>
+        </Button>
       }
     >
-      <p className="hint">
+      <Hint>
         An employee joining on this date or later no longer gets this policy; another policy applies, or HR is told that none does. Cases already opened keep it.
         {policy.latestCaseStart ? ` The date must come after ${formatDate(policy.latestCaseStart)}, the latest start of a case under it.` : ''}
-      </p>
-      <form className="grid-form" aria-label={`End ${policyLabel(policy)}`} onSubmit={submit}>
-        <label>
+      </Hint>
+      <FormGrid aria-label={`End ${policyLabel(policy)}`} onSubmit={submit}>
+        <FormField>
           End date
-          <input type="date" required value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} />
-        </label>
+          <Input type="date" required value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} />
+        </FormField>
         <FormProblem text={problem} />
-        <div className="wide row">
-          <button type="submit" disabled={retire.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={retire.isPending}>
             End policy
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
       <PlainRefusal error={retire.error} />
     </Section>
   );

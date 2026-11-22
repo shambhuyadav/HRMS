@@ -2,10 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, download } from '../../api';
 import { isReportRefusal, reportProblem } from '../../report-failures';
-import { Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../../ui';
+import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, StateBadge } from '../../ui';
 import { NotificationPreferencesPanel } from '../notifications';
+import { ITEM_ACTION } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Inbox (FR-061/085) and reports (FR-056/065).
@@ -26,18 +32,20 @@ export function InboxPage() {
       {/* A visible heading of its own: the page is titled "Notifications", which a card of the same name would hide. */}
       <Section title="Inbox">
         {inbox.data?.items.length === 0 && <Empty>No notifications yet.</Empty>}
+        {/* `tasks` and `unread` are the list's marker classes: styles.css draws each notification as a framed item, an unread one with
+            a red edge. */}
         <ul className="tasks">
           {inbox.data?.items.map((n) => (
             <li key={n.id} className={n.readAt ? 'read' : 'unread'}>
               <div>
-                <strong>{n.title ?? n.category}</strong> {!n.readAt && <span className="badge badge-warn">new</span>}
+                <strong>{n.title ?? n.category}</strong> {!n.readAt && <Badge tone="info">new</Badge>}
               </div>
               <div>{n.body}</div>
-              <div className="hint">{new Date(n.occurredAt).toLocaleString()}</div>
+              <HintLine>{new Date(n.occurredAt).toLocaleString()}</HintLine>
               {!n.readAt && (
-                <button className="link" onClick={() => read.mutate(n.id)}>
+                <Button variant="outline" size="sm" className={ITEM_ACTION} onClick={() => read.mutate(n.id)}>
                   Mark as read
-                </button>
+                </Button>
               )}
             </li>
           ))}
@@ -91,61 +99,60 @@ export function ReportsPage() {
           <>
             <Empty>No report can be requested in this role.</Empty>
             {/* Several reports are explicit grants, never default duties (the delivery log, audit export): say how to get one. */}
-            <p className="hint">Reports come with the duties of the selected role. If you need one that is not listed, ask an administrator to grant it; another administrator approves the grant.</p>
+            <Hint>Reports come with the duties of the selected role. If you need one that is not listed, ask an administrator to grant it; another administrator approves the grant.</Hint>
           </>
         )}
         {offered.length > 0 && (
-        <form
-          className="grid-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            request.mutate();
-          }}
-        >
-          <label>
-            Report
-            <select
-              value={chosen}
-              onChange={(e) => {
-                setCode(e.target.value);
-                setFormat('CSV');
-              }}
-            >
-              {catalogue.data?.items.map((r) => (
-                <option key={r.code} value={r.code}>
-                  {r.title}
-                </option>
-              ))}
-            </select>
-          </label>
-          {def?.formats && (
-            <label>
-              Format
-              <select value={chosenFormat} onChange={(e) => setFormat(e.target.value)}>
-                {def.formats.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
+          <FormGrid
+            onSubmit={(e) => {
+              e.preventDefault();
+              request.mutate();
+            }}
+          >
+            <FormField>
+              Report
+              <NativeSelect
+                value={chosen}
+                onChange={(e) => {
+                  setCode(e.target.value);
+                  setFormat('CSV');
+                }}
+              >
+                {catalogue.data?.items.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.title}
                   </option>
                 ))}
-              </select>
-            </label>
-          )}
-          {def?.requiresPeriod && (
-            <>
-              <label>
-                From
-                <input type="date" required value={from} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label>
-                To
-                <input type="date" required value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
-            </>
-          )}
-          <button type="submit">Request</button>
-        </form>
+              </NativeSelect>
+            </FormField>
+            {def?.formats && (
+              <FormField>
+                Format
+                <NativeSelect value={chosenFormat} onChange={(e) => setFormat(e.target.value)}>
+                  {def.formats.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </FormField>
+            )}
+            {def?.requiresPeriod && (
+              <>
+                <FormField>
+                  From
+                  <Input type="date" required value={from} onChange={(e) => setFrom(e.target.value)} />
+                </FormField>
+                <FormField>
+                  To
+                  <Input type="date" required value={to} onChange={(e) => setTo(e.target.value)} />
+                </FormField>
+              </>
+            )}
+            <Button type="submit">Request</Button>
+          </FormGrid>
         )}
-        <p className="hint">Reports are generated in the background; downloads expire after 24 hours and re-check your access.</p>
+        <Hint>Reports are generated in the background; downloads expire after 24 hours and re-check your access.</Hint>
         <ErrorNote error={request.error ?? catalogue.error} />
       </Section>
       <Section title={`My reports${reports.data ? ` (${reports.data.total})` : ''}`}>
@@ -179,17 +186,17 @@ function ReportRow({ report: r }: { report: OwnReport }) {
   const problem = reportProblem(r);
   return (
     <li>
-      <strong>{r.title}</strong> <StateBadge state={r.state} /> {r.rowCount !== null && <span className="hint">{r.rowCount} rows</span>}
-      <div className="hint">
+      <strong>{r.title}</strong> <StateBadge state={r.state} /> {r.rowCount !== null && <Hint as="span">{r.rowCount} rows</Hint>}
+      <HintLine>
         Requested {new Date(r.requestedAt).toLocaleString()}
         {r.state === 'COMPLETED' && r.expiresAt && `; the download expires ${new Date(r.expiresAt).toLocaleString()}`}
         {r.state === 'EXPIRED' && '; the download has expired, so request the report again'}
-      </div>
-      {problem && <div className="hint">{problem}</div>}
+      </HintLine>
+      {problem && <HintLine>{problem}</HintLine>}
       {r.state === 'COMPLETED' && (
-        <button className="link" onClick={() => download(`/v1/reports/${r.id}/download`).catch(setError)}>
+        <Button variant="outline" size="sm" className={ITEM_ACTION} onClick={() => download(`/v1/reports/${r.id}/download`).catch(setError)}>
           Download {r.format}
-        </button>
+        </Button>
       )}
       <ErrorNote error={error} />
     </li>

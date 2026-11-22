@@ -3,13 +3,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, ApiError, formatDate, plural, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, Item, LIST_PAGE_SIZE, Pager, Section, When } from '../../ui';
 import { DelegatedBadge } from '../delegations';
 import { TaskActions, TaskFacts } from './process-view';
 import { type Act, type Done, Refusal, refusalText } from './refusals';
-import { EXIT_APPROVE, EXIT_READ, EXIT_RECOMMEND, FLUSH, H3, ISO_DATE, Loading, Notice, type NoticeState, noticeText, type Paged, pagedUrl, PATHS, Problem, PROCESS_READ, QueryProblem, ReasonField, shown, TASK_COMPLETE, totalOf, useDecisionKey, useKeys } from './shared';
+import { EXIT_APPROVE, EXIT_READ, EXIT_RECOMMEND, ISO_DATE, Notice, type NoticeState, noticeText, type Paged, pagedUrl, PATHS, Problem, PROCESS_READ, QueryProblem, ReasonField, shown, TASK_COMPLETE, totalOf, useDecisionKey, useKeys } from './shared';
 import type { ExitCase, ExitDecided, ExitDecisionBody, ExitDetail, ExitTask, MyTask, RecommendResult, WithdrawalDecided, WithdrawalDecisionBody } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -78,8 +84,8 @@ function ExitQueue({ kind }: { kind: ExitQueueKind }) {
   };
   return (
     <Section title={`${queue.title}${data ? ` (${items.length})` : ''}`}>
-      <p className="hint">{queue.hint}</p>
-      {tasks.isPending && <Loading>Loading the resignations waiting for you…</Loading>}
+      <Hint>{queue.hint}</Hint>
+      {tasks.isPending && <LoadingLine>Loading the resignations waiting for you…</LoadingLine>}
       <QueryProblem error={tasks.error} forbidden="The selected role cannot view exit tasks." />
       <Notice notice={notice} />
       {data && items.length === 0 && <Empty>{queue.empty}</Empty>}
@@ -96,6 +102,13 @@ function ExitQueue({ kind }: { kind: ExitQueueKind }) {
 
 type Finished = (t: ExitTask, text: string, ok: boolean) => void;
 
+/** The decision a queue item asks for, in words. */
+const DECISION_WORDS: Record<ExitQueueKind, string> = {
+  recommend: 'Recommendation of the last working date',
+  approve: 'HR decision on the resignation',
+  withdrawal: 'Withdrawal of an approved resignation',
+};
+
 export function ExitTaskItem({ task: t, kind, onFinished, linkToExit = true }: { task: ExitTask; kind: ExitQueueKind; onFinished: Finished; linkToExit?: boolean }) {
   const { can } = useSession();
   const headingId = useId();
@@ -103,17 +116,13 @@ export function ExitTaskItem({ task: t, kind, onFinished, linkToExit = true }: {
   const permitted = can(EXIT_QUEUES[kind].permission);
   return (
     <li aria-labelledby={headingId}>
-      <h3 id={headingId} style={H3}>
-        {x ? `${x.employeeName} (${x.employeeCode})` : 'Resignation'}
-      </h3>
+      <CardSubheading id={headingId}>{x ? `${x.employeeName} (${x.employeeCode})` : 'Resignation'}</CardSubheading>
       <DelegatedBadge taskId={t.taskId} />
       {!x ? (
         <Empty>This resignation is not available in the selected role’s scope.</Empty>
       ) : (
         <>
-          <p className="hint" style={FLUSH}>
-            {kind === 'recommend' ? 'Recommendation of the last working date' : kind === 'approve' ? 'HR decision on the resignation' : 'Withdrawal of an approved resignation'}
-          </p>
+          <Hint className="m-0">{DECISION_WORDS[kind]}</Hint>
           <dl className="kv">
             <Item term="Resignation date">{formatDate(x.requestDate)}</Item>
             <Item term="Proposed last working date">{formatDate(x.proposedLastWorkingDate)}</Item>
@@ -127,19 +136,18 @@ export function ExitTaskItem({ task: t, kind, onFinished, linkToExit = true }: {
               <Link to={PATHS.exit(x.id)}>Open the exit case</Link>
             </div>
           )}
-          {!permitted ? (
-            <p className="hint">The selected role cannot take this decision.</p>
-          ) : kind === 'recommend' ? (
-            <RecommendForm task={t} exit={x} onFinished={onFinished} />
-          ) : kind === 'approve' ? (
-            <ExitDecisionForm task={t} exit={x} onFinished={onFinished} />
-          ) : (
-            <WithdrawalDecisionForm task={t} exit={x} onFinished={onFinished} />
-          )}
+          {permitted ? <DecisionForm kind={kind} task={t} exit={x} onFinished={onFinished} /> : <Hint>The selected role cannot take this decision.</Hint>}
         </>
       )}
     </li>
   );
+}
+
+/** The form of the decision a queue item asks for. */
+function DecisionForm({ kind, ...form }: { kind: ExitQueueKind; task: ExitTask; exit: ExitCase; onFinished: Finished }) {
+  if (kind === 'recommend') return <RecommendForm {...form} />;
+  if (kind === 'approve') return <ExitDecisionForm {...form} />;
+  return <WithdrawalDecisionForm {...form} />;
 }
 
 /** A refusal that leaves nothing to decide here (decided, withdrawn or out of reach meanwhile) closes the item. */
@@ -182,15 +190,15 @@ function RecommendForm({ task: t, exit: x, onFinished }: { task: ExitTask; exit:
   };
   return (
     <form aria-label={`Recommend the last working date of ${name}`} className="stack" onSubmit={submit}>
-      <label>
+      <FormField>
         Recommended last working date (inclusive)
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
+        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </FormField>
       <Problem text={problem} />
       <div>
-        <button type="submit" disabled={recommend.isPending}>
+        <Button type="submit" disabled={recommend.isPending}>
           Recommend this date
-        </button>
+        </Button>
       </div>
       <Refusal error={recommend.error} action="recommend" />
     </form>
@@ -239,24 +247,22 @@ function ExitDecisionForm({ task: t, exit: x, onFinished }: { task: ExitTask; ex
   };
   return (
     <div className="stack" role="group" aria-label={`Decide the resignation of ${name}`}>
-      <label>
+      <FormField>
         Approved last working date (inclusive)
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </label>
-      <p className="hint" style={FLUSH}>
-        Keep the recommended date ({formatDate(x.recommendedLastWorkingDate)}) or set another one, not before the resignation date or today.
-      </p>
+        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </FormField>
+      <Hint className="m-0">Keep the recommended date ({formatDate(x.recommendedLastWorkingDate)}) or set another one, not before the resignation date or today.</Hint>
       <ReasonField label="Private reason (never shown to the employee; required to not approve)" value={reason} onChange={setReason} />
       <ReasonField label="Message to the employee (required to not approve)" value={message} onChange={setMessage} />
       <Problem text={problem} />
-      <div className="row">
-        <button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
+      <ButtonRow>
+        <Button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
           Approve
-        </button>
-        <button type="button" className="danger" disabled={decide.isPending} onClick={() => send('REJECT')}>
+        </Button>
+        <Button type="button" variant="danger" disabled={decide.isPending} onClick={() => send('REJECT')}>
           Do not approve
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={decide.error} action="exit-decide" />
     </div>
   );
@@ -305,24 +311,24 @@ function WithdrawalDecisionForm({ task: t, exit: x, onFinished }: { task: ExitTa
   return (
     <div className="stack" role="group" aria-label={`Decide the withdrawal request of ${name}`}>
       {pending ? (
-        <p style={FLUSH}>
+        <p className="m-0">
           Withdrawal requested <When at={pending.requestedAt} />
           {pending.reason !== undefined ? `. Reason: ${pending.reason}` : ''}
         </p>
       ) : (
-        detail.isPending && <Loading>Loading the withdrawal request…</Loading>
+        detail.isPending && <LoadingLine>Loading the withdrawal request…</LoadingLine>
       )}
       <ReasonField label="Reason for your decision (required; never shown to the employee)" value={reason} onChange={setReason} />
       <ReasonField label="Message to the employee (required to not approve)" value={message} onChange={setMessage} />
       <Problem text={problem} />
-      <div className="row">
-        <button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
+      <ButtonRow>
+        <Button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
           Approve the withdrawal
-        </button>
-        <button type="button" className="danger" disabled={decide.isPending} onClick={() => send('REJECT')}>
+        </Button>
+        <Button type="button" variant="danger" disabled={decide.isPending} onClick={() => send('REJECT')}>
           Do not approve
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={decide.error} action="withdrawal-decide" />
     </div>
   );
@@ -356,12 +362,12 @@ function MyProcessTasks() {
   // `total` and `overdue` count every task waiting for the caller, not only this page.
   return (
     <Section title={`My process tasks${data ? ` (${totalOf(data)})` : ''}`}>
-      <p className="hint">Open tasks of open processes that you or your role own, earliest due first.</p>
-      {tasks.isPending && <Loading>Loading your process tasks…</Loading>}
+      <Hint>Open tasks of open processes that you or your role own, earliest due first.</Hint>
+      {tasks.isPending && <LoadingLine>Loading your process tasks…</LoadingLine>}
       <QueryProblem error={tasks.error} forbidden="The selected role cannot complete process tasks." />
       <Notice notice={notice} />
       {data && data.overdue > 0 && (
-        <p style={FLUSH}>
+        <p className="m-0">
           <Badge tone="bad">overdue</Badge> {`${plural(data.overdue, 'task')} past the due date.`}
         </p>
       )}
@@ -384,10 +390,8 @@ function MyTaskItem({ task: t, onDone }: { task: MyTask; onDone: Done }) {
   const canComplete = can(TASK_COMPLETE);
   return (
     <li aria-labelledby={headingId}>
-      <h3 id={headingId} style={H3}>
-        {`${t.title} (${t.code})`}
-      </h3>
-      <p style={FLUSH}>
+      <CardSubheading id={headingId}>{`${t.title} (${t.code})`}</CardSubheading>
+      <p className="m-0">
         {can(PROCESS_READ) ? <Link to={PATHS.process(t.processId)}>{t.processName}</Link> : t.processName} for {t.employeeName} ({t.employeeCode})
       </p>
       <TaskFacts task={t} employeeId={t.employeeId} />

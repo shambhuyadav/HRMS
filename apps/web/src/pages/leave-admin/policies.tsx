@@ -2,10 +2,34 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { CheckField, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, Section, StateBadge } from '../../ui';
-import { ACTIVATE, codeWords, eligibilityWords, keepOnPage, type LeaveType, MANAGE, mappingText, mappingWords, type Option, periodText, type PolicyOptions, type PolicyRevision, ReportExport } from './shared';
+import { Badge, Empty, ErrorNote, Notice, Section, StateBadge, WarningNote } from '../../ui';
+import {
+  ACTIVATE,
+  codeWords,
+  eligibilityWords,
+  keepOnPage,
+  type LeaveType,
+  MANAGE,
+  mappingText,
+  mappingWords,
+  type Option,
+  periodText,
+  type PolicyOptions,
+  type PolicyRevision,
+  ReportExport,
+} from './shared';
+
+/** A form opened from a row's actions, below the row's buttons. */
+const ROW_FORM = 'mt-3';
 
 // ---------------------------------------------------------------------------------------------------------
 // Leave types
@@ -32,59 +56,68 @@ function LeaveTypes({ canManage }: { canManage: boolean }) {
   });
   return (
     <Section title="Leave types">
-      <table>
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Pay</th>
-            <th>Status</th>
-            <th scope="col"><span className="sr-only">Actions</span></th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Code</TableHead>
+            <TableHead scope="col">Name</TableHead>
+            <TableHead scope="col">Pay</TableHead>
+            <TableHead scope="col">Status</TableHead>
+            <TableHead scope="col">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {types.data?.items.map((t) => (
-            <tr key={t.id}>
-              <td>{t.code}</td>
-              <td>{t.name}</td>
-              <td>{t.paid ? 'Paid' : 'Unpaid'}</td>
-              <td>{t.active ? <Badge tone="good">Active</Badge> : <Badge>Inactive</Badge>}</td>
-              <td>
+            <TableRow key={t.id}>
+              <TableCell>{t.code}</TableCell>
+              <TableCell>{t.name}</TableCell>
+              <TableCell>{t.paid ? 'Paid' : 'Unpaid'}</TableCell>
+              <TableCell>{t.active ? <Badge tone="good">Active</Badge> : <Badge>Inactive</Badge>}</TableCell>
+              <RowActionsCell>
                 {canManage && (
-                  <button type="button" className={t.active ? 'link danger' : 'link'} aria-label={t.active ? `Deactivate ${t.code}` : `Reactivate ${t.code}`} onClick={() => toggle.mutate(t)}>
-                    {t.active ? 'Deactivate' : 'Reactivate'}
-                  </button>
+                  <RowActions>
+                    <Button
+                      type="button"
+                      variant={t.active ? 'danger' : 'outline'}
+                      size="sm"
+                      aria-label={t.active ? `Deactivate ${t.code}` : `Reactivate ${t.code}`}
+                      onClick={() => toggle.mutate(t)}
+                    >
+                      {t.active ? 'Deactivate' : 'Reactivate'}
+                    </Button>
+                  </RowActions>
                 )}
-              </td>
-            </tr>
+              </RowActionsCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       <ErrorNote error={types.error ?? toggle.error} />
       {canManage && (
-        <form
-          className="grid-form"
+        <FormGrid
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             create.mutate();
           }}
         >
-          <label>
+          <FormField>
             New type code
-            <input required maxLength={40} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
-          </label>
-          <label>
+            <Input required maxLength={40} value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+          </FormField>
+          <FormField>
             New type name
-            <input required maxLength={200} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </label>
-          <label className="check">
+            <Input required maxLength={200} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </FormField>
+          <CheckField>
             <input type="checkbox" checked={form.paid} onChange={(e) => setForm({ ...form, paid: e.target.checked })} /> Paid (fixed once created)
-          </label>
-          <button type="submit" disabled={create.isPending}>
+          </CheckField>
+          <Button type="submit" disabled={create.isPending}>
             Add leave type
-          </button>
+          </Button>
           <ErrorNote error={create.error} />
-        </form>
+        </FormGrid>
       )}
     </Section>
   );
@@ -126,48 +159,48 @@ function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: 
   const field = (key: keyof DraftValues) => ({ value: values[key], onChange: (e: { target: { value: string } }) => onChange({ ...values, [key]: e.target.value }) });
   return (
     <>
-      <label>
+      <FormField>
         Effective from
-        <input type="date" required {...field('effectiveFrom')} />
-      </label>
-      <label>
+        <Input type="date" required {...field('effectiveFrom')} />
+      </FormField>
+      <FormField>
         Effective until (exclusive, optional)
-        <input type="date" {...field('effectiveTo')} />
-      </label>
-      <label>
+        <Input type="date" {...field('effectiveTo')} />
+      </FormField>
+      <FormField>
         Eligibility code
-        <input required maxLength={60} {...field('eligibility')} />
-      </label>
-      <label>
+        <Input required maxLength={60} {...field('eligibility')} />
+      </FormField>
+      <FormField>
         Accrual rule
-        <select {...field('accrualRule')}>
+        <NativeSelect {...field('accrualRule')}>
           <option value="NONE">No accrual</option>
           <option value="MONTHLY_PRORATED">Monthly, prorated</option>
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Annual entitlement (days)
-        <input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,4})?" {...field('annualEntitlement')} />
-      </label>
-      <label>
+        <Input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,4})?" {...field('annualEntitlement')} />
+      </FormField>
+      <FormField>
         Minimum service (days)
-        <input required inputMode="numeric" pattern="\d{1,6}" {...field('minServiceDays')} />
-      </label>
-      <label>
+        <Input required inputMode="numeric" pattern="\d{1,6}" {...field('minServiceDays')} />
+      </FormField>
+      <FormField>
         Carry cap (days)
-        <input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,4})?" {...field('carryCap')} />
-      </label>
-      <label>
+        <Input required inputMode="decimal" pattern="\d{1,8}(\.\d{1,4})?" {...field('carryCap')} />
+      </FormField>
+      <FormField>
         Leave year starts in
-        <select {...field('leaveYearStartMonth')}>
+        <NativeSelect {...field('leaveYearStartMonth')}>
           <option value="">Not set (nothing expires)</option>
           {MONTHS.map((m, i) => (
             <option key={m} value={String(i + 1)}>
               {m}
             </option>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
     </>
   );
 }
@@ -186,16 +219,15 @@ function NewRevision({ types }: { types: LeaveType[] }) {
   });
   return (
     <Section title="New policy revision">
-      <form
-        className="grid-form"
+      <FormGrid
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <label>
+        <FormField>
           Leave type
-          <select value={chosen} onChange={(e) => setLeaveType(e.target.value)}>
+          <NativeSelect value={chosen} onChange={(e) => setLeaveType(e.target.value)}>
             {types
               .filter((t) => t.active)
               .map((t) => (
@@ -203,14 +235,14 @@ function NewRevision({ types }: { types: LeaveType[] }) {
                   {t.name}
                 </option>
               ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         <DraftFields values={values} onChange={setValues} />
-        <button type="submit" disabled={create.isPending || !chosen}>
+        <Button type="submit" disabled={create.isPending || !chosen}>
           Create draft
-        </button>
-      </form>
-      <p className="hint">The revision stays a draft until someone other than its author activates it. Policy values need the owner’s approval before activation.</p>
+        </Button>
+      </FormGrid>
+      <Hint>The revision stays a draft until someone other than its author activates it. Policy values need the owner’s approval before activation.</Hint>
       <ErrorNote error={create.error} />
     </Section>
   );
@@ -235,21 +267,21 @@ function AddMapping({ policy, onDone }: { policy: PolicyRevision; onDone: () => 
     },
   });
   const select = (label: string, key: keyof typeof choice, items: Option[] | undefined) => (
-    <label>
+    <FormField>
       {label}
-      <select value={choice[key]} onChange={(e) => setChoice({ ...choice, [key]: e.target.value })}>
+      <NativeSelect value={choice[key]} onChange={(e) => setChoice({ ...choice, [key]: e.target.value })}>
         <option value="">Any</option>
         {items?.map((o) => (
           <option key={o.id} value={o.id}>
             {key === 'gradeId' ? `${o.name} (${o.code})` : o.name}
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
   return (
-    <form
-      className="grid-form"
+    <FormGrid
+      className={ROW_FORM}
       aria-label={`Map ${policy.leaveType} revision ${policy.revision}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
@@ -259,11 +291,11 @@ function AddMapping({ policy, onDone }: { policy: PolicyRevision; onDone: () => 
       {select('Employment type', 'employmentTypeId', options.data?.employmentTypes)}
       {select('Grade', 'gradeId', options.data?.grades)}
       {select('Location', 'locationId', options.data?.locations)}
-      <button type="submit" disabled={add.isPending}>
+      <Button type="submit" disabled={add.isPending}>
         Add mapping
-      </button>
+      </Button>
       <ErrorNote error={options.error ?? add.error} />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -274,6 +306,7 @@ function overlapText(error: unknown): string | null {
   return `This revision ties with revision ${revisions.map((r) => r.revision).join(', ')} for the same employees in an overlapping period. Change the mappings or the dates, or end an earlier revision when this one starts.`;
 }
 
+/** A revision's actions, as its row's last cell: the buttons, and below them the form one of them opened. */
 function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy: PolicyRevision; canManage: boolean; canActivate: boolean; onChanged: () => void }) {
   const [open, setOpen] = useState<'edit' | 'map' | 'activate' | 'retire' | null>(null);
   const [values, setValues] = useState<DraftValues>({
@@ -301,30 +334,32 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
   const name = `${policy.leaveType} revision ${policy.revision}`;
   const overlap = overlapText(activate.error);
   return (
-    <>
-      {policy.state === 'DRAFT' && canManage && (
-        <>
-          <button type="button" className="link" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => setOpen(open === 'edit' ? null : 'edit')}>
-            Edit
-          </button>{' '}
-          <button type="button" className="link" aria-label={`Map ${name}`} aria-expanded={open === 'map'} onClick={() => setOpen(open === 'map' ? null : 'map')}>
-            Map
-          </button>{' '}
-        </>
-      )}
-      {policy.state === 'DRAFT' && canActivate && (
-        <button type="button" className="link" aria-label={`Activate ${name}`} aria-expanded={open === 'activate'} onClick={() => setOpen(open === 'activate' ? null : 'activate')}>
-          Activate
-        </button>
-      )}
-      {policy.state === 'ACTIVE' && canActivate && (
-        <button type="button" className="link danger" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => setOpen(open === 'retire' ? null : 'retire')}>
-          Retire
-        </button>
-      )}
+    <RowActionsCell expanded={open !== null}>
+      <RowActions>
+        {policy.state === 'DRAFT' && canManage && (
+          <>
+            <Button type="button" variant="outline" size="sm" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => setOpen(open === 'edit' ? null : 'edit')}>
+              Edit
+            </Button>{' '}
+            <Button type="button" variant="outline" size="sm" aria-label={`Map ${name}`} aria-expanded={open === 'map'} onClick={() => setOpen(open === 'map' ? null : 'map')}>
+              Map
+            </Button>{' '}
+          </>
+        )}
+        {policy.state === 'DRAFT' && canActivate && (
+          <Button type="button" variant="outline" size="sm" aria-label={`Activate ${name}`} aria-expanded={open === 'activate'} onClick={() => setOpen(open === 'activate' ? null : 'activate')}>
+            Activate
+          </Button>
+        )}
+        {policy.state === 'ACTIVE' && canActivate && (
+          <Button type="button" variant="danger" size="sm" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => setOpen(open === 'retire' ? null : 'retire')}>
+            Retire
+          </Button>
+        )}
+      </RowActions>
       {open === 'edit' && (
-        <form
-          className="grid-form"
+        <FormGrid
+          className={ROW_FORM}
           aria-label={`Edit ${name}`}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -332,59 +367,53 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
           }}
         >
           <DraftFields values={values} onChange={setValues} />
-          <button type="submit" disabled={edit.isPending}>
+          <Button type="submit" disabled={edit.isPending}>
             Save draft
-          </button>
+          </Button>
           <ErrorNote error={edit.error} />
-        </form>
+        </FormGrid>
       )}
       {open === 'map' && <AddMapping policy={policy} onDone={done} />}
       {open === 'activate' && (
         <form
-          className="stack"
+          className="mt-3 flex flex-col items-start gap-3"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             activate.mutate();
           }}
         >
-          <label className="check">
+          <CheckField>
             <input type="checkbox" checked={closePredecessors} onChange={(e) => setClosePredecessors(e.target.checked)} /> End an earlier overlapping revision when this one starts
-          </label>
-          <button type="submit" disabled={activate.isPending}>
+          </CheckField>
+          <Button type="submit" disabled={activate.isPending}>
             Confirm activation
-          </button>
-          {overlap ? (
-            <p role="alert" className="error">
-              {overlap}
-            </p>
-          ) : (
-            <ErrorNote error={activate.error} />
-          )}
+          </Button>
+          {overlap ? <Notice notice={{ text: overlap, ok: false }} /> : <ErrorNote error={activate.error} />}
         </form>
       )}
       {open === 'retire' && (
-        <form
-          className="grid-form"
+        <FormGrid
+          className={ROW_FORM}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             retireIt.mutate();
           }}
         >
-          <label>
+          <FormField>
             No longer applies from
-            <input type="date" required value={retire.effectiveTo} onChange={(e) => setRetire({ ...retire, effectiveTo: e.target.value })} />
-          </label>
-          <label className="wide">
+            <Input type="date" required value={retire.effectiveTo} onChange={(e) => setRetire({ ...retire, effectiveTo: e.target.value })} />
+          </FormField>
+          <FormField className="col-span-full">
             Reason for retiring
-            <input required maxLength={500} value={retire.reason} onChange={(e) => setRetire({ ...retire, reason: e.target.value })} />
-          </label>
-          <button type="submit" disabled={retireIt.isPending}>
+            <Input required maxLength={500} value={retire.reason} onChange={(e) => setRetire({ ...retire, reason: e.target.value })} />
+          </FormField>
+          <Button type="submit" disabled={retireIt.isPending}>
             Confirm retirement
-          </button>
+          </Button>
           <ErrorNote error={retireIt.error} />
-        </form>
+        </FormGrid>
       )}
-    </>
+    </RowActionsCell>
   );
 }
 
@@ -401,9 +430,9 @@ function MappingList({ policy, options, canRemove, onChanged }: { policy: Policy
             {canRemove && (
               <>
                 {' '}
-                <button type="button" className="link" aria-label={`Remove ${mappingText(m)}`} disabled={remove.isPending} onClick={() => remove.mutate(m.id)}>
+                <Button type="button" variant="danger" size="sm" aria-label={`Remove ${mappingText(m)}`} disabled={remove.isPending} onClick={() => remove.mutate(m.id)}>
                   Remove
-                </button>
+                </Button>
               </>
             )}
           </li>
@@ -436,78 +465,80 @@ export function LeavePoliciesPage() {
     <>
       <LeaveTypes canManage={canManage} />
       <Section title="Policy revisions">
-        <form className="grid-form filter-bar" onSubmit={keepOnPage}>
-          <label>
-            Leave type
-            <select value={filters.leaveType} onChange={(e) => setFilters({ ...filters, leaveType: e.target.value })}>
-              <option value="">All</option>
-              {types.data?.items.map((t) => (
-                <option key={t.id} value={t.code}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Effective from, on or after
-            <input type="date" value={filters.effectiveFrom} onChange={(e) => setFilters({ ...filters, effectiveFrom: e.target.value })} />
-          </label>
-          <label>
-            State
-            <select value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value })}>
-              <option value="">All</option>
-              <option value="DRAFT">Draft</option>
-              <option value="ACTIVE">Active</option>
-              <option value="RETIRED">Retired</option>
-            </select>
-          </label>
-        </form>
+        <FilterBar asChild>
+          <form onSubmit={keepOnPage}>
+            <FormField>
+              Leave type
+              <NativeSelect value={filters.leaveType} onChange={(e) => setFilters({ ...filters, leaveType: e.target.value })}>
+                <option value="">All</option>
+                {types.data?.items.map((t) => (
+                  <option key={t.id} value={t.code}>
+                    {t.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FormField>
+            <FormField>
+              Effective from, on or after
+              <Input type="date" value={filters.effectiveFrom} onChange={(e) => setFilters({ ...filters, effectiveFrom: e.target.value })} />
+            </FormField>
+            <FormField>
+              State
+              <NativeSelect value={filters.state} onChange={(e) => setFilters({ ...filters, state: e.target.value })}>
+                <option value="">All</option>
+                <option value="DRAFT">Draft</option>
+                <option value="ACTIVE">Active</option>
+                <option value="RETIRED">Retired</option>
+              </NativeSelect>
+            </FormField>
+          </form>
+        </FilterBar>
         <ErrorNote error={revisions.error} />
         {revisions.isSuccess && items.length === 0 && <Empty>No policy revisions match.</Empty>}
         {unmapped > 0 && (
-          <p role="note">
-            <Badge tone="warn">unmapped</Badge> {unmapped === 1 ? 'One revision has' : `${unmapped} revisions have`} no mapping, so {unmapped === 1 ? 'it applies' : 'they apply'} to nobody.
-          </p>
+          <WarningNote badge="unmapped">
+            {unmapped === 1 ? 'One revision has' : `${unmapped} revisions have`} no mapping, so {unmapped === 1 ? 'it applies' : 'they apply'} to nobody.
+          </WarningNote>
         )}
         {items.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Revision</th>
-                <th>State</th>
-                <th>Period</th>
-                <th>Values</th>
-                <th>Mapped to</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Period</TableHead>
+                <TableHead scope="col">Values</TableHead>
+                <TableHead scope="col">Mapped to</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {items.map((p) => (
-                <tr key={p.id}>
-                  <td>{`${p.leaveType} revision ${p.revision}`}</td>
-                  <td>
+                <TableRow key={p.id}>
+                  <TableCell>{`${p.leaveType} revision ${p.revision}`}</TableCell>
+                  <TableCell>
                     <StateBadge state={p.state} />
-                  </td>
-                  <td>{periodText(p)}</td>
-                  <td>
+                  </TableCell>
+                  <TableCell>{periodText(p)}</TableCell>
+                  <TableCell>
                     {`${p.accrualRule === 'NONE' ? 'No accrual' : 'Monthly accrual'}, ${Number(p.annualEntitlement)} days a year, ${p.minServiceDays} days of service, carry cap ${Number(p.carryCap)}, ${leaveYearText(p.leaveYearStartMonth)}`}{' '}
-                    <span className="hint">(eligible: {eligibilityWords(p.eligibility, eligibleTypes(p))})</span>
-                  </td>
-                  <td>
+                    <Hint as="span">(eligible: {eligibilityWords(p.eligibility, eligibleTypes(p))})</Hint>
+                  </TableCell>
+                  <TableCell>
                     <MappingList key={p.version} policy={p} options={options.data} canRemove={p.state === 'DRAFT' && canManage} onChanged={refresh} />
                     {p.warnings.map((w) => (
-                      <p key={w.code} role="note">
-                        <Badge tone="warn">{w.code === 'UNMAPPED' ? 'unmapped' : 'overlap'}</Badge> {w.text}
-                      </p>
+                      <WarningNote key={w.code} badge={w.code === 'UNMAPPED' ? 'unmapped' : 'overlap'}>
+                        {w.text}
+                      </WarningNote>
                     ))}
-                  </td>
-                  <td>
-                    <RevisionActions key={p.version} policy={p} canManage={canManage} canActivate={canActivate} onChanged={refresh} />
-                  </td>
-                </tr>
+                  </TableCell>
+                  <RevisionActions key={p.version} policy={p} canManage={canManage} canActivate={canActivate} onChanged={refresh} />
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
         {can('leave_policy.export.operational') && (
           <ReportExport
@@ -516,7 +547,7 @@ export function LeavePoliciesPage() {
             filters={{ ...(filters.leaveType ? { leaveType: filters.leaveType } : {}), ...(filters.effectiveFrom ? { from: filters.effectiveFrom } : {}), ...(filters.state ? { status: filters.state } : {}) }}
           />
         )}
-        <p className="hint">When two revisions apply, the mapping naming more of grade, location and employment type wins; two revisions tying for the same employees in the same period cannot both be active.</p>
+        <Hint>When two revisions apply, the mapping naming more of grade, location and employment type wins; two revisions tying for the same employees in the same period cannot both be active.</Hint>
       </Section>
       {canManage && types.data && <NewRevision types={types.data.items} />}
     </>

@@ -1,6 +1,27 @@
 import { Component, type ComponentType, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, NavLink, Navigate, Route, Routes, matchPath, useLocation } from 'react-router-dom';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { cn } from '@/lib/utils';
 import { api } from './api';
 import { groupIcon, Icon, navIcon } from './icons';
 import { useSession } from './session';
@@ -178,7 +199,7 @@ function loadGroupChoices(): Record<string, boolean> {
  * The menu: the core pages, then the module groups. A group opens by itself when the current page is in it; the user can open or
  * close any group, and that choice is remembered on this device (a convenience only: nothing depends on it).
  */
-function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () => void }) {
+function MainMenu({ pathname, onNavigate }: { pathname: string; onNavigate: () => void }) {
   const { me, can } = useSession();
   // Reports appears once the role's catalogue offers at least one report (the Reports page reads the same cached catalogue);
   // if the catalogue cannot be read the entry stays, and the page says why.
@@ -201,62 +222,84 @@ function Sidebar({ pathname, onNavigate }: { pathname: string; onNavigate: () =>
     }
   };
   return (
-    <nav className="sidebar" aria-label="Main">
-      {entries.length > 0 && (
-        <div className="nav-section">
-          <p className="nav-section-title">Workspace</p>
-          {entries.map((n) => (
-            // Active on its own page and on the pages under it (an employee's record keeps Employees lit), but not on a module
-            // screen under its path (/confirmations/policies lights its own entry, not Confirmations as well).
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.to === '/' || n.to === '/me' || inModuleScreen}
-              onClick={onNavigate}
-            >
-              <Icon name={navIcon(n.to)} />
-              <span>{n.label}</span>
-            </NavLink>
-          ))}
-        </div>
-      )}
-      {groups.length > 0 && (
-        <div className="nav-section">
-          <p className="nav-section-title">Modules</p>
-          {groups.map((g) => {
-            // A group of one screen is that screen's link, not a heading to open first.
-            const only = g.screens.length === 1 ? g.screens[0]! : null;
-            if (only) {
-              return (
-                <NavLink key={g.label} to={only.path} end onClick={onNavigate} title={only.title === g.label ? undefined : g.label}>
-                  <Icon name={groupIcon(g.label)} />
-                  <span>{only.title}</span>
-                </NavLink>
-              );
-            }
-            const open = isOpen(g.label);
-            return (
-              <div key={g.label} className={`nav-group${open ? ' open' : ''}${g.label === activeGroup ? ' current' : ''}`} role="group" aria-label={g.label}>
-                <button type="button" className="nav-group-toggle" aria-expanded={open} onClick={() => toggle(g.label)}>
-                  <Icon name={groupIcon(g.label)} />
-                  <span className="nav-group-label">{g.label}</span>
-                  <Icon name="chevron" size={15} className="chevron" />
-                </button>
-                {open && (
-                  <div className="nav-group-items">
-                    {g.screens.map((s) => (
-                      <NavLink key={s.path} to={s.path} end onClick={onNavigate}>
-                        {s.title}
-                      </NavLink>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </nav>
+    <SidebarContent>
+      <nav aria-label="Main" className="flex flex-col gap-[1.1rem]">
+        {entries.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+            <SidebarMenu>
+              {entries.map((n) => (
+                // Active on its own page and on the pages under it (an employee's record keeps Employees lit), but not on a module
+                // screen under its path (/confirmations/policies lights its own entry, not Confirmations as well).
+                <SidebarMenuItem key={n.to}>
+                  <SidebarMenuButton asChild>
+                    <NavLink to={n.to} end={n.to === '/' || n.to === '/me' || inModuleScreen} onClick={onNavigate}>
+                      <Icon name={navIcon(n.to)} />
+                      <span>{n.label}</span>
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
+        {groups.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Modules</SidebarGroupLabel>
+            <SidebarMenu>
+              {groups.map((g) => {
+                // A group of one screen is that screen's link, not a heading to open first.
+                const only = g.screens.length === 1 ? g.screens[0]! : null;
+                if (only) {
+                  return (
+                    <SidebarMenuItem key={g.label}>
+                      <SidebarMenuButton asChild>
+                        <NavLink to={only.path} end onClick={onNavigate} title={only.title === g.label ? undefined : g.label}>
+                          <Icon name={groupIcon(g.label)} />
+                          <span>{only.title}</span>
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                }
+                // The group holding the page shown has its name lit and its icon in the light red, open or closed.
+                const current = g.label === activeGroup;
+                return (
+                  <SidebarMenuItem key={g.label}>
+                    <Collapsible open={isOpen(g.label)} onOpenChange={() => toggle(g.label)} role="group" aria-label={g.label} className="group/collapsible">
+                      <CollapsibleTrigger asChild>
+                        <SidebarMenuButton className={cn(current && 'text-sidebar-accent-foreground [&>svg:first-child]:text-[var(--accent-on-dark)]')}>
+                          <Icon name={groupIcon(g.label)} />
+                          <span className="min-w-0 flex-1">{g.label}</span>
+                          <Icon
+                            name="chevron"
+                            size={15}
+                            className="text-white/[0.35] transition-transform duration-150 group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none"
+                          />
+                        </SidebarMenuButton>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <SidebarMenuSub>
+                          {g.screens.map((s) => (
+                            <SidebarMenuSubItem key={s.path}>
+                              <SidebarMenuSubButton asChild>
+                                <NavLink to={s.path} end onClick={onNavigate}>
+                                  {s.title}
+                                </NavLink>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
+      </nav>
+    </SidebarContent>
   );
 }
 
@@ -267,25 +310,44 @@ const PHONE_BAR_PATHS: readonly string[] = ['/', '/me', '/team', '/leave', '/tas
 const PHONE_QUERY = '(max-width: 560px)';
 
 /**
- * On a phone, the everyday pages within thumb's reach at the bottom of the screen, and the full menu behind "More". Rendered only at
- * phone width, so a larger screen (and assistive technology there) has one menu, not two.
+ * A place in the phone bar: its icon over its name, the whole cell a 54px target. The page shown (and "More" while the menu is open)
+ * has its name in the text colour and its icon on a soft red pill; in Windows high-contrast mode, the system's highlight colours.
+ */
+const PHONE_BAR_ITEM = cn(
+  'h-auto min-h-[54px] min-w-0 flex-col gap-[0.2rem] px-[0.15rem] py-[0.3rem] text-[0.78rem] leading-[1.2] font-semibold text-muted-foreground no-underline phone:min-h-[54px] has-[>svg]:px-[0.15rem]',
+  'hover:bg-transparent hover:text-foreground dark:hover:bg-transparent',
+  '[&_svg]:box-content [&_svg]:rounded-full [&_svg]:px-[0.85rem] [&_svg]:py-[0.15rem] [&_svg]:transition-colors',
+  '[&.active]:text-foreground [&.active_svg]:bg-[var(--accent-soft)] [&.active_svg]:text-[var(--accent)]',
+  'aria-expanded:text-foreground aria-expanded:[&_svg]:bg-[var(--accent-soft)] aria-expanded:[&_svg]:text-[var(--accent)]',
+  'forced-colors:[&.active]:bg-[color:Highlight] forced-colors:[&.active]:text-[color:HighlightText] forced-colors:[&.active]:forced-color-adjust-none forced-colors:[&.active_svg]:bg-transparent forced-colors:[&.active_svg]:text-[color:HighlightText]',
+);
+
+/**
+ * On a phone, the everyday pages within thumb's reach at the bottom of the screen, and the full menu behind "More" (the same menu
+ * sheet as the top bar's menu button on a tablet). Rendered only at phone width, so a larger screen (and assistive technology there)
+ * has one menu, not two.
  */
 function PhoneBar({ menuOpen, onMenu, onNavigate }: { menuOpen: boolean; onMenu: () => void; onNavigate: () => void }) {
   const { me, can } = useSession();
   const entries = visibleNav(can, me ?? null);
   const picks = PHONE_BAR_PATHS.flatMap((path) => entries.filter((n) => n.to === path)).slice(0, 4);
   return (
-    <nav className="phone-bar" aria-label="Shortcuts">
+    <nav
+      aria-label="Shortcuts"
+      className="relative z-[6] grid flex-none auto-cols-fr grid-flow-col gap-[0.15rem] border-t border-border bg-card px-[0.35rem] pt-[0.3rem] pb-[calc(0.3rem+env(safe-area-inset-bottom,0px))]"
+    >
       {picks.map((n) => (
-        <NavLink key={n.to} to={n.to} end={n.to === '/' || n.to === '/me'} onClick={onNavigate}>
-          <Icon name={navIcon(n.to)} size={20} />
-          <span>{n.label}</span>
-        </NavLink>
+        <Button key={n.to} asChild variant="ghost" className={PHONE_BAR_ITEM}>
+          <NavLink to={n.to} end={n.to === '/' || n.to === '/me'} onClick={onNavigate}>
+            <Icon name={navIcon(n.to)} size={20} className="size-[20px]" />
+            <span className="max-w-full truncate">{n.label}</span>
+          </NavLink>
+        </Button>
       ))}
-      <button type="button" aria-expanded={menuOpen} onClick={onMenu}>
-        <Icon name="menu" size={20} />
-        <span>More</span>
-      </button>
+      <Button variant="ghost" aria-expanded={menuOpen} onClick={onMenu} className={PHONE_BAR_ITEM}>
+        <Icon name="menu" size={20} className="size-[20px]" />
+        <span className="max-w-full truncate">More</span>
+      </Button>
     </nav>
   );
 }
@@ -347,6 +409,8 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const { theme, toggle: toggleTheme } = useTheme();
   const phone = useMediaQuery(PHONE_QUERY);
+  // At 920px wide or less the menu is a sheet over the page (hooks/use-mobile), opened from the top bar or, on a phone, the bar's "More".
+  const sheetMenu = useIsMobile();
   const page = pageOf(pathname);
   useEffect(() => {
     document.title = page.title === 'HRMS' ? 'HRMS' : `${page.title} · HRMS`;
@@ -396,39 +460,63 @@ export function App() {
 
   // A sign-in name without a display name shows its part before the "@" (the whole address is in the tooltip), not a cut-off address.
   const name = me ? (me.displayName ?? me.accountKey.replace(/@.*$/, '')) : '';
+  const phoneBar = phone && !!me;
   return (
-    <div className={`shell${menuOpen ? ' menu-open' : ''}${phone && me ? ' has-phone-bar' : ''}`}>
-      <aside className="side">
-        <div className="side-brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <div className="brand-text">
-            <span className="brand">HRMS</span>
-            <span className="brand-company">{me?.companyName ?? ''}</span>
-          </div>
-        </div>
-        {/* The menu waits for the role's permissions: entries are never shown and then taken away. */}
-        {me && <Sidebar pathname={pathname} onNavigate={() => setMenuOpen(false)} />}
-      </aside>
-      {menuOpen && <div className="scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
-      <div className="main-col">
-        <header className="topbar">
-          <button type="button" className="icon-button menu-toggle" aria-label="Menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
-            <Icon name="menu" size={20} />
-          </button>
-          <nav className="crumbs" aria-label="Breadcrumb">
-            {page.group && (
-              <>
-                <span className="crumb">{page.group}</span>
-                <Icon name="chevron" size={14} className="crumb-sep" />
-              </>
-            )}
-            <span className="crumb current" aria-current="page">
-              {page.title}
-            </span>
-          </nav>
-          <div className="topbar-actions">
+    // The shell: the menu beside the page on a wide screen, a sheet over it at 920px or less (components/ui/sidebar). The shell's
+    // classes follow the menu sheet and the phone bar.
+    <SidebarProvider
+      openMobile={menuOpen}
+      onOpenMobileChange={setMenuOpen}
+      className={cn('shell', menuOpen && 'menu-open', phoneBar && 'has-phone-bar')}
+    >
+      {/* Keyboard users jump past the menu and header to the page itself; the link shows only when it has the focus. */}
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+      <Sidebar>
+        <aside className="flex min-h-0 flex-1 flex-col">
+          <SidebarHeader className="min-h-[60px] flex-row items-center gap-3 border-b border-sidebar-border px-5 py-[0.85rem]">
+            {/* The brand mark: a white square outline on the brand red. */}
+            <span
+              aria-hidden="true"
+              className="relative size-[30px] flex-none rounded-[8px] bg-[var(--accent-bright)] shadow-[inset_0_-1px_0_rgba(0,0,0,0.18)] after:absolute after:inset-[8.5px] after:rounded-[4px] after:border-[2.5px] after:border-white/95 after:content-['']"
+            />
+            <div className="flex min-w-0 flex-col leading-[1.2]">
+              <span className="text-[1.05rem] font-bold tracking-[-0.01em] text-white">HRMS</span>
+              <span className="truncate text-[0.74rem] text-white/50">{me?.companyName ?? ''}</span>
+            </div>
+          </SidebarHeader>
+          {/* The menu waits for the role's permissions: entries are never shown and then taken away. */}
+          {me && <MainMenu pathname={pathname} onNavigate={() => setMenuOpen(false)} />}
+        </aside>
+      </Sidebar>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="relative z-[5] flex min-h-[60px] items-center gap-4 border-b border-border bg-card px-7 py-2 [@media(max-width:920px)]:gap-2 [@media(max-width:920px)]:px-4">
+          {/* Only where the menu is a sheet, and not beside the phone bar, whose "More" opens it. */}
+          {sheetMenu && !phoneBar && (
+            <SidebarTrigger aria-label="Menu" aria-expanded={menuOpen} className="size-[var(--control-h)]">
+              <Icon name="menu" size={20} className="size-[20px]" />
+            </SidebarTrigger>
+          )}
+          {/* On a phone the page title sits just below; a cut-off copy of it ("Emplo…") in the bar adds nothing. */}
+          <Breadcrumb aria-label="Breadcrumb" className="min-w-0 flex-1">
+            <BreadcrumbList>
+              {page.group && (
+                <>
+                  <BreadcrumbItem className="phone:hidden">{page.group}</BreadcrumbItem>
+                  <BreadcrumbSeparator className="text-[var(--faint)] phone:hidden [&>svg]:size-[14px]">
+                    <Icon name="chevron" size={14} />
+                  </BreadcrumbSeparator>
+                </>
+              )}
+              <BreadcrumbItem className="min-w-0 phone:hidden">
+                <BreadcrumbPage>{page.title}</BreadcrumbPage>
+              </BreadcrumbItem>
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="flex items-center gap-[0.45rem] phone:min-w-0">
             {/* FR-096: the acting role and its scope are always visible. */}
-            <div className="role-chip" aria-label="Current role">
+            <div className="role-chip" role="group" aria-label="Current role">
               {me ? (
                 <>
                   <span className="role-name">{me.roleName}</span>
@@ -440,37 +528,40 @@ export function App() {
                 'Loading…'
               )}
             </div>
-            <button type="button" className="ghost" aria-label="Switch role" title="Switch role" onClick={switchRole}>
-              <Icon name="swap" size={16} />
-              <span>Switch role</span>
-            </button>
+            {/* At 920px or less the two worded actions show their icons only (their names stay as labels and tooltips). */}
+            <Button variant="ghost" aria-label="Switch role" title="Switch role" onClick={switchRole}>
+              <Icon name="swap" size={16} className="size-[16px]" />
+              <span className="[@media(max-width:920px)]:hidden">Switch role</span>
+            </Button>
             {/* The theme switch: pressed means the dark theme is on (theme.ts keeps the choice on this device). */}
-            <button
-              type="button"
-              className="icon-button"
+            <Button
+              variant="ghost"
+              size="icon"
               aria-label="Dark theme"
               aria-pressed={theme === 'dark'}
               title={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}
               onClick={toggleTheme}
             >
-              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} />
-            </button>
-            <NavLink to="/inbox" className="icon-button" aria-label="Notifications" title="Notifications">
-              <Icon name="bell" size={19} />
-            </NavLink>
-            <div className="user-chip" title={me?.accountKey ?? ''}>
-              <span className="avatar" aria-hidden="true">
-                {initialsOf(name)}
-              </span>
-              <span className="user-name">{name}</span>
+              <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} className="size-[18px]" />
+            </Button>
+            <Button asChild variant="ghost" size="icon" className="no-underline [&.active]:bg-[var(--accent-soft)] [&.active]:text-[var(--accent)]">
+              <NavLink to="/inbox" aria-label="Notifications" title="Notifications">
+                <Icon name="bell" size={19} className="size-[19px]" />
+              </NavLink>
+            </Button>
+            <div className="ml-1 flex items-center gap-[0.55rem] border-l border-border pl-3 phone:hidden [@media(max-width:1180px)]:pl-2" title={me?.accountKey ?? ''}>
+              <Avatar aria-hidden="true" className="size-[32px]">
+                <AvatarFallback className="bg-[var(--info-soft)] text-[0.74rem] font-[650] text-[var(--info)] shadow-[inset_0_0_0_1px_var(--info-edge)]">{initialsOf(name)}</AvatarFallback>
+              </Avatar>
+              <span className="max-w-[170px] truncate text-[0.85rem] font-semibold text-foreground [@media(max-width:1180px)]:hidden">{name}</span>
             </div>
-            <button type="button" className="ghost" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>
-              <Icon name="logOut" size={16} />
-              <span>Sign out</span>
-            </button>
+            <Button variant="ghost" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>
+              <Icon name="logOut" size={16} className="size-[16px]" />
+              <span className="[@media(max-width:920px)]:hidden">Sign out</span>
+            </Button>
           </div>
         </header>
-        <main className="content" ref={mainRef}>
+        <main className="content" id="main" tabIndex={-1} ref={mainRef}>
           {!ownTitle && page.title !== 'HRMS' && (
             // The module's name is in the breadcrumb above; the header is the title alone, as on pages that title themselves.
             <header className="page-header">
@@ -511,8 +602,8 @@ export function App() {
             </PageTitleContext.Provider>
           )}
         </main>
-        {phone && me && <PhoneBar menuOpen={menuOpen} onMenu={() => setMenuOpen(!menuOpen)} onNavigate={() => setMenuOpen(false)} />}
+        {phoneBar && <PhoneBar menuOpen={menuOpen} onMenu={() => setMenuOpen(!menuOpen)} onNavigate={() => setMenuOpen(false)} />}
       </div>
-    </div>
+    </SidebarProvider>
   );
 }

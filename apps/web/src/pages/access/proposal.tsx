@@ -2,9 +2,37 @@
 
 import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
+import { ButtonRow, CheckField, ChoiceRow, FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { FieldSet } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 import { api, isForbidden } from '../../api';
-import { Badge, Empty, ErrorNote, NotPermitted, Section } from '../../ui';
-import { atLocalMidnight, type CataloguePermission, type CatalogueRole, CLASS_LABEL, GROUP, type OrgItem, type OrgQuery, type ProposalBody, type RolesQuery, SCOPE_LABEL, type ScopeKind, SCOPES, shown, TEXTAREA, todayLocal, useRefreshAccess } from './shared';
+import { Badge, Empty, ErrorNote, Notice, NotPermitted, Section } from '../../ui';
+import {
+  atLocalMidnight,
+  type CataloguePermission,
+  type CatalogueRole,
+  CLASS_LABEL,
+  type OrgItem,
+  type OrgQuery,
+  type ProposalBody,
+  type RolesQuery,
+  SCOPE_LABEL,
+  type ScopeKind,
+  SCOPES,
+  shown,
+  todayLocal,
+  useRefreshAccess,
+} from './shared';
+
+/** One resource's permissions inside the permission group, without a frame of their own. */
+const RESOURCE_GROUP = 'gap-[0.55rem]';
+/** The resource's name above its permissions, muted. */
+const RESOURCE_LEGEND = 'p-0 text-[0.84rem] font-semibold text-muted-foreground';
 
 // ---------------------------------------------------------------------------------------------------------
 // Proposal (FR-067): a pending grant for the selected user, inside the chosen role's ceiling
@@ -28,7 +56,7 @@ export function ProposeGrant({
   if (roles.isPending) {
     return (
       <Section title={title}>
-        <p className="hint loading">Loading roles…</p>
+        <LoadingLine>Loading roles…</LoadingLine>
       </Section>
     );
   }
@@ -146,21 +174,21 @@ function ProposeForm({ userId, roles, orgDepartments, orgLocations }: { userId: 
   const showFilters = departmentOptions.length > 0 || locationOptions.length > 0;
 
   return (
-    <form className="grid-form" onSubmit={submit} aria-label="Propose a grant">
-      <label>
+    <FormGrid onSubmit={submit} aria-label="Propose a grant">
+      <FormField>
         Role
-        <select required value={roleCode} onChange={(e) => chooseRole(e.target.value)}>
+        <NativeSelect required value={roleCode} onChange={(e) => chooseRole(e.target.value)}>
           <option value="">Choose a role</option>
           {roles.map((r) => (
             <option key={r.code} value={r.code}>
               {r.name} ({CLASS_LABEL[r.accessClass] ?? r.accessClass})
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Scope
-        <select required disabled={!role} value={scopeKind} onChange={(e) => setScopeKind(e.target.value as ScopeKind | '')}>
+        <NativeSelect required disabled={!role} value={scopeKind} onChange={(e) => setScopeKind(e.target.value as ScopeKind | '')}>
           <option value="" disabled>
             Choose a scope
           </option>
@@ -170,62 +198,52 @@ function ProposeForm({ userId, roles, orgDepartments, orgLocations }: { userId: 
               {role?.defaultScope === s ? ' (role default)' : ''}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Effective from
-        <input type="date" required value={from} onChange={(e) => setFrom(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" required value={from} onChange={(e) => setFrom(e.target.value)} />
+      </FormField>
+      <FormField>
         Effective to (optional)
-        <input type="date" value={to} aria-describedby={`${id}-to`} onChange={(e) => setTo(e.target.value)} />
-      </label>
-      <p className="hint wide" id={`${id}-to`}>
-        Access ends at the start of the effective-to day, which must be after the effective-from date.
-      </p>
+        <Input type="date" value={to} aria-describedby={`${id}-to`} onChange={(e) => setTo(e.target.value)} />
+      </FormField>
+      <Hint id={`${id}-to`}>Access ends at the start of the effective-to day, which must be after the effective-from date.</Hint>
 
       {role && <PermissionPicker role={role} checked={checked} chosenCount={chosen.length} onToggle={(key) => setChecked((prev) => toggled(prev, key))} />}
 
       <OrgFilter legend="Restrict to departments (optional)" query={orgDepartments} options={departmentOptions} selected={departments} onToggle={(v) => setDepartments((prev) => toggled(prev, v))} />
       <OrgFilter legend="Restrict to locations (optional)" query={orgLocations} options={locationOptions} selected={locations} onToggle={(v) => setLocations((prev) => toggled(prev, v))} />
       {showFilters && (
-        <p className="hint wide">
+        <Hint>
           Chosen departments and locations narrow the grant: an employee must be in one of the chosen departments (if any) and in one of the chosen locations (if any). Leave
           both empty for no restriction.
-        </p>
+        </Hint>
       )}
 
-      <label className="wide">
+      <FormField className="col-span-full">
         {needsPurpose ? 'Business purpose (required for confidential permissions)' : 'Business purpose (optional)'}
-        <textarea rows={2} maxLength={500} required={needsPurpose} value={purpose} style={TEXTAREA} onChange={(e) => setPurpose(e.target.value)} />
-      </label>
+        <Textarea rows={2} maxLength={500} required={needsPurpose} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+      </FormField>
 
-      <div className="wide row">
-        <button type="submit" disabled={missing.length > 0 || propose.isPending} aria-describedby={role && missing.length > 0 ? missingId : undefined}>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={missing.length > 0 || propose.isPending} aria-describedby={role && missing.length > 0 ? missingId : undefined}>
           Propose grant
-        </button>
+        </Button>
         {role && (
-          <button type="button" className="secondary" onClick={() => setChecked(defaultDuties(role))}>
+          <Button type="button" variant="outline" onClick={() => setChecked(defaultDuties(role))}>
             Reset to default duties
-          </button>
+          </Button>
         )}
-      </div>
-      {role && missing.length > 0 && (
-        <p className="hint wide" id={missingId}>
-          Still needed: {missing.join(', ')}.
-        </p>
-      )}
-      {propose.isSuccess && (
-        <p className="ok wide" role="status">
-          Proposed — needs independent approval
-        </p>
-      )}
+      </ButtonRow>
+      {role && missing.length > 0 && <Hint id={missingId}>Still needed: {missing.join(', ')}.</Hint>}
+      {propose.isSuccess && <Notice notice={{ text: 'Proposed — needs independent approval', ok: true }} />}
       {propose.error && (
-        <div className="wide">
+        <div className="col-span-full">
           <ErrorNote error={propose.error} />
         </div>
       )}
-    </form>
+    </FormGrid>
   );
 }
 
@@ -234,29 +252,22 @@ function PermissionPicker({ role, checked, chosenCount, onToggle }: { role: Cata
   const hintId = useId();
   const eligible = role.accessClass !== 'OTHER';
   const hasConfidential = role.permissions.some((p) => p.confidential);
-  if (role.permissions.length === 0) return <p className="hint wide">This role has no permissions in its ceiling.</p>;
+  if (role.permissions.length === 0) return <Hint>This role has no permissions in its ceiling.</Hint>;
   return (
-    <fieldset className="wide">
-      <legend>
-        Permissions ({chosenCount} of {role.permissions.length} selected)
-      </legend>
-      <p className="hint">
+    <FramedFieldset legend={<>Permissions ({chosenCount} of {role.permissions.length} selected)</>}>
+      <Hint>
         The role&apos;s default duties are pre-selected.
         {hasConfidential && eligible && ' Confidential permissions are never pre-selected; choosing one needs a business purpose.'}
-      </p>
-      {hasConfidential && !eligible && (
-        <p className="hint" id={hintId}>
-          Confidential permissions are disabled: only Admin or Manager roles can hold confidential permissions.
-        </p>
-      )}
+      </Hint>
+      {hasConfidential && !eligible && <Hint id={hintId}>Confidential permissions are disabled: only Admin or Manager roles can hold confidential permissions.</Hint>}
       {groupByResource(role.permissions).map(([resource, perms]) => (
-        <fieldset key={resource} style={GROUP}>
-          <legend className="hint">{resource.replace(/_/g, ' ')}</legend>
-          <div className="row">
+        <FieldSet key={resource} className={RESOURCE_GROUP}>
+          <legend className={RESOURCE_LEGEND}>{resource.replace(/_/g, ' ')}</legend>
+          <ChoiceRow>
             {perms.map((p) => {
               const disabled = p.confidential && !eligible;
               return (
-                <label key={p.key} className="check">
+                <CheckField key={p.key}>
                   <input
                     type="checkbox"
                     checked={!disabled && checked.has(p.key)}
@@ -266,14 +277,14 @@ function PermissionPicker({ role, checked, chosenCount, onToggle }: { role: Cata
                   />
                   <code>{p.key}</code>
                   {p.confidential && <Badge tone="warn">confidential</Badge>}
-                  {p.defaultDuty && <span className="hint">default duty</span>}
-                </label>
+                  {p.defaultDuty && <Hint as="span">default duty</Hint>}
+                </CheckField>
               );
             })}
-          </div>
-        </fieldset>
+          </ChoiceRow>
+        </FieldSet>
       ))}
-    </fieldset>
+    </FramedFieldset>
   );
 }
 
@@ -294,22 +305,21 @@ function OrgFilter({
   if (options.length === 0) {
     // Not readable by the selected role (never requested, or refused): no picker. Any other failure is shown.
     return query.error && !isForbidden(query.error) ? (
-      <div className="wide">
+      <div className="col-span-full">
         <ErrorNote error={query.error} />
       </div>
     ) : null;
   }
   return (
-    <fieldset className="wide">
-      <legend>{legend}</legend>
-      <div className="row">
+    <FramedFieldset legend={legend}>
+      <ChoiceRow>
         {options.map((i) => (
-          <label key={i.id} className="check">
+          <CheckField key={i.id}>
             <input type="checkbox" checked={selected.has(i.id)} onChange={() => onToggle(i.id)} />
-            {i.name} <span className="hint">{i.code}</span>
-          </label>
+            {i.name} <Hint as="span">{i.code}</Hint>
+          </CheckField>
         ))}
-      </div>
-    </fieldset>
+      </ChoiceRow>
+    </FramedFieldset>
   );
 }

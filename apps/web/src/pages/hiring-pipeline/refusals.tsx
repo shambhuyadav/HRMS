@@ -1,6 +1,6 @@
 // The hiring API's refusals in plain words, and how a failed load is shown.
 import { ApiError, formatDate, isForbidden, isNotFound } from '../../api';
-import { Empty, ErrorNote, NotPermitted } from '../../ui';
+import { Empty, ErrorNote, NotPermitted, Notice } from '../../ui';
 import { CONSENT_LABEL, labelOf } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -214,13 +214,7 @@ export function refusalText(error: unknown, words: Words = {}): string | null {
 export function Refusal({ error, words }: { error: unknown; words?: Words }) {
   if (!error) return null;
   const text = refusalText(error, words);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return text === null ? <ErrorNote error={error} /> : <Notice notice={{ text, ok: false }} />;
 }
 
 /** A list or record that did not load: a refusal of the role, a record outside its scope, or the API's error. */

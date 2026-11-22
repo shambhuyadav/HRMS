@@ -2,11 +2,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, download, type EmployeeHit, formatDate, idempotencyKey, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, LIST_PAGE_SIZE, NotPermitted, Pager, Section, StateBadge } from '../../ui';
 import { DOWNLOAD_WORDS, Refusal, SEND_WORDS } from './refusals';
-import { DELIVERY_LABEL, EMPLOYEE_LIST, EMPLOYEE_PAGE_SIZE, EMPLOYEE_READ, enc, labelOf, LETTER_GENERATE, LETTER_READ, LETTER_SEND, LoadProblem, NOTE_KIND_LABEL, NOTE_READ, type Paged, pagedUrl, PATHS, PROCESS_READ, SCROLL, SR_ONLY, TEMPLATE_READ, totalOf, useKeys, UserRef, UUID, when } from './shared';
+import { DELIVERY_LABEL, EMPLOYEE_LIST, EMPLOYEE_PAGE_SIZE, EMPLOYEE_READ, enc, labelOf, LETTER_GENERATE, LETTER_READ, LETTER_SEND, LINK_ROW, LoadProblem, NOTE_KIND_LABEL, NOTE_READ, type Paged, pagedUrl, PATHS, PROCESS_READ, TEMPLATE_READ, totalOf, useKeys, UserRef, UUID, when } from './shared';
 import type { Delivery, LetterOutput, NoteItem, ProcessSummary } from './types';
 
 // =========================================================================================================
@@ -17,7 +24,7 @@ export function LettersScreen() {
   return (
     <>
       <h1>Letters</h1>
-      <p className="hint">
+      <Hint>
         A letter is prepared for one of an employee’s processes: preview it (nothing is stored or sent), then generate the final letter. The final letter is stored as
         a confidential file and downloaded for manual delivery; sending letters is not available.
         {can(TEMPLATE_READ) && (
@@ -26,7 +33,7 @@ export function LettersScreen() {
             Templates are kept under <Link to={PATHS.templates}>Letter templates</Link>.
           </>
         )}
-      </p>
+      </Hint>
       <EmployeeFinder />
     </>
   );
@@ -56,52 +63,55 @@ function EmployeeFinder() {
   };
   return (
     <Section title="Find an employee">
-      <form className="row" aria-label="Find an employee" onSubmit={submit}>
-        <label className="inline">
-          Employee name, code or work email{' '}
-          <input type="search" value={search} maxLength={100} onChange={(e) => setSearch(e.target.value)} />
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      {term !== '' && hits.isPending && <p className="hint">Searching…</p>}
+      {/* The search over the list it fills, drawn as a list's filters are. */}
+      <FilterBar asChild>
+        <form aria-label="Find an employee" onSubmit={submit}>
+          <FormField>
+            Employee name, code or work email{' '}
+            <Input type="search" value={search} maxLength={100} onChange={(e) => setSearch(e.target.value)} />
+          </FormField>
+          <Button type="submit">Search</Button>
+        </form>
+      </FilterBar>
+      {term !== '' && hits.isPending && <Hint>Searching…</Hint>}
       <LoadProblem error={hits.error} forbidden="The selected role cannot search employees." />
       {hits.data && hits.data.items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
       {hits.data && hits.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Employees found">
-            <thead>
-              <tr>
-                <th scope="col">Code</th>
-                <th scope="col">Name</th>
-                <th scope="col">Status</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Letters</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+        <>
+          <Table aria-label="Employees found">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Code</TableHead>
+                <TableHead scope="col">Name</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Letters</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {hits.data.items.map((e) => (
-                <tr key={e.id}>
-                  <td>{e.employeeCode}</td>
-                  <td>{e.displayName}</td>
-                  <td>
+                <TableRow key={e.id}>
+                  <TableCell>{e.employeeCode}</TableCell>
+                  <TableCell>{e.displayName}</TableCell>
+                  <TableCell>
                     <StateBadge state={e.status} />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <RowActionsCell>
                     <Link to={PATHS.employeeLetters(e.id)} aria-label={`Letters of ${e.displayName} (${e.employeeCode})`}>
                       Letters
                     </Link>
-                  </td>
-                </tr>
+                  </RowActionsCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           {hits.data.total > hits.data.items.length && (
-            <p className="hint">
+            <Hint>
               Showing the first {hits.data.items.length} of {hits.data.total}; refine the search to narrow it down.
-            </p>
+            </Hint>
           )}
-        </div>
+        </>
       )}
     </Section>
   );
@@ -134,7 +144,7 @@ function EmployeeLetters({ employeeId }: { employeeId: string }) {
   return (
     <>
       <h1>{who ? `Letters of ${who}` : 'Employee letters'}</h1>
-      <p className="row">
+      <p className={LINK_ROW}>
         <Link to={PATHS.letters}>Find another employee</Link>
         {can(PROCESS_READ) && <Link to={PATHS.employeeLifecycle(employeeId)}>Processes and exit of this employee</Link>}
       </p>
@@ -176,11 +186,11 @@ function StoredLetterList({ employeeId }: { employeeId: string }) {
   const items = outputs.data?.items ?? [];
   return (
     <Section title="Stored letters">
-      <p className="hint">
+      <Hint>
         Final letters exactly as generated, newest first, each with the template revision it was made from and who generated it. Each is a confidential file. Sending
         delivers it to the employee’s own self-service with an in-app notice (never an e-mail attachment); it can also be downloaded for delivery by hand.
-      </p>
-      {outputs.isPending && <p className="hint loading">Loading the stored letters…</p>}
+      </Hint>
+      {outputs.isPending && <LoadingLine>Loading the stored letters…</LoadingLine>}
       <LoadProblem error={outputs.error} forbidden="The selected role cannot read stored letters." missing="This employee is not in the selected role’s scope." />
       {outputs.data && items.length === 0 && <Empty>No letters have been generated for this employee.</Empty>}
       {items.length > 0 && <OutputTable items={items} employeeId={employeeId} />}
@@ -199,16 +209,17 @@ function SendLetter({ output, employeeId }: { output: LetterOutput; employeeId: 
   });
   return (
     <>
-      <button
+      <Button
         type="button"
-        className="secondary"
+        variant="outline"
+        size="sm"
         disabled={send.isPending}
         onClick={() => {
           if (window.confirm('Deliver this letter to the employee’s own self-service? The employee it is about is the only recipient.')) send.mutate();
         }}
       >
         Send to self-service
-      </button>
+      </Button>
       <Refusal error={send.error} words={SEND_WORDS} />
     </>
   );
@@ -217,45 +228,46 @@ function SendLetter({ output, employeeId }: { output: LetterOutput; employeeId: 
 function OutputTable({ items, employeeId }: { items: readonly LetterOutput[]; employeeId?: string }) {
   const { can } = useSession();
   return (
-    <div style={SCROLL}>
-      <table aria-label="Stored letters">
-        <thead>
-          <tr>
-            <th scope="col">Template</th>
-            <th scope="col">Template revision</th>
-            <th scope="col">Output number</th>
-            <th scope="col">Generated</th>
-            <th scope="col">Generated by</th>
-            <th scope="col">Size</th>
-            <th scope="col">Delivery</th>
-            <th scope="col">
-              <span style={SR_ONLY}>Download</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((o) => (
-            <tr key={o.id}>
-              <td>{o.templateCode}</td>
-              <td>{o.templateRevision}</td>
-              <td>{o.outputNumber}</td>
-              <td>
-                <time dateTime={o.generatedAt}>{when(o.generatedAt)}</time>
-              </td>
-              <td>
-                <UserRef userId={o.generatedBy} />
-              </td>
-              <td>{o.byteSize} bytes</td>
-              <td>{labelOf(DELIVERY_LABEL, o.deliveryState)}</td>
-              <td>
+    <Table aria-label="Stored letters">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Template</TableHead>
+          <TableHead scope="col">Template revision</TableHead>
+          <TableHead scope="col">Output number</TableHead>
+          <TableHead scope="col">Generated</TableHead>
+          <TableHead scope="col">Generated by</TableHead>
+          <TableHead scope="col">Size</TableHead>
+          <TableHead scope="col">Delivery</TableHead>
+          <TableHead scope="col">
+            <span className="sr-only">Download</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((o) => (
+          <TableRow key={o.id}>
+            <TableCell>{o.templateCode}</TableCell>
+            <TableCell>{o.templateRevision}</TableCell>
+            <TableCell>{o.outputNumber}</TableCell>
+            <TableCell>
+              <time dateTime={o.generatedAt}>{when(o.generatedAt)}</time>
+            </TableCell>
+            <TableCell>
+              <UserRef userId={o.generatedBy} />
+            </TableCell>
+            <TableCell>{o.byteSize} bytes</TableCell>
+            <TableCell>{labelOf(DELIVERY_LABEL, o.deliveryState)}</TableCell>
+            {/* A refused download or delivery is said under its button, so this cell is not drawn to the buttons' width. */}
+            <TableCell>
+              <RowActions className="flex-wrap">
                 <OutputDownload output={o} />
                 {employeeId && can(LETTER_SEND) && <SendLetter output={o} employeeId={employeeId} />}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+              </RowActions>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -264,9 +276,9 @@ export function OutputDownload({ output: o }: { output: LetterOutput }) {
   const open = useMutation({ mutationFn: () => download(`/v1/letter-outputs/${enc(o.id)}/content`) });
   return (
     <>
-      <button type="button" className="link" disabled={open.isPending} aria-label={`Download ${o.templateCode} letter ${o.outputNumber}`} onClick={() => open.mutate()}>
+      <Button type="button" variant="outline" size="sm" disabled={open.isPending} aria-label={`Download ${o.templateCode} letter ${o.outputNumber}`} onClick={() => open.mutate()}>
         Download
-      </button>
+      </Button>
       <Refusal error={open.error} words={DOWNLOAD_WORDS} />
     </>
   );
@@ -295,50 +307,48 @@ function ProcessList({ employeeId }: { employeeId: string }) {
   const items = processes.data?.items ?? [];
   return (
     <Section title="Prepare a letter">
-      <p className="hint">
+      <Hint>
         Choose the process the letter belongs to. Exit placeholders (resignation date, approved last working date) come from an approved exit only, never from a
         proposal.
-      </p>
-      {processes.isPending && <p className="hint loading">Loading the employee’s processes…</p>}
+      </Hint>
+      {processes.isPending && <LoadingLine>Loading the employee’s processes…</LoadingLine>}
       <LoadProblem error={processes.error} forbidden="The selected role cannot list this employee’s processes." missing="This employee is not in the selected role’s scope." />
       {processes.data && items.length === 0 && <Empty>This employee has no processes yet, so no letter can be prepared.</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Processes">
-            <thead>
-              <tr>
-                <th scope="col">Process</th>
-                <th scope="col">State</th>
-                <th scope="col">Effective date</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Letter</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    {p.processName} <span className="hint">{p.processCode}</span>
-                  </td>
-                  <td>
-                    <StateBadge state={p.state} />
-                  </td>
-                  <td>{formatDate(p.effectiveDate)}</td>
-                  <td>
-                    {p.state === 'CANCELLED' ? (
-                      <span className="hint">Cancelled: no letters</span>
-                    ) : (
-                      <Link to={PATHS.processLetters(p.id)} aria-label={`Prepare a letter for ${p.processName}`}>
-                        Prepare a letter
-                      </Link>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Processes">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Process</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Effective date</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Letter</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell>
+                  {p.processName} <Hint as="span">{p.processCode}</Hint>
+                </TableCell>
+                <TableCell>
+                  <StateBadge state={p.state} />
+                </TableCell>
+                <TableCell>{formatDate(p.effectiveDate)}</TableCell>
+                <RowActionsCell>
+                  {p.state === 'CANCELLED' ? (
+                    <Hint as="span">Cancelled: no letters</Hint>
+                  ) : (
+                    <Link to={PATHS.processLetters(p.id)} aria-label={`Prepare a letter for ${p.processName}`}>
+                      Prepare a letter
+                    </Link>
+                  )}
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {processes.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(processes.data)} onPage={setPage} label="Process pages" noun="process" plural="processes" />}
     </Section>
@@ -358,7 +368,7 @@ function RestrictedNotes({ employeeId }: { employeeId: string }) {
   const items = notes.data?.items ?? [];
   return (
     <Section title="Restricted HR notes and warnings">
-      <p className="hint">
+      <Hint>
         Visible only to authorised HR. Notes are never changed: a correction is a new note that supersedes the earlier one.
         {can(PROCESS_READ) && (
           <>
@@ -366,8 +376,8 @@ function RestrictedNotes({ employeeId }: { employeeId: string }) {
             Notes are added on the employee’s <Link to={PATHS.employeeLifecycle(employeeId)}>processes and exit</Link> screen.
           </>
         )}
-      </p>
-      {notes.isPending && <p className="hint loading">Loading the restricted notes…</p>}
+      </Hint>
+      {notes.isPending && <LoadingLine>Loading the restricted notes…</LoadingLine>}
       <LoadProblem error={notes.error} forbidden="The selected role cannot read restricted HR notes." missing="This employee is not in the selected role’s scope." />
       {notes.data && items.length === 0 && <Empty>No restricted notes or warnings are recorded for this employee.</Empty>}
       {items.length > 0 && (
@@ -375,13 +385,13 @@ function RestrictedNotes({ employeeId }: { employeeId: string }) {
           {items.map((n) => (
             <li key={n.id}>
               <div>
-                <strong>{labelOf(NOTE_KIND_LABEL, n.kind)}</strong> <span className="hint">recorded {when(n.createdAt)}</span>
-                {n.supersededByNoteId && <span className="hint"> · superseded by a later note</span>}
-                {n.supersedesNoteId && <span className="hint"> · corrects an earlier note</span>}
-                {n.processId && <span className="hint"> · linked to a process</span>}
-                {n.exitCaseId && <span className="hint"> · linked to an exit</span>}
+                <strong>{labelOf(NOTE_KIND_LABEL, n.kind)}</strong> <Hint as="span">recorded {when(n.createdAt)}</Hint>
+                {n.supersededByNoteId && <Hint as="span"> · superseded by a later note</Hint>}
+                {n.supersedesNoteId && <Hint as="span"> · corrects an earlier note</Hint>}
+                {n.processId && <Hint as="span"> · linked to a process</Hint>}
+                {n.exitCaseId && <Hint as="span"> · linked to an exit</Hint>}
               </div>
-              {typeof n.body === 'string' && <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{n.body}</p>}
+              {typeof n.body === 'string' && <p className="m-0 whitespace-pre-wrap">{n.body}</p>}
             </li>
           ))}
         </ul>

@@ -1,10 +1,16 @@
 // The challan master screen (CL-074).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, localDate } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section } from '../../ui';
-import { CHALLAN_MANAGE, CHALLAN_READ } from './shared';
+import { CHALLAN_MANAGE, CHALLAN_READ, FOLD, FOLD_SUMMARY } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // CL-074 challan master
@@ -50,43 +56,43 @@ export function ChallanMasterPage() {
   return (
     <>
       <Section title="Challan master">
-        <p className="hint">The company’s deposit particulars per statute. A change is a new dated revision; earlier revisions stay on record.</p>
+        <Hint>The company’s deposit particulars per statute. A change is a new dated revision; earlier revisions stay on record.</Hint>
         <ErrorNote error={settings.error} />
         {settings.data && (
-          <table aria-label="In force">
-            <thead>
-              <tr>
-                <th scope="col">Statute</th>
-                <th scope="col">TAN or establishment code</th>
-                <th scope="col">Bank</th>
-                <th scope="col">BSR code</th>
-                <th scope="col">From</th>
-                <th scope="col">Revision</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="In force">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Statute</TableHead>
+                <TableHead scope="col">TAN or establishment code</TableHead>
+                <TableHead scope="col">Bank</TableHead>
+                <TableHead scope="col">BSR code</TableHead>
+                <TableHead scope="col">From</TableHead>
+                <TableHead scope="col">Revision</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {Object.entries(settings.data.inForce).map(([statute, s]) => (
-                <tr key={statute}>
-                  <td>{statute}</td>
+                <TableRow key={statute}>
+                  <TableCell>{statute}</TableCell>
                   {s ? (
                     <>
-                      <td>{s.tan ?? s.establishmentCode}</td>
-                      <td>{[s.bankName, s.bankBranch].filter(Boolean).join(', ')}</td>
-                      <td>{s.bsrCode ?? '—'}</td>
-                      <td>{formatDate(s.effectiveFrom)}</td>
-                      <td>{s.revision}</td>
+                      <TableCell>{s.tan ?? s.establishmentCode}</TableCell>
+                      <TableCell>{[s.bankName, s.bankBranch].filter(Boolean).join(', ')}</TableCell>
+                      <TableCell>{s.bsrCode ?? '—'}</TableCell>
+                      <TableCell>{formatDate(s.effectiveFrom)}</TableCell>
+                      <TableCell>{s.revision}</TableCell>
                     </>
                   ) : (
-                    <td colSpan={5}>Not recorded</td>
+                    <TableCell colSpan={5}>Not recorded</TableCell>
                   )}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
         {settings.data && settings.data.items.length > 0 && (
-          <details>
-            <summary>All revisions ({settings.data.items.length})</summary>
+          <details className={FOLD}>
+            <summary className={FOLD_SUMMARY}>All revisions ({settings.data.items.length})</summary>
             <ul>
               {settings.data.items.map((s) => (
                 <li key={s.id}>
@@ -99,50 +105,49 @@ export function ChallanMasterPage() {
       </Section>
       {can(CHALLAN_MANAGE) && (
         <Section title="New revision">
-          <form
-            className="grid-form"
+          <FormGrid
             aria-label="New revision"
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
               if (!save.isPending) save.mutate();
             }}
           >
-            <label>
+            <FormField>
               Statute
-              <select value={form.statute} onChange={set('statute')}>
+              <NativeSelect value={form.statute} onChange={set('statute')}>
                 <option value="TDS">TDS</option>
                 <option value="PF">PF</option>
                 <option value="ESIC">ESIC</option>
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Effective from
-              <input type="date" value={form.effectiveFrom} onChange={set('effectiveFrom')} required />
-            </label>
-            <label>
+              <Input type="date" value={form.effectiveFrom} onChange={set('effectiveFrom')} required />
+            </FormField>
+            <FormField>
               {form.statute === 'TDS' ? 'TAN' : 'Establishment code'}
-              <input value={form.identifier} onChange={set('identifier')} required maxLength={30} />
-            </label>
-            <label>
+              <Input value={form.identifier} onChange={set('identifier')} required maxLength={30} />
+            </FormField>
+            <FormField>
               Bank
-              <input value={form.bankName} onChange={set('bankName')} required maxLength={120} />
-            </label>
-            <label>
+              <Input value={form.bankName} onChange={set('bankName')} required maxLength={120} />
+            </FormField>
+            <FormField>
               Branch
-              <input value={form.bankBranch} onChange={set('bankBranch')} maxLength={120} />
-            </label>
-            <label>
+              <Input value={form.bankBranch} onChange={set('bankBranch')} maxLength={120} />
+            </FormField>
+            <FormField>
               BSR code
-              <input value={form.bsrCode} onChange={set('bsrCode')} maxLength={7} />
-            </label>
-            <label>
+              <Input value={form.bsrCode} onChange={set('bsrCode')} maxLength={7} />
+            </FormField>
+            <FormField>
               Reason
-              <input value={form.reason} onChange={set('reason')} required maxLength={500} />
-            </label>
-            <button type="submit" disabled={save.isPending}>
+              <Input value={form.reason} onChange={set('reason')} required maxLength={500} />
+            </FormField>
+            <Button type="submit" disabled={save.isPending}>
               Record revision
-            </button>
-          </form>
+            </Button>
+          </FormGrid>
           <ErrorNote error={save.error} />
         </Section>
       )}

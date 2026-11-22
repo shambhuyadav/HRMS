@@ -1,6 +1,11 @@
 // The mobile-app link review screen (FR-023): independent decisions on link requests; revocation with a reason.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ButtonRow } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { SegmentedChoice, SegmentedOption } from '@/components/tab-list';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, formatDate } from '../../api';
 import { Badge, Empty, ErrorNote, Section } from '../../ui';
 
@@ -32,50 +37,51 @@ export function MobileLinkReviewPage() {
     <Section
       title="Mobile-app links"
       actions={
-        <div className="row toggle-group">
-          <button type="button" aria-pressed={state === 'PENDING'} className={state === 'PENDING' ? '' : 'secondary'} onClick={() => setState('PENDING')}>
+        <SegmentedChoice>
+          <SegmentedOption pressed={state === 'PENDING'} onClick={() => setState('PENDING')}>
             Waiting for review
-          </button>
-          <button type="button" aria-pressed={state === 'ACTIVE'} className={state === 'ACTIVE' ? '' : 'secondary'} onClick={() => setState('ACTIVE')}>
+          </SegmentedOption>
+          <SegmentedOption pressed={state === 'ACTIVE'} onClick={() => setState('ACTIVE')}>
             Active
-          </button>
-        </div>
+          </SegmentedOption>
+        </SegmentedChoice>
       }
     >
       {list.data?.items.length === 0 && <Empty>Nothing here.</Empty>}
+      {/* `tasks`: the list's marker class, which styles.css draws each link request by, as in the decision lists. */}
       <ul className="tasks">
         {list.data?.items.map((l) => (
           <li key={l.id}>
             <div>
-              <strong>{l.employeeName}</strong> <span className="hint">{l.employeeCode}</span> → <code>{l.appAccountRef}</code>{' '}
-              {l.replacesLinkId && <Badge tone="warn">replaces the current link</Badge>} <span className="hint">requested {formatDate(l.requestedAt)}</span>
+              <strong>{l.employeeName}</strong> <Hint as="span">{l.employeeCode}</Hint> → <code>{l.appAccountRef}</code>{' '}
+              {l.replacesLinkId && <Badge tone="warn">replaces the current link</Badge>} <Hint as="span">requested {formatDate(l.requestedAt)}</Hint>
             </div>
             {l.state === 'PENDING' ? (
-              <div className="row">
-                <button type="button" onClick={() => act.mutate({ path: `/v1/mobile-links/${l.id}/decision`, body: { expectedVersion: l.version, decision: 'APPROVE' } })}>
+              <ButtonRow>
+                <Button type="button" onClick={() => act.mutate({ path: `/v1/mobile-links/${l.id}/decision`, body: { expectedVersion: l.version, decision: 'APPROVE' } })}>
                   Approve
-                </button>
-                <button type="button" className="danger" onClick={() => act.mutate({ path: `/v1/mobile-links/${l.id}/decision`, body: { expectedVersion: l.version, decision: 'REJECT' } })}>
+                </Button>
+                <Button type="button" variant="danger" onClick={() => act.mutate({ path: `/v1/mobile-links/${l.id}/decision`, body: { expectedVersion: l.version, decision: 'REJECT' } })}>
                   Reject
-                </button>
-              </div>
+                </Button>
+              </ButtonRow>
             ) : (
-              <div className="row">
-                <input aria-label="Revocation reason" placeholder="Reason" value={reason[l.id] ?? ''} onChange={(e) => setReason({ ...reason, [l.id]: e.target.value })} />
-                <button
+              <ButtonRow>
+                <Input aria-label="Revocation reason" placeholder="Reason" className="w-auto" value={reason[l.id] ?? ''} onChange={(e) => setReason({ ...reason, [l.id]: e.target.value })} />
+                <Button
                   type="button"
-                  className="danger"
+                  variant="danger"
                   disabled={!reason[l.id]?.trim()}
                   onClick={() => act.mutate({ path: `/v1/mobile-links/${l.id}/revoke`, body: { expectedVersion: l.version, reason: reason[l.id] } })}
                 >
                   Revoke
-                </button>
-              </div>
+                </Button>
+              </ButtonRow>
             )}
           </li>
         ))}
       </ul>
-      <p className="hint">You cannot decide a link you requested or one for your own employee record.</p>
+      <Hint>You cannot decide a link you requested or one for your own employee record.</Hint>
       <ErrorNote error={act.error ?? list.error} />
     </Section>
   );

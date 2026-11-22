@@ -1,8 +1,9 @@
 // Shared parts of the increment screens: permission keys, API shapes, labels, query keys and small helpers.
 
 import { useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { Hint } from '@/components/hint';
 import { formatAmount, isForbidden, isNotFound, readable } from '../../api';
 import { useSession } from '../../session';
 import { ErrorNote, NotPermitted } from '../../ui';
@@ -237,22 +238,14 @@ export function answered<T>(query: { isSuccess: boolean; data: T | undefined }):
   return query.isSuccess ? query.data : undefined;
 }
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const PANEL: CSSProperties = { marginTop: '0.75rem' };
-export const FLUSH: CSSProperties = { margin: 0 };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.75rem 0 0.4rem' };
-export const H4: CSSProperties = { fontSize: '0.95rem', margin: '0.6rem 0 0.3rem' };
-export const YEAR_INPUT: CSSProperties = { width: '6.5rem' };
-export const TEXTAREA: CSSProperties = {
-  font: 'inherit',
-  padding: '0.4rem 0.5rem',
-  border: '1px solid var(--line)',
-  borderRadius: 6,
-  color: 'var(--text)',
-  background: 'var(--surface)',
-  resize: 'vertical',
-};
-export const SR_ONLY: CSSProperties = { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 };
+// The module's own layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026). The shared helpers (FormField, Hint, Table …)
+// cover fields, hints and tables; these cover what this module has and they do not.
+/** A block set apart below what it follows, its parts stacked: an opening's progress, an employee's salary, a year's growth. */
+export const PANEL = 'mt-3 flex flex-col gap-3';
+/** A short form on one line (a review year, a growth year and basis): its fields and button side by side, bottoms aligned. */
+export const FIELD_ROW = 'flex flex-wrap items-end gap-2';
+/** A four-digit year field, no wider than its digits need. */
+export const YEAR_INPUT = 'w-[6.5rem]';
 
 /** A cycle occurrence ("ANNUAL:2027") as a person reads it ("Annual 2027"). */
 export function occurrenceText(occurrence: string): string {
@@ -293,13 +286,7 @@ export function currentFinancialYear(): number {
 export function LoadProblem({ error, forbidden, notFound }: { error: unknown; forbidden: string; notFound?: string }) {
   if (!error) return null;
   if (isForbidden(error)) return <NotPermitted>{forbidden}</NotPermitted>;
-  if (notFound && isNotFound(error)) {
-    return (
-      <p role="note" className="hint">
-        {notFound}
-      </p>
-    );
-  }
+  if (notFound && isNotFound(error)) return <Hint role="note">{notFound}</Hint>;
   return <ErrorNote error={error} />;
 }
 

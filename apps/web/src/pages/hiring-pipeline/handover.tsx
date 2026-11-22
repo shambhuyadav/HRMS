@@ -2,11 +2,46 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, FormField, FormGrid, LabelledFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, ApiError, formatDate, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, NotPermitted, Section } from '../../ui';
 import { HANDOVER_WORDS, LoadProblem, Refusal } from './refusals';
-import { APPLICATION_READ, CANDIDATE_READ, CodeBadge, COMPENSATION_READ, DEFAULT_EMPLOYEE_DOCUMENT_TYPE, Denied, DOCUMENT_READ, DOCUMENT_TYPE_CODE, DOCUMENT_TYPE_LABEL, EMPLOYEE_CREATE, EMPLOYEE_DOCUMENT_READ, EMPLOYEE_DOCUMENT_UPLOAD, EMPLOYEE_READ, EMPLOYEE_STATUS_LABEL, EMPLOYEE_TONE, enc, GROUP, H3, labelOf, MAX_HANDOVER_DOCUMENTS, Missing, OFFER_READ, OFFER_STATE_LABEL, PATHS, Problem, ScanBadge, STAGE_LABEL, useKeys, useRefresh, UUID } from './shared';
+import {
+  APPLICATION_READ,
+  CANDIDATE_READ,
+  CodeBadge,
+  COMPENSATION_READ,
+  DEFAULT_EMPLOYEE_DOCUMENT_TYPE,
+  Denied,
+  DOCUMENT_READ,
+  DOCUMENT_TYPE_CODE,
+  DOCUMENT_TYPE_LABEL,
+  EMPLOYEE_CREATE,
+  EMPLOYEE_DOCUMENT_READ,
+  EMPLOYEE_DOCUMENT_UPLOAD,
+  EMPLOYEE_READ,
+  EMPLOYEE_STATUS_LABEL,
+  EMPLOYEE_TONE,
+  enc,
+  labelOf,
+  MAX_HANDOVER_DOCUMENTS,
+  Missing,
+  OFFER_READ,
+  OFFER_STATE_LABEL,
+  PATHS,
+  Problem,
+  ScanBadge,
+  STAGE_LABEL,
+  useKeys,
+  useRefresh,
+  UUID,
+} from './shared';
 import type { CandidateDocument, EmployeeRecord, HandoverResult, OfferView, Origin } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -33,6 +68,16 @@ interface HandoverBody {
   documents?: { candidateDocumentId: string; documentType: string }[];
 }
 
+type ChosenDocument = { candidateDocumentId: string; documentType: string };
+
+/** The checks made before sending: a code, and a valid employee document type on each of at most so many documents. */
+function handoverProblem(code: string, documents: ChosenDocument[]): string | null {
+  if (!code) return 'Enter the new employee’s code.';
+  if (documents.length > MAX_HANDOVER_DOCUMENTS) return `Choose at most ${MAX_HANDOVER_DOCUMENTS} documents to transfer.`;
+  if (documents.some((d) => !DOCUMENT_TYPE_CODE.test(d.documentType))) return 'Give each chosen document an employee document type: capital letters, digits or _, for example GENERAL.';
+  return null;
+}
+
 function HandoverForm({ offer: o, busy, onDone }: { offer: OfferView; busy: boolean; onDone: (result: HandoverResult) => void }) {
   const { can } = useSession();
   const keys = useKeys();
@@ -49,7 +94,7 @@ function HandoverForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
   const [displayName, setDisplayName] = useState('');
   const [workEmail, setWorkEmail] = useState('');
   /** The documents chosen for transfer, in the order chosen, each with its employee document type. */
-  const [chosen, setChosen] = useState<{ candidateDocumentId: string; documentType: string }[]>([]);
+  const [chosen, setChosen] = useState<ChosenDocument[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const handover = useMutation({
     mutationFn: (body: HandoverBody) => api<HandoverResult>(`/v1/hiring/offers/${enc(o.id)}/handover`, { body }),
@@ -73,13 +118,7 @@ function HandoverForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
     if (handover.isPending || busy) return;
     const code = employeeCode.trim();
     const documents = chosen.map((d) => ({ candidateDocumentId: d.candidateDocumentId, documentType: d.documentType.trim().toUpperCase() }));
-    const missing = !code
-      ? 'Enter the new employee’s code.'
-      : documents.length > MAX_HANDOVER_DOCUMENTS
-        ? `Choose at most ${MAX_HANDOVER_DOCUMENTS} documents to transfer.`
-        : documents.some((d) => !DOCUMENT_TYPE_CODE.test(d.documentType))
-          ? 'Give each chosen document an employee document type: capital letters, digits or _, for example GENERAL.'
-          : null;
+    const missing = handoverProblem(code, documents);
     setProblem(missing);
     if (missing) {
       handover.reset();
@@ -95,78 +134,89 @@ function HandoverForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
   const already = handover.error instanceof ApiError && handover.error.code === 'ALREADY_HANDED_OVER' ? (handover.error.details as { employeeId?: string } | undefined)?.employeeId : undefined;
   const items = docs.data?.items ?? [];
   return (
-    <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-      <h3 id={`${id}-title`} className="wide" style={H3}>
-        Create the employee draft
-      </h3>
-      <p className="hint wide">
+    <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+      <CardSubheading id={`${id}-title`}>Create the employee draft</CardSubheading>
+      <Hint>
         The employee is created as a draft from the approved requisition (department, location, designation and employment type) and this accepted offer (joining
         date {formatDate(o.proposedJoiningDate)}). Hiring never activates employment: activation is the separate employee activation action. An accepted offer
         creates at most one employee.
-      </p>
-      <label>
+      </Hint>
+      <FormField>
         Employee code (required)
-        <input required maxLength={40} value={employeeCode} onChange={(e) => setEmployeeCode(e.target.value)} />
-      </label>
-      <label>
+        <Input required maxLength={40} value={employeeCode} onChange={(e) => setEmployeeCode(e.target.value)} />
+      </FormField>
+      <FormField>
         Display name (optional)
-        <input maxLength={200} value={displayName} placeholder={o.candidate.fullName} onChange={(e) => setDisplayName(e.target.value)} />
-      </label>
-      <label>
+        <Input maxLength={200} value={displayName} placeholder={o.candidate.fullName} onChange={(e) => setDisplayName(e.target.value)} />
+      </FormField>
+      <FormField>
         Work email (optional)
-        <input type="email" maxLength={254} value={workEmail} onChange={(e) => setWorkEmail(e.target.value)} />
-      </label>
-      <p className="hint wide">A blank display name uses the candidate’s name, {o.candidate.fullName}.</p>
+        <Input type="email" maxLength={254} value={workEmail} onChange={(e) => setWorkEmail(e.target.value)} />
+      </FormField>
+      <Hint>A blank display name uses the candidate’s name, {o.candidate.fullName}.</Hint>
       {withDocuments ? (
-        <fieldset className="wide" style={GROUP}>
-          <legend>Candidate documents to transfer (optional)</legend>
-          {docs.isPending && <p className="hint loading">Loading the candidate’s documents…</p>}
+        <LabelledFieldset legend="Candidate documents to transfer (optional)">
+          {docs.isPending && <LoadingLine>Loading the candidate’s documents…</LoadingLine>}
           <LoadProblem error={docs.error} forbidden="The selected role cannot read this candidate’s documents." />
           {docs.data && items.length === 0 && <Empty>The candidate has no documents.</Empty>}
           {items.length > 0 && (
-            <ul className="choices" aria-label="Candidate documents">
-              {items.map((d) => {
-                const pick = chosen.find((x) => x.candidateDocumentId === d.id);
-                const name = d.fileName ?? labelOf(DOCUMENT_TYPE_LABEL, d.documentType);
-                return (
-                  <li key={d.id}>
-                    {d.scanState === 'CLEAN' ? (
-                      <label className="check">
-                        <input type="checkbox" checked={pick !== undefined} onChange={(e) => toggle(d.id, e.target.checked)} /> {name} ({labelOf(DOCUMENT_TYPE_LABEL, d.documentType)})
-                      </label>
-                    ) : (
-                      <span>
-                        {name} <ScanBadge state={d.scanState} /> <span className="hint">only released files can be transferred</span>
-                      </span>
-                    )}
-                    {pick && (
-                      <label>
-                        Employee document type for {name}
-                        <input required maxLength={60} value={pick.documentType} onChange={(e) => setType(d.id, e.target.value)} />
-                      </label>
-                    )}
-                  </li>
-                );
-              })}
+            <ul className="m-0 flex list-none flex-col gap-[0.6rem] p-0" aria-label="Candidate documents">
+              {items.map((d) => (
+                <DocumentChoice key={d.id} document={d} pick={chosen.find((x) => x.candidateDocumentId === d.id)} onToggle={toggle} onType={setType} />
+              ))}
             </ul>
           )}
-        </fieldset>
+        </LabelledFieldset>
       ) : (
-        <p className="hint wide">Transferring candidate documents needs the candidate document read and employee document upload grants.</p>
+        <Hint>Transferring candidate documents needs the candidate document read and employee document upload grants.</Hint>
       )}
       <Problem text={problem} />
       {handover.error && (
-        <div className="wide">
+        <div className="col-span-full">
           <Refusal error={handover.error} words={HANDOVER_WORDS} />
           {already && <Link to={PATHS.origin(already)}>Open the employee created from this offer</Link>}
         </div>
       )}
-      <div className="wide row">
-        <button type="submit" disabled={handover.isPending || busy}>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={handover.isPending || busy}>
           Create employee draft
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ButtonRow>
+    </FormGrid>
+  );
+}
+
+/** One candidate document of the handover: a released file can be chosen and given its employee document type; any other cannot. */
+function DocumentChoice({
+  document: d,
+  pick,
+  onToggle,
+  onType,
+}: {
+  document: CandidateDocument;
+  pick: ChosenDocument | undefined;
+  onToggle: (docId: string, on: boolean) => void;
+  onType: (docId: string, type: string) => void;
+}) {
+  const name = d.fileName ?? labelOf(DOCUMENT_TYPE_LABEL, d.documentType);
+  return (
+    <li className="flex flex-col gap-2">
+      {d.scanState === 'CLEAN' ? (
+        <CheckField>
+          <input type="checkbox" checked={pick !== undefined} onChange={(e) => onToggle(d.id, e.target.checked)} /> {name} ({labelOf(DOCUMENT_TYPE_LABEL, d.documentType)})
+        </CheckField>
+      ) : (
+        <span>
+          {name} <ScanBadge state={d.scanState} /> <Hint as="span">only released files can be transferred</Hint>
+        </span>
+      )}
+      {pick && (
+        <FormField>
+          Employee document type for {name}
+          <Input required maxLength={60} value={pick.documentType} onChange={(e) => onType(d.id, e.target.value)} />
+        </FormField>
+      )}
+    </li>
   );
 }
 
@@ -217,7 +267,7 @@ function EmployeeOrigin({ employeeId }: { employeeId: string }) {
       <h1>{e ? `Hiring origin of ${e.displayName} (${e.employeeCode})` : 'Hiring origin'}</h1>
       {can(EMPLOYEE_READ) && (
         <Section title="Employee record">
-          {employee.isPending && <p className="hint loading">Loading the employee…</p>}
+          {employee.isPending && <LoadingLine>Loading the employee…</LoadingLine>}
           <LoadProblem error={employee.error} forbidden="The selected role cannot view this employee." missing="This employee is not available in the selected role’s scope." />
           {e && (
             <>
@@ -231,7 +281,7 @@ function EmployeeOrigin({ employeeId }: { employeeId: string }) {
                 <Item term="Employment type">{labelOf({}, e.employmentType)}</Item>
                 <Item term="Work email">{e.workEmail ?? '—'}</Item>
               </dl>
-              {e.status === 'DRAFT' && <p className="hint">This employee is a draft. Hiring never activates employment: activation is the separate employee activation action.</p>}
+              {e.status === 'DRAFT' && <Hint>This employee is a draft. Hiring never activates employment: activation is the separate employee activation action.</Hint>}
             </>
           )}
           {documentsLink && (
@@ -242,12 +292,12 @@ function EmployeeOrigin({ employeeId }: { employeeId: string }) {
         </Section>
       )}
       <Section title="Recruitment history">
-        {origin.isPending && <p className="hint loading">Loading the hiring origin…</p>}
+        {origin.isPending && <LoadingLine>Loading the hiring origin…</LoadingLine>}
         <LoadProblem error={origin.error} forbidden="The selected role cannot view the hiring origin." missing="No hiring origin is recorded for this employee in the selected role’s scope." />
         {h && (
           <dl className="kv">
             <Item term="Requisition">
-              <Link to={PATHS.requisitionApplications(h.requisition.id)}>{h.requisition.code}</Link> <span className="hint">{h.requisition.title}</span>
+              <Link to={PATHS.requisitionApplications(h.requisition.id)}>{h.requisition.code}</Link> <Hint as="span">{h.requisition.title}</Hint>
             </Item>
             <Item term="Application">
               <Link to={PATHS.application(h.application.id)}>{labelOf(STAGE_LABEL, h.application.stage)}</Link>
@@ -258,7 +308,7 @@ function EmployeeOrigin({ employeeId }: { employeeId: string }) {
               ) : (
                 labelOf(OFFER_STATE_LABEL, h.offer.state)
               )}{' '}
-              <span className="hint">joining {formatDate(h.offer.proposedJoiningDate)}</span>
+              <Hint as="span">joining {formatDate(h.offer.proposedJoiningDate)}</Hint>
             </Item>
             <Item term="Candidate">{can(CANDIDATE_READ) ? <Link to={PATHS.candidate(h.candidate.id)}>{h.candidate.candidateCode}</Link> : h.candidate.candidateCode}</Item>
             <Item term="Handed over">{formatDate(h.handedOverAt)}</Item>
@@ -269,4 +319,3 @@ function EmployeeOrigin({ employeeId }: { employeeId: string }) {
     </>
   );
 }
-

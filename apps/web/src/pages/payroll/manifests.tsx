@@ -3,11 +3,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerRow } from '@/components/pager';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, download, formatDate, idempotencyKey, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, Section } from '../../ui';
+import { Empty, Notice, Section } from '../../ui';
+import { Missing } from './pickers';
 import { Problem, ReasonForm } from './problems';
-import { BANK_AUTHORIZE, BANK_FILE, BANK_OUTCOME, BANK_PREPARE, BANK_READ, BATCH_STATE, canReadRuns, Fact, FLUSH, involvement, label, MONEY, money, OUTCOME_FROM, OUTCOME_LABEL, PATHS, PAYMENT_STATE, SCROLL, Status, TEXTAREA, useKeys } from './shared';
+import { BANK_AUTHORIZE, BANK_FILE, BANK_OUTCOME, BANK_PREPARE, BANK_READ, BATCH_STATE, canReadRuns, Fact, involvement, label, MONEY, money, OUTCOME_FROM, OUTCOME_LABEL, PATHS, PAYMENT_STATE, Status, useKeys } from './shared';
 import type { BankLine, Manifest, RunDetail } from './types';
 
 // =========================================================================================================
@@ -20,7 +31,7 @@ export function ManifestScreen() {
   if (!can(BANK_READ)) {
     return (
       <Section title="Bank manifest">
-        <Empty>The selected role cannot see bank manifests.</Empty>
+        <Empty refusal>The selected role cannot see bank manifests.</Empty>
       </Section>
     );
   }
@@ -28,6 +39,13 @@ export function ManifestScreen() {
 }
 
 type ManifestAction = 'authorize' | 'cancel' | 'issue';
+
+/** What a manifest action that worked did, in words; none of them is a payment. */
+const ACTION_NOTE: Record<ManifestAction, string> = {
+  authorize: 'Authorised: every line is reserved. Nothing is paid until a CONFIRMED outcome is recorded from bank evidence.',
+  issue: 'The bank file was issued. Issuing a file is not a payment.',
+  cancel: 'The manifest was cancelled; nothing was reserved.',
+};
 
 function ManifestView({ id }: { id: string }) {
   const { can, me } = useSession();
@@ -48,18 +66,10 @@ function ManifestView({ id }: { id: string }) {
   const act = useMutation({
     mutationFn: ({ action, reason }: { action: ManifestAction; reason?: string }) =>
       api<Manifest>(`/v1/payroll-outputs/bank-manifests/${encodeURIComponent(id)}/${action}`, action === 'issue' ? { method: 'POST' } : { body: { ...(reason ? { reason } : {}), expectedVersion: b?.version } }),
-    onSuccess: (_r, { action }) => {
-      setNote(
-        action === 'authorize'
-          ? 'Authorised: every line is reserved. Nothing is paid until a CONFIRMED outcome is recorded from bank evidence.'
-          : action === 'issue'
-            ? 'The bank file was issued. Issuing a file is not a payment.'
-            : 'The manifest was cancelled; nothing was reserved.',
-      );
-    },
+    onSuccess: (_r, { action }) => setNote(ACTION_NOTE[action]),
     onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.manifestAll }), qc.invalidateQueries({ queryKey: keys.runAll })]),
   });
-  if (batch.isPending) return <p className="hint loading">Loading the manifest…</p>;
+  if (batch.isPending) return <LoadingLine>Loading the manifest…</LoadingLine>;
   if (!b) {
     return (
       <Section title="Bank manifest">
@@ -87,7 +97,14 @@ function ManifestView({ id }: { id: string }) {
   const ex = b.excluded ?? {};
   return (
     <div className="stack">
-      <Section title={`Bank manifest ${b.batchRevision}`} actions={<Link to={PATHS.run(b.runId)}>Open the payroll run</Link>}>
+      <Section
+        title={`Bank manifest ${b.batchRevision}`}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={PATHS.run(b.runId)}>Open the payroll run</Link>
+          </Button>
+        }
+      >
         <dl className="kv">
           <Fact term="State">
             <Status map={BATCH_STATE} code={b.state} />
@@ -106,15 +123,13 @@ function ManifestView({ id }: { id: string }) {
             {ex.excludedEmployeeCodes && ex.excludedEmployeeCodes.length > 0 ? ` (${ex.excludedEmployeeCodes.join(', ')})` : ''}
           </Fact>
         </dl>
-        <p role="note" className="hint">
-          A manifest or a bank file is not a payment. Payment status comes only from outcomes recorded from bank evidence; only a confirmed outcome is a payment.
-        </p>
-        {preparer && <p className="hint">You prepared this manifest, so someone else authorises it and records its outcomes.</p>}
-        {runRoles.length > 0 && <p className="hint">{`You ${runRoles.join(' and ')} its payroll run, so you cannot authorise this manifest or record its outcomes.`}</p>}
-        <div className="stack" style={{ marginTop: '0.5rem' }}>
+        <Hint role="note">A manifest or a bank file is not a payment. Payment status comes only from outcomes recorded from bank evidence; only a confirmed outcome is a payment.</Hint>
+        {preparer && <Hint>You prepared this manifest, so someone else authorises it and records its outcomes.</Hint>}
+        {runRoles.length > 0 && <Hint>{`You ${runRoles.join(' and ')} its payroll run, so you cannot authorise this manifest or record its outcomes.`}</Hint>}
+        <div className="mt-2 flex flex-col gap-3">
           {b.state === 'VALIDATED' && can(BANK_AUTHORIZE) && (
-            <div className="row">
-              <button
+            <ButtonRow>
+              <Button
                 type="button"
                 disabled={busy || blocked}
                 onClick={() => {
@@ -123,8 +138,8 @@ function ManifestView({ id }: { id: string }) {
                 }}
               >
                 {busy && act.variables?.action === 'authorize' ? 'Authorising…' : 'Authorise the payment'}
-              </button>
-            </div>
+              </Button>
+            </ButtonRow>
           )}
           {b.state === 'VALIDATED' && can(BANK_PREPARE) && (
             <ReasonForm
@@ -140,8 +155,8 @@ function ManifestView({ id }: { id: string }) {
             />
           )}
           {b.state === 'AUTHORIZED' && can(BANK_FILE) && (
-            <div className="row">
-              <button
+            <ButtonRow>
+              <Button
                 type="button"
                 disabled={busy}
                 onClick={() => {
@@ -150,51 +165,45 @@ function ManifestView({ id }: { id: string }) {
                 }}
               >
                 {busy ? 'Issuing…' : 'Issue the bank file'}
-              </button>
-            </div>
+              </Button>
+            </ButtonRow>
           )}
           {b.state === 'ISSUED' && can(BANK_FILE) && (
-            <div className="row">
-              <button type="button" className="secondary" disabled={downloading} onClick={() => void fetchFile()}>
+            <ButtonRow>
+              <Button type="button" variant="outline" disabled={downloading} onClick={() => void fetchFile()}>
                 {downloading ? 'Downloading…' : 'Download the bank file'}
-              </button>
-            </div>
+              </Button>
+            </ButtonRow>
           )}
         </div>
-        {note && (
-          <p role="status" className="ok">
-            {note}
-          </p>
-        )}
+        <Notice notice={note ? { text: note, ok: true } : null} />
         <Problem error={act.error} act={act.variables?.action === 'authorize' ? 'authorize' : 'manifest'} />
         {fileFailure !== null && <Problem error={fileFailure} act="download" />}
       </Section>
       {b.ledger.length > 0 && (
         <Section title="Payment ledger">
-          <div style={SCROLL}>
-            <table aria-label="Payment ledger">
-              <thead>
-                <tr>
-                  <th>Payment state</th>
-                  <th>Lines</th>
-                  <th>Amount</th>
-                  <th>Net confirmed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {b.ledger.map((l) => (
-                  <tr key={l.paymentState}>
-                    <td>
-                      <Status map={PAYMENT_STATE} code={l.paymentState} />
-                    </td>
-                    <td>{l.lines}</td>
-                    <td>{money(l.amount, b.currencyCode)}</td>
-                    <td>{money(l.netConfirmed, b.currencyCode)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Payment ledger">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Payment state</TableHead>
+                <TableHead scope="col">Lines</TableHead>
+                <TableHead scope="col">Amount</TableHead>
+                <TableHead scope="col">Net confirmed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {b.ledger.map((l) => (
+                <TableRow key={l.paymentState}>
+                  <TableCell>
+                    <Status map={PAYMENT_STATE} code={l.paymentState} />
+                  </TableCell>
+                  <TableCell>{l.lines}</TableCell>
+                  <TableCell>{money(l.amount, b.currencyCode)}</TableCell>
+                  <TableCell>{money(l.netConfirmed, b.currencyCode)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </Section>
       )}
       <ManifestLines batch={b} blocked={blocked} />
@@ -217,135 +226,110 @@ function ManifestLines({ batch, blocked }: { batch: Manifest; blocked: boolean }
   const recordable = can(BANK_OUTCOME) && (batch.state === 'AUTHORIZED' || batch.state === 'ISSUED');
   const outcomesFor = (line: BankLine) =>
     Object.keys(OUTCOME_FROM).filter((o) => OUTCOME_FROM[o]!.includes(line.paymentState) && (batch.state === 'ISSUED' || o === 'CANCELLED'));
+  const done = (text: string) => {
+    setSelected(null);
+    setNote(text);
+  };
   return (
     <Section title="Manifest lines">
-      {recordable && <p className="hint">Outcomes are recorded only from bank evidence, each with its own evidence key. Before the file is issued, only a cancellation can be recorded.</p>}
-      {lines.isPending && <p className="hint loading">Loading the lines…</p>}
+      {recordable && <Hint>Outcomes are recorded only from bank evidence, each with its own evidence key. Before the file is issued, only a cancellation can be recorded.</Hint>}
+      {lines.isPending && <LoadingLine>Loading the lines…</LoadingLine>}
       {lines.error && <Problem error={lines.error} act="read" />}
       {lines.data && lines.data.items.length === 0 && <Empty>This manifest has no lines.</Empty>}
       {lines.data && lines.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Manifest lines">
-            <thead>
-              <tr>
-                <th>Row</th>
-                <th>Allocation</th>
-                <th>Employee</th>
-                <th>Kind</th>
-                <th>Amount</th>
-                <th>Payment state</th>
-                <th>Confirmed</th>
-                <th>Reversed</th>
-                {recordable && <th>Record</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {lines.data.items.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.lineSequence}</td>
-                  <td>{l.allocationKey}</td>
-                  <td>{l.employeeCode}</td>
-                  <td>{l.holdId ? 'Released hold' : 'Payroll net'}</td>
-                  <td>{money(l.amount, l.currencyCode)}</td>
-                  <td>
-                    <Status map={PAYMENT_STATE} code={l.paymentState} />
-                  </td>
-                  <td>{money(l.confirmedAmount, l.currencyCode)}</td>
-                  <td>{money(l.reversedAmount, l.currencyCode)}</td>
-                  {recordable && (
-                    <td>
-                      <div className="row">
-                        {outcomesFor(l).length > 0 && (
-                          <button
-                            type="button"
-                            className="link"
-                            disabled={blocked}
-                            onClick={() => {
-                              setNote(null);
-                              setSelected({ line: l, kind: 'outcome' });
-                            }}
-                            aria-label={`Record an outcome for row ${l.lineSequence}`}
-                          >
-                            Outcome
-                          </button>
-                        )}
-                        {l.paymentState === 'CONFIRMED' && (
-                          <button
-                            type="button"
-                            className="link"
-                            disabled={blocked}
-                            onClick={() => {
-                              setNote(null);
-                              setSelected({ line: l, kind: 'reversal' });
-                            }}
-                            aria-label={`Record a reversal for row ${l.lineSequence}`}
-                          >
-                            Reversal
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Manifest lines">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Row</TableHead>
+              <TableHead scope="col">Allocation</TableHead>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Kind</TableHead>
+              <TableHead scope="col">Amount</TableHead>
+              <TableHead scope="col">Payment state</TableHead>
+              <TableHead scope="col">Confirmed</TableHead>
+              <TableHead scope="col">Reversed</TableHead>
+              {recordable && <TableHead scope="col">Record</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {lines.data.items.map((l) => (
+              <TableRow key={l.id}>
+                <TableCell>{l.lineSequence}</TableCell>
+                <TableCell>{l.allocationKey}</TableCell>
+                <TableCell>{l.employeeCode}</TableCell>
+                <TableCell>{l.holdId ? 'Released hold' : 'Payroll net'}</TableCell>
+                <TableCell>{money(l.amount, l.currencyCode)}</TableCell>
+                <TableCell>
+                  <Status map={PAYMENT_STATE} code={l.paymentState} />
+                </TableCell>
+                <TableCell>{money(l.confirmedAmount, l.currencyCode)}</TableCell>
+                <TableCell>{money(l.reversedAmount, l.currencyCode)}</TableCell>
+                {recordable && (
+                  <RowActionsCell>
+                    <RowActions>
+                      {outcomesFor(l).length > 0 && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={blocked}
+                          onClick={() => {
+                            setNote(null);
+                            setSelected({ line: l, kind: 'outcome' });
+                          }}
+                          aria-label={`Record an outcome for row ${l.lineSequence}`}
+                        >
+                          Outcome
+                        </Button>
+                      )}
+                      {l.paymentState === 'CONFIRMED' && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={blocked}
+                          onClick={() => {
+                            setNote(null);
+                            setSelected({ line: l, kind: 'reversal' });
+                          }}
+                          aria-label={`Record a reversal for row ${l.lineSequence}`}
+                        >
+                          Reversal
+                        </Button>
+                      )}
+                    </RowActions>
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      <div className="row" style={{ marginTop: '0.5rem' }}>
+      <PagerRow>
         {previous.length > 0 && (
-          <button
-            type="button"
-            className="secondary"
+          <PagerButton
             onClick={() => {
               setAfter(previous[previous.length - 1] ?? 0);
               setPrevious(previous.slice(0, -1));
             }}
           >
             Previous lines
-          </button>
+          </PagerButton>
         )}
         {lines.data?.next != null && (
-          <button
-            type="button"
-            className="secondary"
+          <PagerButton
             onClick={() => {
               setPrevious([...previous, after]);
               setAfter(lines.data?.next ?? 0);
             }}
           >
             Next lines
-          </button>
+          </PagerButton>
         )}
-      </div>
-      {note && (
-        <p role="status" className="ok">
-          {note}
-        </p>
-      )}
-      {selected?.kind === 'outcome' && (
-        <OutcomeForm
-          key={`o:${selected.line.id}`}
-          batch={batch}
-          line={selected.line}
-          options={outcomesFor(selected.line)}
-          onDone={(text) => {
-            setSelected(null);
-            setNote(text);
-          }}
-        />
-      )}
-      {selected?.kind === 'reversal' && (
-        <ReversalForm
-          key={`r:${selected.line.id}`}
-          batch={batch}
-          line={selected.line}
-          onDone={(text) => {
-            setSelected(null);
-            setNote(text);
-          }}
-        />
-      )}
+      </PagerRow>
+      <Notice notice={note ? { text: note, ok: true } : null} />
+      {selected?.kind === 'outcome' && <OutcomeForm key={`o:${selected.line.id}`} batch={batch} line={selected.line} options={outcomesFor(selected.line)} onDone={done} />}
+      {selected?.kind === 'reversal' && <ReversalForm key={`r:${selected.line.id}`} batch={batch} line={selected.line} onDone={done} />}
     </Section>
   );
 }
@@ -398,39 +382,33 @@ function OutcomeForm({ batch, line, options, onDone }: { batch: Manifest; line: 
     record.mutate({ outcomes: [{ lineId: line.id, outcome, eventKey, evidenceReference: ref }] });
   };
   return (
-    <form onSubmit={submit} aria-label={`Outcome for row ${line.lineSequence}`} className="grid-form" style={{ marginTop: '0.5rem' }}>
-      <p className="wide" style={FLUSH}>
-        {`Row ${line.lineSequence} · ${line.employeeCode} · ${money(line.amount, line.currencyCode)} · ${label(PAYMENT_STATE, line.paymentState)}`}
-      </p>
-      <label>
+    <FormGrid onSubmit={submit} aria-label={`Outcome for row ${line.lineSequence}`}>
+      <p className="my-1">{`Row ${line.lineSequence} · ${line.employeeCode} · ${money(line.amount, line.currencyCode)} · ${label(PAYMENT_STATE, line.paymentState)}`}</p>
+      <FormField>
         Outcome
-        <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+        <NativeSelect value={outcome} onChange={(e) => setOutcome(e.target.value)}>
           <option value="">Choose the outcome</option>
           {options.map((o) => (
             <option key={o} value={o}>
               {label(OUTCOME_LABEL, o)}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Evidence reference
-        <input value={evidence} onChange={(e) => setEvidence(e.target.value)} maxLength={500} autoComplete="off" />
-      </label>
-      <div className="row">
-        <button type="submit" disabled={record.isPending}>
+        <Input value={evidence} onChange={(e) => setEvidence(e.target.value)} maxLength={500} autoComplete="off" />
+      </FormField>
+      <ButtonRow>
+        <Button type="submit" disabled={record.isPending}>
           {record.isPending ? 'Recording…' : 'Record the outcome'}
-        </button>
-      </div>
-      {problem && (
-        <p role="alert" className="error wide">
-          {problem}
-        </p>
-      )}
-      <div className="wide">
+        </Button>
+      </ButtonRow>
+      <Missing text={problem} />
+      <div className="col-span-full">
         <Problem error={record.error} act="outcome" />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -471,35 +449,29 @@ function ReversalForm({ batch, line, onDone }: { batch: Manifest; line: BankLine
     reverse.mutate({ amount: amt, eventKey, evidenceReference: ref, reason: why });
   };
   return (
-    <form onSubmit={submit} aria-label={`Reversal for row ${line.lineSequence}`} className="grid-form" style={{ marginTop: '0.5rem' }}>
-      <p className="wide" style={FLUSH}>
-        {`Row ${line.lineSequence} · ${line.employeeCode} · confirmed ${money(line.confirmedAmount, line.currencyCode)}, reversed so far ${money(line.reversedAmount, line.currencyCode)}`}
-      </p>
-      <label>
+    <FormGrid onSubmit={submit} aria-label={`Reversal for row ${line.lineSequence}`}>
+      <p className="my-1">{`Row ${line.lineSequence} · ${line.employeeCode} · confirmed ${money(line.confirmedAmount, line.currencyCode)}, reversed so far ${money(line.reversedAmount, line.currencyCode)}`}</p>
+      <FormField>
         Reversed amount
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoComplete="off" />
-      </label>
-      <label>
+        <Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" autoComplete="off" />
+      </FormField>
+      <FormField>
         Evidence reference
-        <input value={evidence} onChange={(e) => setEvidence(e.target.value)} maxLength={500} autoComplete="off" />
-      </label>
-      <label className="wide">
+        <Input value={evidence} onChange={(e) => setEvidence(e.target.value)} maxLength={500} autoComplete="off" />
+      </FormField>
+      <FormField className="col-span-full">
         Reason
-        <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-      </label>
-      <div className="row">
-        <button type="submit" disabled={reverse.isPending}>
+        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} />
+      </FormField>
+      <ButtonRow>
+        <Button type="submit" disabled={reverse.isPending}>
           {reverse.isPending ? 'Recording…' : 'Record the reversal'}
-        </button>
-      </div>
-      {problem && (
-        <p role="alert" className="error wide">
-          {problem}
-        </p>
-      )}
-      <div className="wide">
+        </Button>
+      </ButtonRow>
+      <Missing text={problem} />
+      <div className="col-span-full">
         <Problem error={reverse.error} act="reverse" />
       </div>
-    </form>
+    </FormGrid>
   );
 }

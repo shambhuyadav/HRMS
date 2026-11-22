@@ -2,12 +2,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, isConflict, isNotFound, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, NotPermitted, Section } from '../../ui';
+import { Empty, Notice, NotPermitted, Section } from '../../ui';
 import { OfferTemplateNote, optionalToSend, TemplateTextFields, usableText, usePlaceholders } from './letter-templates';
 import { braces, Refusal, TEMPLATE_WORDS } from './refusals';
-import { enc, Item, labelOf, LETTER, letterTypeLabel, LoadProblem, MAX_NAME, MAX_OPTIONAL, PATHS, REVISION_STATE_LABEL, sameSet, SCROLL, TEMPLATE_MANAGE, TEMPLATE_READ, useKeys, UUID, when } from './shared';
+import { enc, FOLD, FOLD_SUMMARY, Item, labelOf, LETTER, letterTypeLabel, LoadProblem, MAX_NAME, MAX_OPTIONAL, PATHS, REVISION_STATE_LABEL, sameSet, TEMPLATE_MANAGE, TEMPLATE_READ, useKeys, UUID, when, WRAPPING_BUTTON } from './shared';
 import type { TemplateDetail, TemplateRevision } from './types';
 
 // =========================================================================================================
@@ -52,7 +58,7 @@ function TemplateView({ id }: { id: string }) {
         <Link to={PATHS.templates}>All letter templates</Link>
       </p>
       <Section title="Template">
-        {detail.isPending && <p className="hint loading">Loading the template…</p>}
+        {detail.isPending && <LoadingLine>Loading the template…</LoadingLine>}
         <LoadProblem error={detail.error} forbidden="The selected role cannot view letter templates." missing="This letter template is not available." />
         {t && (
           <dl className="kv">
@@ -80,40 +86,38 @@ function RevisionTable({ template: t }: { template: TemplateDetail }) {
       {t.revisions.length === 0 ? (
         <Empty>No revisions.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label="Revisions">
-            <thead>
-              <tr>
-                <th scope="col">Revision</th>
-                <th scope="col">State</th>
-                <th scope="col">Mandatory placeholders</th>
-                <th scope="col">Optional placeholders</th>
-                <th scope="col">Published</th>
-                <th scope="col">Text</th>
-              </tr>
-            </thead>
-            <tbody>
-              {t.revisions.map((r) => {
-                const mandatory = r.placeholders.filter((p) => !r.optionalPlaceholders.includes(p));
-                return (
-                  <tr key={r.revision}>
-                    <td>{r.revision}</td>
-                    <td>{labelOf(REVISION_STATE_LABEL, r.state)}</td>
-                    <td>{mandatory.length > 0 ? braces(mandatory) : 'None'}</td>
-                    <td>{r.optionalPlaceholders.length > 0 ? braces(r.optionalPlaceholders) : 'None'}</td>
-                    <td>{when(r.publishedAt)}</td>
-                    <td>
-                      <details>
-                        <summary>Text of revision {r.revision}</summary>
-                        <pre style={LETTER}>{r.body}</pre>
-                      </details>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Revisions">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Revision</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Mandatory placeholders</TableHead>
+              <TableHead scope="col">Optional placeholders</TableHead>
+              <TableHead scope="col">Published</TableHead>
+              <TableHead scope="col">Text</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {t.revisions.map((r) => {
+              const mandatory = r.placeholders.filter((p) => !r.optionalPlaceholders.includes(p));
+              return (
+                <TableRow key={r.revision}>
+                  <TableCell>{r.revision}</TableCell>
+                  <TableCell>{labelOf(REVISION_STATE_LABEL, r.state)}</TableCell>
+                  <TableCell>{mandatory.length > 0 ? braces(mandatory) : 'None'}</TableCell>
+                  <TableCell>{r.optionalPlaceholders.length > 0 ? braces(r.optionalPlaceholders) : 'None'}</TableCell>
+                  <TableCell>{when(r.publishedAt)}</TableCell>
+                  <TableCell>
+                    <details className={FOLD}>
+                      <summary className={FOLD_SUMMARY}>Text of revision {r.revision}</summary>
+                      <pre className={LETTER}>{r.body}</pre>
+                    </details>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
@@ -166,35 +170,27 @@ function TemplateSettings({ template: t }: { template: TemplateDetail }) {
   };
   return (
     <Section title="Name and status">
-      <form className="row" aria-label="Rename the template" onSubmit={rename}>
-        <label className="inline">
+      <FormGrid aria-label="Rename the template" onSubmit={rename}>
+        <FormField>
           Template name{' '}
-          <input value={name} maxLength={MAX_NAME} required disabled={update.isPending} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <button type="submit" disabled={update.isPending}>
+          <Input value={name} maxLength={MAX_NAME} required disabled={update.isPending} onChange={(e) => setName(e.target.value)} />
+        </FormField>
+        <Button type="submit" disabled={update.isPending}>
           Save name
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
       <p>
         This template is {t.active ? 'active' : 'inactive'}.{' '}
         {t.active ? 'Deactivating it stops new previews and letters from it; letters already generated stay as they are.' : 'Activating it lets letters use its published revision again.'}
       </p>
-      <div className="row">
-        <button type="button" className={t.active ? 'danger' : undefined} disabled={update.isPending} onClick={() => update.mutate({ active: !t.active, expectedVersion: t.version })}>
+      <ButtonRow>
+        <Button type="button" variant={t.active ? 'danger' : 'default'} disabled={update.isPending} onClick={() => update.mutate({ active: !t.active, expectedVersion: t.version })}>
           {t.active ? 'Deactivate template' : 'Activate template'}
-        </button>
-      </div>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
+        </Button>
+      </ButtonRow>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
       <Refusal error={update.error} words={TEMPLATE_WORDS} />
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
     </Section>
   );
 }
@@ -277,56 +273,51 @@ function DraftEditor({ template: t }: { template: TemplateDetail }) {
 
   return (
     <Section title={draft ? `Draft revision ${draft.revision}` : 'Next revision'}>
-      <p className="hint">
-        {draft
-          ? 'Edit the draft and save it, then publish it. A published revision is frozen.'
-          : published
-            ? `Start the next revision from the published text (revision ${published.revision}). Saving opens a new draft; revision ${published.revision} stays in use until the draft is published.`
-            : 'Write the text and save it as a draft.'}
-      </p>
-      <form className="grid-form" aria-label={draft ? `Draft revision ${draft.revision}` : 'Next revision'} onSubmit={submit}>
+      <Hint>{editorIntro(draft, published)}</Hint>
+      <FormGrid aria-label={draft ? `Draft revision ${draft.revision}` : 'Next revision'} onSubmit={submit}>
         <TemplateTextFields body={body} onBody={setBody} optional={optional} onOptional={setOptional} approved={approved.data?.items} disabled={busy} />
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
         {save.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={save.error} words={TEMPLATE_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={busy}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={busy}>
             {draft ? 'Save draft' : 'Save as a new draft'}
-          </button>
+          </Button>
           {changed && base && (
-            <button type="button" className="secondary" disabled={busy} onClick={discard}>
+            <Button type="button" variant="outline" className={WRAPPING_BUTTON} disabled={busy} onClick={discard}>
               Discard changes (back to the saved text of revision {base.revision})
-            </button>
+            </Button>
           )}
-        </div>
-      </form>
+        </ButtonRow>
+      </FormGrid>
       {draft && (
-        <div className="stack">
+        <div className="flex flex-col gap-3">
           <p>
             Publishing revision {draft.revision} freezes it{published ? ` and retires revision ${published.revision}` : ''}. New letters then use revision {draft.revision}.
           </p>
-          {unsaved && <p className="hint">Save the draft first: publishing publishes the saved text, not unsaved changes.</p>}
-          <div className="row">
-            <button type="button" disabled={busy || unsaved} onClick={() => publish.mutate(draft)}>
+          {unsaved && <Hint>Save the draft first: publishing publishes the saved text, not unsaved changes.</Hint>}
+          <ButtonRow>
+            <Button type="button" disabled={busy || unsaved} onClick={() => publish.mutate(draft)}>
               Publish revision {draft.revision}
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Refusal error={publish.error} words={TEMPLATE_WORDS} />
         </div>
       )}
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
     </Section>
   );
+}
+
+/** What the editor is for: the draft being edited, the next revision started from the published text, or a first text. */
+function editorIntro(draft: TemplateRevision | null, published: TemplateRevision | null): string {
+  if (draft) return 'Edit the draft and save it, then publish it. A published revision is frozen.';
+  if (published) {
+    return `Start the next revision from the published text (revision ${published.revision}). Saving opens a new draft; revision ${published.revision} stays in use until the draft is published.`;
+  }
+  return 'Write the text and save it as a draft.';
 }
 

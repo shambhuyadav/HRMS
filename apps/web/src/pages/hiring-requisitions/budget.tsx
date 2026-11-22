@@ -1,12 +1,33 @@
 // One manpower budget line: summary, the revision in progress, a new revision and the revision history.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, isConflict, isForbidden, isNotFound, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, Item, NotPermitted, Section, StateBadge, When } from '../../ui';
+import { Empty, ErrorNote, Item, Notice, NotPermitted, Section, StateBadge, When } from '../../ui';
 import { Refusal } from './refusals';
-import { BUDGET_MANAGE, BUDGET_READ, type BudgetDetail, byWhom, FLUSH, lineLabel, PATHS, periodText, type RevisionSaved, SCROLL, shown, SPACED, TEXTAREA, useKeys, UUID, wholeNumber } from './shared';
+import {
+  BUDGET_MANAGE,
+  BUDGET_READ,
+  type BudgetDetail,
+  byWhom,
+  lineLabel,
+  PATHS,
+  periodText,
+  type RevisionSaved,
+  shown,
+  useKeys,
+  UUID,
+  wholeNumber,
+} from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: one budget line (summary, the revision in progress, a new revision, the revision history)
@@ -26,9 +47,7 @@ export function BudgetDetailScreen() {
   if (!UUID.test(id)) {
     return (
       <>
-        <p style={FLUSH}>
-          <Link to={PATHS.budgets}>Back to manpower budgets</Link>
-        </p>
+        <BackLink to={PATHS.budgets}>Back to manpower budgets</BackLink>
         <h1>Manpower budget</h1>
         <Empty>This budget line is not available in the selected role’s scope.</Empty>
       </>
@@ -109,23 +128,11 @@ function BudgetDetailView({ id }: { id: string }) {
 
   return (
     <>
-      <p style={FLUSH}>
-        <Link to={PATHS.budgets}>Back to manpower budgets</Link>
-      </p>
+      <BackLink to={PATHS.budgets}>Back to manpower budgets</BackLink>
       <h1>Manpower budget</h1>
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
-      {detail.isPending && <p className="hint loading">Loading the budget line…</p>}
-      {isForbidden(detail.error) ? (
-        <NotPermitted>The selected role cannot view this budget line.</NotPermitted>
-      ) : isNotFound(detail.error) ? (
-        <Empty>This budget line is not available in the selected role’s scope.</Empty>
-      ) : (
-        <ErrorNote error={detail.error} />
-      )}
+      {notice && <Notice notice={{ text: notice, ok: true }} />}
+      {detail.isPending && <LoadingLine>Loading the budget line…</LoadingLine>}
+      <ReadProblem error={detail.error} />
       {b && (
         <>
           <Section title={lineLabel(b)}>
@@ -137,7 +144,7 @@ function BudgetDetailView({ id }: { id: string }) {
               <Item term="Headcount in force">{b.approvedHeadcount ?? 'None approved yet'}</Item>
               <Item term="Committed">{b.committed}</Item>
             </dl>
-            <p className="hint">Committed counts the vacancies of approved requisitions on this line, plus the placements of closed ones.</p>
+            <Hint>Committed counts the vacancies of approved requisitions on this line, plus the placements of closed ones.</Hint>
           </Section>
 
           {open && (
@@ -150,25 +157,25 @@ function BudgetDetailView({ id }: { id: string }) {
                 {openRow && <Item term="Reason">{openRow.reason}</Item>}
                 {openRow && <Item term="Prepared by">{byWhom(openRow.preparedBy, myUserId)}</Item>}
               </dl>
-              {open.state === 'SUBMITTED' && <p className="hint">Waiting for an independent HR Administrator’s decision.</p>}
-              {canManage && openRow && !mine && <p className="hint">Another HR user prepared this revision; only they can change, submit or withdraw it.</p>}
+              {open.state === 'SUBMITTED' && <Hint>Waiting for an independent HR Administrator’s decision.</Hint>}
+              {canManage && openRow && !mine && <Hint>Another HR user prepared this revision; only they can change, submit or withdraw it.</Hint>}
               {canManage && openRow && mine && (
                 <>
-                  <div className="row">
+                  <ButtonRow className="mt-4">
                     {open.state === 'DRAFT' && (
                       <>
-                        <button type="button" className="secondary" aria-expanded={editing} disabled={busy} onClick={() => setEditing((v) => !v)}>
+                        <Button type="button" variant="outline" aria-expanded={editing} disabled={busy} onClick={() => setEditing((v) => !v)}>
                           Change draft
-                        </button>
-                        <button type="button" disabled={busy} onClick={() => run.mutate({ kind: 'revision-submit', revisionId: openRow.revisionId, expectedVersion: openRow.version })}>
+                        </Button>
+                        <Button type="button" disabled={busy} onClick={() => run.mutate({ kind: 'revision-submit', revisionId: openRow.revisionId, expectedVersion: openRow.version })}>
                           Submit for approval
-                        </button>
+                        </Button>
                       </>
                     )}
-                    <button type="button" className="danger" disabled={busy} onClick={() => run.mutate({ kind: 'revision-withdraw', revisionId: openRow.revisionId })}>
+                    <Button type="button" variant="danger" disabled={busy} onClick={() => run.mutate({ kind: 'revision-withdraw', revisionId: openRow.revisionId })}>
                       Withdraw revision
-                    </button>
-                  </div>
+                    </Button>
+                  </ButtonRow>
                   {editing && open.state === 'DRAFT' && (
                     <RevisionForm
                       label={`Change draft revision ${open.revision}`}
@@ -186,7 +193,7 @@ function BudgetDetailView({ id }: { id: string }) {
 
           {!open && canManage && (
             <Section title="New revision">
-              <p className="hint">A revision changes the headcount in force only once an independent HR Administrator approves it.</p>
+              <Hint>A revision changes the headcount in force only once an independent HR Administrator approves it.</Hint>
               <RevisionForm
                 key={formKey}
                 label="New revision"
@@ -204,42 +211,40 @@ function BudgetDetailView({ id }: { id: string }) {
             {b.revisions.length === 0 ? (
               <Empty>No revisions recorded yet.</Empty>
             ) : (
-              <div style={SCROLL}>
-                <table aria-label="Revision history">
-                  <thead>
-                    <tr>
-                      <th scope="col">Revision</th>
-                      <th scope="col">Headcount</th>
-                      <th scope="col">Reason</th>
-                      <th scope="col">State</th>
-                      <th scope="col">Prepared by</th>
-                      <th scope="col">Submitted</th>
-                      <th scope="col">Decided</th>
-                      <th scope="col">Decided by</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {b.revisions.map((v) => (
-                      <tr key={v.revisionId}>
-                        <td>{v.revision}</td>
-                        <td>{v.headcount}</td>
-                        <td>{v.reason}</td>
-                        <td>
-                          <StateBadge state={v.state} />
-                        </td>
-                        <td>{byWhom(v.preparedBy, myUserId)}</td>
-                        <td>
-                          <When at={v.submittedAt} />
-                        </td>
-                        <td>
-                          <When at={v.decidedAt} />
-                        </td>
-                        <td>{byWhom(v.decidedBy, myUserId)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table aria-label="Revision history">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Revision</TableHead>
+                    <TableHead scope="col">Headcount</TableHead>
+                    <TableHead scope="col">Reason</TableHead>
+                    <TableHead scope="col">State</TableHead>
+                    <TableHead scope="col">Prepared by</TableHead>
+                    <TableHead scope="col">Submitted</TableHead>
+                    <TableHead scope="col">Decided</TableHead>
+                    <TableHead scope="col">Decided by</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {b.revisions.map((v) => (
+                    <TableRow key={v.revisionId}>
+                      <TableCell>{v.revision}</TableCell>
+                      <TableCell>{v.headcount}</TableCell>
+                      <TableCell>{v.reason}</TableCell>
+                      <TableCell>
+                        <StateBadge state={v.state} />
+                      </TableCell>
+                      <TableCell>{byWhom(v.preparedBy, myUserId)}</TableCell>
+                      <TableCell>
+                        <When at={v.submittedAt} />
+                      </TableCell>
+                      <TableCell>
+                        <When at={v.decidedAt} />
+                      </TableCell>
+                      <TableCell>{byWhom(v.decidedBy, myUserId)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </Section>
         </>
@@ -270,37 +275,46 @@ function RevisionForm({
     event.preventDefault();
     const count = headcount.trim();
     const text = reason.trim();
-    const missing = !wholeNumber(count, 0) ? 'Enter the headcount as a whole number (0 or more).' : !text ? 'Enter the reason for the revision.' : null;
+    const missing = revisionProblem(count, text);
     setProblem(missing);
     if (missing !== null || busy) return;
     onSubmit({ headcount: Number(count), reason: text });
   };
   return (
-    <form className="grid-form" aria-label={label} onSubmit={submit} noValidate style={SPACED}>
-      <label>
+    <FormGrid aria-label={label} onSubmit={submit} noValidate>
+      <FormField>
         Headcount
-        <input type="number" required min={0} step={1} inputMode="numeric" value={headcount} onChange={(e) => setHeadcount(e.target.value)} />
-      </label>
-      <label className="wide">
+        <Input type="number" required min={0} step={1} inputMode="numeric" value={headcount} onChange={(e) => setHeadcount(e.target.value)} />
+      </FormField>
+      <FormField className="col-span-full">
         Reason (required)
-        <textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
-      {problem && (
-        <p role="alert" className="error wide">
-          {problem}
-        </p>
-      )}
-      <div className="wide row">
-        <button type="submit" disabled={busy}>
+        <Textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={busy}>
           {submitLabel}
-        </button>
+        </Button>
         {onCancel && (
-          <button type="button" className="secondary" disabled={busy} onClick={onCancel}>
+          <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         )}
-      </div>
-    </form>
+      </ButtonRow>
+    </FormGrid>
   );
+}
+
+/** What is missing from a revision, in words; null when it can be sent. */
+function revisionProblem(count: string, reason: string): string | null {
+  if (!wholeNumber(count, 0)) return 'Enter the headcount as a whole number (0 or more).';
+  return reason ? null : 'Enter the reason for the revision.';
+}
+
+/** A budget line the server would not read: refused, out of the role's scope, or another failure. */
+function ReadProblem({ error }: { error: unknown }) {
+  if (isForbidden(error)) return <NotPermitted>The selected role cannot view this budget line.</NotPermitted>;
+  if (isNotFound(error)) return <Empty>This budget line is not available in the selected role’s scope.</Empty>;
+  return <ErrorNote error={error} />;
 }
 

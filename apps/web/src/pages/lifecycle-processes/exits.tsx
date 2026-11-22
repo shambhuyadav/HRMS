@@ -3,12 +3,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, plural, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, LIST_PAGE_SIZE, nextSort, NotPermitted, Pager, Section, SortHeader, sortParams, type SortState, StateBadge, When } from '../../ui';
 import { ExitApprovalQueue, type ExitQueueKind, ExitRecommendationQueue, ExitTaskItem, ExitWithdrawalQueue } from './queues';
 import { type Done, Refusal, reportGone } from './refusals';
-import { Block, CODE, DECISION_LABEL, EXIT_ACTION_LABEL, EXIT_APPROVE, EXIT_MANAGE, EXIT_READ, EXIT_RECOMMEND, EXIT_STATE_HINT, EXIT_STATES, EXIT_TYPE, FIELDS, FLUSH, ISO_DATE, Loading, Notice, NOTICE_DAYS_LIMIT, type NoticeState, noticeText, type Paged, pagedUrl, PATHS, Problem, PROCESS_MANAGE, PROCESS_READ, QueryProblem, RoleReady, SCROLL, shown, statusLabel, TEMPLATE_READ, totalOf, useKeys, userText, UUID } from './shared';
+import { Block, CODE, DECISION_LABEL, EXIT_ACTION_LABEL, EXIT_APPROVE, EXIT_MANAGE, EXIT_READ, EXIT_RECOMMEND, EXIT_STATE_HINT, EXIT_STATES, EXIT_TYPE, FIELDS, ISO_DATE, Notice, NOTICE_DAYS_LIMIT, type NoticeState, noticeText, type Paged, pagedUrl, PATHS, Problem, PROCESS_MANAGE, PROCESS_READ, QueryProblem, RoleReady, shown, statusLabel, TEMPLATE_READ, totalOf, useKeys, userText, UUID } from './shared';
 import type { AfterLastWorkingDate, ExitCase, ExitDecision, ExitDetail, ExitEvent, ExitTask, ExitWithdrawal, ProcessDetail, TemplateSummary } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -39,46 +47,49 @@ export function ExitsScreen() {
 type ExitSort = 'employeeName' | 'requestDate' | 'state';
 
 export function ExitTable({ exits, label, withEmployee = true, sort, onSort }: { exits: ExitCase[]; label: string; withEmployee?: boolean; sort?: SortState<ExitSort>; onSort?: (column: ExitSort) => void }) {
-  const heading = (column: ExitSort, text: string) => (onSort ? <SortHeader column={column} label={text} sort={sort ?? null} onSort={onSort} /> : <th>{text}</th>);
+  const heading = (column: ExitSort, text: string) =>
+    onSort ? (
+      <SortHeader column={column} label={text} sort={sort ?? null} onSort={onSort} />
+    ) : (
+      <TableHead scope="col">{text}</TableHead>
+    );
   return (
-    <div style={SCROLL}>
-      <table aria-label={label}>
-        <thead>
-          <tr>
-            {withEmployee && heading('employeeName', 'Employee')}
-            {heading('requestDate', 'Resignation date')}
-            {heading('state', 'State')}
-            <th>Proposed last working date</th>
-            <th>Recommended</th>
-            <th>Approved</th>
-            <th>Contractual notice period</th>
-            <th>Final release</th>
-          </tr>
-        </thead>
-        <tbody>
-          {exits.map((x) => (
-            <tr key={x.id}>
-              {withEmployee && (
-                <td>
-                  <Link to={PATHS.exit(x.id)}>
-                    {x.employeeName} ({x.employeeCode})
-                  </Link>
-                </td>
-              )}
-              <td>{withEmployee ? formatDate(x.requestDate) : <Link to={PATHS.exit(x.id)}>{formatDate(x.requestDate)}</Link>}</td>
-              <td>
-                <StateBadge state={x.state} />
-              </td>
-              <td>{formatDate(x.proposedLastWorkingDate)}</td>
-              <td>{formatDate(x.recommendedLastWorkingDate)}</td>
-              <td>{formatDate(x.approvedLastWorkingDate)}</td>
-              <td>{noticeText(x.noticePeriod)}</td>
-              <td>{x.released ? 'Released' : 'Not released'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label={label}>
+      <TableHeader>
+        <TableRow>
+          {withEmployee && heading('employeeName', 'Employee')}
+          {heading('requestDate', 'Resignation date')}
+          {heading('state', 'State')}
+          <TableHead scope="col">Proposed last working date</TableHead>
+          <TableHead scope="col">Recommended</TableHead>
+          <TableHead scope="col">Approved</TableHead>
+          <TableHead scope="col">Contractual notice period</TableHead>
+          <TableHead scope="col">Final release</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {exits.map((x) => (
+          <TableRow key={x.id}>
+            {withEmployee && (
+              <TableCell>
+                <Link to={PATHS.exit(x.id)}>
+                  {x.employeeName} ({x.employeeCode})
+                </Link>
+              </TableCell>
+            )}
+            <TableCell>{withEmployee ? formatDate(x.requestDate) : <Link to={PATHS.exit(x.id)}>{formatDate(x.requestDate)}</Link>}</TableCell>
+            <TableCell>
+              <StateBadge state={x.state} />
+            </TableCell>
+            <TableCell>{formatDate(x.proposedLastWorkingDate)}</TableCell>
+            <TableCell>{formatDate(x.recommendedLastWorkingDate)}</TableCell>
+            <TableCell>{formatDate(x.approvedLastWorkingDate)}</TableCell>
+            <TableCell>{noticeText(x.noticePeriod)}</TableCell>
+            <TableCell>{x.released ? 'Released' : 'Not released'}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -99,24 +110,26 @@ function ExitList() {
   const data = shown(list);
   return (
     <Section title={`Exit cases${data ? ` (${totalOf(data)})` : ''}`}>
-      <label className="inline">
-        State
-        <select
-          value={state}
-          onChange={(e) => {
-            setState(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All states</option>
-          {EXIT_STATES.map((s) => (
-            <option key={s} value={s}>
-              {readable(s)}
-            </option>
-          ))}
-        </select>
-      </label>
-      {list.isPending && <Loading>Loading the exit cases…</Loading>}
+      <FilterBar>
+        <FormField>
+          State
+          <NativeSelect
+            value={state}
+            onChange={(e) => {
+              setState(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All states</option>
+            {EXIT_STATES.map((s) => (
+              <option key={s} value={s}>
+                {readable(s)}
+              </option>
+            ))}
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {list.isPending && <LoadingLine>Loading the exit cases…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="The selected role cannot view exit cases." />
       {data && data.items.length === 0 && <Empty>{state ? 'No exit cases in this state.' : 'No exit cases in the selected role’s scope.'}</Empty>}
       {data && data.items.length > 0 && <ExitTable exits={data.items} label="Exit cases" sort={sort} onSort={onSort} />}
@@ -130,9 +143,7 @@ export function ExitDetailScreen() {
   const { can } = useSession();
   return (
     <>
-      <p>
-        <Link className="back-link" to={PATHS.exits}>← Exit cases</Link>
-      </p>
+      <BackLink to={PATHS.exits}>← Exit cases</BackLink>
       {!UUID.test(id) ? (
         <Empty>This exit case does not exist.</Empty>
       ) : (
@@ -162,7 +173,7 @@ function ExitView({ exitId }: { exitId: string }) {
   if (!x) {
     return (
       <>
-        {query.isPending && <Loading>Loading the exit case…</Loading>}
+        {query.isPending && <LoadingLine>Loading the exit case…</LoadingLine>}
         <QueryProblem error={query.error} forbidden="The selected role cannot view exit cases." missing="This exit case is not available in the selected role’s scope." />
       </>
     );
@@ -198,7 +209,7 @@ function ExitView({ exitId }: { exitId: string }) {
       <Section title="Exit">
         <ExitFacts x={x} />
         {can(PROCESS_READ) && (
-          <p style={FLUSH}>
+          <p className="m-0">
             <Link to={PATHS.employee(x.employeeId)}>All processes and exits of {x.employeeName}</Link>
           </p>
         )}
@@ -229,7 +240,7 @@ const AFTER_KIND_LABEL: Record<string, string> = {
 function AfterLastWorkingDateList({ after }: { after: AfterLastWorkingDate }) {
   return (
     <Section title="Approved for days after the last working date">
-      <p className="hint">These are kept, not cancelled by the exit. Payroll and attendance stop at the last working date, so none of them takes effect after it.</p>
+      <Hint>These are kept, not cancelled by the exit. Payroll and attendance stop at the last working date, so none of them takes effect after it.</Hint>
       {after.items.length === 0 ? (
         <Empty>Nothing is approved for days after the last working date.</Empty>
       ) : (
@@ -248,7 +259,7 @@ export function ExitFacts({ x, ownView = false }: { x: ExitCase; ownView?: boole
     <dl className="kv">
       {!ownView && <Item term="Employee">{`${x.employeeName} (${x.employeeCode})`}</Item>}
       <Item term="State">
-        <StateBadge state={x.state} /> <span className="hint">{EXIT_STATE_HINT[x.state] ?? ''}</span>
+        <StateBadge state={x.state} /> <Hint as="span">{EXIT_STATE_HINT[x.state] ?? ''}</Hint>
       </Item>
       <Item term="Separation type">{readable(x.separationType)}</Item>
       {x.origin === 'HR' && <Item term="Entered by">HR, from a resignation given outside the system (with its evidence)</Item>}
@@ -313,22 +324,29 @@ function NoticePeriodForm({ exit: x, onDone }: { exit: ExitDetail; onDone: Done 
   };
   return (
     <Section title="Contractual notice period">
-      <p className="hint">
+      <Hint>
         Record the notice period from the employee’s contract. There is no default; a notice adjustment in the settlement needs it recorded. Nothing is calculated from it here.
-      </p>
-      <form aria-label="Contractual notice period" className="row" onSubmit={submit}>
-        <label>
+      </Hint>
+      <FormGrid aria-label="Contractual notice period" onSubmit={submit}>
+        <FormField>
           Notice period (days)
-          <input type="number" min={0} max={NOTICE_DAYS_LIMIT} step={1} value={days} onChange={(e) => setDays(e.target.value)} />
-        </label>
-        <button type="submit" disabled={record.isPending}>
+          <Input type="number" min={0} max={NOTICE_DAYS_LIMIT} step={1} value={days} onChange={(e) => setDays(e.target.value)} />
+        </FormField>
+        <Button type="submit" disabled={record.isPending}>
           Record notice period
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
       <Problem text={problem} />
       <Refusal error={record.error} action="notice-period" except={EXIT_GONE} />
     </Section>
   );
+}
+
+/** Where the exit's clearance stands, naming the required tasks still incomplete when the server listed them. */
+function clearanceText(c: ExitDetail['clearance']): string {
+  if (!c.started) return 'Not started.';
+  if (c.complete) return 'Every required clearance task is complete.';
+  return `Required clearance tasks still incomplete: ${c.incompleteRequired.length > 0 ? c.incompleteRequired.join(', ') : 'see the checklist'}.`;
 }
 
 /** F1 "no skipped required clearance at final release": the checklist of the exit and its incomplete required tasks. */
@@ -338,13 +356,7 @@ function ClearanceSection({ exit: x, own, onDone }: { exit: ExitDetail; own: boo
   const canStart = can(PROCESS_MANAGE) && !own && (x.state === 'APPROVED' || x.state === 'SEPARATED') && !x.released && !c.started;
   return (
     <Section title="Clearance checklist">
-      <p style={FLUSH}>
-        {!c.started
-          ? 'Not started.'
-          : c.complete
-            ? 'Every required clearance task is complete.'
-            : `Required clearance tasks still incomplete: ${c.incompleteRequired.length > 0 ? c.incompleteRequired.join(', ') : 'see the checklist'}.`}
-      </p>
+      <p className="m-0">{clearanceText(c)}</p>
       {c.processIds.length > 0 && (
         <ul aria-label="Clearance checklists">
           {c.processIds.map((id, i) => (
@@ -414,40 +426,36 @@ function StartClearanceForm({ exit: x, onDone }: { exit: ExitDetail; onDone: Don
   };
   return (
     <form aria-label="Start the clearance checklist" className="stack" onSubmit={submit}>
-      <div style={FIELDS}>
+      <div className={FIELDS}>
         {canList ? (
-          <label>
+          <FormField>
             Exit clearance template
-            <select value={code} onChange={(e) => setCode(e.target.value)}>
+            <NativeSelect value={code} onChange={(e) => setCode(e.target.value)}>
               <option value="">Choose a template…</option>
               {exitTemplates.map((t) => (
                 <option key={t.id} value={t.code}>
                   {`${t.name} (${t.code}) · revision ${t.publishedRevision}`}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
         ) : (
-          <label>
+          <FormField>
             Exit clearance template code
-            <input value={code} maxLength={40} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-          </label>
+            <Input value={code} maxLength={40} onChange={(e) => setCode(e.target.value.toUpperCase())} />
+          </FormField>
         )}
-        <label>
+        <FormField>
           Effective date (leave empty for today)
-          <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-        </label>
+          <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+        </FormField>
       </div>
-      {canList && listed && exitTemplates.length === 0 && (
-        <p className="hint" style={FLUSH}>
-          No active exit clearance template has a published revision yet.
-        </p>
-      )}
+      {canList && listed && exitTemplates.length === 0 && <Hint className="m-0">No active exit clearance template has a published revision yet.</Hint>}
       <Problem text={problem} />
       <div>
-        <button type="submit" disabled={start.isPending}>
+        <Button type="submit" disabled={start.isPending}>
           Start clearance checklist
-        </button>
+        </Button>
       </div>
       <Refusal error={start.error} action="start" except={CLEARANCE_GONE} />
     </form>
@@ -468,14 +476,14 @@ function FinalRelease({ exit: x, onDone }: { exit: ExitDetail; onDone: Done }) {
   });
   return (
     <Section title="Final release">
-      <p className="hint">
+      <Hint>
         The final release is recorded on or after the last working date ({formatDate(x.approvedLastWorkingDate)}), once every required clearance task is complete and no withdrawal request is
         waiting.
-      </p>
+      </Hint>
       <div>
-        <button type="button" disabled={release.isPending || !x.clearance.complete} onClick={() => release.mutate()}>
+        <Button type="button" disabled={release.isPending || !x.clearance.complete} onClick={() => release.mutate()}>
           Record final release
-        </button>
+        </Button>
       </div>
       <Refusal error={release.error} action="release" except={EXIT_GONE} />
     </Section>
@@ -548,36 +556,34 @@ export function ExitHistory({ history, nested, ownView }: { history: ExitEvent[]
       {history.length === 0 ? (
         <Empty>Nothing recorded yet.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label="Exit history">
-            <thead>
-              <tr>
-                <th>Business date</th>
-                <th>Recorded</th>
-                <th>Step</th>
-                <th>State</th>
-                <th>Last working date</th>
-                <th>Employee status</th>
-                {!ownView && <th>By</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((e, i) => (
-                <tr key={`${e.occurredAt}-${i}`}>
-                  <td>{formatDate(e.businessDate)}</td>
-                  <td>
-                    <When at={e.occurredAt} />
-                  </td>
-                  <td>{EXIT_ACTION_LABEL[e.action] ?? readable(e.action)}</td>
-                  <td>{exitStateChange(e)}</td>
-                  <td>{formatDate(e.lastWorkingDate)}</td>
-                  <td>{statusChange(e)}</td>
-                  {!ownView && <td>{userText(e.actorUserId, myUserId)}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Exit history">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Business date</TableHead>
+              <TableHead scope="col">Recorded</TableHead>
+              <TableHead scope="col">Step</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Last working date</TableHead>
+              <TableHead scope="col">Employee status</TableHead>
+              {!ownView && <TableHead scope="col">By</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {history.map((e, i) => (
+              <TableRow key={`${e.occurredAt}-${i}`}>
+                <TableCell>{formatDate(e.businessDate)}</TableCell>
+                <TableCell>
+                  <When at={e.occurredAt} />
+                </TableCell>
+                <TableCell>{EXIT_ACTION_LABEL[e.action] ?? readable(e.action)}</TableCell>
+                <TableCell>{exitStateChange(e)}</TableCell>
+                <TableCell>{formatDate(e.lastWorkingDate)}</TableCell>
+                <TableCell>{statusChange(e)}</TableCell>
+                {!ownView && <TableCell>{userText(e.actorUserId, myUserId)}</TableCell>}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Block>
   );

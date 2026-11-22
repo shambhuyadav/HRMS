@@ -243,7 +243,7 @@ interface LeaveBalanceAsOf {
 }
 
 /** A disbursed loan or advance not yet fully recovered (net of recoveries recognised or already deducted by processed payroll, as the loan module shows it). */
-interface OutstandingLoan {
+export interface OutstandingLoan {
   id: string;
   /** LOAN or ADVANCE. */
   loanKind: string;

@@ -3,11 +3,36 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, LIST_PAGE_SIZE, Notice, NotPermitted, pageParams, Pager, Section, StateBadge, When } from '../../ui';
 import { ReadProblem, Refusal } from './refusals';
-import { DECISION_LABEL, H3, hm, lateText, ORIGIN_LABEL, PATHS, Problem, SCROLL, SHEET_STATES, shown, SPACED, TEXTAREA, TS_READ, TS_REQUEST_REOPEN, TS_SUBMIT, useKeys, weekText } from './shared';
+import {
+  DECISION_LABEL,
+  hm,
+  lateText,
+  ORIGIN_LABEL,
+  PATHS,
+  Problem,
+  Remark,
+  SHEET_STATES,
+  shown,
+  TS_READ,
+  TS_REQUEST_REOPEN,
+  TS_SUBMIT,
+  useKeys,
+  weekText,
+} from './shared';
 import type { Line, SheetDetail, SheetSummary } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -23,7 +48,7 @@ export function SheetFacts({ s }: { s: SheetDetail }) {
       <Item term="Due">{formatDate(s.dueDate)}</Item>
       <Item term="Status">
         <StateBadge state={s.state} />
-        {s.pendingWith && <div className="hint">with {s.pendingWith}</div>}
+        {s.pendingWith && <Remark>with {s.pendingWith}</Remark>}
       </Item>
       <Item term="Current revision">{s.currentRevision}</Item>
       <Item term="Approved revision in force">{s.approvedRevision ?? '—'}</Item>
@@ -42,56 +67,56 @@ export function SheetFacts({ s }: { s: SheetDetail }) {
 
 export function RevisionTable({ s, onShow }: { s: SheetDetail; onShow: (revision: number) => void }) {
   return (
-    <div style={SCROLL}>
-      <table aria-label="Revisions">
-        <thead>
-          <tr>
-            <th>Revision</th>
-            <th>Origin</th>
-            <th>Status</th>
-            <th>Submitted</th>
-            <th>Decided</th>
-            <th>Lines and time</th>
-            <th>Show</th>
-          </tr>
-        </thead>
-        <tbody>
-          {s.revisions.map((r) => (
-            <tr key={r.revision}>
-              <td>
-                {r.revision}
-                {r.revision === s.approvedRevision && <div className="hint">approved revision in force</div>}
-              </td>
-              <td>
-                {ORIGIN_LABEL[r.origin] ?? readable(r.origin)}
-                {r.previousRevision !== null && <div className="hint">follows revision {r.previousRevision}</div>}
-              </td>
-              <td>
-                <StateBadge state={r.state} />
-                {r.supersededByRevision !== null && <div className="hint">superseded by revision {r.supersededByRevision}</div>}
-              </td>
-              <td>{r.submittedOn ? `${formatDate(r.submittedOn)} · ${lateText(r.late)}` : '—'}</td>
-              <td>
-                <When at={r.decidedAt} />
-                {r.decisionReason && <div className="hint">Reason: {r.decisionReason}</div>}
-              </td>
-              <td>
-                {r.lineCount} lines · {hm(r.totalMinutes)}
-              </td>
-              <td>
-                {r.revision === s.shownRevision ? (
-                  'Shown'
-                ) : (
-                  <button type="button" className="secondary" onClick={() => onShow(r.revision)}>
+    <Table aria-label="Revisions">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Revision</TableHead>
+          <TableHead scope="col">Origin</TableHead>
+          <TableHead scope="col">Status</TableHead>
+          <TableHead scope="col">Submitted</TableHead>
+          <TableHead scope="col">Decided</TableHead>
+          <TableHead scope="col">Lines and time</TableHead>
+          <TableHead scope="col">Show</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {s.revisions.map((r) => (
+          <TableRow key={r.revision}>
+            <TableCell>
+              {r.revision}
+              {r.revision === s.approvedRevision && <Remark>approved revision in force</Remark>}
+            </TableCell>
+            <TableCell>
+              {ORIGIN_LABEL[r.origin] ?? readable(r.origin)}
+              {r.previousRevision !== null && <Remark>follows revision {r.previousRevision}</Remark>}
+            </TableCell>
+            <TableCell>
+              <StateBadge state={r.state} />
+              {r.supersededByRevision !== null && <Remark>superseded by revision {r.supersededByRevision}</Remark>}
+            </TableCell>
+            <TableCell>{r.submittedOn ? `${formatDate(r.submittedOn)} · ${lateText(r.late)}` : '—'}</TableCell>
+            <TableCell>
+              <When at={r.decidedAt} />
+              {r.decisionReason && <Remark>Reason: {r.decisionReason}</Remark>}
+            </TableCell>
+            <TableCell>
+              {r.lineCount} lines · {hm(r.totalMinutes)}
+            </TableCell>
+            <RowActionsCell>
+              {r.revision === s.shownRevision ? (
+                'Shown'
+              ) : (
+                <RowActions>
+                  <Button type="button" variant="outline" size="sm" onClick={() => onShow(r.revision)}>
                     Show revision {r.revision}
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                  </Button>
+                </RowActions>
+              )}
+            </RowActionsCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -99,40 +124,38 @@ export function LinesTable({ s, actions }: { s: SheetDetail; actions?: (l: Line)
   if (s.lines.length === 0) return <Empty>No lines in revision {s.shownRevision}.</Empty>;
   return (
     <>
-      <div style={SCROLL}>
-        <table aria-label={`Lines of revision ${s.shownRevision}`}>
-          <thead>
-            <tr>
-              <th>Work date</th>
-              <th>Project and job</th>
-              <th>Activity</th>
-              <th>Time</th>
-              <th>Note</th>
-              {actions && <th>Change</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {s.lines.map((l) => (
-              <tr key={l.id}>
-                <td>{formatDate(l.workDate)}</td>
-                <td>
-                  {l.projectCode} / {l.jobCode}: {l.jobName}
-                </td>
-                <td>
-                  {l.activityCode}: {l.activityName}
-                  <div className="hint">{l.productive ? 'productive' : 'not productive'}</div>
-                </td>
-                <td>{hm(l.minutes)}</td>
-                <td>{l.note ?? '—'}</td>
-                {actions && <td>{actions(l)}</td>}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="hint">
+      <Table aria-label={`Lines of revision ${s.shownRevision}`}>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Work date</TableHead>
+            <TableHead scope="col">Project and job</TableHead>
+            <TableHead scope="col">Activity</TableHead>
+            <TableHead scope="col">Time</TableHead>
+            <TableHead scope="col">Note</TableHead>
+            {actions && <TableHead scope="col">Change</TableHead>}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {s.lines.map((l) => (
+            <TableRow key={l.id}>
+              <TableCell>{formatDate(l.workDate)}</TableCell>
+              <TableCell>
+                {l.projectCode} / {l.jobCode}: {l.jobName}
+              </TableCell>
+              <TableCell>
+                {l.activityCode}: {l.activityName}
+                <Remark>{l.productive ? 'productive' : 'not productive'}</Remark>
+              </TableCell>
+              <TableCell>{hm(l.minutes)}</TableCell>
+              <TableCell>{l.note ?? '—'}</TableCell>
+              {actions && <RowActionsCell>{actions(l)}</RowActionsCell>}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      <Hint>
         Daily totals: {s.dailyTotals.map((d) => `${formatDate(d.workDate)} ${d.hours} h`).join(' · ')} · Revision total {hm(s.totalMinutes)}
-      </p>
+      </Hint>
     </>
   );
 }
@@ -140,7 +163,7 @@ export function LinesTable({ s, actions }: { s: SheetDetail; actions?: (l: Line)
 export function SheetHistory({ s }: { s: SheetDetail }) {
   return (
     <>
-      <h3 style={H3}>Decisions</h3>
+      <CardSubheading>Decisions</CardSubheading>
       {s.decisions.length === 0 ? (
         <Empty>No decisions yet.</Empty>
       ) : (
@@ -152,7 +175,7 @@ export function SheetHistory({ s }: { s: SheetDetail }) {
           ))}
         </ul>
       )}
-      <h3 style={H3}>Reopen requests</h3>
+      <CardSubheading>Reopen requests</CardSubheading>
       {s.reopenRequests.length === 0 ? (
         <Empty>No reopen requests.</Empty>
       ) : (
@@ -167,7 +190,7 @@ export function SheetHistory({ s }: { s: SheetDetail }) {
                 </>
               )}
               {r.newRevision !== null && ` · correction opened as revision ${r.newRevision}`}
-              <div className="hint">Reason: {r.reason}</div>
+              <Remark>Reason: {r.reason}</Remark>
             </li>
           ))}
         </ul>
@@ -198,7 +221,7 @@ export function ReopenRequestForm({ s }: { s: SheetDetail }) {
     return (
       <>
         <Notice notice={notice} />
-        <p className="hint">A reopen request is waiting for an independent HR reviewer.</p>
+        <Hint>A reopen request is waiting for an independent HR reviewer.</Hint>
       </>
     );
   const submit = (e: FormEvent) => {
@@ -213,18 +236,18 @@ export function ReopenRequestForm({ s }: { s: SheetDetail }) {
     send.mutate({ reason: reason.trim() });
   };
   return (
-    <form aria-label="Request a reopen" onSubmit={submit} noValidate className="stack" style={SPACED}>
-      <label>
+    <form aria-label="Request a reopen" onSubmit={submit} noValidate className="stack mt-3">
+      <FormField>
         Reason for reopening the approved timesheet
-        <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
+        <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
       <Problem text={problem} />
       <Refusal error={send.error} act="reopen-request" />
       <Notice notice={notice} />
       <div>
-        <button type="submit" disabled={send.isPending}>
+        <Button type="submit" disabled={send.isPending}>
           Request reopen
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -255,14 +278,14 @@ export function TimesheetScreen() {
         <Link to={PATHS.timesheets}>All timesheets</Link>
       </p>
       <Section title={s ? `Timesheet of ${s.employeeName} for ${weekText(s)}` : 'Timesheet'}>
-        {detail.isPending && <p className="hint loading">Loading the timesheet…</p>}
+        {detail.isPending && <LoadingLine>Loading the timesheet…</LoadingLine>}
         <ReadProblem error={detail.error} what="this timesheet" />
         {s && (
           <>
             <SheetFacts s={s} />
-            <h3 style={H3}>Revisions</h3>
+            <CardSubheading>Revisions</CardSubheading>
             <RevisionTable s={s} onShow={(r) => setParams(r === s.currentRevision ? {} : { revision: String(r) })} />
-            <h3 style={H3}>Lines of revision {s.shownRevision}</h3>
+            <CardSubheading>Lines of revision {s.shownRevision}</CardSubheading>
             <LinesTable s={s} />
             <SheetHistory s={s} />
             <ReopenRequestForm s={s} />
@@ -297,40 +320,40 @@ export function TimesheetsScreen() {
   const own = me?.scopeKind === 'OWN';
   return (
     // An own-scope list gets a heading of its own ("Timesheets" is the page's title, which a card of that name would hide), and
-    // filling in is the card's main action (styles.css: .card-header > a.primary).
+    // filling in is the card's main action, so its link is drawn as the filled main button.
     <Section
       title={own ? 'My timesheets' : 'Timesheets'}
       actions={
         fillOwn ? (
-          <Link className="primary" to="/me?tab=TN13">
-            Fill in my timesheet
-          </Link>
+          <Button asChild size="sm">
+            <Link to="/me?tab=TN13">Fill in my timesheet</Link>
+          </Button>
         ) : undefined
       }
     >
-      <div className="row">
-        <label>
+      <FilterBar>
+        <FormField>
           Status
-          <select value={state} onChange={(e) => setState(e.target.value)}>
+          <NativeSelect value={state} onChange={(e) => setState(e.target.value)}>
             <option value="">All</option>
             {SHEET_STATES.map((st) => (
               <option key={st} value={st}>
                 {readable(st)}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Weeks from
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </FormField>
+        <FormField>
           Weeks to
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-      </div>
+          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </FormField>
+      </FilterBar>
       <ReadProblem error={list.error} what="timesheets" />
-      {list.isPending && <p className="hint loading">Loading timesheets…</p>}
+      {list.isPending && <LoadingLine>Loading timesheets…</LoadingLine>}
       {data && data.items.length === 0 && (
         <Empty>{own && !state && !from && !to ? 'You haven’t filled in a timesheet yet.' : 'No timesheets match these filters.'}</Empty>
       )}
@@ -342,54 +365,54 @@ export function TimesheetsScreen() {
 
 export function SheetTable({ items, link, onOpen }: { items: SheetSummary[]; link?: boolean; onOpen?: (id: string) => void }) {
   return (
-    <div style={SCROLL}>
-      <table aria-label="Timesheet weeks">
-        <thead>
-          <tr>
-            {link && <th>Employee</th>}
-            <th>Week</th>
-            <th>Due</th>
-            <th>Status</th>
-            <th>Revision</th>
-            <th>Submission</th>
-            <th>Time (current revision)</th>
-            <th>Approved time</th>
-            <th>Open</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((s) => (
-            <tr key={s.id}>
-              {link && (
-                <td>
-                  {s.employeeName} ({s.employeeCode})
-                </td>
-              )}
-              <td>{weekText(s)}</td>
-              <td>{formatDate(s.dueDate)}</td>
-              <td>
-                <StateBadge state={s.state} />
-              </td>
-              <td>
-                {s.currentRevision}
-                {s.approvedRevision !== null && s.approvedRevision !== s.currentRevision && <div className="hint">approved: {s.approvedRevision}</div>}
-              </td>
-              <td>{s.firstSubmittedAt ? lateText(s.late) : 'Not yet submitted'}</td>
-              <td>{hm(s.totalMinutes)}</td>
-              <td>{s.approvedRevision !== null ? hm(s.approvedMinutes) : '—'}</td>
-              <td>
-                {link ? (
-                  <Link to={PATHS.timesheet(s.id)}>Open week {formatDate(s.periodStart)}</Link>
-                ) : (
-                  <button type="button" className="secondary" onClick={() => onOpen?.(s.id)}>
+    <Table aria-label="Timesheet weeks">
+      <TableHeader>
+        <TableRow>
+          {link && <TableHead scope="col">Employee</TableHead>}
+          <TableHead scope="col">Week</TableHead>
+          <TableHead scope="col">Due</TableHead>
+          <TableHead scope="col">Status</TableHead>
+          <TableHead scope="col">Revision</TableHead>
+          <TableHead scope="col">Submission</TableHead>
+          <TableHead scope="col">Time (current revision)</TableHead>
+          <TableHead scope="col">Approved time</TableHead>
+          <TableHead scope="col">Open</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((s) => (
+          <TableRow key={s.id}>
+            {link && (
+              <TableCell>
+                {s.employeeName} ({s.employeeCode})
+              </TableCell>
+            )}
+            <TableCell>{weekText(s)}</TableCell>
+            <TableCell>{formatDate(s.dueDate)}</TableCell>
+            <TableCell>
+              <StateBadge state={s.state} />
+            </TableCell>
+            <TableCell>
+              {s.currentRevision}
+              {s.approvedRevision !== null && s.approvedRevision !== s.currentRevision && <Remark>approved: {s.approvedRevision}</Remark>}
+            </TableCell>
+            <TableCell>{s.firstSubmittedAt ? lateText(s.late) : 'Not yet submitted'}</TableCell>
+            <TableCell>{hm(s.totalMinutes)}</TableCell>
+            <TableCell>{s.approvedRevision !== null ? hm(s.approvedMinutes) : '—'}</TableCell>
+            <RowActionsCell>
+              {link ? (
+                <Link to={PATHS.timesheet(s.id)}>Open week {formatDate(s.periodStart)}</Link>
+              ) : (
+                <RowActions>
+                  <Button type="button" variant="outline" size="sm" onClick={() => onOpen?.(s.id)}>
                     Open week {formatDate(s.periodStart)}
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                  </Button>
+                </RowActions>
+              )}
+            </RowActionsCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

@@ -5,7 +5,17 @@
 // CA authorises the packs, so the screen mostly shows why a file is not configured, in the server's words; it computes nothing. Every
 // action re-checks its own keys and the server re-checks every call.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleAlertIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, download, formatDate, localDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -116,6 +126,12 @@ const STATE_WORDS: Readonly<Record<Format['state'], string>> = { AWAITING_VALIDA
 const plain = (code: string) => code.replace(/_/g, ' ').toLowerCase();
 const label = (key: string) => key.replace(/([A-Z])/g, ' $1').toLowerCase();
 
+// The screen's own layout pieces, as utility classes and small components (shadcn/ui move, 20 Nov 2026).
+/** The server's notes on a file, as muted lines (the old `ul.hint`). */
+const NOTE_LIST = 'm-0 pl-5 text-[0.84rem] text-muted-foreground';
+/** A synthetic sample exactly as rendered: its lines kept whole in a quiet box that scrolls sideways when a line is long. */
+const SAMPLE_FILE = 'overflow-x-auto rounded-md border border-border bg-muted p-3 text-[0.8rem]';
+
 /** The financial year (April to March) of a day, written 2026-27. */
 export function fiscalYearOf(day: string): string {
   const y = Number(day.slice(0, 4));
@@ -129,18 +145,30 @@ export function periodQuery(kind: StatutoryOutput['period'], p: { runId: string;
   return kind === 'QUARTER' ? `fiscalYear=${encodeURIComponent(p.fiscalYear)}&quarter=${p.quarter}` : `fiscalYear=${encodeURIComponent(p.fiscalYear)}&half=${p.half}`;
 }
 
+/** What the period chooser reads: a run picked from the list or given by its id, or every run of a quarter or contribution period. */
+function periodHint(kind: StatutoryOutput['period'], runsListed: boolean): string {
+  if (kind !== 'RUN') return `Every processed payroll run of ${PERIOD_WORDS[kind]} is read.`;
+  return runsListed ? 'Processed (locked) runs, most recent first.' : 'A processed (locked) run; its id is on the payroll run’s page.';
+}
+
+/** Why a file is not configured: a status (it is the output's state, not a failed action), drawn as a problem with its list. */
 function MissingList({ missing }: { missing: Missing[] }) {
   return (
-    <div className="error" role="status">
-      <strong>Not configured.</strong>
-      <ul>
-        {missing.map((m) => (
-          <li key={`${m.code}-${m.pack ?? ''}`}>
-            {MISSING_TEXT[m.code] ?? plain(m.code)} ({m.message})
-          </li>
-        ))}
-      </ul>
-    </div>
+    <Alert variant="destructive" role="status">
+      <CircleAlertIcon aria-hidden="true" />
+      <AlertTitle asChild>
+        <strong>Not configured.</strong>
+      </AlertTitle>
+      <AlertDescription asChild className="block">
+        <ul className="m-0 pl-5">
+          {missing.map((m) => (
+            <li key={`${m.code}-${m.pack ?? ''}`}>
+              {MISSING_TEXT[m.code] ?? plain(m.code)} ({m.message})
+            </li>
+          ))}
+        </ul>
+      </AlertDescription>
+    </Alert>
   );
 }
 
@@ -170,94 +198,90 @@ function PeriodFile({ output }: { output: StatutoryOutput }) {
   const s = status.data;
   return (
     <Section title="File for a period">
-      <form
-        className="filters"
-        aria-label="Period"
-        onSubmit={(e: FormEvent) => {
-          e.preventDefault();
-          save.reset();
-          setShown(periodQuery(output.period, form));
-        }}
-      >
-        {output.period === 'RUN' &&
-          (pickable.length > 0 ? (
-            <label>
-              Payroll run
-              <select value={form.runId} onChange={(e) => setForm((f) => ({ ...f, runId: e.target.value }))} required>
-                <option value="">Choose a run…</option>
-                {pickable.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.periodCode} · revision {r.revision}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <label>
-              Payroll run id
-              <input value={form.runId} onChange={(e) => setForm((f) => ({ ...f, runId: e.target.value }))} required />
-            </label>
-          ))}
-        {output.period !== 'RUN' && (
-          <label>
-            Financial year
-            <input value={form.fiscalYear} onChange={(e) => setForm((f) => ({ ...f, fiscalYear: e.target.value }))} required pattern="\d{4}-\d{2}" placeholder="2026-27" />
-          </label>
-        )}
-        {output.period === 'QUARTER' && (
-          <label>
-            Quarter
-            <select value={form.quarter} onChange={(e) => setForm((f) => ({ ...f, quarter: e.target.value }))}>
-              <option value="1">Q1 (April to June)</option>
-              <option value="2">Q2 (July to September)</option>
-              <option value="3">Q3 (October to December)</option>
-              <option value="4">Q4 (January to March)</option>
-            </select>
-          </label>
-        )}
-        {output.period === 'HALF_YEAR' && (
-          <label>
-            Contribution period
-            <select value={form.half} onChange={(e) => setForm((f) => ({ ...f, half: e.target.value }))}>
-              <option value="1">April to September</option>
-              <option value="2">October to March</option>
-            </select>
-          </label>
-        )}
-        <button type="submit">Show status</button>
-      </form>
-      <p className="hint">
-        {output.period === 'RUN'
-          ? pickable.length > 0
-            ? 'Processed (locked) runs, most recent first.'
-            : 'A processed (locked) run; its id is on the payroll run’s page.'
-          : `Every processed payroll run of ${PERIOD_WORDS[output.period]} is read.`}
-      </p>
-      {!can(REPORT_READ) && <p className="hint">The status of a period needs the payroll report duty.</p>}
+      <FilterBar asChild>
+        <form
+          aria-label="Period"
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            save.reset();
+            setShown(periodQuery(output.period, form));
+          }}
+        >
+          {output.period === 'RUN' &&
+            (pickable.length > 0 ? (
+              <FormField>
+                Payroll run
+                <NativeSelect value={form.runId} onChange={(e) => setForm((f) => ({ ...f, runId: e.target.value }))} required>
+                  <option value="">Choose a run…</option>
+                  {pickable.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.periodCode} · revision {r.revision}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </FormField>
+            ) : (
+              <FormField>
+                Payroll run id
+                <Input value={form.runId} onChange={(e) => setForm((f) => ({ ...f, runId: e.target.value }))} required />
+              </FormField>
+            ))}
+          {output.period !== 'RUN' && (
+            <FormField>
+              Financial year
+              <Input value={form.fiscalYear} onChange={(e) => setForm((f) => ({ ...f, fiscalYear: e.target.value }))} required pattern="\d{4}-\d{2}" placeholder="2026-27" />
+            </FormField>
+          )}
+          {output.period === 'QUARTER' && (
+            <FormField>
+              Quarter
+              <NativeSelect value={form.quarter} onChange={(e) => setForm((f) => ({ ...f, quarter: e.target.value }))}>
+                <option value="1">Q1 (April to June)</option>
+                <option value="2">Q2 (July to September)</option>
+                <option value="3">Q3 (October to December)</option>
+                <option value="4">Q4 (January to March)</option>
+              </NativeSelect>
+            </FormField>
+          )}
+          {output.period === 'HALF_YEAR' && (
+            <FormField>
+              Contribution period
+              <NativeSelect value={form.half} onChange={(e) => setForm((f) => ({ ...f, half: e.target.value }))}>
+                <option value="1">April to September</option>
+                <option value="2">October to March</option>
+              </NativeSelect>
+            </FormField>
+          )}
+          <Button type="submit">Show status</Button>
+        </form>
+      </FilterBar>
+      <Hint>{periodHint(output.period, pickable.length > 0)}</Hint>
+      {!can(REPORT_READ) && <Hint>The status of a period needs the payroll report duty.</Hint>}
       <ErrorNote error={status.error} />
       {s?.status === 'NOT_CONFIGURED' && <MissingList missing={s.missing} />}
+      {/* The problems said inside the file's status have no role of their own: the status around them is announced. */}
       {s?.status === 'AVAILABLE' && (
-        <div role="status" aria-label="File status">
-          <p>
+        <div role="status" aria-label="File status" className="flex flex-col gap-3">
+          <p className="m-0">
             Available for {s.period.label} ({formatDate(s.period.from)} to {formatDate(s.period.to)}), from {s.packs.map((p) => `${p.packCode} revision ${p.packRevision}`).join(', ') || 'no pinned pack'} in the accepted format{' '}
             {s.format ? `${s.format.formatReference} (revision ${s.format.revision})` : ''}.
           </p>
-          {s.selfIncluded && <p className="error">Your own pay is in this file: someone else must produce it.</p>}
-          {s.rowCount !== null && s.rowCount !== undefined && <p>{s.rowCount === 1 ? '1 row.' : `${s.rowCount} rows.`}</p>}
+          {s.selfIncluded && <StatusNote tone="error">Your own pay is in this file: someone else must produce it.</StatusNote>}
+          {s.rowCount !== null && s.rowCount !== undefined && <p className="m-0">{s.rowCount === 1 ? '1 row.' : `${s.rowCount} rows.`}</p>}
           {s.totals && (
-            <table aria-label="Totals">
-              <tbody>
+            <Table aria-label="Totals">
+              <TableBody>
                 {Object.entries(s.totals).map(([key, value]) => (
-                  <tr key={key}>
-                    <th scope="row">{label(key)}</th>
-                    <td>{String(value)}</td>
-                  </tr>
+                  <TableRow key={key}>
+                    <TableHead scope="row">{label(key)}</TableHead>
+                    <TableCell className="whitespace-nowrap">{String(value)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
           {s.warnings.length > 0 && (
-            <ul className="hint" aria-label="Notes">
+            <ul className={NOTE_LIST} aria-label="Notes">
               {s.warnings.map((w, i) => (
                 <li key={`${w.code}-${i}`}>
                   {w.detail ?? plain(w.code)}
@@ -268,45 +292,45 @@ function PeriodFile({ output }: { output: StatutoryOutput }) {
           )}
           {s.rowErrors && s.rowErrors.length > 0 && (
             <>
-              <p className="error">No file is produced while a row has an error. Correct these and show the status again.</p>
-              <table aria-label="Row errors">
-                <thead>
-                  <tr>
-                    <th scope="col">Employee</th>
-                    <th scope="col">Problem</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <StatusNote tone="error">No file is produced while a row has an error. Correct these and show the status again.</StatusNote>
+              <Table aria-label="Row errors">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Employee</TableHead>
+                    <TableHead scope="col">Problem</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {s.rowErrors.map((r, i) => (
-                    <tr key={`${r.employeeCode}-${r.code}-${i}`}>
-                      <td>{r.employeeCode}</td>
-                      <td>
+                    <TableRow key={`${r.employeeCode}-${r.code}-${i}`}>
+                      <TableCell>{r.employeeCode}</TableCell>
+                      <TableCell>
                         {ROW_ERROR_TEXT[r.code] ?? plain(r.code)}
                         {r.field && !ROW_ERROR_TEXT[r.code] ? ` (${r.field})` : ''}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </>
           )}
           {(s.identifierErrorsWithheld ?? 0) > 0 && (
-            <p className="error">
+            <StatusNote tone="error">
               {s.identifierErrorsWithheld === 1 ? '1 row has' : `${s.identifierErrorsWithheld} rows have`} a missing, invalid or unreadable UAN or IP number. No file is produced until it is
               corrected; seeing which needs the payroll identifier read duty.
-            </p>
+            </StatusNote>
           )}
           {s.ready && mayDownload && (
-            <div className="filters">
+            <ButtonRow>
               {(s.files ?? []).map((f) => (
-                <button key={f.format} type="button" disabled={save.isPending} onClick={() => save.mutate(f.format)}>
+                <Button key={f.format} type="button" disabled={save.isPending} onClick={() => save.mutate(f.format)}>
                   Download {f.format.toUpperCase()}
-                </button>
+                </Button>
               ))}
-            </div>
+            </ButtonRow>
           )}
-          {s.ready && !mayDownload && <p className="hint">Downloading needs the payroll report export duty{output.identifiers ? ' and the payroll identifier read duty (the file carries UAN or IP numbers)' : ''}.</p>}
-          {s.ready && <p className="hint">The file name says which pinned pack revisions it was produced from. Every download is recorded.</p>}
+          {s.ready && !mayDownload && <Hint>Downloading needs the payroll report export duty{output.identifiers ? ' and the payroll identifier read duty (the file carries UAN or IP numbers)' : ''}.</Hint>}
+          {s.ready && <Hint>The file name says which pinned pack revisions it was produced from. Every download is recorded.</Hint>}
         </div>
       )}
       <ErrorNote error={save.error} />
@@ -331,46 +355,46 @@ function FormatSample({ format }: { format: Format }) {
     },
   });
   return (
-    <div aria-label={`Sample of revision ${format.revision}`}>
+    <div aria-label={`Sample of revision ${format.revision}`} className="flex flex-col gap-3">
       <ErrorNote error={sample.error} />
       {sample.data && (
         <>
-          <p className="hint">
+          {/* The sample hash is one long word: it may break anywhere, or it runs out of the card on a phone. */}
+          <Hint className="wrap-anywhere">
             Synthetic rows, not for filing, rendered exactly as a file would be. Sample hash {sample.data.sampleHash}.
             {!sample.data.matchesRecorded && ' This build renders a different sample than the format was set up with: set up a new revision.'}
-          </p>
+          </Hint>
           {sample.data.files
             .filter((f) => f.content !== undefined)
             .map((f) => (
-              <pre key={f.format} aria-label={`Sample ${f.format}`}>
+              <pre key={f.format} aria-label={`Sample ${f.format}`} className={SAMPLE_FILE}>
                 {f.content}
               </pre>
             ))}
-          <div className="filters">
+          <ButtonRow>
             {sample.data.files.map((f) => (
-              <button key={f.format} type="button" disabled={save.isPending} onClick={() => save.mutate(f.format)}>
+              <Button key={f.format} type="button" disabled={save.isPending} onClick={() => save.mutate(f.format)}>
                 Download sample {f.format.toUpperCase()}
-              </button>
+              </Button>
             ))}
-          </div>
+          </ButtonRow>
           <ErrorNote error={save.error} />
           {can(ACCEPT) && sample.data.matchesRecorded && (
-            <form
-              className="grid-form"
+            <FormGrid
               aria-label={`Accept revision ${format.revision}`}
               onSubmit={(e: FormEvent) => {
                 e.preventDefault();
                 if (!accept.isPending) accept.mutate();
               }}
             >
-              <label>
+              <FormField>
                 Validation reference
-                <input value={reference} onChange={(e) => setReference(e.target.value)} required maxLength={500} placeholder="For example the portal validator’s run or the CA’s note" />
-              </label>
-              <button type="submit" disabled={accept.isPending}>
+                <Input value={reference} onChange={(e) => setReference(e.target.value)} required maxLength={500} placeholder="For example the portal validator’s run or the CA’s note" />
+              </FormField>
+              <Button type="submit" disabled={accept.isPending}>
                 Accept this format
-              </button>
-            </form>
+              </Button>
+            </FormGrid>
           )}
           <ErrorNote error={accept.error} />
         </>
@@ -387,23 +411,22 @@ function Withdraw({ format }: { format: Format }) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['statutory-files'] }),
   });
   return (
-    <form
-      className="filters"
+    <FormGrid
       aria-label={`Withdraw revision ${format.revision}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         if (!withdraw.isPending) withdraw.mutate();
       }}
     >
-      <label>
+      <FormField>
         Reason
-        <input value={reason} onChange={(e) => setReason(e.target.value)} required maxLength={500} />
-      </label>
-      <button type="submit" disabled={withdraw.isPending}>
+        <Input value={reason} onChange={(e) => setReason(e.target.value)} required maxLength={500} />
+      </FormField>
+      <Button type="submit" disabled={withdraw.isPending}>
         Withdraw
-      </button>
+      </Button>
       <ErrorNote error={withdraw.error} />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -427,48 +450,50 @@ function OutputFormats({ output }: { output: StatutoryOutput }) {
   const inForce = formats.data?.inForce[0];
   return (
     <Section title="Accepted format">
-      <p className="hint">
+      <Hint>
         A format is the published layout the company files to (for example ECR 2.0). One person sets it up; another validates its synthetic sample against the portal’s validator or the specification and
         accepts it with a reference. Formats are never edited: a change is a new revision.
-      </p>
+      </Hint>
       <ErrorNote error={formats.error} />
       {formats.isSuccess && !inForce?.format && <Empty>No accepted format is in force for this output.</Empty>}
       {inForce?.format && (
-        <p role="status">
+        <StatusNote tone="info" role="status">
           In force: {inForce.format.formatReference} (revision {inForce.format.revision}, from {formatDate(inForce.format.effectiveFrom)}){inForce.sampleCurrent === false ? ', but the layout has changed since: it does not apply.' : '.'}
-        </p>
+        </StatusNote>
       )}
       {formats.data && formats.data.items.length > 0 && (
-        <table aria-label="Format revisions">
-          <thead>
-            <tr>
-              <th scope="col">Revision</th>
-              <th scope="col">Format reference</th>
-              <th scope="col">From</th>
-              <th scope="col">State</th>
-              <th scope="col">Validation reference</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table aria-label="Format revisions">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Revision</TableHead>
+              <TableHead scope="col">Format reference</TableHead>
+              <TableHead scope="col">From</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Validation reference</TableHead>
+              <TableHead scope="col">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {formats.data.items.map((f) => (
-              <tr key={f.id}>
-                <td>{f.revision}</td>
-                <td>{f.formatReference}</td>
-                <td>{formatDate(f.effectiveFrom)}</td>
-                <td>{STATE_WORDS[f.state]}</td>
-                <td>{f.validationReference ?? f.withdrawalReason ?? '—'}</td>
-                <td>
+              <TableRow key={f.id}>
+                <TableCell>{f.revision}</TableCell>
+                <TableCell>{f.formatReference}</TableCell>
+                <TableCell className="whitespace-nowrap">{formatDate(f.effectiveFrom)}</TableCell>
+                <TableCell>{STATE_WORDS[f.state]}</TableCell>
+                <TableCell>{f.validationReference ?? f.withdrawalReason ?? '—'}</TableCell>
+                <RowActionsCell>
                   {f.state === 'AWAITING_VALIDATION' && (
-                    <button type="button" onClick={() => setOpen(open === f.id ? null : f.id)}>
-                      {open === f.id ? 'Hide sample' : 'Sample'}
-                    </button>
+                    <RowActions>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(open === f.id ? null : f.id)}>
+                        {open === f.id ? 'Hide sample' : 'Sample'}
+                      </Button>
+                    </RowActions>
                   )}
-                </td>
-              </tr>
+                </RowActionsCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       {formats.data?.items
         .filter((f) => f.id === open && f.state === 'AWAITING_VALIDATION')
@@ -480,31 +505,30 @@ function OutputFormats({ output }: { output: StatutoryOutput }) {
           .filter((f) => f.state !== 'WITHDRAWN')
           .map((f) => <Withdraw key={f.id} format={f} />)}
       {can(DEFINE) && (
-        <form
-          className="grid-form"
+        <FormGrid
           aria-label="Set up a format"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             if (!create.isPending) create.mutate();
           }}
         >
-          <label>
+          <FormField>
             Format reference
-            <input value={form.formatReference} onChange={(e) => setForm((x) => ({ ...x, formatReference: e.target.value }))} required maxLength={200} />
-          </label>
-          <label>
+            <Input value={form.formatReference} onChange={(e) => setForm((x) => ({ ...x, formatReference: e.target.value }))} required maxLength={200} />
+          </FormField>
+          <FormField>
             Effective from
-            <input type="date" value={form.effectiveFrom} onChange={(e) => setForm((x) => ({ ...x, effectiveFrom: e.target.value }))} required />
-          </label>
-          <label>
+            <Input type="date" value={form.effectiveFrom} onChange={(e) => setForm((x) => ({ ...x, effectiveFrom: e.target.value }))} required />
+          </FormField>
+          <FormField>
             Note
-            <input value={form.note} onChange={(e) => setForm((x) => ({ ...x, note: e.target.value }))} maxLength={500} />
-          </label>
-          <button type="submit" disabled={create.isPending}>
+            <Input value={form.note} onChange={(e) => setForm((x) => ({ ...x, note: e.target.value }))} maxLength={500} />
+          </FormField>
+          <Button type="submit" disabled={create.isPending}>
             Set up format
-          </button>
+          </Button>
           <ErrorNote error={create.error} />
-        </form>
+        </FormGrid>
       )}
     </Section>
   );
@@ -523,20 +547,28 @@ export function StatutoryFilesPage() {
         <ErrorNote error={outputs.error} />
         {output && (
           <>
-            <form className="filters" aria-label="Output" onSubmit={(e: FormEvent) => e.preventDefault()}>
-              <label>
-                Output
-                <select value={output.code} onChange={(e) => setCode(e.target.value)}>
-                  {items.map((o) => (
-                    <option key={o.code} value={o.code}>
-                      {o.title} ({o.clause})
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </form>
-            <p className="hint">{output.notice}</p>
-            {output.status === 'NOT_CONFIGURED' ? <MissingList missing={output.missing} /> : <p role="status">Configured today: an active pack and an accepted format are in force.</p>}
+            <FilterBar asChild>
+              <form aria-label="Output" onSubmit={(e: FormEvent) => e.preventDefault()}>
+                <FormField>
+                  Output
+                  <NativeSelect value={output.code} onChange={(e) => setCode(e.target.value)}>
+                    {items.map((o) => (
+                      <option key={o.code} value={o.code}>
+                        {o.title} ({o.clause})
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </FormField>
+              </form>
+            </FilterBar>
+            <Hint>{output.notice}</Hint>
+            {output.status === 'NOT_CONFIGURED' ? (
+              <MissingList missing={output.missing} />
+            ) : (
+              <StatusNote tone="info" role="status">
+                Configured today: an active pack and an accepted format are in force.
+              </StatusNote>
+            )}
           </>
         )}
       </Section>

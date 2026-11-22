@@ -2,13 +2,22 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ConfirmBox } from '@/components/confirm-box';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, LIST_PAGE_SIZE, NotPermitted, Pager, Section, StateBadge } from '../../ui';
 import { DecisionTrail, ExitFacts, ExitHistory, WithdrawalList } from './exits';
 import { ProcessView } from './process-view';
 import { type Act, type Done, Refusal, reportGone } from './refusals';
-import { EXIT_READ, EXIT_SUBMIT, FLUSH, H3, inOwnContext, ISO_DATE, Loading, Notice, type NoticeState, OPEN_EXIT_STATES, type Paged, pagedUrl, Problem, PROCESS_READ, QueryProblem, ReasonField, SCROLL, shown, totalOf, typeLabel, useKeys } from './shared';
+import { EXIT_READ, EXIT_SUBMIT, inOwnContext, ISO_DATE, Notice, type NoticeState, OPEN_EXIT_STATES, type Paged, pagedUrl, Problem, PROCESS_READ, QueryProblem, ReasonField, shown, totalOf, typeLabel, useKeys } from './shared';
 import type { ExitDetail, ProcessSummary, ResignationResult } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -57,14 +66,14 @@ function OwnResignation() {
   return (
     <Section title="Resignation">
       <Notice notice={notice} />
-      {loading && <Loading>Loading your resignations…</Loading>}
+      {loading && <LoadingLine>Loading your resignations…</LoadingLine>}
       {canRead && <QueryProblem error={exits.error} forbidden="Your Employee role cannot view resignations." />}
       {/* With no open resignation the form says what to do; the empty note is only for a role that cannot resign. */}
       {current ? <OwnExitCard exit={current} canAct={canSubmit} onDone={done} /> : items && !canSubmit && <Empty>You have no open resignation.</Empty>}
       {canSubmit && !current && !loading && <ResignationForm onDone={done} />}
       {earlier.length > 0 && (
         <div className="stack">
-          <h3 style={H3}>Earlier resignations</h3>
+          <CardSubheading>Earlier resignations</CardSubheading>
           <ul className="tasks" aria-label="Earlier resignations">
             {earlier.map((x) => (
               <li key={x.id}>
@@ -116,13 +125,11 @@ function OwnExitCard({ exit: x, canAct, onDone }: { exit: ExitDetail; canAct: bo
       <ExitFacts x={x} ownView />
       {canWithdraw && (
         <div className="stack">
-          <p className="hint" style={FLUSH}>
-            Until HR decides, you can withdraw your resignation yourself.
-          </p>
+          <Hint className="m-0">Until HR decides, you can withdraw your resignation yourself.</Hint>
           <div>
-            <button type="button" className="danger" disabled={withdraw.isPending} onClick={() => withdraw.mutate()}>
+            <Button type="button" variant="danger" disabled={withdraw.isPending} onClick={() => withdraw.mutate()}>
               Withdraw my resignation
-            </button>
+            </Button>
           </div>
           <Refusal error={withdraw.error} action="withdraw" except={OWN_EXIT_GONE} />
         </div>
@@ -136,9 +143,9 @@ function OwnExitCard({ exit: x, canAct, onDone }: { exit: ExitDetail; canAct: bo
           canAct && w.state === 'SUBMITTED' ? (
             <>
               <div>
-                <button type="button" className="secondary" disabled={cancelRequest.isPending} onClick={() => cancelRequest.mutate(w.id)}>
+                <Button type="button" variant="outline" disabled={cancelRequest.isPending} onClick={() => cancelRequest.mutate(w.id)}>
                   Cancel my withdrawal request
-                </button>
+                </Button>
               </div>
               <Refusal error={cancelRequest.error} action="withdrawal-cancel" except={OWN_EXIT_GONE} />
             </>
@@ -176,15 +183,13 @@ function WithdrawalRequestForm({ exit: x, onDone }: { exit: ExitDetail; onDone: 
   };
   return (
     <form aria-label="Request to withdraw your resignation" className="stack" onSubmit={submit}>
-      <p className="hint" style={FLUSH}>
-        Your resignation is approved, so withdrawing it needs an independent HR decision. You can ask until your last working date.
-      </p>
+      <Hint className="m-0">Your resignation is approved, so withdrawing it needs an independent HR decision. You can ask until your last working date.</Hint>
       <ReasonField label="Why do you want to withdraw it? (required)" value={reason} onChange={setReason} />
       <Problem text={problem} />
       <div>
-        <button type="submit" disabled={request.isPending}>
+        <Button type="submit" disabled={request.isPending}>
           Request withdrawal
-        </button>
+        </Button>
       </div>
       <Refusal error={request.error} action="withdrawal-request" except={OWN_EXIT_GONE} />
     </form>
@@ -240,34 +245,32 @@ function ResignationForm({ onDone }: { onDone: Done }) {
   return (
     <form aria-label="Submit your resignation" className="stack" onSubmit={send}>
       {/* The card's "Resignation" heading is the form's heading: no second one. */}
-      <p className="hint" style={FLUSH}>
-        Choose your proposed last working day. Your manager and HR review it; you can withdraw until HR decides.
-      </p>
-      <label>
+      <Hint className="m-0">Choose your proposed last working day. Your manager and HR review it; you can withdraw until HR decides.</Hint>
+      <FormField>
         Proposed last working day (you work on this day)
-        <input type="date" value={date} onChange={(e) => edit(setDate)(e.target.value)} />
-      </label>
+        <Input type="date" value={date} onChange={(e) => edit(setDate)(e.target.value)} />
+      </FormField>
       <ReasonField label="Reason (optional; seen by you and authorised reviewers only)" value={reason} onChange={edit(setReason)} />
       <Problem text={problem} />
       {confirming ? (
-        <div className="confirm-box" role="group" aria-label="Confirm your resignation">
+        <ConfirmBox role="group" aria-label="Confirm your resignation">
           <p>
             You are resigning with <strong>{formatDate(date)}</strong> as your last working day. You can withdraw it yourself until HR decides.
           </p>
-          <div className="row">
-            <button type="button" className="danger" disabled={submit.isPending} onClick={confirm}>
+          <ButtonRow>
+            <Button type="button" variant="danger" disabled={submit.isPending} onClick={confirm}>
               Yes, submit my resignation
-            </button>
-            <button type="button" className="secondary" disabled={submit.isPending} onClick={() => setConfirming(false)}>
+            </Button>
+            <Button type="button" variant="outline" disabled={submit.isPending} onClick={() => setConfirming(false)}>
               Go back
-            </button>
-          </div>
-        </div>
+            </Button>
+          </ButtonRow>
+        </ConfirmBox>
       ) : (
         <div>
-          <button type="submit" disabled={submit.isPending}>
+          <Button type="submit" disabled={submit.isPending}>
             Submit resignation
-          </button>
+          </Button>
         </div>
       )}
       <Refusal error={submit.error} action="resign" except={OWN_EXIT_GONE} />
@@ -298,45 +301,45 @@ function OwnProcesses() {
   const data = shown(list);
   return (
     <Section title="Processes and tasks">
-      <p className="hint">Your own record only: processes about you, such as onboarding or exit clearance. Tasks owned by the Employee role are yours to complete.</p>
-      {list.isPending && <Loading>Loading your processes…</Loading>}
+      <Hint>Your own record only: processes about you, such as onboarding or exit clearance. Tasks owned by the Employee role are yours to complete.</Hint>
+      {list.isPending && <LoadingLine>Loading your processes…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="Your Employee role cannot view processes." />
       {data && data.items.length === 0 && <Empty>No processes about you right now. HR starts one, such as onboarding, when it applies to you.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="My processes">
-            <thead>
-              <tr>
-                <th>Process</th>
-                <th>Type</th>
-                <th>State</th>
-                <th>Effective date</th>
-                <th>Open tasks</th>
-                <th>Overdue</th>
-                <th>Tasks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.processName}</td>
-                  <td>{typeLabel(p.processType)}</td>
-                  <td>
-                    <StateBadge state={p.state} />
-                  </td>
-                  <td>{formatDate(p.effectiveDate)}</td>
-                  <td>{`${p.openTasks} of ${p.taskCount}`}</td>
-                  <td>{p.overdueTasks > 0 ? <Badge tone="bad">{`${p.overdueTasks} overdue`}</Badge> : '0'}</td>
-                  <td>
-                    <button type="button" className="secondary" aria-expanded={openId === p.id} aria-controls={panelId} onClick={() => setOpenId(openId === p.id ? null : p.id)}>
+        <Table aria-label="My processes">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Process</TableHead>
+              <TableHead scope="col">Type</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Effective date</TableHead>
+              <TableHead scope="col">Open tasks</TableHead>
+              <TableHead scope="col">Overdue</TableHead>
+              <TableHead scope="col">Tasks</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell>{p.processName}</TableCell>
+                <TableCell>{typeLabel(p.processType)}</TableCell>
+                <TableCell>
+                  <StateBadge state={p.state} />
+                </TableCell>
+                <TableCell>{formatDate(p.effectiveDate)}</TableCell>
+                <TableCell>{`${p.openTasks} of ${p.taskCount}`}</TableCell>
+                <TableCell>{p.overdueTasks > 0 ? <Badge tone="bad">{`${p.overdueTasks} overdue`}</Badge> : '0'}</TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button type="button" variant="outline" size="sm" aria-expanded={openId === p.id} aria-controls={panelId} onClick={() => setOpenId(openId === p.id ? null : p.id)}>
                       {openId === p.id ? 'Hide tasks' : 'Show tasks'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(data)} onPage={setPage} label="My process pages" noun="process" plural="processes" />}
       <div id={panelId} className="stack">

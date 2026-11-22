@@ -3,6 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Section } from '../../ui';
@@ -10,7 +18,7 @@ import { ActivateControl, type CalendarDetail, type CalendarPeriod, Choice, CONF
 import { PaidDayPolicySection } from './config-paid-days';
 import { Missing, Note } from './pickers';
 import { Problem } from './problems';
-import { CONFIG_READ, Fact, FLUSH, H3, label, PATHS, SCROLL, Status, useKeys } from './shared';
+import { CONFIG_READ, Fact, label, PATHS, Status, useKeys } from './shared';
 
 // ---- Calendars and periods (FR-030) ----
 
@@ -19,7 +27,7 @@ export function CalendarsScreen() {
   if (!can(CONFIG_READ)) {
     return (
       <Section title="Payroll calendars">
-        <Empty>{NOT_CONFIG}</Empty>
+        <Empty refusal>{NOT_CONFIG}</Empty>
       </Section>
     );
   }
@@ -40,45 +48,45 @@ function CalendarList() {
   const activator = can(CONFIG_ACTIVATE);
   return (
     <Section title="Payroll calendars">
-      <p className="hint">
+      <Hint>
         No calendar exists by default. A calendar is saved as a draft with its currency, gets its monthly periods, and is activated by someone other than its author; runs and
         inputs use only the periods of an active calendar.
-      </p>
-      {calendars.isPending && <p className="hint loading">Loading payroll calendars…</p>}
+      </Hint>
+      {calendars.isPending && <LoadingLine>Loading payroll calendars…</LoadingLine>}
       {calendars.error && <Problem error={calendars.error} act="read" />}
       <Note text={note} />
       {calendars.data && calendars.data.items.length === 0 && <Empty>No payroll calendar is defined, so no payroll can be run yet.</Empty>}
       {calendars.data && calendars.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Payroll calendars">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Currency</th>
-                <th>Minor unit</th>
-                <th>Periods</th>
-                <th>State</th>
-                {activator && <th>Activation</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {calendars.data.items.map((k) => (
-                <tr key={k.id}>
-                  <td>
-                    <Link to={PATHS.calendar(k.id)} aria-label={`Open calendar ${k.code}`}>
-                      {k.code}
-                    </Link>
-                  </td>
-                  <td>{k.name}</td>
-                  <td>{k.currencyCode}</td>
-                  <td>{label(MINOR_UNITS, String(k.currencyMinorUnit))}</td>
-                  <td>{k.periods.length}</td>
-                  <td>
-                    <Status map={CONFIG_STATE} code={k.state} />
-                  </td>
-                  {activator && (
-                    <td>
+        <Table aria-label="Payroll calendars">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Currency</TableHead>
+              <TableHead scope="col">Minor unit</TableHead>
+              <TableHead scope="col">Periods</TableHead>
+              <TableHead scope="col">State</TableHead>
+              {activator && <TableHead scope="col">Activation</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {calendars.data.items.map((k) => (
+              <TableRow key={k.id}>
+                <TableCell>
+                  <Link to={PATHS.calendar(k.id)} aria-label={`Open calendar ${k.code}`}>
+                    {k.code}
+                  </Link>
+                </TableCell>
+                <TableCell>{k.name}</TableCell>
+                <TableCell>{k.currencyCode}</TableCell>
+                <TableCell>{label(MINOR_UNITS, String(k.currencyMinorUnit))}</TableCell>
+                <TableCell>{k.periods.length}</TableCell>
+                <TableCell>
+                  <Status map={CONFIG_STATE} code={k.state} />
+                </TableCell>
+                {activator && (
+                  <RowActionsCell>
+                    <RowActions>
                       <ActivateControl
                         state={k.state}
                         createdBy={k.createdBy}
@@ -89,13 +97,13 @@ function CalendarList() {
                           activate.mutate(k);
                         }}
                       />
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </RowActions>
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       <Problem error={activate.error} act="calendar-activate" />
     </Section>
@@ -132,31 +140,31 @@ function CalendarForm() {
   };
   return (
     <Section title="New payroll calendar">
-      <form onSubmit={submit} aria-label="Create a payroll calendar" className="grid-form">
-        <label>
+      <FormGrid onSubmit={submit} aria-label="Create a payroll calendar">
+        <FormField>
           Calendar code
-          <input value={f.code} onChange={(e) => set({ code: e.target.value })} maxLength={40} autoComplete="off" />
-        </label>
-        <label>
+          <Input value={f.code} onChange={(e) => set({ code: e.target.value })} maxLength={40} autoComplete="off" />
+        </FormField>
+        <FormField>
           Calendar name
-          <input value={f.name} onChange={(e) => set({ name: e.target.value })} maxLength={200} autoComplete="off" />
-        </label>
-        <label>
+          <Input value={f.name} onChange={(e) => set({ name: e.target.value })} maxLength={200} autoComplete="off" />
+        </FormField>
+        <FormField>
           Currency (ISO code)
-          <input value={f.currencyCode} onChange={(e) => set({ currencyCode: e.target.value })} maxLength={3} autoComplete="off" />
-        </label>
+          <Input value={f.currencyCode} onChange={(e) => set({ currencyCode: e.target.value })} maxLength={3} autoComplete="off" />
+        </FormField>
         <Choice label="Currency minor unit" value={f.currencyMinorUnit} onChange={(v) => set({ currencyMinorUnit: v })} options={MINOR_UNITS} />
-        <div className="row">
-          <button type="submit" disabled={create.isPending}>
+        <ButtonRow>
+          <Button type="submit" disabled={create.isPending}>
             {create.isPending ? 'Saving…' : 'Save the calendar as a draft'}
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Missing text={problem} />
-        <div className="wide">
+        <div className="col-span-full">
           <Note text={note} />
           <Problem error={create.error} act="calendar" />
         </div>
-      </form>
+      </FormGrid>
     </Section>
   );
 }
@@ -167,7 +175,7 @@ export function CalendarScreen() {
   if (!can(CONFIG_READ)) {
     return (
       <Section title="Payroll calendar">
-        <Empty>{NOT_CONFIG}</Empty>
+        <Empty refusal>{NOT_CONFIG}</Empty>
       </Section>
     );
   }
@@ -186,8 +194,15 @@ function CalendarView({ id }: { id: string }) {
   const edited = k?.periods.find((p) => p.id === editing) ?? null;
   return (
     <div className="stack">
-      <Section title={k ? `Payroll calendar ${k.code}` : 'Payroll calendar'} actions={<Link to={PATHS.calendars}>All calendars</Link>}>
-        {calendar.isPending && <p className="hint loading">Loading the calendar…</p>}
+      <Section
+        title={k ? `Payroll calendar ${k.code}` : 'Payroll calendar'}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={PATHS.calendars}>All calendars</Link>
+          </Button>
+        }
+      >
+        {calendar.isPending && <LoadingLine>Loading the calendar…</LoadingLine>}
         {calendar.error && <Problem error={calendar.error} act="read" />}
         <Note text={note} />
         {k && (
@@ -202,7 +217,7 @@ function CalendarView({ id }: { id: string }) {
           </dl>
         )}
         {k && can(CONFIG_ACTIVATE) && k.state === 'DRAFT' && (
-          <p style={FLUSH}>
+          <p className="my-1">
             <ActivateControl
               state={k.state}
               createdBy={k.createdBy}
@@ -219,36 +234,35 @@ function CalendarView({ id }: { id: string }) {
       </Section>
       {k && (
         <Section title="Periods">
-          <p className="hint">
-            Each period is one whole calendar month of service with its input cutoff and payment date. A period is fixed once payroll runs, inputs or salary stops use it.
-          </p>
+          <Hint>Each period is one whole calendar month of service with its input cutoff and payment date. A period is fixed once payroll runs, inputs or salary stops use it.</Hint>
           {k.periods.length === 0 && <Empty>The calendar has no periods yet, so it cannot be activated.</Empty>}
           {k.periods.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label={`Periods of calendar ${k.code}`}>
-                <thead>
-                  <tr>
-                    <th>Period</th>
-                    <th>Financial year</th>
-                    <th>Service period</th>
-                    <th>Input cutoff</th>
-                    <th>Payment date</th>
-                    {manage && <th>Change</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {k.periods.map((p) => (
-                    <tr key={p.id}>
-                      <td>{p.periodCode}</td>
-                      <td>{p.financialYear}</td>
-                      <td>{`${formatDate(p.serviceStart)} to ${formatDate(p.serviceEnd)}`}</td>
-                      <td>{formatDate(p.inputCutoff)}</td>
-                      <td>{formatDate(p.paymentDate)}</td>
-                      {manage && (
-                        <td>
-                          <button
+            <Table aria-label={`Periods of calendar ${k.code}`}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Period</TableHead>
+                  <TableHead scope="col">Financial year</TableHead>
+                  <TableHead scope="col">Service period</TableHead>
+                  <TableHead scope="col">Input cutoff</TableHead>
+                  <TableHead scope="col">Payment date</TableHead>
+                  {manage && <TableHead scope="col">Change</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {k.periods.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell>{p.periodCode}</TableCell>
+                    <TableCell>{p.financialYear}</TableCell>
+                    <TableCell>{`${formatDate(p.serviceStart)} to ${formatDate(p.serviceEnd)}`}</TableCell>
+                    <TableCell>{formatDate(p.inputCutoff)}</TableCell>
+                    <TableCell>{formatDate(p.paymentDate)}</TableCell>
+                    {manage && (
+                      <RowActionsCell>
+                        <RowActions>
+                          <Button
                             type="button"
-                            className="link"
+                            variant="outline"
+                            size="sm"
                             onClick={() => {
                               setNote(null);
                               setEditing(p.id);
@@ -256,14 +270,14 @@ function CalendarView({ id }: { id: string }) {
                             aria-label={`Change the dates of period ${p.periodCode}`}
                           >
                             Change dates
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                          </Button>
+                        </RowActions>
+                      </RowActionsCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
           {manage && edited && (
             <PeriodForm
@@ -282,6 +296,12 @@ function CalendarView({ id }: { id: string }) {
       )}
     </div>
   );
+}
+
+/** The period form's button: saving, saving a changed period's dates, or adding a new period. */
+function periodButtonText(saving: boolean, changing: boolean): string {
+  if (saving) return 'Saving…';
+  return changing ? 'Save the new dates' : 'Add the period';
 }
 
 function PeriodForm({ calendar, period, onDone, onClose }: { calendar: CalendarDetail; period: CalendarPeriod | null; onDone: (text: string) => void; onClose?: () => void }) {
@@ -322,50 +342,48 @@ function PeriodForm({ calendar, period, onDone, onClose }: { calendar: CalendarD
     save.mutate({ financialYear: f.financialYear.trim().toUpperCase(), serviceStart: f.serviceStart, serviceEnd: f.serviceEnd, inputCutoff: f.inputCutoff, paymentDate: f.paymentDate });
   };
   return (
-    <form onSubmit={submit} aria-label={name} className="grid-form" style={{ marginTop: '0.75rem' }}>
-      <h3 style={H3} className="wide">
-        {name}
-      </h3>
+    <FormGrid onSubmit={submit} aria-label={name}>
+      <CardSubheading>{name}</CardSubheading>
       {!period && (
-        <label>
+        <FormField>
           Period code
-          <input value={f.periodCode} onChange={(e) => set({ periodCode: e.target.value })} maxLength={20} autoComplete="off" />
-        </label>
+          <Input value={f.periodCode} onChange={(e) => set({ periodCode: e.target.value })} maxLength={20} autoComplete="off" />
+        </FormField>
       )}
-      <label>
+      <FormField>
         Financial year
-        <input value={f.financialYear} onChange={(e) => set({ financialYear: e.target.value })} maxLength={20} autoComplete="off" />
-      </label>
-      <label>
+        <Input value={f.financialYear} onChange={(e) => set({ financialYear: e.target.value })} maxLength={20} autoComplete="off" />
+      </FormField>
+      <FormField>
         Service start
-        <input type="date" value={f.serviceStart} onChange={(e) => set({ serviceStart: e.target.value })} />
-      </label>
-      <label>
+        <Input type="date" value={f.serviceStart} onChange={(e) => set({ serviceStart: e.target.value })} />
+      </FormField>
+      <FormField>
         Service end
-        <input type="date" value={f.serviceEnd} onChange={(e) => set({ serviceEnd: e.target.value })} />
-      </label>
-      <label>
+        <Input type="date" value={f.serviceEnd} onChange={(e) => set({ serviceEnd: e.target.value })} />
+      </FormField>
+      <FormField>
         Input cutoff
-        <input type="date" value={f.inputCutoff} onChange={(e) => set({ inputCutoff: e.target.value })} />
-      </label>
-      <label>
+        <Input type="date" value={f.inputCutoff} onChange={(e) => set({ inputCutoff: e.target.value })} />
+      </FormField>
+      <FormField>
         Payment date
-        <input type="date" value={f.paymentDate} onChange={(e) => set({ paymentDate: e.target.value })} />
-      </label>
-      <div className="row">
-        <button type="submit" disabled={save.isPending}>
-          {save.isPending ? 'Saving…' : period ? 'Save the new dates' : 'Add the period'}
-        </button>
+        <Input type="date" value={f.paymentDate} onChange={(e) => set({ paymentDate: e.target.value })} />
+      </FormField>
+      <ButtonRow>
+        <Button type="submit" disabled={save.isPending}>
+          {periodButtonText(save.isPending, period !== null)}
+        </Button>
         {onClose && (
-          <button type="button" className="secondary" onClick={onClose} disabled={save.isPending}>
+          <Button type="button" variant="outline" onClick={onClose} disabled={save.isPending}>
             Close
-          </button>
+          </Button>
         )}
-      </div>
+      </ButtonRow>
       <Missing text={problem} />
-      <div className="wide">
+      <div className="col-span-full">
         <Problem error={save.error} act="period" />
       </div>
-    </form>
+    </FormGrid>
   );
 }

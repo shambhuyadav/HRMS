@@ -1,8 +1,10 @@
 // Shared parts of the timesheet screens: permission keys, paths, query keys, styles and small helpers.
 
-import { type CSSProperties, useMemo, useRef } from 'react';
+import { type ReactNode, useMemo, useRef } from 'react';
+import { Hint } from '@/components/hint';
 import { formatDate, idempotencyKey, isForbidden, isNotFound } from '../../api';
 import { useSession } from '../../session';
+import { Notice } from '../../ui';
 
 // ---------------------------------------------------------------------------------------------------------
 // Permission keys (modules/timesheet/registration.ts, routes.ts; migration 0037) and screen paths
@@ -97,11 +99,14 @@ export function useKeys() {
 }
 export type Keys = ReturnType<typeof useKeys>;
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const FLUSH: CSSProperties = { margin: 0 };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.5rem 0 0' };
-export const SPACED: CSSProperties = { marginTop: '0.75rem' };
-export const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', background: 'var(--surface)', resize: 'vertical' };
+// The module's own layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026). The shared helpers (FormField, Hint, Table …)
+// cover fields, hints and tables; these cover the rows, form endings and buttons this module has and they do not.
+/** The last row of a form grid: what went wrong or right, then the form's button (given `self-start`), across the full width. */
+export const FORM_END = 'col-span-full flex flex-col gap-3';
+/** Fields side by side with a button at the end, bottoms aligned, wrapping on a narrow screen; each FormField in it is `w-auto`. */
+export const FIELD_ROW = 'flex flex-wrap items-end gap-x-[1.1rem] gap-y-[0.95rem]';
+/** A button whose long words wrap on a phone instead of running past the card. */
+export const WRAPPING_BUTTON = 'h-auto min-h-[var(--control-h)] shrink py-1.5 whitespace-normal';
 
 /** The latest answer, unless the server has since refused it (403/404): what the role may no longer see is not kept. */
 export function shown<T>(query: { data: T | undefined; error: unknown }): T | undefined {
@@ -125,16 +130,28 @@ export const dayLabel = (day: string, i: number) => `${DAY_NAMES[i] ?? ''} ${for
 export const weekText = (s: { periodStart: string; periodEnd: string }) => `${formatDate(s.periodStart)} to ${formatDate(s.periodEnd)}`;
 export const periodText = (m: { startDate: string; endDate: string | null }) => `${formatDate(m.startDate)} to ${m.endDate ? formatDate(m.endDate) : 'open-ended'}`;
 export const activeText = (active: boolean) => (active ? 'Active' : 'Inactive');
-export const lateText = (late: boolean | null) => (late === true ? 'Submitted late' : late === false ? 'On time' : '—');
+/** Whether a submission was late; a dash before there is one. */
+export function lateText(late: boolean | null): string {
+  if (late === true) return 'Submitted late';
+  if (late === false) return 'On time';
+  return '—';
+}
 export const ORIGIN_LABEL: Record<string, string> = { INITIAL: 'First entry', RETURNED: 'After a return', REJECTED: 'After a rejection', REOPENED: 'Correction after a reopen' };
 export const DECISION_LABEL: Record<string, string> = { APPROVE: 'Approved', RETURN: 'Returned for changes', REJECT: 'Rejected' };
 
+/** A remark under a value in a table cell, a fact or a list item ("imported", "with Asha"): one muted line of its own. */
+export function Remark({ children }: { children: ReactNode }) {
+  return (
+    <Hint as="span" className="block">
+      {children}
+    </Hint>
+  );
+}
+
+/** A check made here before sending failed: what to fix, in words. */
 export function Problem({ text }: { text: string | null }) {
-  return text ? (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  ) : null;
+  if (!text) return null;
+  return <Notice notice={{ text, ok: false }} />;
 }
 
 /**

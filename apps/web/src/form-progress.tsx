@@ -8,7 +8,54 @@
 // than with the attribute. Nothing here changes what the form sends or refuses.
 
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
-import './styles/form-progress.css';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
+// ---- How it is drawn ----------------------------------------------------------------------------------------------------------
+// The strip stays at the top of the page while the form scrolls. Every colour is a token, so the light and dark themes both follow.
+
+/**
+ * A band of the page's own background, so what scrolls under the strip never shows around it; its padding is taken back by its
+ * margins, so the space between the cards stays the page's own. A sticky box stops at the page's top padding (--content-top), so the
+ * strip is lifted by that much and meets the top bar with nothing scrolling past above it.
+ */
+const STRIP = 'sticky top-[calc(-1*var(--content-top,0rem))] z-4 -my-2 bg-background py-2';
+const CARD =
+  'flex flex-col gap-[0.6rem] rounded-xl border border-border bg-card px-[0.7rem] pt-[0.55rem] pb-[0.75rem] shadow-[var(--shadow-xs)] phone:gap-2 phone:px-2 phone:pt-[0.45rem] phone:pb-[0.65rem]';
+/**
+ * The steps side by side, sharing the width; on a narrow screen they scroll sideways, with no scrollbar shown. On a phone the strip
+ * fades at its end, a sign that it scrolls, and its end padding lets the last step scroll clear of the fade.
+ */
+const STEPS = cn(
+  'm-0 flex list-none gap-1 overflow-x-auto overscroll-x-contain p-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+  'phone:pr-5 phone:[mask-image:linear-gradient(to_right,#000_calc(100%-20px),transparent)]',
+);
+const STEP_ITEM = 'flex min-w-max flex-[1_1_0] phone:flex-none';
+/**
+ * A step's button: its number (or tick) beside its name and state. The step being filled in is on a quiet tile, or in the system's
+ * highlight colours in Windows high-contrast mode, where tiles are not drawn.
+ */
+const STEP_BUTTON = cn(
+  'h-auto flex-1 justify-start gap-[0.6rem] px-[0.6rem] py-[0.4rem] text-left font-medium text-[var(--body)] phone:gap-[0.45rem] phone:px-2 phone:py-[0.35rem]',
+  'aria-[current=step]:border-border aria-[current=step]:bg-accent',
+  'forced-colors:aria-[current=step]:bg-[color:Highlight] forced-colors:aria-[current=step]:text-[color:HighlightText] forced-colors:aria-[current=step]:forced-color-adjust-none',
+);
+const MARK = 'grid size-[1.6rem] flex-none place-items-center rounded-full text-[0.76rem] font-[650] transition-[background,color,box-shadow] duration-150 motion-reduce:transition-none';
+/** The mark's colours: complete in the success tint, the step being filled in in the accent tint, any other step quiet. */
+const MARK_DONE = 'bg-[var(--good-soft)] text-[var(--good)] shadow-[inset_0_0_0_1px_var(--good-edge)]';
+const MARK_CURRENT = 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-[inset_0_0_0_1px_var(--accent-edge)]';
+const MARK_WAITING = 'bg-muted text-muted-foreground shadow-[inset_0_0_0_1px_var(--line-strong)]';
+const markColours = (done: boolean, current: boolean) => {
+  if (done) return MARK_DONE;
+  return current ? MARK_CURRENT : MARK_WAITING;
+};
+/** The step's state under its name; left out on a phone, where the strip has room for the names only. */
+const STEP_STATE = 'text-[0.74rem] font-medium whitespace-nowrap text-muted-foreground phone:hidden';
+/** The share of required fields filled: a thin bar and its words, in the success colour once every one is filled. */
+const METER = 'flex items-center gap-3 px-[0.2rem] phone:flex-wrap phone:gap-[0.3rem_0.75rem]';
+const TRACK = 'relative h-[6px] flex-1 overflow-hidden rounded-full bg-muted shadow-[inset_0_0_0_1px_var(--line)]';
+const FILL = 'absolute inset-0 origin-left rounded-[inherit] bg-[var(--accent-bright)] transition-[transform,background] duration-[250ms] motion-reduce:transition-none';
+const COUNT = 'flex-none text-[0.78rem] font-medium text-muted-foreground tabular-nums';
 
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 
@@ -142,7 +189,19 @@ function follow(form: HTMLFormElement, scan: () => void, focusIn: (step: number)
 
 function Tick() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+    <svg
+      width="13"
+      height="13"
+      className="size-[13px]"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
       <path d="m5 12.5 4.5 4.5L19 7.5" />
     </svg>
   );
@@ -214,33 +273,40 @@ export function FormProgress({
   const { steps, required: total, filled } = snapshot;
   const summary = total === 0 ? 'No required fields' : filled === total ? `All ${total} required fields filled` : `${filled} of ${total} required fields filled`;
   return (
-    <nav className="form-progress" aria-label={`Steps of ${label}`}>
-      <div className="form-progress-card">
-        <ol className="form-progress-steps">
+    <nav data-slot="form-progress" className={STRIP} aria-label={`Steps of ${label}`}>
+      <div className={CARD}>
+        <ol className={STEPS}>
           {steps.map((s, i) => {
             const done = s.required > 0 && s.filled === s.required;
             const state = s.required === 0 ? 'No required fields' : done ? 'Complete' : `${s.filled} of ${s.required} required`;
             return (
-              <li key={`${i}-${s.name}`} className={done ? 'done' : undefined}>
-                <button type="button" aria-label={`Step ${i + 1}: ${s.name}, ${state.toLowerCase()}`} aria-current={current === i ? 'step' : undefined} onClick={() => open(i)}>
-                  <span className="form-progress-mark" aria-hidden="true">
+              <li key={`${i}-${s.name}`} data-state={done ? 'done' : undefined} className={STEP_ITEM}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className={STEP_BUTTON}
+                  aria-label={`Step ${i + 1}: ${s.name}, ${state.toLowerCase()}`}
+                  aria-current={current === i ? 'step' : undefined}
+                  onClick={() => open(i)}
+                >
+                  <span className={cn(MARK, markColours(done, current === i))} aria-hidden="true">
                     {done ? <Tick /> : i + 1}
                   </span>
-                  <span className="form-progress-text" aria-hidden="true">
-                    <span className="form-progress-name">{s.name}</span>
-                    <span className="form-progress-state">{state}</span>
+                  <span className="flex min-w-0 flex-col leading-tight" aria-hidden="true">
+                    <span className="text-[0.85rem] font-semibold whitespace-nowrap text-foreground">{s.name}</span>
+                    <span className={cn(STEP_STATE, done && 'text-[var(--good)]')}>{state}</span>
                   </span>
-                </button>
+                </Button>
               </li>
             );
           })}
         </ol>
         {total > 0 && (
-          <div className={filled === total ? 'form-progress-meter complete' : 'form-progress-meter'}>
-            <div className="form-progress-track" role="progressbar" aria-label="Required fields filled" aria-valuemin={0} aria-valuemax={total} aria-valuenow={filled} aria-valuetext={summary}>
-              <span className="form-progress-fill" style={{ transform: `scaleX(${filled / total})` }} />
+          <div className={METER}>
+            <div className={TRACK} role="progressbar" aria-label="Required fields filled" aria-valuemin={0} aria-valuemax={total} aria-valuenow={filled} aria-valuetext={summary}>
+              <span className={cn(FILL, filled === total && 'bg-[var(--good)]')} style={{ transform: `scaleX(${filled / total})` }} />
             </div>
-            <span className="form-progress-count" aria-hidden="true">
+            <span className={cn(COUNT, filled === total && 'text-[var(--good)]')} aria-hidden="true">
               {summary}
             </span>
           </div>

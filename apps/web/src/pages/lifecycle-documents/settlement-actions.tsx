@@ -1,13 +1,19 @@
 // Settlement steps besides preparation: the notice waiver, release eligibility, export, the payment record, voiding and the statement.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useRef, useState } from 'react';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, download, idempotencyKey, isConflict, localDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Section } from '../../ui';
+import { Notice, Section } from '../../ui';
 import { VerifiedEvidencePicker } from '../exit-finance';
 import { plural, unitText } from './calculation-basis';
 import { EXPORT_WORDS, PAYMENT_WORDS, Refusal, RELEASE_WORDS, SEND_WORDS, VOID_WORDS, WAIVER_WORDS } from './refusals';
-import { DELIVERY_STATUS_LABEL, enc, EXPORT_FORMATS, type ExportFormat, formatLabel, labelOf, MAX_REASON, TEXTAREA, useSettlementRefresh, when } from './shared';
+import { DELIVERY_STATUS_LABEL, enc, EXPORT_FORMATS, type ExportFormat, FIELD_ROW, formatLabel, labelOf, MAX_REASON, useSettlementRefresh, when } from './shared';
 import type { Delivery, SettlementDetail } from './types';
 
 /**
@@ -47,30 +53,27 @@ export function WaiveNotice({ s, onNotice }: { s: SettlementDetail; onNotice: (t
   };
   return (
     <Section title="Waive the notice recovery">
-      <p className="hint">
+      <Hint>
         The calculation recovers {short ? plural(short, 'day', 'days') : 'the days'} of notice not served. Waiving it is recorded with its reason, once for this exit, by someone other
         than the employee and the preparer; it applies when the preparer calculates the draft again.
-      </p>
+      </Hint>
       {preparer && (
-        <p className="hint" id={blockedId}>
+        <Hint id={blockedId}>
           You prepared this settlement, so someone else waives its notice recovery.
-        </p>
+        </Hint>
       )}
-      <form className="stack" aria-label="Waive the notice recovery" onSubmit={send}>
-        <label>
+      <form className="flex flex-col gap-3" aria-label="Waive the notice recovery" onSubmit={send}>
+        {/* A readable width, as the old `.stack` form gave its fields. */}
+        <FormField className="max-w-[560px]">
           Reason for waiving (required)
-          <textarea rows={2} maxLength={MAX_REASON} value={reason} disabled={waive.isPending || preparer} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
-        {problem && (
-          <p role="alert" className="error">
-            {problem}
-          </p>
-        )}
-        <div className="row">
-          <button type="submit" disabled={waive.isPending || preparer} aria-describedby={preparer ? blockedId : undefined}>
+          <Textarea rows={2} maxLength={MAX_REASON} value={reason} disabled={waive.isPending || preparer} onChange={(e) => setReason(e.target.value)} className="resize-y" />
+        </FormField>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <ButtonRow>
+          <Button type="submit" disabled={waive.isPending || preparer} aria-describedby={preparer ? blockedId : undefined}>
             Waive the notice recovery
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Refusal
           error={waive.error}
           words={WAIVER_WORDS}
@@ -102,15 +105,15 @@ export function ReleaseEligibility({ s, onNotice }: { s: SettlementDetail; onNot
       <p>
         Recording release eligibility states that this approved settlement may be released. It is not a payment: nothing is paid, scheduled or recorded as paid here.
       </p>
-      <p className="hint">
+      <Hint>
         It is recorded by someone other than the preparer, the reviewer and the approver, once every required task of the exit clearance checklist is complete.
-      </p>
-      {preparer && <p className="hint">You prepared this settlement, so someone else records its release eligibility.</p>}
-      <div className="row">
-        <button type="button" disabled={release.isPending || preparer} onClick={() => release.mutate(s.version)}>
+      </Hint>
+      {preparer && <Hint>You prepared this settlement, so someone else records its release eligibility.</Hint>}
+      <ButtonRow>
+        <Button type="button" disabled={release.isPending || preparer} onClick={() => release.mutate(s.version)}>
           Record release eligibility
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal
         error={release.error}
         words={RELEASE_WORDS}
@@ -126,23 +129,23 @@ export function SettlementExport({ s }: { s: SettlementDetail }) {
   const exp = useMutation({ mutationFn: (f: ExportFormat) => download(`/v1/settlements/${enc(s.id)}/export?format=${f}`) });
   return (
     <Section title="Export">
-      <p className="hint">
+      <Hint>
         This approved revision’s lines and net amount with its context, as CSV, Excel (XLSX) or PDF, built when you download it. It is not stored and nothing is sent.
-      </p>
-      <div className="row">
-        <label>
+      </Hint>
+      <div className={FIELD_ROW}>
+        <FormField className="w-auto">
           Format
-          <select value={format} disabled={exp.isPending} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
+          <NativeSelect value={format} disabled={exp.isPending} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
             {EXPORT_FORMATS.map(([f, label]) => (
               <option key={f} value={f}>
                 {label}
               </option>
             ))}
-          </select>
-        </label>
-        <button type="button" disabled={exp.isPending} onClick={() => exp.mutate(format)}>
+          </NativeSelect>
+        </FormField>
+        <Button type="button" disabled={exp.isPending} onClick={() => exp.mutate(format)}>
           {`Download the ${formatLabel(format)} export`}
-        </button>
+        </Button>
       </div>
       <Refusal error={exp.error} words={EXPORT_WORDS} />
     </Section>
@@ -184,28 +187,24 @@ export function RecordPayment({ s, onNotice }: { s: SettlementDetail; onNotice: 
   return (
     <Section title="Record the payment">
       <p>The settlement is paid outside this system. Record the payment once it has happened, from its evidence; the full net amount is the amount paid.</p>
-      {involved && <p className="hint">You prepared, decided or marked this settlement, so someone else records its payment.</p>}
-      <form onSubmit={submit} className="grid-form" aria-label="Record the settlement payment">
-        <label>
+      {involved && <Hint>You prepared, decided or marked this settlement, so someone else records its payment.</Hint>}
+      <FormGrid onSubmit={submit} aria-label="Record the settlement payment">
+        <FormField>
           Payment date
-          <input type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value)} />
+        </FormField>
+        <FormField>
           Bank or receipt reference
-          <input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
-        </label>
+          <Input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
+        </FormField>
         <VerifiedEvidencePicker employeeId={s.employeeId} chosen={doc} onChange={setDoc} legend="Evidence of the payment (released and verified)" />
-        <div className="row">
-          <button type="submit" disabled={pay.isPending || involved}>
+        <ButtonRow>
+          <Button type="submit" disabled={pay.isPending || involved}>
             Record the payment
-          </button>
-        </div>
-      </form>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
+          </Button>
+        </ButtonRow>
+      </FormGrid>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
       <Refusal error={pay.error} words={PAYMENT_WORDS} noAnswer="No answer came back, so the payment may or may not have been recorded. The settlement has been reloaded: check its state before trying again." />
     </Section>
   );
@@ -227,17 +226,19 @@ export function VoidSettlement({ s, onNotice }: { s: SettlementDetail; onNotice:
   });
   return (
     <Section title="Void this revision">
-      <p className="hint">For a revision that must not be paid: the final period’s payroll already paid one of its components, or it is wrong. A paid revision cannot be voided.</p>
-      <label>
-        Reason
-        <input value={reason} maxLength={MAX_REASON} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <div className="row">
-        <button type="button" disabled={voiding.isPending || !reason.trim()} onClick={() => voiding.mutate()}>
-          Void the revision
-        </button>
+      <Hint>For a revision that must not be paid: the final period’s payroll already paid one of its components, or it is wrong. A paid revision cannot be voided.</Hint>
+      <div className="flex flex-col gap-3">
+        <FormField>
+          Reason
+          <Input value={reason} maxLength={MAX_REASON} onChange={(e) => setReason(e.target.value)} />
+        </FormField>
+        <ButtonRow>
+          <Button type="button" disabled={voiding.isPending || !reason.trim()} onClick={() => voiding.mutate()}>
+            Void the revision
+          </Button>
+        </ButtonRow>
+        <Refusal error={voiding.error} words={VOID_WORDS} />
       </div>
-      <Refusal error={voiding.error} words={VOID_WORDS} />
     </Section>
   );
 }
@@ -269,22 +270,23 @@ export function SendStatement({ s }: { s: SettlementDetail }) {
   });
   return (
     <Section title="Send to the employee’s self-service">
-      <p className="hint">The statement is delivered in the employee’s own self-service with an in-app notice; nothing is attached to an e-mail.</p>
-      <div className="row">
-        <label>
+      <Hint>The statement is delivered in the employee’s own self-service with an in-app notice; nothing is attached to an e-mail.</Hint>
+      <div className={FIELD_ROW}>
+        <FormField className="w-auto">
           Format
-          <select value={format} disabled={send.isPending} onChange={(e) => setFormat(e.target.value as 'PDF' | 'XLSX')}>
+          <NativeSelect value={format} disabled={send.isPending} onChange={(e) => setFormat(e.target.value as 'PDF' | 'XLSX')}>
             <option value="PDF">PDF</option>
             <option value="XLSX">Excel (XLSX)</option>
-          </select>
-        </label>
-        <label className="check">
+          </NativeSelect>
+        </FormField>
+        {/* Raised off the row's bottom edge so the box and words sit level with the middle of the select and button beside them. */}
+        <CheckField className="mb-[0.6rem]">
           <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
           {` The recipient is ${s.employeeName} (${s.employeeCode}), the employee this settlement is about`}
-        </label>
-        <button type="button" disabled={send.isPending || !confirmed} onClick={() => send.mutate()}>
+        </CheckField>
+        <Button type="button" disabled={send.isPending || !confirmed} onClick={() => send.mutate()}>
           {`Send the ${format === 'PDF' ? 'PDF' : 'Excel'} statement`}
-        </button>
+        </Button>
       </div>
       <Refusal error={send.error} words={SEND_WORDS} />
       {deliveries.data && deliveries.data.items.length > 0 && (

@@ -2,6 +2,12 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { QuietWhenEmptyContext } from '@/components/card-context';
+import { ButtonRow } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, download, formatAmount, formatDate, idempotencyKey } from '../../api';
 import { MODULE_TASK_QUEUES } from '../../screens-registry';
 import { useSession } from '../../session';
@@ -140,18 +146,22 @@ export function TasksPage() {
   // Wave-2 module queues (screens-registry.ts); each renders its own section and checks its own decision keys.
   const modules = MODULE_TASK_QUEUES.filter((q) => can(q.permission));
   if (visible.length === 0 && modules.length === 0) return <Empty>You have no decision queues in this role.</Empty>;
-  // (A queue with nothing waiting is one quiet line after the queues that have something: styles.css, .decision-queues.)
+  // A queue with nothing waiting is one quiet line after the queues that have something (QuietWhenEmptyContext; styles.css,
+  // .decision-queues, lays the lines out). The `tasks` marker class of each queue's list and the compact empty states are what those
+  // rules look for.
   return (
     <CompactEmptyContext.Provider value={true}>
-      <div className="decision-queues">
-        <DelegatedTasksSection />
-        {visible.map((q) => (
-          <TaskQueue key={q.path} queue={q} />
-        ))}
-        {modules.map((q) => (
-          <q.component key={q.title} />
-        ))}
-      </div>
+      <QuietWhenEmptyContext.Provider value={true}>
+        <div className="decision-queues">
+          <DelegatedTasksSection />
+          {visible.map((q) => (
+            <TaskQueue key={q.path} queue={q} />
+          ))}
+          {modules.map((q) => (
+            <q.component key={q.title} />
+          ))}
+        </div>
+      </QuietWhenEmptyContext.Provider>
     </CompactEmptyContext.Provider>
   );
 }
@@ -179,13 +189,14 @@ const PROFILE_FIELD_LABEL: Record<string, string> = { displayName: 'Display name
 function TaskDetails({ task: t }: { task: Task }) {
   if ((t.kind === 'leave_request' || t.kind === 'leave_cancellation') && t.summary) {
     const s = t.summary as LeaveSummary;
-    const when = s.halfDay || s.startDate === s.endDate ? `${formatDate(s.startDate)}${s.halfDay ? ' (half day)' : ''}` : `${formatDate(s.startDate)} – ${formatDate(s.endDate)}`;
+    const halfDayNote = s.halfDay ? ' (half day)' : '';
+    const when = s.halfDay || s.startDate === s.endDate ? `${formatDate(s.startDate)}${halfDayNote}` : `${formatDate(s.startDate)} – ${formatDate(s.endDate)}`;
     return (
       <>
         <div>{`${s.leaveType} · ${when} · ${Number(s.units).toFixed(2)} days`}</div>
         {s.requestId && !!s.evidence?.length && (
           <div>
-            <span className="hint">Supporting documents:</span> <EvidenceList evidence={s.evidence} openPath={(documentId) => leaveEvidencePath(s.requestId!, documentId)} />
+            <Hint as="span">Supporting documents:</Hint> <EvidenceList evidence={s.evidence} openPath={(documentId) => leaveEvidencePath(s.requestId!, documentId)} />
           </div>
         )}
       </>
@@ -204,36 +215,36 @@ function TaskDetails({ task: t }: { task: Task }) {
   if (t.kind === 'profile_change' && t.request) {
     const r = t.request as ProfileChangeView;
     return (
-      <table>
-        <thead>
-          <tr>
-            <th>Field</th>
-            <th>Current record</th>
-            <th>Requested</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Field</TableHead>
+            <TableHead scope="col">Current record</TableHead>
+            <TableHead scope="col">Requested</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {Object.keys(r.requested ?? {}).map((field) => {
             const now = r.recordNow?.[field] ?? null;
             const then = r.currentValues?.[field] ?? null;
             return (
-              <tr key={field}>
-                <td>{PROFILE_FIELD_LABEL[field] ?? field}</td>
-                <td>
+              <TableRow key={field}>
+                <TableCell>{PROFILE_FIELD_LABEL[field] ?? field}</TableCell>
+                <TableCell>
                   <span>{now ?? '—'}</span>
                   {then !== now && (
                     <>
                       {' '}
-                      <span className="hint">was {then ?? '—'} when requested</span>
+                      <Hint as="span">was {then ?? '—'} when requested</Hint>
                     </>
                   )}
-                </td>
-                <td>{r.requested[field]}</td>
-              </tr>
+                </TableCell>
+                <TableCell>{r.requested[field]}</TableCell>
+              </TableRow>
             );
           })}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     );
   }
   if (t.kind === 'attendance_correction' && t.request) {
@@ -243,13 +254,19 @@ function TaskDetails({ task: t }: { task: Task }) {
         <div>{`${formatDate(r.workDate)}: ${statusText(r.currentStatus)} → ${statusText(r.requestedStatus)}`}</div>
         {r.reason && (
           <div>
-            <span className="hint">Reason (private):</span> <span>{r.reason}</span>
+            <Hint as="span">Reason (private):</Hint> <span>{r.reason}</span>
           </div>
         )}
       </>
     );
   }
   return null;
+}
+
+/** When the queue's decisions need a reason, said in the reason field. */
+function reasonPlaceholder(queue: Queue): string {
+  if (queue.needsReason) return 'Reason (required)';
+  return queue.canReturn ? 'Reason (required to reject or return)' : 'Reason (required to reject)';
 }
 
 function DecisionTask({ task: t, queue }: { task: Task; queue: Queue }) {
@@ -268,32 +285,26 @@ function DecisionTask({ task: t, queue }: { task: Task; queue: Queue }) {
     <li>
       <div>
         <strong>{t.ownerName ?? 'Request'}</strong> {cancellation && <Badge tone="warn">cancel approved leave</Badge>}{' '}
-        <span className="hint">
+        <Hint as="span">
           {t.ownerEmployeeCode} · assigned {formatDate(t.assignedAt)}
-        </span>
+        </Hint>
         <DelegatedBadge taskId={t.taskId} />
       </div>
       <TaskDetails task={t} />
-      <input
-        aria-label="Decision reason"
-        placeholder={queue.needsReason ? 'Reason (required)' : queue.canReturn ? 'Reason (required to reject or return)' : 'Reason (required to reject)'}
-        maxLength={1000}
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-      />
-      <div className="row">
-        <button disabled={decide.isPending || (queue.needsReason && noReason)} onClick={() => decide.mutate('APPROVE')}>
+      <Input aria-label="Decision reason" placeholder={reasonPlaceholder(queue)} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      <ButtonRow>
+        <Button disabled={decide.isPending || (queue.needsReason && noReason)} onClick={() => decide.mutate('APPROVE')}>
           Approve
-        </button>
+        </Button>
         {queue.canReturn && !cancellation && (
-          <button className="secondary" disabled={decide.isPending || noReason} onClick={() => decide.mutate('RETURN')}>
+          <Button variant="outline" disabled={decide.isPending || noReason} onClick={() => decide.mutate('RETURN')}>
             Return
-          </button>
+          </Button>
         )}
-        <button className="danger" disabled={decide.isPending || noReason} onClick={() => decide.mutate('REJECT')}>
+        <Button variant="danger" disabled={decide.isPending || noReason} onClick={() => decide.mutate('REJECT')}>
           Reject
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <ErrorNote error={decide.error} />
     </li>
   );
@@ -323,14 +334,23 @@ interface ClaimLine {
   exchangeRate?: string | null;
 }
 
+const receiptReleased = (l: ClaimLine) => !l.receiptScanState || l.receiptScanState === 'CLEAN';
+
+/** A line's receipt in words: missing, quarantined, attached (released by the malware scan) or still waiting for the scan. */
+function receiptWords(l: ClaimLine): string {
+  if (!l.receiptPresent) return 'missing';
+  if (l.receiptScanState === 'QUARANTINED') return 'quarantined by the malware scan';
+  return receiptReleased(l) ? 'attached' : 'waiting for the malware scan';
+}
+
+/** The claim's earlier revisions, a muted list under its purpose (the old `ul.hint`). */
+const EARLIER_REVISIONS = 'text-[0.84rem] text-muted-foreground';
+
 /**
  * Expense decision (FR-072/073/075, C5). The financial step decides an amount for every line (0..claimed) and needs a
  * reason for any reduction and for accepting any flagged line; manager and high-value steps approve, return or reject
  * the claim as submitted.
  */
-const receiptReleased = (l: ClaimLine) => !l.receiptScanState || l.receiptScanState === 'CLEAN';
-const receiptWords = (l: ClaimLine) => (!l.receiptPresent ? 'missing' : l.receiptScanState === 'QUARANTINED' ? 'quarantined by the malware scan' : receiptReleased(l) ? 'attached' : 'waiting for the malware scan');
-
 function ExpenseTask({ task }: { task: Task }) {
   const qc = useQueryClient();
   const finance = task.stepAction === 'finance_decide';
@@ -375,97 +395,104 @@ function ExpenseTask({ task }: { task: Task }) {
   return (
     <li>
       <div>
-        <strong>{task.ownerName ?? 'Claim'}</strong> <span className="hint">{task.ownerEmployeeCode} · {finance ? 'financial review' : task.stepAction.replace(/_/g, ' ')} · assigned {formatDate(task.assignedAt)}</span>
+        <strong>{task.ownerName ?? 'Claim'}</strong>{' '}
+        <Hint as="span">
+          {task.ownerEmployeeCode} · {finance ? 'financial review' : task.stepAction.replace(/_/g, ' ')} · assigned {formatDate(task.assignedAt)}
+        </Hint>
         <DelegatedBadge taskId={task.taskId} />
       </div>
       {claim && (
         <>
           <div>{claim.purpose}</div>
           {claim.revisions && claim.revisions.length > 1 && (
-            <ul className="hint" aria-label="Earlier revisions">
+            <ul className={EARLIER_REVISIONS} aria-label="Earlier revisions">
               {claim.revisions.slice(0, -1).map((r) => (
                 <li key={r.revision}>{`Revision ${r.revision}, ${formatAmount(r.claimedTotal, claim.currency)}: ${r.purpose ?? 'purpose not recorded'}`}</li>
               ))}
             </ul>
           )}
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Category</th>
-                <th>Date</th>
-                <th>Merchant</th>
-                <th>Claimed</th>
-                <th>Flags</th>
-                <th>Receipt</th>
-                {finance && <th>Approved amount</th>}
-                {finance && <th>Reason (reduction or flagged line)</th>}
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">#</TableHead>
+                <TableHead scope="col">Category</TableHead>
+                <TableHead scope="col">Date</TableHead>
+                <TableHead scope="col">Merchant</TableHead>
+                <TableHead scope="col">Claimed</TableHead>
+                <TableHead scope="col">Flags</TableHead>
+                <TableHead scope="col">Receipt</TableHead>
+                {finance && <TableHead scope="col">Approved amount</TableHead>}
+                {finance && <TableHead scope="col">Reason (reduction or flagged line)</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {claim.lines.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.sequence}</td>
-                  <td>{l.category}</td>
-                  <td>{formatDate(l.expenseDate)}</td>
-                  <td>
+                <TableRow key={l.id}>
+                  <TableCell>{l.sequence}</TableCell>
+                  <TableCell>{l.category}</TableCell>
+                  <TableCell>{formatDate(l.expenseDate)}</TableCell>
+                  <TableCell>
                     {l.merchant}
-                    {l.invoiceReference && <div className="hint">Invoice {l.invoiceReference}</div>}
-                  </td>
-                  <td>
+                    {l.invoiceReference && <HintLine>Invoice {l.invoiceReference}</HintLine>}
+                  </TableCell>
+                  <TableCell>
                     {formatAmount(l.claimedAmount, claim.currency)}
-                    {l.currency && l.sourceClaimedAmount && (
-                      <div className="hint">{`Paid ${formatAmount(l.sourceClaimedAmount, l.currency)} at ${Number(l.exchangeRate)} ${claim.currency} each`}</div>
-                    )}
-                    {l.appliedLimit && <div className="hint">Limit {formatAmount(l.appliedLimit, claim.currency)}</div>}
-                  </td>
-                  <td>
+                    {l.currency && l.sourceClaimedAmount && <HintLine>{`Paid ${formatAmount(l.sourceClaimedAmount, l.currency)} at ${Number(l.exchangeRate)} ${claim.currency} each`}</HintLine>}
+                    {l.appliedLimit && <HintLine>Limit {formatAmount(l.appliedLimit, claim.currency)}</HintLine>}
+                  </TableCell>
+                  <TableCell>
                     {l.exceptionFlags.length ? l.exceptionFlags.join(', ').toLowerCase().replace(/_/g, ' ') : '—'}
-                    {l.exceptionReason && <div className="hint">Claimant: {l.exceptionReason}</div>}
-                    {l.decisionReason && <div className="hint">Reviewer: {l.decisionReason}</div>}
-                  </td>
-                  <td>
+                    {l.exceptionReason && <HintLine>Claimant: {l.exceptionReason}</HintLine>}
+                    {l.decisionReason && <HintLine>Reviewer: {l.decisionReason}</HintLine>}
+                  </TableCell>
+                  <TableCell>
                     {receiptWords(l)}{' '}
                     {l.receiptPresent && receiptReleased(l) && can('expense.view_receipt.receipt') && (
-                      <button type="button" className="secondary" onClick={() => viewReceipt.mutate(l.id)}>
+                      <Button type="button" variant="outline" size="sm" onClick={() => viewReceipt.mutate(l.id)}>
                         View
-                      </button>
+                      </Button>
                     )}
-                  </td>
+                  </TableCell>
                   {finance && (
-                    <td>
-                      <input
+                    <TableCell>
+                      <Input
                         aria-label={`Approved amount for line ${l.sequence}`}
                         inputMode="decimal"
+                        className="w-auto"
                         value={allowed[l.id] ?? Number(l.claimedAmount).toFixed(2)}
                         onChange={(e) => setAllowed({ ...allowed, [l.id]: e.target.value })}
                       />
-                    </td>
+                    </TableCell>
                   )}
                   {finance && (
-                    <td>
-                      <input aria-label={`Reason for line ${l.sequence}`} value={lineReason[l.id] ?? ''} onChange={(e) => setLineReason({ ...lineReason, [l.id]: e.target.value })} />
-                    </td>
+                    <TableCell>
+                      <Input
+                        aria-label={`Reason for line ${l.sequence}`}
+                        className="w-auto"
+                        value={lineReason[l.id] ?? ''}
+                        onChange={(e) => setLineReason({ ...lineReason, [l.id]: e.target.value })}
+                      />
+                    </TableCell>
                   )}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </>
       )}
-      <input aria-label="Decision reason" placeholder="Reason (required to reject or return)" maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      {unclearedLines && <p className="hint">Enter a reason for each flagged line to clear it before approving.{claim?.lines.some((l) => !receiptReleased(l)) ? ' A receipt the malware scan has not released counts as none.' : ''}</p>}
-      <div className="row">
-        <button disabled={decide.isPending || unclearedLines} onClick={() => decide.mutate('APPROVE')}>
+      <Input aria-label="Decision reason" placeholder="Reason (required to reject or return)" maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      {unclearedLines && <Hint>Enter a reason for each flagged line to clear it before approving.{claim?.lines.some((l) => !receiptReleased(l)) ? ' A receipt the malware scan has not released counts as none.' : ''}</Hint>}
+      <ButtonRow>
+        <Button disabled={decide.isPending || unclearedLines} onClick={() => decide.mutate('APPROVE')}>
           {finance ? 'Approve amounts' : 'Approve'}
-        </button>
-        <button className="secondary" disabled={decide.isPending || noReason} onClick={() => decide.mutate('RETURN')}>
+        </Button>
+        <Button variant="outline" disabled={decide.isPending || noReason} onClick={() => decide.mutate('RETURN')}>
           Return
-        </button>
-        <button className="danger" disabled={decide.isPending || noReason} onClick={() => decide.mutate('REJECT')}>
+        </Button>
+        <Button variant="danger" disabled={decide.isPending || noReason} onClick={() => decide.mutate('REJECT')}>
           Reject
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <ErrorNote error={claimQuery.error ?? decide.error ?? viewReceipt.error} />
     </li>
   );

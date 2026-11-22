@@ -1,12 +1,31 @@
 // A record page's sections as a bar of tab-like links (owner's request of 20 Nov 2026: "the sections as tabs"). Every section stays
 // on the page, in its order and with everything in it: the bar only jumps to one and marks the one in view. It stays at the top of
-// the page while the page scrolls (styles/profile.css), and on a phone it scrolls sideways inside itself.
+// the page while the page scrolls, and on a phone it scrolls sideways inside itself. The page's sections come to rest below it, and a
+// list's sticky column headings stop under it (styles.css, by the bar's height `--section-bar-h`, which the bar takes too).
 //
 // A section is found by its heading, as the page draws it (ui.tsx Section), so the page needs no other change: the bar names each
 // section it finds with an id, so its link is a real link to that place on the page.
 
 import { type MouseEvent, useEffect, useRef, useState } from 'react';
-import './styles/profile.css';
+import { cn } from '@/lib/utils';
+
+/**
+ * A band of the page's own background, so what scrolls under the bar never shows around it; its padding is taken back by its
+ * margins, so the space between the cards stays the page's own. A sticky box stops at the page's top padding (--content-top), so the
+ * bar is lifted by that much and meets the top bar with nothing scrolling past above it.
+ */
+const BAR = 'sticky top-[calc(-1*var(--content-top,0rem))] z-4 -my-2 h-[var(--section-bar-h,3.6rem)] bg-background py-2';
+/** The tiles' strip on the card colour, scrolling sideways on a narrow screen with no scrollbar shown. */
+const STRIP =
+  'm-0 flex h-full list-none items-stretch gap-[2px] overflow-x-auto overscroll-x-contain rounded-lg border border-border bg-card p-[3px] shadow-[var(--shadow-xs)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
+const LINK =
+  'inline-flex items-center rounded-md px-[0.9rem] text-[0.85rem] font-medium whitespace-nowrap text-muted-foreground no-underline transition-[background,color,box-shadow] duration-[120ms] hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-solid focus-visible:outline-[var(--focus)] motion-reduce:transition-none phone:px-3';
+/**
+ * The section in view: ink on a sunken tile with an accent underline (the red tint alone read like an error), hovered or not; in
+ * Windows high-contrast mode, where tints and shadows are not drawn, the system's highlight colours.
+ */
+const LINK_IN_VIEW =
+  'bg-muted font-semibold text-foreground shadow-[inset_0_-2px_0_var(--accent-bright)] hover:bg-muted forced-colors:bg-[color:Highlight] forced-colors:text-[color:HighlightText] forced-colors:forced-color-adjust-none';
 
 export interface BarSection {
   /** A stable key; the section is given the id `section-<key>`. */
@@ -136,11 +155,16 @@ export function SectionBar({ sections, label = 'Sections of this record' }: { se
 
   if (sections.length < 2) return null;
   return (
-    <nav ref={bar} className="section-bar" aria-label={label}>
-      <ul ref={list}>
+    <nav ref={bar} data-slot="section-bar" className={BAR} aria-label={label}>
+      <ul ref={list} className={STRIP}>
         {sections.map((s) => (
-          <li key={s.key}>
-            <a href={`#${sectionId(s.key)}`} aria-current={current === s.key ? 'true' : undefined} onClick={go(s)}>
+          <li key={s.key} className="flex flex-none">
+            <a
+              href={`#${sectionId(s.key)}`}
+              aria-current={current === s.key ? 'true' : undefined}
+              className={cn(LINK, current === s.key && LINK_IN_VIEW)}
+              onClick={go(s)}
+            >
               {s.label}
             </a>
           </li>

@@ -2,11 +2,19 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, NotPermitted, Section } from '../../ui';
 import { CANDIDATE_WORDS, LoadProblem, Refusal } from './refusals';
-import { CANDIDATE_MANAGE, CANDIDATE_READ, CandidateStateBadge, CONSENT_LABEL, CONSENTS, Denied, Done, labelOf, PAGE_SIZE, parseSkills, PATHS, Problem, SCROLL, SOURCES, useKeys, useRefresh } from './shared';
+import { CANDIDATE_MANAGE, CANDIDATE_READ, CandidateStateBadge, CONSENT_LABEL, CONSENTS, Denied, labelOf, PAGE_SIZE, parseSkills, PATHS, Problem, SOURCES, useKeys, useRefresh } from './shared';
 import type { CandidatePage, CandidateView } from './types';
 import { useActiveVendors } from './vendors';
 
@@ -60,85 +68,92 @@ function CandidateRegister() {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   return (
     <Section title={`Candidate register${data ? ` (${data.total})` : ''}`}>
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setQuery((q) => ({ ...q, term: search.trim(), page: 1 }));
-        }}
-      >
-        <label className="inline">
-          Search code, name or skill
-          <input type="search" maxLength={100} value={search} onChange={(e) => setSearch(e.target.value)} />
-        </label>
-        <label className="inline">
-          State
-          <select value={query.state} onChange={(e) => setQuery((q) => ({ ...q, state: e.target.value, page: 1 }))}>
-            {CANDIDATE_STATE_FILTERS.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" className="secondary">
-          Search
-        </button>
-      </form>
-      {list.isPending && <p className="hint loading">Loading candidates…</p>}
+      <FilterBar asChild>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setQuery((q) => ({ ...q, term: search.trim(), page: 1 }));
+          }}
+        >
+          <FormField>
+            Search code, name or skill
+            <Input type="search" maxLength={100} value={search} onChange={(e) => setSearch(e.target.value)} />
+          </FormField>
+          <FormField>
+            State
+            <NativeSelect value={query.state} onChange={(e) => setQuery((q) => ({ ...q, state: e.target.value, page: 1 }))}>
+              {CANDIDATE_STATE_FILTERS.map((f) => (
+                <option key={f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+            </NativeSelect>
+          </FormField>
+          <Button type="submit" variant="outline">
+            Search
+          </Button>
+        </form>
+      </FilterBar>
+      {list.isPending && <LoadingLine>Loading candidates…</LoadingLine>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view the candidate register." />
       {data && data.items.length === 0 && <Empty>{query.term ? `No candidates match “${query.term}”.` : 'No candidates in the register.'}</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Candidate register">
-            <thead>
-              <tr>
-                <th scope="col">Code</th>
-                <th scope="col">Name</th>
-                <th scope="col">Source</th>
-                <th scope="col">Skills</th>
-                <th scope="col">Consent</th>
-                <th scope="col">Retain until</th>
-                <th scope="col">State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.candidateCode}</td>
-                  <td>
-                    <Link to={PATHS.candidate(c.id)}>{c.fullName}</Link>
-                  </td>
-                  <td>
-                    {c.source.label}
-                    {c.vendor && <div className="hint">{` ${c.vendor.name} (${c.vendor.code})`}</div>}
-                  </td>
-                  <td>{c.skills.length > 0 ? c.skills.join(', ') : '—'}</td>
-                  <td>
-                    {labelOf(CONSENT_LABEL, c.consentStatus)}
-                    {c.consentRecordedOn && <div className="hint">{` on ${formatDate(c.consentRecordedOn)}`}</div>}
-                  </td>
-                  <td>{formatDate(c.retainUntil)}</td>
-                  <td>
-                    <CandidateStateBadge state={c.state} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Candidate register">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Source</TableHead>
+              <TableHead scope="col">Skills</TableHead>
+              <TableHead scope="col">Consent</TableHead>
+              <TableHead scope="col">Retain until</TableHead>
+              <TableHead scope="col">State</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((c) => (
+              <TableRow key={c.id}>
+                <TableCell>{c.candidateCode}</TableCell>
+                <TableCell>
+                  <Link to={PATHS.candidate(c.id)}>{c.fullName}</Link>
+                </TableCell>
+                <TableCell>
+                  {c.source.label}
+                  {c.vendor && (
+                    <Hint as="span" className="block">
+                      {` ${c.vendor.name} (${c.vendor.code})`}
+                    </Hint>
+                  )}
+                </TableCell>
+                <TableCell>{c.skills.length > 0 ? c.skills.join(', ') : '—'}</TableCell>
+                <TableCell>
+                  {labelOf(CONSENT_LABEL, c.consentStatus)}
+                  {c.consentRecordedOn && (
+                    <Hint as="span" className="block">
+                      {` on ${formatDate(c.consentRecordedOn)}`}
+                    </Hint>
+                  )}
+                </TableCell>
+                <TableCell>{formatDate(c.retainUntil)}</TableCell>
+                <TableCell>
+                  <CandidateStateBadge state={c.state} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {data && pages > 1 && (
-        <div className="pager">
-          <button type="button" className="secondary" disabled={query.page <= 1} onClick={() => setQuery((q) => ({ ...q, page: q.page - 1 }))}>
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-3 text-sm text-muted-foreground">
+          <Button type="button" variant="outline" size="sm" disabled={query.page <= 1} onClick={() => setQuery((q) => ({ ...q, page: q.page - 1 }))}>
             Previous
-          </button>
-          <span>
+          </Button>
+          <span className="tabular-nums">
             Page {query.page} of {pages}
           </span>
-          <button type="button" className="secondary" disabled={query.page >= pages} onClick={() => setQuery((q) => ({ ...q, page: q.page + 1 }))}>
+          <Button type="button" variant="outline" size="sm" disabled={query.page >= pages} onClick={() => setQuery((q) => ({ ...q, page: q.page + 1 }))}>
             Next
-          </button>
+          </Button>
         </div>
       )}
     </Section>
@@ -240,75 +255,75 @@ export function CandidateFields({
   const options = currentVendor && !active.some((x) => x.id === currentVendor.id) ? [{ ...currentVendor, current: true }, ...active.map((x) => ({ ...x, current: false }))] : active.map((x) => ({ ...x, current: false }));
   return (
     <>
-      <label>
+      <FormField>
         Full name (required)
-        <input required maxLength={200} value={v.fullName} onChange={(e) => set({ fullName: e.target.value })} />
-      </label>
-      <label>
+        <Input required maxLength={200} value={v.fullName} onChange={(e) => set({ fullName: e.target.value })} />
+      </FormField>
+      <FormField>
         Source
-        <select value={v.sourceCode} onChange={(e) => set({ sourceCode: e.target.value, vendorId: '' })}>
+        <NativeSelect value={v.sourceCode} onChange={(e) => set({ sourceCode: e.target.value, vendorId: '' })}>
           {SOURCES.map((s) => (
             <option key={s.code} value={s.code}>
               {s.label}
             </option>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {v.sourceCode === 'VENDOR' && (
-        <label>
+        <FormField>
           Recruitment vendor (required)
-          <select required value={v.vendorId} onChange={(e) => set({ vendorId: e.target.value })}>
+          <NativeSelect required value={v.vendorId} onChange={(e) => set({ vendorId: e.target.value })}>
             <option value="">{vendors.isLoading ? 'Loading vendors…' : 'Choose a vendor…'}</option>
             {options.map((x) => (
               <option key={x.id} value={x.id}>
                 {`${x.name} (${x.code})${x.current ? ' (current)' : ''}`}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       )}
       {v.sourceCode === 'VENDOR' && vendors.data && options.length === 0 && (
-        <p className="hint wide">
+        <Hint>
           No active vendors yet: add one under <Link to={PATHS.vendors}>Recruitment vendors</Link>.
-        </p>
+        </Hint>
       )}
       {v.sourceCode === 'VENDOR' && vendors.error && (
-        <div className="wide">
+        <div className="col-span-full">
           <LoadProblem error={vendors.error} forbidden="The selected role cannot list the recruitment vendors." />
         </div>
       )}
-      <label className="wide">
+      <FormField className="col-span-full">
         Skills (separated by commas)
-        <input maxLength={5000} value={v.skills} onChange={(e) => set({ skills: e.target.value })} />
-      </label>
-      <label>
+        <Input maxLength={5000} value={v.skills} onChange={(e) => set({ skills: e.target.value })} />
+      </FormField>
+      <FormField>
         Consent
-        <select value={v.consentStatus} onChange={(e) => set({ consentStatus: e.target.value, ...(e.target.value === 'NOT_RECORDED' ? { consentRecordedOn: '' } : {}) })}>
+        <NativeSelect value={v.consentStatus} onChange={(e) => set({ consentStatus: e.target.value, ...(e.target.value === 'NOT_RECORDED' ? { consentRecordedOn: '' } : {}) })}>
           {CONSENTS.map((c) => (
             <option key={c} value={c}>
               {labelOf(CONSENT_LABEL, c)}
             </option>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {v.consentStatus !== 'NOT_RECORDED' && (
-        <label>
+        <FormField>
           {v.consentStatus === 'WITHDRAWN' ? 'Consent withdrawn on (required)' : 'Consent given on (required)'}
-          <input type="date" required value={v.consentRecordedOn} onChange={(e) => set({ consentRecordedOn: e.target.value })} />
-        </label>
+          <Input type="date" required value={v.consentRecordedOn} onChange={(e) => set({ consentRecordedOn: e.target.value })} />
+        </FormField>
       )}
-      <label>
+      <FormField>
         Retain until (optional)
-        <input type="date" value={v.retainUntil} onChange={(e) => set({ retainUntil: e.target.value })} />
-      </label>
+        <Input type="date" value={v.retainUntil} onChange={(e) => set({ retainUntil: e.target.value })} />
+      </FormField>
       {showState && (
-        <label>
+        <FormField>
           Record state
-          <select value={v.state} onChange={(e) => set({ state: e.target.value })}>
+          <NativeSelect value={v.state} onChange={(e) => set({ state: e.target.value })}>
             <option value="ACTIVE">Active</option>
             <option value="INACTIVE">Inactive</option>
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       )}
     </>
   );
@@ -343,28 +358,28 @@ function NewCandidateForm() {
   };
   return (
     <Section title="Register a candidate">
-      <form className="grid-form" aria-label="Register a candidate" onSubmit={submit} noValidate>
+      <FormGrid aria-label="Register a candidate" onSubmit={submit} noValidate>
         <CandidateFields values={values} set={set} vendors={vendors} currentVendor={null} showState={false} />
-        <p className="hint wide">
+        <Hint>
           Private contacts and CVs are confidential: an eligible Admin records them on the candidate’s page. A likely duplicate is flagged for review, never merged.
-        </p>
+        </Hint>
         <Problem text={problem} />
         {create.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={create.error} words={CANDIDATE_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={create.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={create.isPending}>
             Register candidate
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         {create.isSuccess && (
-          <Done>
+          <StatusNote tone="success" role="status">
             Registered {create.data.candidateCode}. <Link to={PATHS.candidate(create.data.id)}>Open {create.data.fullName}</Link>
-          </Done>
+          </StatusNote>
         )}
-      </form>
+      </FormGrid>
     </Section>
   );
 }

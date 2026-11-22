@@ -1,12 +1,18 @@
 // Appraisal reports (FR-044) within row scope, the export, and the training needs suggested to training planning.
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FilterBar } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, download, personLabel, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, NotPermitted, Section, When } from '../../ui';
 import { CycleSelect, DepartmentSelect } from './lookups';
 import { QueryProblem, Refusal } from './refusals';
-import { CYCLE_READ, EXPORT, FLUSH, H3, periodText, REPORT, type Report, REPORT_RATING, SCROLL, shown, SPACED, useKeys } from './shared';
+import { CYCLE_READ, EXPORT, ORG_READ, periodText, REPORT, type Report, REPORT_RATING, shown, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: reports (FR-044) within row scope, and the export
@@ -26,13 +32,13 @@ export function ReportsScreen() {
     <div className="stack">
       <Section title="Appraisal reports">
         {can(CYCLE_READ) ? (
-          <div className="row">
+          <FilterBar>
             <CycleSelect label="Cycle" value={cycleId} onChange={setCycleId} />
-          </div>
+          </FilterBar>
         ) : (
           <NotPermitted>The selected role cannot list appraisal cycles, so it cannot choose one to report on.</NotPermitted>
         )}
-        {!cycleId && can(CYCLE_READ) && <p className="hint">Choose a cycle to see its report.</p>}
+        {!cycleId && can(CYCLE_READ) && <Hint>Choose a cycle to see its report.</Hint>}
       </Section>
       {cycleId && <CycleReport key={cycleId} cycleId={cycleId} />}
     </div>
@@ -49,10 +55,12 @@ export function CycleReport({ cycleId }: { cycleId: string }) {
   const data = shown(report);
   return (
     <Section title="Cycle report">
-      <div className="row">
-        <DepartmentSelect value={departmentId} onChange={setDepartmentId} />
-      </div>
-      {report.isPending && <p className="hint loading">Loading the report…</p>}
+      {can(ORG_READ) && (
+        <FilterBar>
+          <DepartmentSelect value={departmentId} onChange={setDepartmentId} />
+        </FilterBar>
+      )}
+      {report.isPending && <LoadingLine>Loading the report…</LoadingLine>}
       <QueryProblem error={report.error} forbidden="The selected role cannot view appraisal reports." />
       {data && (
         <>
@@ -60,69 +68,65 @@ export function CycleReport({ cycleId }: { cycleId: string }) {
             {data.cycle.code}: {data.cycle.name} ({periodText(data.cycle)}). Scope: {readable(data.scope).toLowerCase()}
             {data.filters.departmentId ? ', one department' : ', all departments in scope'}. Generated <When at={data.generatedAt} />.
           </p>
-          {data.ownAppraisalExcluded && <p className="hint">Your own appraisal is never included in reports or exports.</p>}
+          {data.ownAppraisalExcluded && <Hint>Your own appraisal is never included in reports or exports.</Hint>}
           <p>
             Appraisals in the population: <strong>{data.population}</strong> (cancelled ones are counted apart).
           </p>
-          <div style={SCROLL}>
-            <table aria-label="Appraisals by state">
-              <thead>
-                <tr>
-                  <th>State</th>
-                  <th>Appraisals</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(data.byState).map(([state, n]) => (
-                  <tr key={state}>
-                    <td>{readable(state)}</td>
-                    <td>{n}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Appraisals by state">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Appraisals</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Object.entries(data.byState).map(([state, n]) => (
+                <TableRow key={state}>
+                  <TableCell>{readable(state)}</TableCell>
+                  <TableCell>{n}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
           {data.ratings && (
             <>
-              <h3 style={H3}>Final ratings of completed appraisals</h3>
-              <p className="hint" style={FLUSH}>
+              <CardSubheading>Final ratings of completed appraisals</CardSubheading>
+              <Hint className="m-0">
                 Exact final ratings, counted as they are: no bins, targets or expected shares. The counts add up to the {data.ratings.completed} completed appraisal
                 {data.ratings.completed === 1 ? '' : 's'}.
-              </p>
+              </Hint>
               {data.ratings.distribution.length === 0 ? (
                 <Empty>No completed appraisals yet.</Empty>
               ) : (
-                <div style={SCROLL}>
-                  <table aria-label="Final rating distribution">
-                    <thead>
-                      <tr>
-                        <th>Final rating</th>
-                        <th>Appraisals</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.ratings.distribution.map((r) => (
-                        <tr key={r.finalRating}>
-                          <td>{r.finalRating}</td>
-                          <td>{r.count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <Table aria-label="Final rating distribution">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead scope="col">Final rating</TableHead>
+                      <TableHead scope="col">Appraisals</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.ratings.distribution.map((r) => (
+                      <TableRow key={r.finalRating}>
+                        <TableCell>{r.finalRating}</TableCell>
+                        <TableCell>{r.count}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               )}
             </>
           )}
         </>
       )}
       {can(EXPORT) && (
-        <div style={SPACED}>
-          <div className="row">
-            <button type="button" className="secondary" disabled={exportCsv.isPending} onClick={() => exportCsv.mutate()}>
+        <div className="mt-3">
+          <ButtonRow>
+            <Button type="button" variant="outline" disabled={exportCsv.isPending} onClick={() => exportCsv.mutate()}>
               {exportCsv.isPending ? 'Preparing the export…' : 'Export as CSV'}
-            </button>
-          </div>
-          <p className="hint">The export covers the same population; rating columns are included only when the selected role may see them.</p>
+            </Button>
+          </ButtonRow>
+          <Hint>The export covers the same population; rating columns are included only when the selected role may see them.</Hint>
           <Refusal error={exportCsv.error} action="export" />
         </div>
       )}
@@ -146,37 +150,33 @@ function TrainingNeeds({ cycleId, departmentId }: { cycleId: string; departmentI
   });
   const data = shown(query);
   return (
-    <div style={SPACED}>
-      <h3 style={H3}>Training needs (suggestions for training planning)</h3>
-      {query.isPending && <p className="hint loading">Loading training needs…</p>}
+    <div className="mt-3">
+      <CardSubheading>Training needs (suggestions for training planning)</CardSubheading>
+      {query.isPending && <LoadingLine>Loading training needs…</LoadingLine>}
       <QueryProblem error={query.error} forbidden="Training needs are confidential: the selected role cannot see them." />
       {data && !data.sectionIncluded && <Empty>This cycle does not include the training needs section.</Empty>}
       {data && data.sectionIncluded && data.items.length === 0 && <Empty>No completed appraisal in scope has training needs yet.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Training needs">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Stated by the employee</th>
-                <th>Recommended by the manager</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((r) => (
-                <tr key={r.appraisalId}>
-                  <td>{personLabel(r.employee)}</td>
-                  <td>{r.employeeStated ?? '—'}</td>
-                  <td>{r.managerRecommended ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Training needs">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Stated by the employee</TableHead>
+              <TableHead scope="col">Recommended by the manager</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((r) => (
+              <TableRow key={r.appraisalId}>
+                <TableCell>{personLabel(r.employee)}</TableCell>
+                <TableCell>{r.employeeStated ?? '—'}</TableCell>
+                <TableCell>{r.managerRecommended ?? '—'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      <p className="hint" style={FLUSH}>
-        A suggestion only: nominate people from the training module; nobody is enrolled from here.
-      </p>
+      <Hint className="m-0">A suggestion only: nominate people from the training module; nobody is enrolled from here.</Hint>
     </div>
   );
 }

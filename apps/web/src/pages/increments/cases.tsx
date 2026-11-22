@@ -2,14 +2,48 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, Fragment, useId, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, Section, StateBadge } from '../../ui';
-import { answered, DecisionInboxLink, H3, type IncrementCase, LoadProblem, money, moneyProblem, occurrenceText, type Outcome, outcomeLabel, OUTCOMES, type PickedEmployee, type ProposalBody, type ProposalResult, PROPOSE, SCROLL, SR_ONLY, STATE_FILTERS, TEXTAREA, useKeys, useReloadCases } from './shared';
+import { Empty, ErrorNote, Notice, Section, StateBadge } from '../../ui';
+import {
+  answered,
+  DecisionInboxLink,
+  type IncrementCase,
+  LoadProblem,
+  money,
+  moneyProblem,
+  occurrenceText,
+  type Outcome,
+  outcomeLabel,
+  OUTCOMES,
+  type PickedEmployee,
+  type ProposalBody,
+  type ProposalResult,
+  PROPOSE,
+  STATE_FILTERS,
+  useKeys,
+  useReloadCases,
+} from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // FR-092 / DF15: cases, with amounts only when the server returned them, and the direct manager's proposal.
 // ---------------------------------------------------------------------------------------------------------
+
+/** Which review a case belongs to: a correction of an applied change, an off-cycle change, or a cycle occurrence. */
+function reviewText(c: IncrementCase): string {
+  if (c.correctsHistoryId) return 'Correction';
+  return c.offCycle ? 'Off-cycle' : occurrenceText(c.occurrence);
+}
 
 export function CasesSection({ onShowSalary }: { onShowSalary: ((employee: PickedEmployee) => void) | undefined }) {
   const { me, can } = useSession();
@@ -48,130 +82,139 @@ export function CasesSection({ onShowSalary }: { onShowSalary: ((employee: Picke
 
   return (
     <Section title={`Increment cases${data ? ` (${items.length})` : ''}`}>
-      <p className="hint">
+      <Hint>
         Submitted cases are decided by another administrator on the <DecisionInboxLink /> page, not here. A case changes no salary until it is approved.
-      </p>
-      {can(PROPOSE) && <p className="hint">Cycle outcomes are proposed by the employee’s current direct manager.</p>}
-      <label className="inline">
-        State{' '}
-        <select
-          value={state}
-          onChange={(e) => {
-            setState(e.target.value);
-            toggle(null);
-          }}
-        >
-          {STATE_FILTERS.map((f) => (
-            <option key={f.value} value={f.value}>
-              {f.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {sentFor && (
-        <p className="ok" role="status">
-          Proposal for {sentFor} sent for an independent decision.
-        </p>
-      )}
+      </Hint>
+      {can(PROPOSE) && <Hint>Cycle outcomes are proposed by the employee’s current direct manager.</Hint>}
+      <FilterBar>
+        <FormField>
+          State{' '}
+          <NativeSelect
+            value={state}
+            onChange={(e) => {
+              setState(e.target.value);
+              toggle(null);
+            }}
+          >
+            {STATE_FILTERS.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
+              </option>
+            ))}
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {sentFor && <Notice notice={{ text: `Proposal for ${sentFor} sent for an independent decision.`, ok: true }} />}
       {conflict && !conflictInForm && (
-        <div className="stack">
-          <p className="hint">The proposal for {conflict.employeeCode} was not accepted, and the case list was reloaded. Check the case’s current state.</p>
+        <div className="flex flex-col gap-3">
+          <Hint>The proposal for {conflict.employeeCode} was not accepted, and the case list was reloaded. Check the case’s current state.</Hint>
           <ErrorNote error={conflict.error} />
         </div>
       )}
-      {cases.isPending && <p className="hint loading">Loading cases…</p>}
+      {cases.isPending && <LoadingLine>Loading cases…</LoadingLine>}
       <LoadProblem error={cases.error} forbidden="The selected role cannot view increment cases." />
       {data && items.length === 0 && (
         <Empty>{state ? `No increment cases are in the state “${filterLabel}”.` : 'No increment cases yet. Cases appear when a review is opened or an off-cycle change is proposed.'}</Empty>
       )}
-      {items.length > 0 && !withAmounts && (
-        <p className="hint" role="note">
-          Amounts are shown only to roles holding a confidential salary grant.
-        </p>
-      )}
+      {items.length > 0 && !withAmounts && <Hint role="note">Amounts are shown only to roles holding a confidential salary grant.</Hint>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Employee</th>
-                <th scope="col">Review</th>
-                <th scope="col">Effective date</th>
-                <th scope="col">State</th>
-                <th scope="col">Proposed outcome</th>
-                {withAmounts && <th scope="col">Baseline</th>}
-                {withAmounts && <th scope="col">Proposed amount</th>}
-                {hasActions && (
-                  <th scope="col">
-                    <span style={SR_ONLY}>Actions</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((c) => {
-                const canOpen = proposable(c);
-                const open = canOpen && openId === c.id;
-                return (
-                  <Fragment key={c.id}>
-                    <tr aria-current={open ? 'true' : undefined}>
-                      <td>{c.employeeCode}</td>
-                      <td>{c.correctsHistoryId ? 'Correction' : c.offCycle ? 'Off-cycle' : occurrenceText(c.occurrence)}</td>
-                      <td>{formatDate(c.effectiveDate)}</td>
-                      <td>
-                        <StateBadge state={c.state} />
-                      </td>
-                      <td>{c.proposedOutcome ? outcomeLabel(c.proposedOutcome) : '—'}</td>
-                      {withAmounts && <td>{money(c.baselineAmount, c.currency)}</td>}
-                      {withAmounts && <td>{money(c.proposedAmount, c.currency)}</td>}
-                      {hasActions && (
-                        <td>
-                          <div className="row">
-                            {canOpen && (
-                              <button
-                                type="button"
-                                className="link"
-                                aria-expanded={open}
-                                aria-controls={open ? formId(c.id) : undefined}
-                                aria-label={`${open ? 'Close proposal' : 'Propose outcome'} for ${c.employeeCode}`}
-                                onClick={() => toggle(open ? null : c.id)}
-                              >
-                                {open ? 'Close proposal' : 'Propose outcome'}
-                              </button>
-                            )}
-                            {onShowSalary && (
-                              <button type="button" className="link" aria-label={`Salary for ${c.employeeCode}`} onClick={() => onShowSalary({ id: c.employeeId, employeeCode: c.employeeCode })}>
-                                Salary
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                    {open && (
-                      <tr>
-                        <td colSpan={columns} id={formId(c.id)}>
-                          <ProposalForm
-                            kase={c}
-                            onSent={() => {
-                              toggle(null);
-                              setSentFor(c.employeeCode);
-                            }}
-                            onConflict={(error) => setConflict({ caseId: c.id, employeeCode: c.employeeCode, error })}
-                            onCancel={() => toggle(null)}
-                          />
-                        </td>
-                      </tr>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Review</TableHead>
+              <TableHead scope="col">Effective date</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Proposed outcome</TableHead>
+              {withAmounts && <TableHead scope="col">Baseline</TableHead>}
+              {withAmounts && <TableHead scope="col">Proposed amount</TableHead>}
+              {hasActions && (
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((c) => {
+              const canOpen = proposable(c);
+              const open = canOpen && openId === c.id;
+              return (
+                <Fragment key={c.id}>
+                  <TableRow aria-current={open ? 'true' : undefined}>
+                    <TableCell>{c.employeeCode}</TableCell>
+                    <TableCell>{reviewText(c)}</TableCell>
+                    <TableCell>{formatDate(c.effectiveDate)}</TableCell>
+                    <TableCell>
+                      <StateBadge state={c.state} />
+                    </TableCell>
+                    <TableCell>{c.proposedOutcome ? outcomeLabel(c.proposedOutcome) : '—'}</TableCell>
+                    {withAmounts && <TableCell>{money(c.baselineAmount, c.currency)}</TableCell>}
+                    {withAmounts && <TableCell>{money(c.proposedAmount, c.currency)}</TableCell>}
+                    {hasActions && (
+                      <RowActionsCell>
+                        <RowActions>
+                          {canOpen && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-expanded={open}
+                              aria-controls={open ? formId(c.id) : undefined}
+                              aria-label={`${open ? 'Close proposal' : 'Propose outcome'} for ${c.employeeCode}`}
+                              onClick={() => toggle(open ? null : c.id)}
+                            >
+                              {open ? 'Close proposal' : 'Propose outcome'}
+                            </Button>
+                          )}
+                          {onShowSalary && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-label={`Salary for ${c.employeeCode}`}
+                              onClick={() => onShowSalary({ id: c.employeeId, employeeCode: c.employeeCode })}
+                            >
+                              Salary
+                            </Button>
+                          )}
+                        </RowActions>
+                      </RowActionsCell>
                     )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                  </TableRow>
+                  {open && (
+                    <TableRow>
+                      <TableCell colSpan={columns} id={formId(c.id)}>
+                        <ProposalForm
+                          kase={c}
+                          onSent={() => {
+                            toggle(null);
+                            setSentFor(c.employeeCode);
+                          }}
+                          onConflict={(error) => setConflict({ caseId: c.id, employeeCode: c.employeeCode, error })}
+                          onCancel={() => toggle(null)}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
+}
+
+/** The check of a proposal before it is sent: required fields and the money format only; every business rule is the server's. */
+function proposalProblem(outcome: Outcome | '', amount: string, counterpart: string, reason: string): string | null {
+  if (outcome === '') return 'Choose the proposed outcome.';
+  if (outcome === 'INCREASE') {
+    const amountProblem = moneyProblem(amount, 'the new amount') ?? moneyProblem(counterpart, 'the counterpart figure');
+    if (amountProblem) return amountProblem;
+  }
+  return reason === '' ? 'Enter a reason.' : null;
 }
 
 /**
@@ -211,20 +254,10 @@ function ProposalForm({
     },
   });
 
-  // Required fields and the money format only; every business rule (manager, state, version) is the server's.
-  const check = (text: string): string | null => {
-    if (outcome === '') return 'Choose the proposed outcome.';
-    if (outcome === 'INCREASE') {
-      const amountProblem = moneyProblem(amount, 'the new amount') ?? moneyProblem(counterpart, 'the counterpart figure');
-      if (amountProblem) return amountProblem;
-    }
-    return text === '' ? 'Enter a reason.' : null;
-  };
-
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const text = reason.trim();
-    const missing = check(text);
+    const missing = proposalProblem(outcome, amount, counterpart, text);
     setProblem(missing);
     if (missing !== null || outcome === '') {
       propose.reset();
@@ -239,62 +272,58 @@ function ProposalForm({
 
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
+      <CardSubheading id={`${id}-title`}>
         Proposal for {kase.employeeCode} ({kase.occurrence})
-      </h3>
-      {kase.state === 'RETURNED' && <p className="hint">The decision maker returned this case; propose again with any changes.</p>}
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit}>
-        <label>
+      </CardSubheading>
+      {kase.state === 'RETURNED' && <Hint>The decision maker returned this case; propose again with any changes.</Hint>}
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit}>
+        <FormField>
           Proposed outcome
-          <select required value={outcome} onChange={(e) => setOutcome(e.target.value as Outcome | '')}>
+          <NativeSelect required value={outcome} onChange={(e) => setOutcome(e.target.value as Outcome | '')}>
             <option value="">Choose…</option>
             {OUTCOMES.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         {outcome === 'INCREASE' && (
           <>
-            <label>
+            <FormField>
               New amount on the cycle basis
-              <input inputMode="decimal" autoComplete="off" required value={amount} aria-describedby={`${id}-money`} onChange={(e) => setAmount(e.target.value)} />
-            </label>
-            <label>
+              <Input inputMode="decimal" autoComplete="off" required value={amount} aria-describedby={`${id}-money`} onChange={(e) => setAmount(e.target.value)} />
+            </FormField>
+            <FormField>
               Counterpart figure
-              <input inputMode="decimal" autoComplete="off" required value={counterpart} aria-describedby={`${id}-money`} onChange={(e) => setCounterpart(e.target.value)} />
-            </label>
-            <p className="hint wide" id={`${id}-money`}>
+              <Input inputMode="decimal" autoComplete="off" required value={counterpart} aria-describedby={`${id}-money`} onChange={(e) => setCounterpart(e.target.value)} />
+            </FormField>
+            <Hint id={`${id}-money`}>
               {kase.baselineAmount !== undefined && <>Current baseline on the cycle basis: {money(kase.baselineAmount, kase.currency)}. </>}
               Enter the new figure on the cycle’s basis and the matching figure on the other basis (annual CTC when the basis is monthly gross, monthly gross when it
               is annual CTC). Neither figure is worked out from the other.
-            </p>
+            </Hint>
           </>
         )}
-        {(outcome === 'NO_CHANGE' || outcome === 'DEFER') && <p className="hint wide">No change and defer outcomes create no salary revision.</p>}
-        <label className="wide">
+        {(outcome === 'NO_CHANGE' || outcome === 'DEFER') && <Hint>No change and defer outcomes create no salary revision.</Hint>}
+        <FormField className="col-span-full">
           Reason (required)
-          <textarea required maxLength={1000} rows={3} style={TEXTAREA} value={reason} onChange={(e) => setReason(e.target.value)} />
-        </label>
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
-        <div className="wide row">
-          <button type="submit" disabled={propose.isPending}>
+          <Textarea required maxLength={1000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </FormField>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={propose.isPending}>
             Send proposal
-          </button>
-          <button type="button" className="secondary" onClick={onCancel}>
+          </Button>
+          <Button type="button" variant="outline" onClick={onCancel}>
             Cancel
-          </button>
-        </div>
-        <div className="wide">
+          </Button>
+        </ButtonRow>
+        <div className="col-span-full">
           <ErrorNote error={propose.error} />
-          {isConflict(propose.error) && <p className="hint">The case list was reloaded; check this case and send the proposal again.</p>}
+          {isConflict(propose.error) && <Hint>The case list was reloaded; check this case and send the proposal again.</Hint>}
         </div>
-      </form>
+      </FormGrid>
     </>
   );
 }

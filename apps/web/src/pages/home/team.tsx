@@ -3,6 +3,15 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
+import { Button } from '@/components/ui/button';
+import { FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../../api';
 import { placeFact, type ProfileFact, ProfileHeader, profileSubtitle } from '../../profile-header';
 import { type BarSection, SectionBar } from '../../section-bar';
@@ -28,6 +37,8 @@ interface Member {
 type TeamSort = 'employeeCode' | 'displayName' | 'department' | 'designation' | 'location' | 'joiningDate' | 'status' | 'nextReviewDate';
 
 const TEAM_PAGE_SIZES = [25, 50, 100] as const;
+/** A date in the team list stays on one line ("3 Nov 2026", not "3 Nov" over "2026"), as it did before the move to shadcn. */
+const DATE_CELL = 'whitespace-nowrap';
 /** The list's filters, in the address so a dashboard figure opens the list with its own (DF17) and the export holds the same (DF16). */
 const TEAM_FILTERS = ['departmentId', 'locationId', 'status', 'reviewDueFrom', 'reviewDueTo', 'todayAttendance', 'confirmationDueTo'] as const;
 
@@ -72,116 +83,117 @@ export function MyTeamPage() {
   const pages = Math.max(1, Math.ceil((team.data?.total ?? 0) / pageSize));
   return (
     <Section title={`My team${team.data ? ` (${team.data.total})` : ''}`}>
-      <div className="grid-form">
-        <label className="inline">
-          Search <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code or email" />
-        </label>
-        <label className="inline">
+      <FilterBar>
+        <FormField>
+          Search <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code or email" />
+        </FormField>
+        <FormField>
           Department{' '}
-          <select value={filters.departmentId ?? ''} onChange={(e) => setFilter('departmentId', e.target.value)}>
+          <NativeSelect value={filters.departmentId ?? ''} onChange={(e) => setFilter('departmentId', e.target.value)}>
             <option value="">All</option>
             {options.data?.departments?.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="inline">
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Location{' '}
-          <select value={filters.locationId ?? ''} onChange={(e) => setFilter('locationId', e.target.value)}>
+          <NativeSelect value={filters.locationId ?? ''} onChange={(e) => setFilter('locationId', e.target.value)}>
             <option value="">All</option>
             {options.data?.locations?.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="inline">
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Status{' '}
-          <select value={filters.status ?? ''} onChange={(e) => setFilter('status', e.target.value)}>
+          <NativeSelect value={filters.status ?? ''} onChange={(e) => setFilter('status', e.target.value)}>
             <option value="">All</option>
             <option value="ACTIVE_PROBATION">Active (probation)</option>
             <option value="ACTIVE_CONFIRMED">Active (confirmed)</option>
             <option value="NOTICE">Notice</option>
-          </select>
-        </label>
-        <label className="inline">
-          Review due from <input type="date" value={filters.reviewDueFrom ?? ''} onChange={(e) => setFilter('reviewDueFrom', e.target.value)} />
-        </label>
-        <label className="inline">
-          to <input type="date" value={filters.reviewDueTo ?? ''} onChange={(e) => setFilter('reviewDueTo', e.target.value)} />
-        </label>
-      </div>
+          </NativeSelect>
+        </FormField>
+        <FormField>
+          Review due from <Input type="date" value={filters.reviewDueFrom ?? ''} onChange={(e) => setFilter('reviewDueFrom', e.target.value)} />
+        </FormField>
+        <FormField>
+          to <Input type="date" value={filters.reviewDueTo ?? ''} onChange={(e) => setFilter('reviewDueTo', e.target.value)} />
+        </FormField>
+      </FilterBar>
       {filters.todayAttendance && (
-        <p className="hint">
+        <Hint>
           Attendance today: {words(filters.todayAttendance)}{' '}
-          <button className="secondary" onClick={() => setFilter('todayAttendance', '')}>
+          <Button variant="outline" onClick={() => setFilter('todayAttendance', '')}>
             Clear
-          </button>
-        </p>
+          </Button>
+        </Hint>
       )}
       {filters.confirmationDueTo && (
-        <p className="hint">
+        <Hint>
           Confirmation due by {formatDate(filters.confirmationDueTo)}{' '}
-          <button className="secondary" onClick={() => setFilter('confirmationDueTo', '')}>
+          <Button variant="outline" onClick={() => setFilter('confirmationDueTo', '')}>
             Clear
-          </button>
-        </p>
+          </Button>
+        </Hint>
       )}
-      <table>
-        <thead>
-          <tr>
+      <Table>
+        <TableHeader>
+          <TableRow>
             <SortHeader column="employeeCode" label="Code" sort={sort} onSort={onSort} />
             <SortHeader column="displayName" label="Name" sort={sort} onSort={onSort} />
             <SortHeader column="department" label="Department" sort={sort} onSort={onSort} />
             <SortHeader column="designation" label="Designation" sort={sort} onSort={onSort} />
             <SortHeader column="location" label="Location" sort={sort} onSort={onSort} />
-            <th>Manager</th>
+            <TableHead scope="col">Manager</TableHead>
             <SortHeader column="joiningDate" label="Joined" sort={sort} onSort={onSort} />
             <SortHeader column="status" label="Status" sort={sort} onSort={onSort} />
-            <th>Today</th>
+            <TableHead scope="col">Today</TableHead>
             <SortHeader column="nextReviewDate" label="Next review" sort={sort} onSort={onSort} />
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {team.data?.items.map((m) => (
-            <tr key={m.id}>
-              <td>{m.employeeCode}</td>
-              <td>
+            <TableRow key={m.id}>
+              <TableCell>{m.employeeCode}</TableCell>
+              <TableCell>
                 <Link to={`/team/${m.id}`}>{m.displayName}</Link>
-              </td>
-              <td>{m.department ?? '—'}</td>
-              <td>{m.designation ?? '—'}</td>
-              <td>{m.location ?? '—'}</td>
-              <td>{m.manager ?? '—'}</td>
-              <td className="nowrap">{formatDate(m.joiningDate)}</td>
-              <td>
+              </TableCell>
+              <TableCell>{m.department ?? '—'}</TableCell>
+              <TableCell>{m.designation ?? '—'}</TableCell>
+              <TableCell>{m.location ?? '—'}</TableCell>
+              <TableCell>{m.manager ?? '—'}</TableCell>
+              <TableCell className={DATE_CELL}>{formatDate(m.joiningDate)}</TableCell>
+              <TableCell>
                 <StateBadge state={m.status} />
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <StateBadge state={m.todayAttendance ?? 'NOT_PROCESSED'} />
-              </td>
-              <td className="nowrap">{formatDate(m.nextReviewDate)}</td>
-            </tr>
+              </TableCell>
+              <TableCell className={DATE_CELL}>{formatDate(m.nextReviewDate)}</TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       {team.data?.items.length === 0 && <Empty>No current team members.</Empty>}
-      <div className="pager">
-        <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+      <PagerRow>
+        <PagerButton disabled={page <= 1} onClick={() => setPage(page - 1)}>
           Previous
-        </button>
-        <span>
+        </PagerButton>
+        <PagerCount>
           Page {page} of {pages}
-        </span>
-        <button disabled={page >= pages} onClick={() => setPage(page + 1)}>
+        </PagerCount>
+        <PagerButton disabled={page >= pages} onClick={() => setPage(page + 1)}>
           Next
-        </button>
-        <label className="inline">
+        </PagerButton>
+        <FieldLabel className="font-normal text-muted-foreground">
           Rows{' '}
-          <select
+          <NativeSelect
+            size="sm"
             value={pageSize}
             onChange={(e) => {
               setPageSize(Number(e.target.value));
@@ -193,18 +205,18 @@ export function MyTeamPage() {
                 {n}
               </option>
             ))}
-          </select>
-        </label>
-      </div>
+          </NativeSelect>
+        </FieldLabel>
+      </PagerRow>
       {can('team.export.operational') && (
-        <p>
-          <button className="secondary" disabled={exportTeam.isPending} onClick={() => exportTeam.mutate()}>
+        <p className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" disabled={exportTeam.isPending} onClick={() => exportTeam.mutate()}>
             Export this list
-          </button>{' '}
+          </Button>{' '}
           {exportTeam.isSuccess && (
-            <span className="hint">
+            <Hint as="span">
               Requested. Download it from <Link to="/reports">Reports</Link>.
-            </span>
+            </Hint>
           )}
         </p>
       )}
@@ -248,30 +260,30 @@ interface HistoryRow {
 /** DF16 History: what changed, from what to what; a protected value reads "Protected", as the server sends it. */
 function HistoryRows({ rows }: { rows: HistoryRow[] }) {
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>When</th>
-          <th>Change</th>
-          <th>Details</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">When</TableHead>
+          <TableHead scope="col">Change</TableHead>
+          <TableHead scope="col">Details</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {rows.map((r, i) => (
-          <tr key={i}>
-            <td>{formatDate(r.effectiveDate ?? r.occurredAt)}</td>
-            <td>{words(r.action)}</td>
-            <td>
+          <TableRow key={i}>
+            <TableCell>{formatDate(r.effectiveDate ?? r.occurredAt)}</TableCell>
+            <TableCell>{words(r.action)}</TableCell>
+            <TableCell>
               {r.changes.map((c) => (
                 <div key={c.field}>
                   {c.field}: {format(c.before)} → {format(c.after)}
                 </div>
               ))}
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -307,7 +319,7 @@ function GoalRows({ rows }: { rows: AppraisalGoals[] }) {
 }
 
 function TabSectionView({ name, section }: { name: string; section: TabSection }) {
-  if (!section.available) return <p className="hint">{section.message}</p>;
+  if (!section.available) return <Hint>{section.message}</Hint>;
   if (section.items.length === 0) return <Empty>Nothing recorded yet.</Empty>;
   return name === 'goals' ? <GoalRows rows={section.items as unknown as AppraisalGoals[]} /> : <SimpleTable rows={section.items.map(flatRow)} />;
 }
@@ -351,7 +363,7 @@ export function TeamMemberPage() {
   const sections: BarSection[] = Object.keys(tabs).map((key) => ({ key, label: barLabels[key] ?? TAB_TITLES[key] ?? key, heading: TAB_TITLES[key] ?? key }));
   return (
     <>
-      <Link className="back-link" to="/team">← My team</Link>
+      <BackLink to="/team">← My team</BackLink>
       {name && (
         <ProfileHeader
           name={name}

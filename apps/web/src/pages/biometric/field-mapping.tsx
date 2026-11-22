@@ -1,8 +1,15 @@
 // The field mapping screen (FR-087): versioned revisions approved by someone other than their author, and a safe preview.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api } from '../../api';
-import { Empty, ErrorNote, Section, StateBadge } from '../../ui';
+import { Empty, ErrorNote, Notice, Section, StateBadge } from '../../ui';
 import { Refusal } from './refusals';
 import { formatInstant, instantOf, type MappingRevision, ProfilePicker } from './shared';
 
@@ -20,6 +27,9 @@ const TARGETS = [
 ] as const;
 const TARGET_LABEL: Readonly<Record<string, string>> = Object.fromEntries(TARGETS.map((t) => [t.field, t.label]));
 const TRANSFORMS: Readonly<Record<string, string>> = { IDENTITY: 'As received', TRIM: 'Trim spaces', UPPER: 'Upper case', ENUM_MAP: 'Map values', PARSE_INSTANT: 'Parse time' };
+
+/** The direction's value map and default, one under another in their cell. */
+const VALUES_CELL = 'flex flex-col items-start gap-2';
 
 interface FieldDraft {
   sourcePath: string;
@@ -78,91 +88,95 @@ function NewRevision({ profileId, onChanged }: { profileId: string; onChanged: (
   });
   return (
     <Section title="New mapping revision">
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="New mapping revision"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <label>
+        <FormField>
           Duplicates by
-          <select required value={dedupeStrategy} onChange={(e) => setDedupe(e.target.value)}>
+          <NativeSelect required value={dedupeStrategy} onChange={(e) => setDedupe(e.target.value)}>
             <option value="" disabled>
               Choose…
             </option>
             <option value="PROVIDER_EVENT_KEY">Provider event key</option>
             <option value="FINGERPRINT">Fingerprint</option>
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Time format
-          <select required value={timestampRule} onChange={(e) => setRule(e.target.value)}>
+          <NativeSelect required value={timestampRule} onChange={(e) => setRule(e.target.value)}>
             <option value="" disabled>
               Choose…
             </option>
             <option value="ISO_WITH_OFFSET">With UTC offset</option>
             <option value="LOCAL_IN_PROVIDER_ZONE">Local in the provider’s zone</option>
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           In force from
-          <input required type="datetime-local" value={effectiveFrom} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <table className="wide" aria-label="Field mapping">
-          <thead>
-            <tr>
-              <th scope="col">Target</th>
-              <th scope="col">Source path</th>
-              <th scope="col">Transform</th>
-              <th scope="col">Required</th>
-              <th scope="col">Values and default</th>
-            </tr>
-          </thead>
-          <tbody>
-            {TARGETS.map((t) => {
-              const f = fieldOf(t.field);
-              return (
-                <tr key={t.field}>
-                  <th scope="row">{t.label}</th>
-                  <td>
-                    <input aria-label={`${t.label} source path`} maxLength={200} placeholder="field.path" value={f.sourcePath} onChange={(e) => change(t.field, { sourcePath: e.target.value })} />
-                  </td>
-                  <td>
-                    <select aria-label={`${t.label} transform`} value={f.transformCode || transformsOf(t.field)[0]} onChange={(e) => change(t.field, { transformCode: e.target.value })}>
-                      {transformsOf(t.field).map((code) => (
-                        <option key={code} value={code}>
-                          {TRANSFORMS[code]}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input type="checkbox" aria-label={`${t.label} required`} checked={f.required} onChange={(e) => change(t.field, { required: e.target.checked })} />
-                  </td>
-                  <td>
-                    {t.field === 'DIRECTION' && f.transformCode === 'ENUM_MAP' && (
-                      <textarea aria-label="Direction values" rows={2} placeholder="device value=IN or OUT, one per line" value={f.enumLines} onChange={(e) => change(t.field, { enumLines: e.target.value })} />
-                    )}
-                    {t.field === 'DIRECTION' && (
-                      <select aria-label="Direction default" value={f.defaultCode} onChange={(e) => change(t.field, { defaultCode: e.target.value })}>
-                        <option value="">No default</option>
-                        <option value="IN">IN</option>
-                        <option value="OUT">OUT</option>
-                      </select>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <button type="submit" disabled={create.isPending}>
+          <Input required type="datetime-local" value={effectiveFrom} onChange={(e) => setFrom(e.target.value)} />
+        </FormField>
+        {/* The table's own container is the grid item, so it is the wrapper that spans the form's row. */}
+        <div className="col-span-full">
+          <Table aria-label="Field mapping">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Target</TableHead>
+                <TableHead scope="col">Source path</TableHead>
+                <TableHead scope="col">Transform</TableHead>
+                <TableHead scope="col">Required</TableHead>
+                <TableHead scope="col">Values and default</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {TARGETS.map((t) => {
+                const f = fieldOf(t.field);
+                return (
+                  <TableRow key={t.field}>
+                    <TableHead scope="row">{t.label}</TableHead>
+                    <TableCell>
+                      <Input aria-label={`${t.label} source path`} maxLength={200} placeholder="field.path" value={f.sourcePath} onChange={(e) => change(t.field, { sourcePath: e.target.value })} />
+                    </TableCell>
+                    <TableCell>
+                      <NativeSelect aria-label={`${t.label} transform`} value={f.transformCode || transformsOf(t.field)[0]} onChange={(e) => change(t.field, { transformCode: e.target.value })}>
+                        {transformsOf(t.field).map((code) => (
+                          <option key={code} value={code}>
+                            {TRANSFORMS[code]}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </TableCell>
+                    <TableCell>
+                      <input type="checkbox" aria-label={`${t.label} required`} checked={f.required} onChange={(e) => change(t.field, { required: e.target.checked })} />
+                    </TableCell>
+                    <TableCell>
+                      {t.field === 'DIRECTION' && (
+                        <div className={VALUES_CELL}>
+                          {f.transformCode === 'ENUM_MAP' && (
+                            <Textarea aria-label="Direction values" rows={2} placeholder="device value=IN or OUT, one per line" value={f.enumLines} onChange={(e) => change(t.field, { enumLines: e.target.value })} />
+                          )}
+                          <NativeSelect aria-label="Direction default" value={f.defaultCode} onChange={(e) => change(t.field, { defaultCode: e.target.value })}>
+                            <option value="">No default</option>
+                            <option value="IN">IN</option>
+                            <option value="OUT">OUT</option>
+                          </NativeSelect>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+        <Button type="submit" disabled={create.isPending}>
           Create revision
-        </button>
-      </form>
-      <p className="hint">A revision applies to nothing until someone other than its author approves it. Once approved it never changes, and it takes over from the revision in force on its start date.</p>
+        </Button>
+      </FormGrid>
+      <Hint>A revision applies to nothing until someone other than its author approves it. Once approved it never changes, and it takes over from the revision in force on its start date.</Hint>
       <Refusal error={create.error} />
     </Section>
   );
@@ -177,7 +191,7 @@ function Preview({ revision }: { revision: MappingRevision }) {
   });
   return (
     <form
-      className="stack"
+      className="flex flex-col items-start gap-3"
       aria-label={`Preview revision ${revision.revision}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
@@ -191,19 +205,15 @@ function Preview({ revision }: { revision: MappingRevision }) {
         }
       }}
     >
-      <label>
+      <FormField>
         Sample records (a JSON list, at most 50)
-        <textarea required rows={4} value={text} onChange={(e) => setText(e.target.value)} />
-      </label>
-      {invalid && (
-        <p role="alert" className="error">
-          Enter the samples as a JSON list, for example [{'{'}…{'}'}].
-        </p>
-      )}
-      <button type="submit" className="secondary" disabled={run.isPending}>
+        <Textarea required rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+      </FormField>
+      {invalid && <Notice notice={{ text: 'Enter the samples as a JSON list, for example [{…}].', ok: false }} />}
+      <Button type="submit" variant="outline" disabled={run.isPending}>
         Run preview
-      </button>
-      <p className="hint">Use synthetic samples. A preview applies nothing.</p>
+      </Button>
+      <Hint>Use synthetic samples. A preview applies nothing.</Hint>
       <Refusal error={run.error} />
       {run.data && (
         <ol aria-label="Preview results">
@@ -227,35 +237,35 @@ function RevisionCard({ revision, onChanged }: { revision: MappingRevision; onCh
         {revision.effectiveTo ? `, until ${formatInstant(revision.effectiveTo)}` : ''}
         {`; duplicates by ${revision.dedupeStrategy === 'FINGERPRINT' ? 'fingerprint' : 'provider event key'}; ${revision.timestampRule === 'ISO_WITH_OFFSET' ? 'times with a UTC offset' : 'local times in the provider’s zone'}`}
       </p>
-      <table aria-label={`Fields of revision ${revision.revision}`}>
-        <thead>
-          <tr>
-            <th scope="col">Target</th>
-            <th scope="col">Source path</th>
-            <th scope="col">Transform</th>
-            <th scope="col">Required</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table aria-label={`Fields of revision ${revision.revision}`}>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Target</TableHead>
+            <TableHead scope="col">Source path</TableHead>
+            <TableHead scope="col">Transform</TableHead>
+            <TableHead scope="col">Required</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {revision.fields.map((f) => (
-            <tr key={f.targetField}>
-              <td>{TARGET_LABEL[f.targetField] ?? f.targetField}</td>
-              <td>{f.sourcePath}</td>
-              <td>{TRANSFORMS[f.transformCode] ?? f.transformCode}</td>
-              <td>{f.required ? 'Yes' : 'No'}</td>
-            </tr>
+            <TableRow key={f.targetField}>
+              <TableCell>{TARGET_LABEL[f.targetField] ?? f.targetField}</TableCell>
+              <TableCell>{f.sourcePath}</TableCell>
+              <TableCell>{TRANSFORMS[f.transformCode] ?? f.transformCode}</TableCell>
+              <TableCell>{f.required ? 'Yes' : 'No'}</TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       {!revision.approved && !revision.ownRevision && (
-        <button type="button" disabled={approve.isPending} onClick={() => approve.mutate()}>
+        <Button type="button" disabled={approve.isPending} onClick={() => approve.mutate()}>
           Approve revision {revision.revision}
-        </button>
+        </Button>
       )}
-      {!revision.approved && revision.ownRevision && <p className="hint">You wrote this revision, so someone else must approve it.</p>}{' '}
-      <button type="button" className="secondary" onClick={() => setPreviewing(!previewing)}>
+      {!revision.approved && revision.ownRevision && <Hint>You wrote this revision, so someone else must approve it.</Hint>}{' '}
+      <Button type="button" variant="outline" onClick={() => setPreviewing(!previewing)}>
         Preview revision {revision.revision}
-      </button>
+      </Button>
       <Refusal error={approve.error} />
       {previewing && <Preview revision={revision} />}
     </Section>
@@ -274,7 +284,12 @@ export function BiometricFieldMappingPage() {
   return (
     <>
       <Section title="Field mapping">
-        <ProfilePicker value={profileId} onChange={setProfileId} anyLabel="Choose a profile…" />
+        {/* A grid of one field, so the choice takes a column's width rather than the whole card's. */}
+        <FormGrid asChild>
+          <div>
+            <ProfilePicker value={profileId} onChange={setProfileId} anyLabel="Choose a profile…" />
+          </div>
+        </FormGrid>
         <ErrorNote error={revisions.error} />
         {revisions.data?.items.length === 0 && <Empty>This profile has no mapping revisions yet.</Empty>}
       </Section>

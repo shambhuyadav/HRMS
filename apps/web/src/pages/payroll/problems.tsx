@@ -1,8 +1,14 @@
 // Refusals of the payroll routes in plain words: the actions, their refusal texts, the problem line and the one-reason form.
 
+import { CircleAlertIcon } from 'lucide-react';
 import { type FormEvent, useId, useState } from 'react';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { ApiError, formatDate, readable } from '../../api';
-import { FLUSH, label, TEXTAREA } from './shared';
+import { Notice } from '../../ui';
+import { label, READABLE_WIDTH } from './shared';
 import type { BankRowError } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -330,36 +336,54 @@ function refusalText(error: unknown, act: Act): string | null {
   return error.status === 403 ? REFUSALS.FORBIDDEN! : null;
 }
 
+/** The row that names a refused bank row or upload row; a row number only when the API gave one. */
+function rowNumber(x: BankRowError & { row?: number }): string {
+  if (x.lineSequence) return ` (row ${x.lineSequence})`;
+  return x.row ? ` (row ${x.row})` : '';
+}
+
+/** A refusal in plain words as a destructive Alert: the sentence as its title, the rows or exceptions it names listed below it. */
 export function Problem({ error, act }: { error: unknown; act: Act }) {
   if (!error) return null;
   const text = refusalText(error, act);
   const e = error instanceof ApiError ? error : null;
   const details = (e?.details ?? {}) as { errors?: (BankRowError & { row?: number })[]; exceptions?: { code: string; n: number }[]; expected?: string[] };
   return (
-    <div role="alert" className="error">
-      {text ?? e?.message ?? 'Something went wrong.'}
+    <Alert variant="destructive">
+      <CircleAlertIcon aria-hidden="true" />
+      <AlertTitle asChild>
+        <p className="m-0">{text ?? e?.message ?? 'Something went wrong.'}</p>
+      </AlertTitle>
       {Array.isArray(details.errors) && details.errors.length > 0 && (
-        <ul>
-          {details.errors.map((x, i) => (
-            <li key={i}>
-              {x.employeeCode ? `${x.employeeCode}: ` : ''}
-              {label(ROW_TEXT, x.code)}
-              {x.lineSequence ? ` (row ${x.lineSequence})` : x.row ? ` (row ${x.row})` : ''}
-            </li>
-          ))}
-        </ul>
+        <AlertDescription asChild className="block">
+          <ul className="m-0 pl-5">
+            {details.errors.map((x, i) => (
+              <li key={i}>
+                {x.employeeCode ? `${x.employeeCode}: ` : ''}
+                {label(ROW_TEXT, x.code)}
+                {rowNumber(x)}
+              </li>
+            ))}
+          </ul>
+        </AlertDescription>
       )}
-      {Array.isArray(details.expected) && <p style={FLUSH}>{`Expected header: ${details.expected.join(',')}`}</p>}
+      {Array.isArray(details.expected) && (
+        <AlertDescription asChild className="block">
+          <p className="my-1">{`Expected header: ${details.expected.join(',')}`}</p>
+        </AlertDescription>
+      )}
       {Array.isArray(details.exceptions) && details.exceptions.length > 0 && (
-        <ul>
-          {details.exceptions.map((x) => (
-            <li key={x.code}>
-              {readable(x.code)}: {x.n}
-            </li>
-          ))}
-        </ul>
+        <AlertDescription asChild className="block">
+          <ul className="m-0 pl-5">
+            {details.exceptions.map((x) => (
+              <li key={x.code}>
+                {readable(x.code)}: {x.n}
+              </li>
+            ))}
+          </ul>
+        </AlertDescription>
       )}
-    </div>
+    </Alert>
   );
 }
 
@@ -398,21 +422,17 @@ export function ReasonForm({
     );
   };
   return (
-    <form onSubmit={submit} aria-label={name} className="stack" style={{ marginTop: '0.5rem' }}>
-      <label htmlFor={id}>
+    <form onSubmit={submit} aria-label={name} className="mt-2 flex flex-col gap-3">
+      <FormField htmlFor={id}>
         {field}
-        <textarea id={id} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-      </label>
-      {missing && (
-        <p role="alert" className="error">
-          Give a reason first.
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" className={danger ? 'danger' : 'secondary'} disabled={busy || disabled}>
+        <Textarea id={id} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} className={READABLE_WIDTH} />
+      </FormField>
+      {missing && <Notice notice={{ text: 'Give a reason first.', ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" variant={danger ? 'danger' : 'outline'} disabled={busy || disabled}>
           {button}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
     </form>
   );
 }

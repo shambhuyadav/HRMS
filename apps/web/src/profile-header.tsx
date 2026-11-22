@@ -7,7 +7,18 @@
 
 import { Icon, type IconName } from './icons';
 import { StateBadge } from './ui';
-import './styles/profile.css';
+
+/** The card: the initials beside the name and facts; on a phone a little tighter, the initials at the top. */
+const CARD =
+  'flex items-center gap-[1rem_1.25rem] rounded-xl border border-border bg-card px-6 py-[1.35rem] shadow-[var(--shadow-xs)] phone:items-start phone:gap-[0.85rem] phone:px-4 phone:py-[1.05rem]';
+/** The initials stand in for a photo (the system keeps none): the top bar's avatar, larger, in the information tint. */
+const AVATAR =
+  'grid size-[64px] flex-none place-items-center rounded-full bg-[var(--info-soft)] text-[1.35rem] font-[650] tracking-[0.02em] text-[var(--info)] shadow-[inset_0_0_0_1px_var(--info-edge)] select-none phone:size-[48px] phone:text-[1.05rem]';
+const NAME = 'm-0 text-[1.3rem] leading-[1.25] font-[650] tracking-[-0.015em] text-foreground [overflow-wrap:anywhere] phone:text-[1.12rem]';
+const SUBTITLE = 'm-0 text-[0.9rem] font-medium text-[var(--body)] [overflow-wrap:anywhere]';
+/** The facts side by side, wrapping; one under another on a phone. */
+const FACTS = 'm-0 mt-[0.45rem] flex list-none flex-wrap gap-[0.35rem_1.35rem] p-0 text-[0.84rem] text-muted-foreground phone:flex-col phone:gap-[0.3rem]';
+const FACT = 'inline-flex max-w-full items-center gap-[0.4rem] [overflow-wrap:anywhere]';
 
 /** Up to two initials of a name: "Synthetic Person" reads "SP". */
 export const initialsOf = (name: string) =>
@@ -42,21 +53,23 @@ export function placeFact(department?: string | null, location?: string | null):
 
 export function ProfileHeader({ name, subtitle, status, facts }: { name: string; subtitle: string; status?: string | null | undefined; facts: readonly ProfileFact[] }) {
   return (
-    <div className="profile-card">
-      <span className="profile-avatar" aria-hidden="true">
+    <div data-slot="profile-header" className={CARD}>
+      <span className={AVATAR} aria-hidden="true">
         {initialsOf(name)}
       </span>
-      <div className="profile-main">
-        <div className="profile-title">
-          <p className="profile-name">{name}</p>
+      <div className="flex min-w-0 flex-1 flex-col gap-[0.2rem]">
+        <div className="flex flex-wrap items-center gap-[0.3rem_0.65rem]">
+          <p data-slot="profile-name" className={NAME}>
+            {name}
+          </p>
           {status && <StateBadge state={status} />}
         </div>
-        <p className="profile-sub">{subtitle}</p>
+        <p className={SUBTITLE}>{subtitle}</p>
         {facts.length > 0 && (
-          <ul className="profile-facts">
+          <ul className={FACTS}>
             {facts.map((f) => (
-              <li key={f.title} title={f.title}>
-                <Icon name={f.icon} size={15} />
+              <li key={f.title} title={f.title} className={FACT}>
+                <Icon name={f.icon} size={15} className="text-[var(--faint)]" />
                 {f.text}
               </li>
             ))}

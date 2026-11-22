@@ -1,0 +1,83 @@
+/* shadcn/ui on Tailwind CSS 4 (owner's choice of 20 Nov 2026: a full move to shadcn/ui components, keeping the HRMS red brand).
+   Imported first by main.tsx, so the layer order below holds for every stylesheet of the app:
+     theme      Tailwind's design tokens (spacing, type scale, palette);
+     base       reserved for Tailwind's reset, which is left out while screens still rely on the browser's defaults;
+     legacy     the HRMS stylesheets of before the move (styles.css and styles/*.css, each wrapped in @layer legacy);
+     components shadcn component styles;
+     utilities  Tailwind's utility classes, which shadcn components are built from.
+   A later layer wins over an earlier one whatever the selectors, so a shadcn component's classes take precedence over the old
+   element rules, while a screen not yet moved looks exactly as before. */
+@layer theme, base, legacy, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import 'tw-animate-css';
+
+/* Tailwind makes a utility of every class-like word in the source. "inline" is also a word of the code (Button's size="inline") and
+   was an HRMS class, so Tailwind's display:inline utility of that name is never generated; use inline-block or inline-flex instead. */
+@source not inline('inline');
+
+/* shadcn's `dark:` classes follow the HRMS theme switch: the person's choice of dark, or the device's dark setting when the person
+   has not chosen light (theme.ts sets data-theme on <html>). */
+@custom-variant dark {
+  &:where([data-theme='dark'], [data-theme='dark'] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *) {
+      @slot;
+    }
+  }
+}
+
+/* The HRMS phone width (styles.css: max-width 560px), where targets are 44px and fields are set at 16px. Tailwind's own max-[560px]
+   variant stops just short of it ("width < 560px"), so the app's breakpoint has a variant of its own: phone:min-h-[44px]. */
+@custom-variant phone (@media (max-width: 560px));
+
+/* shadcn's colour roles, mapped onto the HRMS tokens of styles.css (which hold the light and dark values, the red brand, and the
+   accessibility pass of 20 Nov 2026). "inline" puts the token itself into each class, so nothing here defines a variable that could
+   clash: in HRMS --muted and --accent are text colours, while shadcn's muted and accent are backgrounds. */
+@theme inline {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
+  /* The brand: filled buttons and the like carry the red that keeps 4.5:1 with white text. */
+  --color-primary: var(--accent-fill);
+  --color-primary-foreground: var(--on-accent);
+  --color-secondary: var(--surface-sunken);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--surface-sunken);
+  --color-muted-foreground: var(--muted);
+  --color-accent: var(--surface-soft);
+  --color-accent-foreground: var(--text);
+  --color-destructive: var(--bad);
+  --color-border: var(--line);
+  --color-input: var(--field-edge);
+  --color-ring: var(--focus);
+
+  --color-chart-1: var(--series-1);
+  --color-chart-2: var(--series-2);
+  --color-chart-3: var(--series-3);
+  --color-chart-4: var(--series-4);
+
+  /* The sidebar stays dark in both themes, as now. */
+  --color-sidebar: var(--dark);
+  --color-sidebar-foreground: rgb(255 255 255 / 0.74);
+  --color-sidebar-primary: var(--accent-bright);
+  --color-sidebar-primary-foreground: #ffffff;
+  --color-sidebar-accent: rgb(255 255 255 / 0.085);
+  --color-sidebar-accent-foreground: #ffffff;
+  --color-sidebar-border: rgb(255 255 255 / 0.06);
+  --color-sidebar-ring: var(--focus-on-dark);
+
+  /* shadcn's radius steps on the HRMS radii (6, 8, 10 and 12px). */
+  --radius-sm: var(--radius-xs);
+  --radius-md: var(--radius-sm);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius-lg);
+}

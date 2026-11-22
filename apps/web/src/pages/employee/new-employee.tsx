@@ -3,6 +3,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { ButtonRow, FormField, FormGrid, FormStep } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, type EmployeeHit } from '../../api';
 import { FormProgress } from '../../form-progress';
 import { useSession } from '../../session';
@@ -66,87 +71,82 @@ export function NewEmployeePage() {
     <>
       <FormProgress form={formRef} label="New employee" />
       <Section title="New employee">
-        <form
+        <FormGrid
           ref={formRef}
-          className="grid-form"
           aria-label="New employee"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             create.mutate();
           }}
         >
-          <fieldset className="form-step">
-            <legend>Identity and contact</legend>
-            <label>
+          <FormStep legend="Identity and contact">
+            <FormField>
               Employee code
-              <input required value={form.employeeCode} onChange={(e) => set({ employeeCode: e.target.value })} />
-            </label>
-            <label>
+              <Input required value={form.employeeCode} onChange={(e) => set({ employeeCode: e.target.value })} />
+            </FormField>
+            <FormField>
               Name
-              <input required maxLength={200} value={form.displayName} onChange={(e) => set({ displayName: e.target.value })} />
-            </label>
-            <label>
+              <Input required maxLength={200} value={form.displayName} onChange={(e) => set({ displayName: e.target.value })} />
+            </FormField>
+            <FormField>
               Work email
-              <input type="email" maxLength={254} value={form.workEmail} onChange={(e) => set({ workEmail: e.target.value })} />
-            </label>
-            <label>
+              <Input type="email" maxLength={254} value={form.workEmail} onChange={(e) => set({ workEmail: e.target.value })} />
+            </FormField>
+            <FormField>
               Work phone extension
-              <input inputMode="numeric" maxLength={20} value={form.workPhoneExtension} onChange={(e) => set({ workPhoneExtension: e.target.value })} />
-            </label>
-          </fieldset>
-          <fieldset className="form-step">
-            <legend>Employment terms</legend>
-            <label>
+              <Input inputMode="numeric" maxLength={20} value={form.workPhoneExtension} onChange={(e) => set({ workPhoneExtension: e.target.value })} />
+            </FormField>
+          </FormStep>
+          <FormStep legend="Employment terms">
+            <FormField>
               Joining date
-              <input type="date" required value={form.joiningDate} onChange={(e) => set({ joiningDate: e.target.value })} />
-            </label>
-            <label>
+              <Input type="date" required value={form.joiningDate} onChange={(e) => set({ joiningDate: e.target.value })} />
+            </FormField>
+            <FormField>
               Employment type
-              <select required value={form.employmentType} onChange={(e) => set({ employmentType: e.target.value })}>
+              <NativeSelect required value={form.employmentType} onChange={(e) => set({ employmentType: e.target.value })}>
                 <option value="">Choose a type</option>
                 {EMPLOYMENT_TYPES.map((t) => (
                   <option key={t.code} value={t.code}>
                     {t.label}
                   </option>
                 ))}
-              </select>
-            </label>
-          </fieldset>
-          <fieldset className="form-step">
-            <legend>Job assignment</legend>
+              </NativeSelect>
+            </FormField>
+          </FormStep>
+          <FormStep legend="Job assignment">
             <MasterSelect kind="departments" label="Department" required value={form.departmentId} validOn={form.joiningDate} onChange={(departmentId) => set({ departmentId })} />
             <MasterSelect kind="locations" label="Location" required value={form.locationId} validOn={form.joiningDate} onChange={(locationId) => set({ locationId })} />
             <MasterSelect kind="designations" label="Designation" required value={form.designationId} validOn={form.joiningDate} onChange={(designationId) => set({ designationId })} />
             <MasterSelect kind="grades" label="Grade" value={form.gradeId} validOn={form.joiningDate} onChange={(gradeId) => set({ gradeId })} />
-          </fieldset>
+          </FormStep>
           {personal && (
-            <fieldset className="form-step">
-              <legend>Personal details</legend>
-              <label>
+            <FormStep legend="Personal details">
+              <FormField>
                 Date of birth
-                <input type="date" value={form.dateOfBirth} onChange={(e) => set({ dateOfBirth: e.target.value })} />
-              </label>
-              <label>
+                <Input type="date" value={form.dateOfBirth} onChange={(e) => set({ dateOfBirth: e.target.value })} />
+              </FormField>
+              <FormField>
                 Service anniversary base date
-                <input type="date" value={form.serviceAnniversaryDate} onChange={(e) => set({ serviceAnniversaryDate: e.target.value })} />
-              </label>
-            </fieldset>
+                <Input type="date" value={form.serviceAnniversaryDate} onChange={(e) => set({ serviceAnniversaryDate: e.target.value })} />
+              </FormField>
+            </FormStep>
           )}
           {/* Most new employees are new to the company: the link to an earlier employment is asked only when needed. */}
-          <details className="wide form-more">
-            <summary>Rehiring a former employee?</summary>
+          <details className="[&[open]>summary]:mb-[0.6rem]">
+            <summary className="w-max cursor-pointer text-[0.86rem] font-semibold text-[var(--accent)] phone:py-3">Rehiring a former employee?</summary>
             <EmployeePicker label="Follows the ended employment of" value={prior} onChange={setPrior} filter={{ status: 'INACTIVE_SEPARATED' }} />
           </details>
-          <p className="hint wide">A new employee starts as a draft. Activation, the manager and the shift are on their record, which opens once this is saved.</p>
-          <div className="wide row">
-            <button type="submit" disabled={create.isPending}>
+          <Hint>A new employee starts as a draft. Activation, the manager and the shift are on their record, which opens once this is saved.</Hint>
+          <ButtonRow className="col-span-full">
+            <Button type="submit" disabled={create.isPending}>
               Create employee
-            </button>
-          </div>
-          <div className="wide">
+            </Button>
+          </ButtonRow>
+          <div className="col-span-full">
             <Refusal error={create.error} />
           </div>
-        </form>
+        </FormGrid>
       </Section>
     </>
   );

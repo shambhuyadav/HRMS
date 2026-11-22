@@ -3,16 +3,25 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, type EmployeeHit, formatDate, plural, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, NotPermitted, Pager, Section, StateBadge } from '../../ui';
+import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Notice, NotPermitted, Pager, Section, StateBadge } from '../../ui';
 import { VerifiedEvidencePicker } from '../exit-finance';
 import { EnterSeparationForm } from '../separation-entry';
 import { ExitTable } from './exits';
 import { ProcessTaskQueue } from './queues';
 import { Refusal } from './refusals';
 import { RestrictedNotes } from './restricted-notes';
-import { CODE, EMPLOYEE_LIST, EMPLOYEE_PAGE_SIZE, EMPLOYEE_READ, EXIT_MANAGE, EXIT_READ, EXIT_TYPE, FIELDS, FLUSH, ISO_DATE, Loading, type Paged, pagedUrl, PATHS, Problem, PROCESS_MANAGE, PROCESS_READ, QueryProblem, RoleReady, SCROLL, shown, statusLabel, TEMPLATE_READ, totalOf, typeLabel, useKeys, UUID } from './shared';
+import { CODE, EMPLOYEE_LIST, EMPLOYEE_PAGE_SIZE, EMPLOYEE_READ, EXIT_MANAGE, EXIT_READ, EXIT_TYPE, FIELDS, ISO_DATE, type Paged, pagedUrl, PATHS, Problem, PROCESS_MANAGE, PROCESS_READ, QueryProblem, RoleReady, shown, statusLabel, TEMPLATE_READ, totalOf, typeLabel, useKeys, UUID } from './shared';
 import type { ExitCase, ProcessDetail, ProcessSummary, TemplateSummary } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -50,50 +59,49 @@ function EmployeeFinder() {
   const data = term === null ? undefined : shown(results);
   return (
     <Section title="Find an employee">
-      <form
+      <FormGrid
         role="search"
         aria-label="Find an employee"
-        className="row"
         onSubmit={(e) => {
           e.preventDefault();
           setTerm(typed.trim());
         }}
       >
-        <label>
+        <FormField>
           Name or employee code
-          <input value={typed} maxLength={100} onChange={(e) => setTyped(e.target.value)} />
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      {term !== null && results.isPending && <Loading>Searching…</Loading>}
+          <Input value={typed} maxLength={100} onChange={(e) => setTyped(e.target.value)} />
+        </FormField>
+        <Button type="submit">Search</Button>
+      </FormGrid>
+      {term !== null && results.isPending && <LoadingLine>Searching…</LoadingLine>}
       {term !== null && <QueryProblem error={results.error} forbidden="The selected role cannot search employees." />}
       {data && data.items.length === 0 && <Empty>No employee in the selected role’s scope matches.</Empty>}
       {data && data.items.length > 0 && (
         <>
-          <table aria-label="Matching employees">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Code</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Matching employees">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Code</TableHead>
+                <TableHead scope="col">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.items.map((e) => (
-                <tr key={e.id}>
-                  <td>
+                <TableRow key={e.id}>
+                  <TableCell>
                     <Link to={PATHS.employee(e.id)}>{e.displayName}</Link>
-                  </td>
-                  <td>{e.employeeCode}</td>
-                  <td>{statusLabel(e.status)}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>{e.employeeCode}</TableCell>
+                  <TableCell>{statusLabel(e.status)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           {data.total > data.items.length && (
-            <p className="hint">
+            <Hint>
               Showing the first {data.items.length} of {data.total} matches; refine the search to narrow them.
-            </p>
+            </Hint>
           )}
         </>
       )}
@@ -105,9 +113,7 @@ export function EmployeeLifecycleScreen() {
   const { id = '' } = useParams();
   return (
     <>
-      <p>
-        <Link className="back-link" to={PATHS.processes}>← Employee processes</Link>
-      </p>
+      <BackLink to={PATHS.processes}>← Employee processes</BackLink>
       {UUID.test(id) ? (
         <RoleReady>
           <EmployeeLifecycle key={id} employeeId={id} />
@@ -156,52 +162,50 @@ function EmployeeLifecycle({ employeeId }: { employeeId: string }) {
   return (
     <>
       <h1>{name}: processes and exit</h1>
-      {own && <p className="hint">This is your own record: processes, exits and notes about you are handled by another HR user.</p>}
+      {own && <Hint>This is your own record: processes, exits and notes about you are handled by another HR user.</Hint>}
       <Section title="Processes">
         {!canReadProcesses ? (
           <NotPermitted>The selected role cannot view employee processes.</NotPermitted>
         ) : (
           <>
-            {processes.isPending && <Loading>Loading the processes…</Loading>}
+            {processes.isPending && <LoadingLine>Loading the processes…</LoadingLine>}
             <QueryProblem error={processes.error} forbidden="The selected role cannot view employee processes." missing="This employee is not in the selected role’s scope." />
             {processList && processList.length === 0 && <Empty>No processes for this employee yet.</Empty>}
             {processList && processList.length > 0 && (
-              <div style={SCROLL}>
-                <table aria-label="Processes">
-                  <thead>
-                    <tr>
-                      <th>Process</th>
-                      <th>Type</th>
-                      <th>Revision</th>
-                      <th>State</th>
-                      <th>Effective date</th>
-                      <th>Open tasks</th>
-                      <th>Required still open</th>
-                      <th>Overdue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {processList.map((p) => (
-                      <tr key={p.id}>
-                        <td>
-                          <Link to={PATHS.process(p.id)}>
-                            {p.processName} ({p.processCode})
-                          </Link>
-                        </td>
-                        <td>{typeLabel(p.processType)}</td>
-                        <td>{p.revision}</td>
-                        <td>
-                          <StateBadge state={p.state} />
-                        </td>
-                        <td>{formatDate(p.effectiveDate)}</td>
-                        <td>{`${p.openTasks} of ${p.taskCount}`}</td>
-                        <td>{p.requiredOpen}</td>
-                        <td>{p.overdueTasks > 0 ? <Badge tone="bad">{`${p.overdueTasks} overdue`}</Badge> : '0'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table aria-label="Processes">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Process</TableHead>
+                    <TableHead scope="col">Type</TableHead>
+                    <TableHead scope="col">Revision</TableHead>
+                    <TableHead scope="col">State</TableHead>
+                    <TableHead scope="col">Effective date</TableHead>
+                    <TableHead scope="col">Open tasks</TableHead>
+                    <TableHead scope="col">Required still open</TableHead>
+                    <TableHead scope="col">Overdue</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {processList.map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell>
+                        <Link to={PATHS.process(p.id)}>
+                          {p.processName} ({p.processCode})
+                        </Link>
+                      </TableCell>
+                      <TableCell>{typeLabel(p.processType)}</TableCell>
+                      <TableCell>{p.revision}</TableCell>
+                      <TableCell>
+                        <StateBadge state={p.state} />
+                      </TableCell>
+                      <TableCell>{formatDate(p.effectiveDate)}</TableCell>
+                      <TableCell>{`${p.openTasks} of ${p.taskCount}`}</TableCell>
+                      <TableCell>{p.requiredOpen}</TableCell>
+                      <TableCell>{p.overdueTasks > 0 ? <Badge tone="bad">{`${p.overdueTasks} overdue`}</Badge> : '0'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
             {processData && <Pager page={processPage} pageSize={LIST_PAGE_SIZE} total={totalOf(processData)} onPage={setProcessPage} label="Process pages" noun="process" plural="processes" />}
           </>
@@ -212,7 +216,7 @@ function EmployeeLifecycle({ employeeId }: { employeeId: string }) {
       {can(EXIT_MANAGE) && !own && <EnterSeparationForm employeeId={employeeId} exitsKey={keys.exits} />}
       {canReadExits && (
         <Section title="Exit cases">
-          {exits.isPending && <Loading>Loading the exit cases…</Loading>}
+          {exits.isPending && <LoadingLine>Loading the exit cases…</LoadingLine>}
           <QueryProblem error={exits.error} forbidden="The selected role cannot view exit cases." missing="This employee is not in the selected role’s scope." />
           {exitList && exitList.length === 0 && <Empty>No exit cases for this employee.</Empty>}
           {exitList && exitList.length > 0 && <ExitTable exits={exitList} label="Exit cases of the employee" withEmployee={false} />}
@@ -264,40 +268,26 @@ function EnterResignationForm({ employeeId }: { employeeId: string }) {
   const refusal = enter.error instanceof ApiError ? ENTER_WORDS[enter.error.code] : undefined;
   return (
     <Section title="Enter a resignation received outside the system">
-      <p className="hint">For a resignation the employee handed in by letter or e-mail. It follows the employee’s own route; you will not recommend or approve it.</p>
-      <form onSubmit={submit} className="grid-form" aria-label="Enter a resignation">
-        <label>
+      <Hint>For a resignation the employee handed in by letter or e-mail. It follows the employee’s own route; you will not recommend or approve it.</Hint>
+      <FormGrid onSubmit={submit} aria-label="Enter a resignation">
+        <FormField>
           Proposed last working date
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </FormField>
+        <FormField>
           Reference of the resignation received
-          <input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
-        </label>
+          <Input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
+        </FormField>
         <VerifiedEvidencePicker employeeId={employeeId} chosen={doc} onChange={setDoc} legend="The resignation letter or e-mail (released and verified)" />
-        <div className="row">
-          <button type="submit" disabled={enter.isPending}>
+        <ButtonRow>
+          <Button type="submit" disabled={enter.isPending}>
             Enter the resignation
-          </button>
-        </div>
-      </form>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      {refusal ? (
-        <p role="alert" className="error">
-          {refusal}
-        </p>
-      ) : (
-        <ErrorNote error={enter.error} />
-      )}
-      {enter.isSuccess && (
-        <p role="status" className="ok">
-          The resignation is entered and waits for the manager’s recommendation.
-        </p>
-      )}
+          </Button>
+        </ButtonRow>
+      </FormGrid>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      {refusal ? <Notice notice={{ text: refusal, ok: false }} /> : <ErrorNote error={enter.error} />}
+      {enter.isSuccess && <Notice notice={{ text: 'The resignation is entered and waits for the manager’s recommendation.', ok: true }} />}
     </Section>
   );
 }
@@ -368,11 +358,11 @@ function StartProcessForm({ employeeId, exits }: { employeeId: string; exits: Ex
   return (
     <Section title="Start a process">
       <form aria-label="Start a process" className="stack" onSubmit={submit}>
-        <div style={FIELDS}>
+        <div className={FIELDS}>
           {canListTemplates ? (
-            <label>
+            <FormField>
               Process template
-              <select
+              <NativeSelect
                 value={code}
                 onChange={(e) => {
                   setCode(e.target.value);
@@ -385,58 +375,56 @@ function StartProcessForm({ employeeId, exits }: { employeeId: string; exits: Ex
                     {`${t.name} (${t.code}) · ${typeLabel(t.processType)} · revision ${t.publishedRevision}`}
                   </option>
                 ))}
-              </select>
-            </label>
+              </NativeSelect>
+            </FormField>
           ) : (
-            <label>
+            <FormField>
               Template code
-              <input value={code} maxLength={40} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-            </label>
+              <Input value={code} maxLength={40} onChange={(e) => setCode(e.target.value.toUpperCase())} />
+            </FormField>
           )}
-          <label>
+          <FormField>
             Effective date (leave empty for today)
-            <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-          </label>
+            <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+          </FormField>
           {takesExit && (
-            <label>
+            <FormField>
               {canListTemplates ? 'Exit case' : 'Exit case (exit clearance templates only)'}
-              <select value={exitCaseId} onChange={(e) => setExitCaseId(e.target.value)}>
+              <NativeSelect value={exitCaseId} onChange={(e) => setExitCaseId(e.target.value)}>
                 <option value="">{canListTemplates ? 'Choose the exit…' : 'None'}</option>
                 {clearable.map((x) => (
                   <option key={x.id} value={x.id}>
                     {`Resigned ${formatDate(x.requestDate)}, last working date ${formatDate(x.lastWorkingDate)} (${readable(x.state).toLowerCase()})`}
                   </option>
                 ))}
-              </select>
-            </label>
+              </NativeSelect>
+            </FormField>
           )}
-          <label>
+          <FormField>
             Process owner’s user ID (leave empty to own it yourself)
-            <input value={ownerUserId} maxLength={36} onChange={(e) => setOwnerUserId(e.target.value)} />
-          </label>
+            <Input value={ownerUserId} maxLength={36} onChange={(e) => setOwnerUserId(e.target.value)} />
+          </FormField>
         </div>
         {canListTemplates && listed && startable.length === 0 && (
-          <p className="hint" style={FLUSH}>
+          <Hint className="m-0">
             No active template has a published revision yet. <Link to={PATHS.templates}>Open the process templates</Link>.
-          </p>
+          </Hint>
         )}
         {takesExit && canListTemplates && clearable.length === 0 && (
-          <p className="hint" style={FLUSH}>
-            This employee has no approved exit without a final release, so an exit clearance checklist cannot start.
-          </p>
+          <Hint className="m-0">This employee has no approved exit without a final release, so an exit clearance checklist cannot start.</Hint>
         )}
         <Problem text={problem} />
         <div>
-          <button type="submit" disabled={start.isPending}>
+          <Button type="submit" disabled={start.isPending}>
             Start process
-          </button>
+          </Button>
         </div>
         <Refusal error={start.error} action="start" />
         {started && (
-          <p className="ok" role="status">
+          <StatusNote tone="success" role="status">
             {`Started ${started.processName} (${started.processCode}) with ${plural(started.tasks.length, 'task')}. `}
             {can(PROCESS_READ) && <Link to={PATHS.process(started.id)}>Open the process</Link>}
-          </p>
+          </StatusNote>
         )}
       </form>
     </Section>

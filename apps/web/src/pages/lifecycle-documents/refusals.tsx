@@ -1,6 +1,8 @@
 // The lifecycle API's refusals in plain words.
+import { CircleAlertIcon } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ApiError } from '../../api';
-import { ErrorNote } from '../../ui';
+import { ErrorNote, Notice } from '../../ui';
 import type { ImportTemplate } from '../records';
 import { ITEM_KIND_LABEL, ITEM_STATUS_LABEL, labelOf, MAX_ARCHIVE, MAX_LINE_REASON, MAX_REASON, SETTLEMENT_IMPORTS, SETTLEMENT_PREPARE, UPLOAD_HEADER, UPLOAD_ROW_WORDS, UPLOAD_TEMPLATE } from './shared';
 import type { Blocker } from './types';
@@ -292,20 +294,20 @@ export function Refusal({ error, words, noAnswer }: { error: unknown; words?: Wo
   if (!error) return null;
   // fetch rejects with a TypeError when the connection drops: the request may have reached the server.
   if (error instanceof TypeError) {
-    return (
-      <p role="alert" className="error">
-        {noAnswer ?? 'No answer came back from the server. Check your connection and try again.'}
-      </p>
-    );
+    return <Notice notice={{ text: noAnswer ?? 'No answer came back from the server. Check your connection and try again.', ok: false }} />;
   }
   if (!(error instanceof ApiError)) return <ErrorNote error={error} />;
   const text = refusalText(error, words);
   if (text === null) return <ErrorNote error={error} />;
+  // The plain words as the title, the API's code on the line under them (in the text colour, as before) for support.
   return (
-    <div role="alert" className="error">
-      <strong>{text}</strong>
-      <div className="hint">{error.code}</div>
-    </div>
+    <Alert variant="destructive">
+      <CircleAlertIcon aria-hidden="true" />
+      <AlertTitle asChild>
+        <strong>{text}</strong>
+      </AlertTitle>
+      <AlertDescription className="block">{error.code}</AlertDescription>
+    </Alert>
   );
 }
 

@@ -3,11 +3,21 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, fileToBase64, formatDate, idempotencyKey } from '../../api';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from '../records';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section } from '../../ui';
+import { Empty, ErrorNote, LIST_PAGE_SIZE, Pager, pageParams, Section, WarningNote } from '../../ui';
 import { keepOnPage } from './shared';
+
+/** The file field and its Validate button side by side, their bottoms lined up (the old `div.inline`). */
+const FIELD_ROW = 'flex flex-wrap items-end gap-x-4 gap-y-3';
 
 // ---------------------------------------------------------------------------------------------------------
 // Before accrual
@@ -55,17 +65,16 @@ function YearEnd() {
   });
   return (
     <Section title="Leave year end">
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="Leave year end"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           run.mutate();
         }}
       >
-        <label>
+        <FormField>
           Last day of the leave year
-          <input
+          <Input
             type="date"
             required
             value={yearEnd}
@@ -75,46 +84,46 @@ function YearEnd() {
               run.reset();
             }}
           />
-        </label>
-        <button type="submit" disabled={run.isPending || !valid}>
+        </FormField>
+        <Button type="submit" disabled={run.isPending || !valid}>
           Expire balances above the carry cap
-        </button>
-      </form>
-      <p className="hint">
+        </Button>
+      </FormGrid>
+      <Hint>
         Only leave types whose policy starts its leave year the next day are expired, each employee and type once. Units promised to leave after that day are kept, so no balance goes below zero.
-      </p>
+      </Hint>
       {run.isSuccess && (
-        <p role="status">
+        <StatusNote tone="success" role="status">
           Queued. Follow it in <Link to="/bulk-jobs">My background jobs</Link>.
-        </p>
+        </StatusNote>
       )}
       <ErrorNote error={run.error ?? pending.error} />
       {pending.isSuccess && pending.data.total === 0 && <Empty>No request in your scope is waiting for a decision in this leave year.</Empty>}
       {pending.isSuccess && pending.data.items.length > 0 && (
         <>
-          <p role="note">
-            <Badge tone="warn">waiting</Badge> {`${pending.data.total} pending ${pending.data.total === 1 ? 'request holds its employee' : 'requests hold their employees'} back until decided; run this date again afterwards.`}
-          </p>
-          <table aria-label="Pending requests at the leave year end">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Employee</th>
-                <th>Leave type</th>
-                <th>Dates</th>
-              </tr>
-            </thead>
-            <tbody>
+          <WarningNote badge="waiting">
+            {`${pending.data.total} pending ${pending.data.total === 1 ? 'request holds its employee' : 'requests hold their employees'} back until decided; run this date again afterwards.`}
+          </WarningNote>
+          <Table aria-label="Pending requests at the leave year end">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Code</TableHead>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Leave type</TableHead>
+                <TableHead scope="col">Dates</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {pending.data.items.map((r) => (
-                <tr key={r.requestId}>
-                  <td>{r.employeeCode}</td>
-                  <td>{r.employeeName}</td>
-                  <td>{r.leaveType}</td>
-                  <td>{`${formatDate(r.startDate)} – ${formatDate(r.endDate)}`}</td>
-                </tr>
+                <TableRow key={r.requestId}>
+                  <TableCell>{r.employeeCode}</TableCell>
+                  <TableCell>{r.employeeName}</TableCell>
+                  <TableCell>{r.leaveType}</TableCell>
+                  <TableCell>{`${formatDate(r.startDate)} – ${formatDate(r.endDate)}`}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           <Pager page={pending.data.page} pageSize={LIST_PAGE_SIZE} total={pending.data.total} onPage={setPage} label="Pending request pages" noun="request" />
         </>
       )}
@@ -141,54 +150,60 @@ function WithoutPolicyList() {
   });
   return (
     <Section title="Employees without a policy, before accrual">
-      <form className="grid-form filter-bar" onSubmit={keepOnPage}>
-        <label>
-          Accrual month
-          <input
-            type="month"
-            value={month}
-            onChange={(e) => {
-              setMonth(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
-      </form>
-      <p className="hint">Employees the month’s accrual would cover, in your scope, for whom a paid leave type resolves to no policy or to a tie. A group with no paid type by policy (for example contractors) appears here too: check it is meant.</p>
+      <FilterBar asChild>
+        <form onSubmit={keepOnPage}>
+          <FormField>
+            Accrual month
+            <Input
+              type="month"
+              value={month}
+              onChange={(e) => {
+                setMonth(e.target.value);
+                setPage(1);
+              }}
+            />
+          </FormField>
+        </form>
+      </FilterBar>
+      <Hint>
+        Employees the month’s accrual would cover, in your scope, for whom a paid leave type resolves to no policy or to a tie. A group with no paid type by policy (for example contractors) appears here too: check it is meant.
+      </Hint>
       <ErrorNote error={list.error} />
       {!/^\d{4}-\d{2}$/.test(month) && <Empty>Choose an accrual month to list the employees it would leave without a policy.</Empty>}
       {list.isSuccess && list.data.total === 0 && <Empty>Every employee in your scope resolves to one policy for every paid leave type.</Empty>}
       {list.isSuccess && list.data.items.length > 0 && (
         <>
-          <p role="status">{`${list.data.total} ${list.data.total === 1 ? 'employee needs' : 'employees need'} a look`}</p>
-          <table>
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Employee</th>
-                <th>Employment type</th>
-                <th>Paid types not resolved</th>
-                <th>Types that resolve</th>
-              </tr>
-            </thead>
-            <tbody>
+          <StatusNote tone="info" role="status">
+            {`${list.data.total} ${list.data.total === 1 ? 'employee needs' : 'employees need'} a look`}
+          </StatusNote>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Code</TableHead>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Employment type</TableHead>
+                <TableHead scope="col">Paid types not resolved</TableHead>
+                <TableHead scope="col">Types that resolve</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {list.data.items.map((e) => (
-                <tr key={e.employeeId}>
-                  <td>{e.employeeCode}</td>
-                  <td>{e.employeeName}</td>
-                  <td>{e.employmentType ?? '—'}</td>
-                  <td>
+                <TableRow key={e.employeeId}>
+                  <TableCell>{e.employeeCode}</TableCell>
+                  <TableCell>{e.employeeName}</TableCell>
+                  <TableCell>{e.employmentType ?? '—'}</TableCell>
+                  <TableCell>
                     <ul>
                       {e.unresolved.map((u) => (
                         <li key={u.leaveType}>{`${u.leaveType}: ${UNRESOLVED_TEXT[u.reason] ?? u.reason}`}</li>
                       ))}
                     </ul>
-                  </td>
-                  <td>{e.mappedLeaveTypes.join(', ') || 'none'}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>{e.mappedLeaveTypes.join(', ') || 'none'}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           <Pager page={list.data.page} pageSize={LIST_PAGE_SIZE} total={list.data.total} onPage={setPage} label="Employees without a policy pages" noun="employee" />
         </>
       )}
@@ -243,31 +258,33 @@ export function LeaveLedgerPage() {
   });
   return (
     <Section title="Employee leave ledger">
-      <form className="grid-form filter-bar" onSubmit={keepOnPage}>
-        <label>
-          Find an employee (code or name)
-          <input value={search} onChange={(e) => setSearch(e.target.value)} maxLength={100} />
-        </label>
-        <label>
-          Employee
-          <select value={picked} onChange={(e) => setPicked(e.target.value)}>
-            <option value="">{me?.employeeId ? 'Myself' : 'Choose'}</option>
-            {employees.data?.items.map((e) => (
-              <option key={e.id} value={e.id}>
-                {`${e.displayName} (${e.employeeCode})`}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          From
-          <input type="date" required value={period.from} onChange={(e) => setPeriod({ ...period, from: e.target.value })} />
-        </label>
-        <label>
-          To
-          <input type="date" required value={period.to} onChange={(e) => setPeriod({ ...period, to: e.target.value })} />
-        </label>
-      </form>
+      <FilterBar asChild>
+        <form onSubmit={keepOnPage}>
+          <FormField>
+            Find an employee (code or name)
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} maxLength={100} />
+          </FormField>
+          <FormField>
+            Employee
+            <NativeSelect value={picked} onChange={(e) => setPicked(e.target.value)}>
+              <option value="">{me?.employeeId ? 'Myself' : 'Choose'}</option>
+              {employees.data?.items.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {`${e.displayName} (${e.employeeCode})`}
+                </option>
+              ))}
+            </NativeSelect>
+          </FormField>
+          <FormField>
+            From
+            <Input type="date" required value={period.from} onChange={(e) => setPeriod({ ...period, from: e.target.value })} />
+          </FormField>
+          <FormField>
+            To
+            <Input type="date" required value={period.to} onChange={(e) => setPeriod({ ...period, to: e.target.value })} />
+          </FormField>
+        </form>
+      </FilterBar>
       <ErrorNote error={employees.error ?? ledger.error} />
       {!employeeId ? (
         <Empty>Choose an employee and a period to see their leave ledger.</Empty>
@@ -282,28 +299,28 @@ export function LeaveLedgerPage() {
           {t.movements.length === 0 ? (
             <Empty>No movements in this period.</Empty>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Movement</th>
-                  <th>Days</th>
-                  <th>Linked request</th>
-                  <th>Note</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Date</TableHead>
+                  <TableHead scope="col">Movement</TableHead>
+                  <TableHead scope="col">Days</TableHead>
+                  <TableHead scope="col">Linked request</TableHead>
+                  <TableHead scope="col">Note</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {t.movements.map((m) => (
-                  <tr key={m.id}>
-                    <td>{formatDate(m.effectiveDate)}</td>
-                    <td>{MOVEMENT_TEXT[m.kind] ?? m.kind}</td>
-                    <td>{days(m.units)}</td>
-                    <td>{m.requestId ? 'Yes' : '—'}</td>
-                    <td>{m.reason ?? ''}</td>
-                  </tr>
+                  <TableRow key={m.id}>
+                    <TableCell>{formatDate(m.effectiveDate)}</TableCell>
+                    <TableCell>{MOVEMENT_TEXT[m.kind] ?? m.kind}</TableCell>
+                    <TableCell>{days(m.units)}</TableCell>
+                    <TableCell>{m.requestId ? 'Yes' : '—'}</TableCell>
+                    <TableCell>{m.reason ?? ''}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </section>
       ))}
@@ -386,25 +403,26 @@ export function MonthlyLeaveBalancePage() {
     <>
       <Section title="Upload monthly leave balance">
         <form
-          className="stack"
+          className="flex flex-col gap-3"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             if (file && !busy) upload.mutate(file);
           }}
         >
-          <p className="hint">
-            CSV with exactly the header <code>{t.columns}</code>. {t.note} Nothing is applied until you commit the preview, and one row with a problem rejects the whole
+          <Hint>
+            {/* The header is one long word of comma-joined column names: it may break anywhere, or it runs out of the card on a phone. */}
+            CSV with exactly the header <code className="break-all">{t.columns}</code>. {t.note} Nothing is applied until you commit the preview, and one row with a problem rejects the whole
             file. Each employee, leave type and month takes one uploaded adjustment, so a file cannot be applied twice; a deduction never takes a paid balance below zero.
-          </p>
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               Balance file
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         <ErrorNote error={upload.error ?? resume.error} />

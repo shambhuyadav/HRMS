@@ -2,13 +2,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { ButtonRow } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
 import { api, isConflict, isForbidden, isNotFound, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, Item, NotPermitted, Section, When } from '../../ui';
+import { Badge, Empty, ErrorNote, Item, Notice, NotPermitted, Section, When } from '../../ui';
 import { Refusal } from './refusals';
 import { ReasonForm, RequisitionForm } from './requisition-form';
 import { BudgetCheckText, DecisionTable, RequisitionFacts, RevisionTable } from './requisition-views';
-import { BUDGET_READ, FLUSH, PATHS, personLabel, REQ_CLOSE, REQ_CREATE, REQ_READ, type RequisitionDetail, type RequisitionInput, shown, SPACED, stepText, type SubmitResult, useKeys, userInSentence, UUID } from './shared';
+import {
+  BUDGET_READ,
+  PATHS,
+  personLabel,
+  REQ_CLOSE,
+  REQ_CREATE,
+  REQ_READ,
+  type RequisitionDetail,
+  type RequisitionInput,
+  shown,
+  stepText,
+  type SubmitResult,
+  useKeys,
+  userInSentence,
+  UUID,
+} from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: one requisition (details, budget, actions, approval history, submitted revisions)
@@ -28,9 +48,7 @@ export function RequisitionDetailScreen() {
   if (!UUID.test(id)) {
     return (
       <>
-        <p style={FLUSH}>
-          <Link to={PATHS.requisitions}>Back to requisitions</Link>
-        </p>
+        <BackLink to={PATHS.requisitions}>Back to requisitions</BackLink>
         <h1>Requisition</h1>
         <Empty>This requisition is not available in the selected role’s scope.</Empty>
       </>
@@ -57,28 +75,16 @@ function RequisitionDetailView({ id }: { id: string }) {
 
   return (
     <>
-      <p style={FLUSH}>
-        <Link to={PATHS.requisitions}>Back to requisitions</Link>
-      </p>
+      <BackLink to={PATHS.requisitions}>Back to requisitions</BackLink>
       <h1>{r ? `Requisition ${r.code}` : 'Requisition'}</h1>
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
-      {detail.isPending && <p className="hint loading">Loading the requisition…</p>}
-      {isForbidden(detail.error) ? (
-        <NotPermitted>The selected role cannot view this requisition.</NotPermitted>
-      ) : isNotFound(detail.error) ? (
-        <Empty>This requisition is not available in the selected role’s scope.</Empty>
-      ) : (
-        <ErrorNote error={detail.error} />
-      )}
+      {notice && <Notice notice={{ text: notice, ok: true }} />}
+      {detail.isPending && <LoadingLine>Loading the requisition…</LoadingLine>}
+      <ReadProblem error={detail.error} />
       {r && (
         <>
           <Section title={r.title}>
             <RequisitionFacts r={r} />
-            <dl className="kv" style={SPACED}>
+            <dl className="kv mt-3">
               <Item term="Filled (accepted offers)">{r.filled}</Item>
               <Item term="Created">
                 <When at={r.createdAt} />
@@ -137,6 +143,13 @@ function RequisitionDetailView({ id }: { id: string }) {
   );
 }
 
+/** A requisition the server would not read: refused, out of the role's scope, or another failure. */
+function ReadProblem({ error }: { error: unknown }) {
+  if (isForbidden(error)) return <NotPermitted>The selected role cannot view this requisition.</NotPermitted>;
+  if (isNotFound(error)) return <Empty>This requisition is not available in the selected role’s scope.</Empty>;
+  return <ErrorNote error={error} />;
+}
+
 function BudgetSection({ r }: { r: RequisitionDetail }) {
   const { can } = useSession();
   // The budget reference (FR-011), once a submission recorded one: a link for roles that can view manpower budgets
@@ -157,7 +170,7 @@ function BudgetSection({ r }: { r: RequisitionDetail }) {
           Budget reference: <Link to={PATHS.budget(line)}>open the manpower budget line it was checked against</Link>
         </p>
       )}
-      {!r.budgetCheck && r.revisions.length > 0 && <p className="hint">The budget check made at each submission is listed under Submitted revisions.</p>}
+      {!r.budgetCheck && r.revisions.length > 0 && <Hint>The budget check made at each submission is listed under Submitted revisions.</Hint>}
     </Section>
   );
 }
@@ -264,49 +277,49 @@ function RequisitionActions({ r, reloading, onNotice }: { r: RequisitionDetail; 
   return (
     <Section title="Actions">
       {othersDraft && (
-        <p className="hint">
+        <Hint>
           Only the requester, {personLabel(r.requester)}, can {draft ? 'change, submit or discard this draft' : 'withdraw this requisition'}.
-        </p>
+        </Hint>
       )}
-      {mayChange && needsException && <p className="hint">Record a budget exception reason (Edit draft) before submitting: this requisition exceeds its approved budget or has none.</p>}
-      <div className="row">
+      {mayChange && needsException && <Hint>Record a budget exception reason (Edit draft) before submitting: this requisition exceeds its approved budget or has none.</Hint>}
+      <ButtonRow>
         {mayChange && draft && (
           <>
-            <button type="button" className="secondary" aria-expanded={open === 'edit'} disabled={busy} onClick={() => toggle('edit')}>
+            <Button type="button" variant="outline" aria-expanded={open === 'edit'} disabled={busy} onClick={() => toggle('edit')}>
               Edit draft
-            </button>
-            <button type="button" disabled={busy} onClick={() => run.mutate({ kind: 'submit', expectedVersion: r.version })}>
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => run.mutate({ kind: 'submit', expectedVersion: r.version })}>
               Submit for approval
-            </button>
-            <button type="button" className="danger" aria-expanded={open === 'discard'} disabled={busy} onClick={() => toggle('discard')}>
+            </Button>
+            <Button type="button" variant="danger" aria-expanded={open === 'discard'} disabled={busy} onClick={() => toggle('discard')}>
               Discard draft
-            </button>
+            </Button>
           </>
         )}
         {mayChange && waiting && (
-          <button type="button" className="secondary" disabled={busy} onClick={() => run.mutate({ kind: 'withdraw' })}>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => run.mutate({ kind: 'withdraw' })}>
             Withdraw
-          </button>
+          </Button>
         )}
         {mayCopy && (
-          <button type="button" className="secondary" disabled={busy} onClick={() => run.mutate({ kind: 'copy' })}>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => run.mutate({ kind: 'copy' })}>
             Copy to a new requisition
-          </button>
+          </Button>
         )}
         {mayChange && r.state === 'REJECTED' && (
-          <button type="button" className="secondary" disabled={busy} onClick={() => run.mutate({ kind: 'raiseAgain' })}>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => run.mutate({ kind: 'raiseAgain' })}>
             Raise again
-          </button>
+          </Button>
         )}
         {mayClose && (
-          <button type="button" className="danger" aria-expanded={open === 'close'} disabled={busy} onClick={() => toggle('close')}>
+          <Button type="button" variant="danger" aria-expanded={open === 'close'} disabled={busy} onClick={() => toggle('close')}>
             Close requisition
-          </button>
+          </Button>
         )}
-      </div>
-      {mayCopy && <p className="hint">A copy gets a new reference and keeps the job details only: no approvals, decisions, budget exception or candidates.</p>}
+      </ButtonRow>
+      {mayCopy && <Hint>A copy gets a new reference and keeps the job details only: no approvals, decisions, budget exception or candidates.</Hint>}
       {open === 'edit' && mayChange && draft && (
-        <div style={SPACED}>
+        <div className="mt-3">
           <RequisitionForm
             initial={r}
             busy={busy}

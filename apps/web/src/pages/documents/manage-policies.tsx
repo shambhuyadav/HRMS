@@ -2,11 +2,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, fileToBase64, isForbidden, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, NotPermitted, Section } from '../../ui';
+import { Empty, ErrorNote, NotPermitted, Notice, Section } from '../../ui';
 import { CHANGE_WORDS, PUBLISH_WORDS, Refusal, VERSION_WORDS } from './refusals';
-import { type Classification, FILE_ACCEPT, PATHS, POLICY_CODE, POLICY_MANAGE, POLICY_MANAGE_CONFIDENTIAL, POLICY_READ, type PolicyDetail, type PolicyItem, type Published, SCROLL, SR_ONLY, useKeys, UUID } from './shared';
+import {
+  type Classification,
+  FILE_ACCEPT,
+  PATHS,
+  POLICY_CODE,
+  POLICY_MANAGE,
+  POLICY_MANAGE_CONFIDENTIAL,
+  POLICY_READ,
+  type PolicyDetail,
+  type PolicyItem,
+  type Published,
+  useKeys,
+  UUID,
+} from './shared';
 import { ClassificationBadge, Expiry, PolicyFacts, PolicyUnavailable, scanOutcome, usePolicy, VersionHistory } from './shared-views';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -32,55 +54,49 @@ export function ManagePoliciesScreen() {
       <PublishPolicyForm />
       <Section title="Published policies">
         {!canRead && <NotPermitted>The selected role cannot list company policies.</NotPermitted>}
-        {canRead && list.isPending && <p className="hint loading">Loading policies…</p>}
+        {canRead && list.isPending && <LoadingLine>Loading policies…</LoadingLine>}
         {isForbidden(list.error) ? <NotPermitted>The selected role cannot list company policies.</NotPermitted> : <ErrorNote error={list.error} />}
         {list.data && items.length === 0 && <Empty>No company policies are published yet.</Empty>}
         {items.length > 0 && (
-          <div style={SCROLL}>
-            <table aria-label="Published policies">
-              <thead>
-                <tr>
-                  <th scope="col">Policy</th>
-                  <th scope="col">Classification</th>
-                  <th scope="col">Released version</th>
-                  <th scope="col">Expires</th>
-                  <th scope="col">
-                    <span style={SR_ONLY}>Manage</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((p) => {
-                  const released = p.currentVersion?.versionNumber ?? 0;
-                  const latest = p.latestVersionNumber ?? 0;
-                  return (
-                    <tr key={p.id}>
-                      <td>
-                        {p.title} <span className="hint">{p.policyCode}</span>
-                      </td>
-                      <td>
-                        <ClassificationBadge classification={p.classification} />
-                      </td>
-                      <td>
-                        {p.currentVersion ? `Version ${p.currentVersion.versionNumber}` : 'None released yet'}
-                        {latest > released && (
-                          <div className="hint">
-                            Version {latest} is not released (waiting for the malware scan, or quarantined).
-                          </div>
-                        )}
-                      </td>
-                      <td>{p.currentVersion ? <Expiry expiresOn={p.currentVersion.expiresOn} expired={p.currentVersion.expired} /> : '—'}</td>
-                      <td>
-                        <Link to={PATHS.managePolicy(p.id)} aria-label={`Manage ${p.title}`}>
-                          Manage
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Published policies">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Policy</TableHead>
+                <TableHead scope="col">Classification</TableHead>
+                <TableHead scope="col">Released version</TableHead>
+                <TableHead scope="col">Expires</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Manage</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((p) => {
+                const released = p.currentVersion?.versionNumber ?? 0;
+                const latest = p.latestVersionNumber ?? 0;
+                return (
+                  <TableRow key={p.id}>
+                    <TableCell>
+                      {p.title} <Hint as="span">{p.policyCode}</Hint>
+                    </TableCell>
+                    <TableCell>
+                      <ClassificationBadge classification={p.classification} />
+                    </TableCell>
+                    <TableCell>
+                      {p.currentVersion ? `Version ${p.currentVersion.versionNumber}` : 'None released yet'}
+                      {latest > released && <HintLine>Version {latest} is not released (waiting for the malware scan, or quarantined).</HintLine>}
+                    </TableCell>
+                    <TableCell>{p.currentVersion ? <Expiry expiresOn={p.currentVersion.expiresOn} expired={p.currentVersion.expired} /> : '—'}</TableCell>
+                    <TableCell>
+                      <Link to={PATHS.managePolicy(p.id)} aria-label={`Manage ${p.title}`}>
+                        Manage
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </Section>
     </>
@@ -136,48 +152,46 @@ function PublishPolicyForm() {
 
   return (
     <Section title="Publish a new policy">
-      <form key={formKey} className="grid-form" aria-label="Publish a new policy" onSubmit={submit}>
-        <label>
+      <FormGrid key={formKey} aria-label="Publish a new policy" onSubmit={submit}>
+        <FormField>
           Policy code
-          <input required maxLength={40} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-        </label>
-        <label>
+          <Input required maxLength={40} value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} />
+        </FormField>
+        <FormField>
           Title
-          <input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-        </label>
-        <label>
+          <Input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+        </FormField>
+        <FormField>
           Classification
-          <select value={classification} onChange={(e) => setClassification(e.target.value as Classification)}>
+          <NativeSelect value={classification} onChange={(e) => setClassification(e.target.value as Classification)}>
             <option value="OPERATIONAL">Operational (every employee of the company)</option>
             {canConfidential && <option value="CONFIDENTIAL">Confidential (confidential policy grant only)</option>}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Expires on (optional)
-          <input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} />
-        </label>
-        <label className="wide">
+          <Input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} />
+        </FormField>
+        <FormField className="col-span-full">
           Change note (optional)
-          <input maxLength={1000} value={changeNote} onChange={(e) => setChangeNote(e.target.value)} />
-        </label>
-        <label className="wide">
+          <Input maxLength={1000} value={changeNote} onChange={(e) => setChangeNote(e.target.value)} />
+        </FormField>
+        <FormField className="col-span-full">
           Policy file
-          <input type="file" accept={FILE_ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        </label>
-        <div className="wide">
-          <button type="submit" disabled={!ready}>
+          <Input type="file" accept={FILE_ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </FormField>
+        <div className="col-span-full">
+          <Button type="submit" disabled={!ready}>
             Publish
-          </button>
+          </Button>
         </div>
-      </form>
-      {code !== '' && !codeOk && <p className="hint">A policy code starts with an upper-case letter, followed by up to 39 upper-case letters, digits or _.</p>}
-      <p className="hint">
-        PDF, JPEG or PNG up to 10 MB. The code is permanent; later changes are new versions. Every file is scanned for malware before anyone can open it.
-      </p>
+      </FormGrid>
+      {code !== '' && !codeOk && <Hint>A policy code starts with an upper-case letter, followed by up to 39 upper-case letters, digits or _.</Hint>}
+      <Hint>PDF, JPEG or PNG up to 10 MB. The code is permanent; later changes are new versions. Every file is scanned for malware before anyone can open it.</Hint>
       {done && (
-        <p className="ok" role="status">
+        <StatusNote tone="success" role="status">
           Published {done.label}, version 1. {scanOutcome(done.scanState)} <Link to={PATHS.managePolicy(done.id)}>Manage this policy</Link>
-        </p>
+        </StatusNote>
       )}
       <Refusal error={publish.error} words={PUBLISH_WORDS} />
     </Section>
@@ -190,34 +204,41 @@ export function ManagePolicyScreen() {
   const canManage = can(POLICY_MANAGE);
   const canRead = can(POLICY_READ);
   const detail = usePolicy(id, canManage && canRead);
-  const p = detail.data;
   return (
     <>
-      <p>
-        <Link className="back-link" to={PATHS.manage}>← Policy upload</Link>
-      </p>
-      {!canManage || !canRead ? (
-        <Section title="Manage company policy">
-          <NotPermitted>The selected role cannot manage company policies.</NotPermitted>
-        </Section>
-      ) : !UUID.test(id) || detail.error ? (
-        <Section title="Manage company policy">
-          <PolicyUnavailable error={detail.error ?? new ApiError(404, 'NOT_FOUND', 'Not found')} />
-        </Section>
-      ) : !p ? (
-        <p className="hint loading">Loading the policy…</p>
-      ) : (
-        <>
-          <Section title={`${p.title} (${p.policyCode})`}>
-            <PolicyFacts policy={p} />
-            <h3>Versions</h3>
-            <p className="hint">Versions are kept as published: an expiry date belongs to its version and does not change. To change it, publish a new version.</p>
-            <VersionHistory versions={p.versions} />
-          </Section>
-          <NewVersionForm policy={p} />
-          <PolicyChangeForm policy={p} />
-        </>
-      )}
+      <BackLink to={PATHS.manage}>← Policy upload</BackLink>
+      <ManagePolicyBody id={id} allowed={canManage && canRead} error={detail.error} policy={detail.data} />
+    </>
+  );
+}
+
+/** The policy's cards: refused, unavailable, loading, or its versions and the forms that change it. */
+function ManagePolicyBody({ id, allowed, error, policy: p }: { id: string; allowed: boolean; error: unknown; policy: PolicyDetail | undefined }) {
+  if (!allowed) {
+    return (
+      <Section title="Manage company policy">
+        <NotPermitted>The selected role cannot manage company policies.</NotPermitted>
+      </Section>
+    );
+  }
+  if (!UUID.test(id) || error) {
+    return (
+      <Section title="Manage company policy">
+        <PolicyUnavailable error={error ?? new ApiError(404, 'NOT_FOUND', 'Not found')} />
+      </Section>
+    );
+  }
+  if (!p) return <LoadingLine>Loading the policy…</LoadingLine>;
+  return (
+    <>
+      <Section title={`${p.title} (${p.policyCode})`}>
+        <PolicyFacts policy={p} />
+        <h3>Versions</h3>
+        <Hint>Versions are kept as published: an expiry date belongs to its version and does not change. To change it, publish a new version.</Hint>
+        <VersionHistory versions={p.versions} />
+      </Section>
+      <NewVersionForm policy={p} />
+      <PolicyChangeForm policy={p} />
     </>
   );
 }
@@ -265,34 +286,37 @@ function NewVersionForm({ policy }: { policy: PolicyDetail }) {
   };
   return (
     <Section title="Publish a new version">
-      <form key={formKey} className="grid-form" aria-label="Publish a new version" onSubmit={submit}>
-        <label>
+      <FormGrid key={formKey} aria-label="Publish a new version" onSubmit={submit}>
+        <FormField>
           Expires on (optional)
-          <input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} />
-        </label>
-        <label className="wide">
+          <Input type="date" value={expiresOn} onChange={(e) => setExpiresOn(e.target.value)} />
+        </FormField>
+        <FormField className="col-span-full">
           Change note (optional)
-          <input maxLength={1000} value={changeNote} onChange={(e) => setChangeNote(e.target.value)} />
-        </label>
-        <label className="wide">
+          <Input maxLength={1000} value={changeNote} onChange={(e) => setChangeNote(e.target.value)} />
+        </FormField>
+        <FormField className="col-span-full">
           Version file
-          <input type="file" accept={FILE_ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        </label>
-        <div className="wide">
-          <button type="submit" disabled={!file || publish.isPending}>
+          <Input type="file" accept={FILE_ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </FormField>
+        <div className="col-span-full">
+          <Button type="submit" disabled={!file || publish.isPending}>
             Publish version
-          </button>
+          </Button>
         </div>
-      </form>
-      <p className="hint">The new version becomes the current one once the malware scan releases it; earlier versions stay on record.</p>
-      {done && (
-        <p className="ok" role="status">
-          Published version {done.versionNumber}. {scanOutcome(done.scanState)}
-        </p>
-      )}
+      </FormGrid>
+      <Hint>The new version becomes the current one once the malware scan releases it; earlier versions stay on record.</Hint>
+      {done && <Notice notice={{ text: `Published version ${done.versionNumber}. ${scanOutcome(done.scanState)}`, ok: true }} />}
       <Refusal error={publish.error} words={VERSION_WORDS} />
     </Section>
   );
+}
+
+/** What saving the chosen classification would change, said before it is sent; null while it is unchanged. */
+function classificationEffect(changed: boolean, classification: Classification): string | null {
+  if (!changed) return null;
+  if (classification === 'OPERATIONAL') return 'Saving makes every version of this policy readable by every employee of the company.';
+  return 'Saving makes every version of this policy readable only by holders of the confidential policy grant.';
 }
 
 function PolicyChangeForm({ policy }: { policy: PolicyDetail }) {
@@ -333,47 +357,45 @@ function PolicyChangeForm({ policy }: { policy: PolicyDetail }) {
   // A confidential policy, or a change to or from confidential, needs the confidential manage group (DF02).
   const locked = policy.classification === 'CONFIDENTIAL' && !canConfidential;
   const ready = !locked && (titleChanged || classificationChanged) && title.trim() !== '' && !save.isPending;
+  const effect = classificationEffect(classificationChanged, classification);
   return (
     <Section title="Title and classification">
       {locked ? (
         <NotPermitted>Changing a confidential policy also needs the confidential policy grant.</NotPermitted>
       ) : (
-        <form
-          className="grid-form"
+        <FormGrid
           aria-label="Title and classification"
           onSubmit={(e) => {
             e.preventDefault();
             if (ready) save.mutate();
           }}
         >
-          <label className="wide">
+          <FormField className="col-span-full">
             Title
-            <input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-          </label>
-          <label>
+            <Input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+          </FormField>
+          <FormField>
             Classification
-            <select value={classification} onChange={(e) => setClassification(e.target.value as Classification)}>
+            <NativeSelect value={classification} onChange={(e) => setClassification(e.target.value as Classification)}>
               <option value="OPERATIONAL">Operational (every employee of the company)</option>
               {(canConfidential || policy.classification === 'CONFIDENTIAL') && <option value="CONFIDENTIAL">Confidential (confidential policy grant only)</option>}
-            </select>
-          </label>
-          <div className="wide">
-            <button type="submit" disabled={!ready}>
+            </NativeSelect>
+          </FormField>
+          <div className="col-span-full">
+            <Button type="submit" disabled={!ready}>
               Save
-            </button>
+            </Button>
           </div>
-        </form>
+        </FormGrid>
       )}
-      <p className="hint">The classification belongs to the policy, so it applies to every version, earlier ones included.</p>
-      {classificationChanged && classification === 'OPERATIONAL' && <p role="status">Saving makes every version of this policy readable by every employee of the company.</p>}
-      {classificationChanged && classification === 'CONFIDENTIAL' && <p role="status">Saving makes every version of this policy readable only by holders of the confidential policy grant.</p>}
-      {saved && (
-        <p className="ok" role="status">
-          Saved.
-        </p>
+      <Hint>The classification belongs to the policy, so it applies to every version, earlier ones included.</Hint>
+      {effect && (
+        <StatusNote tone="info" role="status">
+          {effect}
+        </StatusNote>
       )}
+      {saved && <Notice notice={{ text: 'Saved.', ok: true }} />}
       <Refusal error={save.error} words={CHANGE_WORDS} />
     </Section>
   );
 }
-

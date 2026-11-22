@@ -1,11 +1,15 @@
 // The settlement bulk upload: the lines of several drafts in one file (shared import lifecycle).
 import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, ApiError, fileToBase64, idempotencyKey, isForbidden, pinSession } from '../../api';
 import { ErrorNote, NotPermitted, Section } from '../../ui';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, TemplateDownload, useBatchFollowUp } from '../records';
 import { BULK_UPLOAD } from './refusals';
-import { enc, useSettlementRefresh } from './shared';
+import { enc, FIELD_ROW, useSettlementRefresh } from './shared';
 
 /**
  * FR-054 bulk upload (CL-244): the lines of several drafts in one SETTLEMENT_LINES_V1 file, through the shared import
@@ -92,20 +96,21 @@ export function SettlementBulkUpload() {
   return (
     <>
       <Section title="Bulk upload of settlement lines">
-        <form onSubmit={submit} className="stack" aria-label="Bulk upload of settlement lines">
-          <p className="hint">
-            CSV with exactly the header <code>{t.columns}</code> (template {t.code}), for as many draft settlements as you prepared. {t.note} Nothing changes until you
+        <form onSubmit={submit} className="flex flex-col gap-3" aria-label="Bulk upload of settlement lines">
+          <Hint>
+            {/* The header is one long word of comma-joined column names: it may break anywhere, or it runs out of the card on a phone. */}
+            CSV with exactly the header <code className="break-all">{t.columns}</code> (template {t.code}), for as many draft settlements as you prepared. {t.note} Nothing changes until you
             apply a preview, and a file is applied all or nothing: one row with a problem rejects every settlement in it.
-          </p>
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               Settlement lines file for several settlements (CSV)
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         {isForbidden(upload.error) ? <NotPermitted>The selected role cannot upload settlement lines.</NotPermitted> : <ErrorNote error={upload.error ?? resume.error} />}

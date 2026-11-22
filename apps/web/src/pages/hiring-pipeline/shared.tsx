@@ -1,10 +1,12 @@
 // Shared by the hiring pipeline screens: permission keys, paths and limits, codes in words and their badges, query keys, styles and small pieces.
 import { useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type ReactNode, useMemo } from 'react';
+import { type ReactNode, useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { Hint } from '@/components/hint';
 import { formatAmount, readable } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, NotPermitted } from '../../ui';
+// ui.tsx's Notice is the outcome line itself; this module's own Notice below keeps its simpler `text` prop for its callers.
+import { Badge, Empty, NotPermitted, Notice as OutcomeNotice } from '../../ui';
 import type { Person } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -192,12 +194,14 @@ export const RequisitionStateBadge = ({ state }: { state: string }) => <CodeBadg
 export const CandidateStateBadge = ({ state }: { state: string }) => <CodeBadge code={state} labels={CANDIDATE_STATE_LABEL} tones={CANDIDATE_TONE} />;
 export const FlagStateBadge = ({ state }: { state: string }) => <CodeBadge code={state} labels={FLAG_STATE_LABEL} tones={FLAG_TONE} />;
 
+/** A released file is good news, a quarantined one bad; any other state still waits for the scan. */
+const SCAN_TONE: Record<string, Tone> = { CLEAN: 'good', QUARANTINED: 'bad' };
+
 /** FR-106: only a file the malware scanner released (CLEAN) is ever served. */
 export function ScanBadge({ state }: { state: string | null }) {
-  const tone: Tone = state === 'CLEAN' ? 'good' : state === 'QUARANTINED' ? 'bad' : 'warn';
+  const tone: Tone = (state ? SCAN_TONE[state] : undefined) ?? 'warn';
   return <Badge tone={tone}>{state ? (SCAN_LABEL[state] ?? readable(state).toLowerCase()) : 'not scanned yet'}</Badge>;
 }
-
 
 // ---------------------------------------------------------------------------------------------------------
 // Shared pieces
@@ -256,38 +260,19 @@ export function useUserId(): string | null {
   return me?.userId ?? null;
 }
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.5rem 0 0' };
-export const GROUP: CSSProperties = { border: 'none', margin: 0, padding: 0, minWidth: 0 };
-export const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
-export const SR_ONLY: CSSProperties = { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 };
-export const LIST: CSSProperties = { margin: 0, paddingLeft: '1.1rem' };
+/** Text kept as typed (a CV's approved text, a letter preview): its line breaks kept, in a scrolling frame of its own. */
+export const PREFORMATTED = 'my-2 max-h-96 overflow-y-auto rounded-md border border-border p-3 font-[inherit] whitespace-pre-wrap';
 
+/** A check made here before sending failed: what to fix, in words. */
 export function Problem({ text }: { text: string | null }) {
   if (!text) return null;
-  return (
-    <p role="alert" className="error wide">
-      {text}
-    </p>
-  );
-}
-
-export function Done({ children }: { children: ReactNode }) {
-  return (
-    <p className="ok wide" role="status">
-      {children}
-    </p>
-  );
+  return <OutcomeNotice notice={{ text, ok: false }} />;
 }
 
 /** What the last action did, kept by a parent that stays on screen while the acted-on item reloads or goes. */
 export function Notice({ text }: { text: string | null }) {
   if (!text) return null;
-  return (
-    <p className="ok" role="status">
-      {text}
-    </p>
-  );
+  return <OutcomeNotice notice={{ text, ok: true }} />;
 }
 
 /** A screen the selected role cannot use: its heading and the reason, and no request at all. */
@@ -316,7 +301,10 @@ export function personText(p: Person | null | undefined, userId: string | null):
   return userId !== null && p.userId === userId ? `You (${name})` : name;
 }
 
-export const ageing = (days: number | null | undefined) => (days === null || days === undefined ? '—' : `${days} ${days === 1 ? 'day' : 'days'}`);
+export function ageing(days: number | null | undefined): string {
+  if (days === null || days === undefined) return '—';
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
 
 /**
  * An amount as the API sent it (a decimal string), through formatAmount. formatAmount shows two decimals, so an amount
@@ -328,7 +316,7 @@ export function Money({ value, currency }: { value: string | null | undefined; c
   return (
     <>
       {formatAmount(value, currency)}
-      {finer && <span className="hint"> (exactly {value})</span>}
+      {finer && <Hint as="span"> (exactly {value})</Hint>}
     </>
   );
 }
@@ -337,7 +325,7 @@ export function CandidateLink({ candidate: c, withState = false }: { candidate: 
   const { can } = useSession();
   return (
     <>
-      {can(CANDIDATE_READ) ? <Link to={PATHS.candidate(c.id)}>{c.fullName}</Link> : c.fullName} <span className="hint">{c.candidateCode}</span>
+      {can(CANDIDATE_READ) ? <Link to={PATHS.candidate(c.id)}>{c.fullName}</Link> : c.fullName} <Hint as="span">{c.candidateCode}</Hint>
       {withState && c.state && (
         <>
           {' '}

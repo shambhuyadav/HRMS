@@ -1,9 +1,16 @@
 // The notification rules screen (FR-085, FR-061; DF12): every revision of every rule, a new revision, and email rules.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, Section } from '../../ui';
+import { Badge, Empty, ErrorNote, Notice, Section } from '../../ui';
 
 // ---------------------------------------------------------------------------------------------------------
 // Notification rules (FR-085, FR-061; DF12; decision I-35): every revision of every rule with its wording. A change is
@@ -47,7 +54,6 @@ const RULE_STATUS: Record<string, { label: string; tone: 'good' | 'warn' | 'bad'
   REJECTED: { label: 'rejected', tone: 'bad' },
 };
 
-const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
 /** An instant shown as the viewer's local date and time. */
@@ -117,25 +123,24 @@ export function NotificationRulesPage() {
   }
   return (
     <Section title="Notification rules">
-      <p className="hint">
+      <Hint>
         A change is a new revision that takes effect from a future date and time once someone other than its author approves it; the revision before it then ends at that moment, so
         one revision is in force at a time. Only the wording and, for an optional notification, whether it is sent can change. The event, channel, recipients, timing and retry
         ceiling carry over unchanged.
-      </p>
-      {scheduled && (
-        <p className="ok" role="status">
-          {scheduled}
-        </p>
-      )}
-      {rules.isPending && <p className="hint loading">Loading rules…</p>}
+      </Hint>
+      <Notice notice={scheduled ? { text: scheduled, ok: true } : null} />
+      {rules.isPending && <LoadingLine>Loading rules…</LoadingLine>}
       <ErrorNote error={rules.error} />
       {rules.data && groups.length === 0 && <Empty>No notification rules are configured.</Empty>}
+      {/* `tasks`: the list's marker class, which styles.css draws each rule by, as in the decision lists. */}
       <ul className="tasks">
         {groups.map(({ code, revisions }) => {
           // A rejected revision was never in force: the next change builds on what came before it.
           const latest = [...revisions].reverse().find((r) => r.status !== 'REJECTED') ?? revisions[revisions.length - 1]!;
           const pending = latest.status === 'PROPOSED';
           const inForce = revisions.find((r) => r.status === 'IN_FORCE');
+          const changing = editing === code;
+          const proposingEmail = editing === `${code}:email`;
           return (
             <li key={code} aria-label={`Rule ${code}`}>
               <div>
@@ -160,41 +165,41 @@ export function NotificationRulesPage() {
                   <dd>{latest.retryCeiling}</dd>
                 </div>
               </dl>
-              <table aria-label={`Revisions of ${code}`}>
-                <thead>
-                  <tr>
-                    <th scope="col">Revision</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">From</th>
-                    <th scope="col">Until</th>
-                    <th scope="col">Sent</th>
-                    <th scope="col">Subject</th>
-                    <th scope="col">Message</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table aria-label={`Revisions of ${code}`}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Revision</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">From</TableHead>
+                    <TableHead scope="col">Until</TableHead>
+                    <TableHead scope="col">Sent</TableHead>
+                    <TableHead scope="col">Subject</TableHead>
+                    <TableHead scope="col">Message</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {revisions.map((r) => {
                     const status = RULE_STATUS[r.status] ?? { label: readableCode(r.status), tone: 'neutral' as const };
                     return (
-                      <tr key={r.id}>
-                        <td>
-                          {r.revision} <span className="hint">wording {r.templateRevision}</span>
-                        </td>
-                        <td>
+                      <TableRow key={r.id}>
+                        <TableCell>
+                          {r.revision} <Hint as="span">wording {r.templateRevision}</Hint>
+                        </TableCell>
+                        <TableCell>
                           <Badge tone={status.tone}>{status.label}</Badge>
-                          {r.status === 'REJECTED' && r.decisionReason ? <div className="hint">{r.decisionReason}</div> : null}
-                        </td>
-                        <td>{localDateTime(r.effectiveFrom)}</td>
-                        <td>{localDateTime(r.effectiveTo)}</td>
-                        <td>{r.active ? 'yes' : 'no (switched off)'}</td>
-                        <td>{r.subjectTemplate ?? '—'}</td>
-                        <td>{r.bodyTemplate}</td>
-                      </tr>
+                          {r.status === 'REJECTED' && r.decisionReason ? <HintLine>{r.decisionReason}</HintLine> : null}
+                        </TableCell>
+                        <TableCell>{localDateTime(r.effectiveFrom)}</TableCell>
+                        <TableCell>{localDateTime(r.effectiveTo)}</TableCell>
+                        <TableCell>{r.active ? 'yes' : 'no (switched off)'}</TableCell>
+                        <TableCell>{r.subjectTemplate ?? '—'}</TableCell>
+                        <TableCell>{r.bodyTemplate}</TableCell>
+                      </TableRow>
                     );
                   })}
-                </tbody>
-              </table>
-              {editing === code ? (
+                </TableBody>
+              </Table>
+              {changing && (
                 <RuleRevisionForm
                   latest={latest}
                   onCancel={() => setEditing(null)}
@@ -205,7 +210,8 @@ export function NotificationRulesPage() {
                     void qc.invalidateQueries({ queryKey: key });
                   }}
                 />
-              ) : editing === `${code}:email` ? (
+              )}
+              {proposingEmail && (
                 <EmailRuleForm
                   source={latest}
                   onCancel={() => setEditing(null)}
@@ -215,15 +221,16 @@ export function NotificationRulesPage() {
                     void qc.invalidateQueries({ queryKey: key });
                   }}
                 />
-              ) : (
+              )}
+              {!changing && !proposingEmail && (
                 <>
                   {pending ? (
-                    <p className="hint">A change is waiting for approval; it has to be decided before another can be proposed.</p>
+                    <Hint>A change is waiting for approval; it has to be decided before another can be proposed.</Hint>
                   ) : (
-                    <div className="row">
-                      <button
+                    <ButtonRow>
+                      <Button
                         type="button"
-                        className="secondary"
+                        variant="outline"
                         aria-label={`Change ${code}`}
                         onClick={() => {
                           setScheduled(null);
@@ -231,14 +238,14 @@ export function NotificationRulesPage() {
                         }}
                       >
                         Change
-                      </button>
-                    </div>
+                      </Button>
+                    </ButtonRow>
                   )}
                   {latest.channel === 'IN_APP' && !codes.has(`${code}_EMAIL`) && (
-                    <div className="row">
-                      <button
+                    <ButtonRow>
+                      <Button
                         type="button"
-                        className="secondary"
+                        variant="outline"
                         aria-label={`Propose email for ${code}`}
                         onClick={() => {
                           setScheduled(null);
@@ -246,8 +253,8 @@ export function NotificationRulesPage() {
                         }}
                       >
                         Propose email
-                      </button>
-                    </div>
+                      </Button>
+                    </ButtonRow>
                   )}
                 </>
               )}
@@ -292,62 +299,62 @@ function RuleRevisionForm({ latest, onScheduled, onStale, onCancel }: { latest: 
   const ready = validInstant && (subjectChanged || bodyChanged || activeChanged) && body.trim() !== '' && reason.trim() !== '' && !save.isPending;
   const refusal = revisionRefusal(save.error);
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label={`Change ${latest.code}`}
       onSubmit={(e) => {
         e.preventDefault();
         if (ready) save.mutate();
       }}
     >
-      <label>
+      <FormField>
         Takes effect from
-        <input type="datetime-local" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-      </label>
+        <Input type="datetime-local" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </FormField>
       {latest.optionalEvent ? (
-        <label className="check">
+        <CheckField>
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Send this notification
-        </label>
+        </CheckField>
       ) : (
-        <p className="hint">Mandatory: this notification cannot be switched off.</p>
+        <Hint>Mandatory: this notification cannot be switched off.</Hint>
       )}
-      <label className="wide">
+      <FormField className="col-span-full">
         Subject (optional)
-        <input maxLength={200} value={subject} onChange={(e) => setSubject(e.target.value)} />
-      </label>
-      <label className="wide">
+        <Input maxLength={200} value={subject} onChange={(e) => setSubject(e.target.value)} />
+      </FormField>
+      <FormField className="col-span-full">
         Message
-        <textarea rows={3} maxLength={1000} style={TEXTAREA} value={body} onChange={(e) => setBody(e.target.value)} />
-      </label>
-      <p className="hint wide">
+        <Textarea rows={3} maxLength={1000} value={body} onChange={(e) => setBody(e.target.value)} />
+      </FormField>
+      <Hint>
         {latest.approvedPlaceholders.length === 0
           ? 'This message has no approved placeholders.'
           : `Approved placeholders: ${latest.approvedPlaceholders.map((p) => `{{${p}}}`).join(', ')}.`}
-      </p>
-      <label className="wide">
+      </Hint>
+      <FormField className="col-span-full">
         Reason for the change
-        <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <div className="row wide">
-        <button type="submit" disabled={!ready}>
+        <Input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={!ready}>
           Propose change
-        </button>
-        <button type="button" className="secondary" onClick={onCancel}>
+        </Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
-        </button>
-      </div>
-      {save.error ? (
-        refusal ? (
-          <p role="alert" className="error wide">
-            {refusal}
-          </p>
-        ) : (
-          <div className="wide">
-            <ErrorNote error={save.error} />
-          </div>
-        )
-      ) : null}
-    </form>
+        </Button>
+      </ButtonRow>
+      <SaveProblem error={save.error} refusal={refusal} />
+    </FormGrid>
+  );
+}
+
+/** Why a rule change was not saved: the refusal in plain words, or the API's answer when there are none for it. */
+function SaveProblem({ error, refusal }: { error: unknown; refusal: string | null }) {
+  if (!error) return null;
+  if (refusal) return <Notice notice={{ text: refusal, ok: false }} />;
+  return (
+    <div className="col-span-full">
+      <ErrorNote error={error} />
+    </div>
   );
 }
 
@@ -393,54 +400,43 @@ function EmailRuleForm({ source, onProposed, onCancel }: { source: RuleRevision;
   const ready = validInstant && reason.trim() !== '' && !save.isPending;
   const refusal = emailRefusal(save.error);
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label={`Propose email for ${source.code}`}
       onSubmit={(e) => {
         e.preventDefault();
         if (ready) save.mutate();
       }}
     >
-      <label>
+      <FormField>
         Takes effect from
-        <input type="datetime-local" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-      </label>
-      <label className="wide">
+        <Input type="datetime-local" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </FormField>
+      <FormField className="col-span-full">
         Email subject (optional)
-        <input maxLength={150} value={subject} onChange={(e) => setSubject(e.target.value)} />
-      </label>
-      <label className="wide">
+        <Input maxLength={150} value={subject} onChange={(e) => setSubject(e.target.value)} />
+      </FormField>
+      <FormField className="col-span-full">
         Email message (optional)
-        <textarea rows={3} maxLength={1000} style={TEXTAREA} value={body} onChange={(e) => setBody(e.target.value)} />
-      </label>
-      <p className="hint wide">
+        <Textarea rows={3} maxLength={1000} value={body} onChange={(e) => setBody(e.target.value)} />
+      </FormField>
+      <Hint>
         Left blank, the email takes a safe subject and message from the in-app notification. Recipients, timing and retries are the in-app
         notification’s.{' '}
         {source.approvedPlaceholders.length > 0 && `Approved placeholders: ${source.approvedPlaceholders.map((p) => `{{${p}}}`).join(', ')}.`}
-      </p>
-      <label className="wide">
+      </Hint>
+      <FormField className="col-span-full">
         Reason
-        <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <div className="row wide">
-        <button type="submit" disabled={!ready}>
+        <Input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={!ready}>
           Propose email
-        </button>
-        <button type="button" className="secondary" onClick={onCancel}>
+        </Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
-        </button>
-      </div>
-      {save.error ? (
-        refusal ? (
-          <p role="alert" className="error wide">
-            {refusal}
-          </p>
-        ) : (
-          <div className="wide">
-            <ErrorNote error={save.error} />
-          </div>
-        )
-      ) : null}
-    </form>
+        </Button>
+      </ButtonRow>
+      <SaveProblem error={save.error} refusal={refusal} />
+    </FormGrid>
   );
 }

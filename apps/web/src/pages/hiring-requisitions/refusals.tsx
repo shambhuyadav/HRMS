@@ -1,6 +1,6 @@
 // The hiring API's refusals in plain words (requisitions and manpower budgets).
 import { ApiError } from '../../api';
-import { ErrorNote } from '../../ui';
+import { ErrorNote, Notice } from '../../ui';
 
 // ---------------------------------------------------------------------------------------------------------
 // The API's refusals in plain words
@@ -61,6 +61,12 @@ function budgetFigures(details: unknown): string {
 const isDecision = (action: Act) => action === 'decide' || action === 'budget-decide';
 const isBudget = (action: Act) => action.startsWith('budget') || action.startsWith('revision');
 
+/** What a NOT_FOUND answer means for the action refused: a task gone from the queue, or a record out of the role's scope. */
+function notFoundText(action: Act): string {
+  if (isDecision(action)) return 'This task is no longer assigned to you.';
+  return isBudget(action) ? 'This budget line is not available in the selected role’s scope.' : 'This requisition is not available in the selected role’s scope.';
+}
+
 /** A refusal in plain words; null for anything else, which is shown as the API sent it. */
 export function refusalText(error: unknown, action: Act): string | null {
   if (!error) return null;
@@ -75,11 +81,7 @@ export function refusalText(error: unknown, action: Act): string | null {
     case 'FORBIDDEN':
       return 'The selected role is not permitted to do this.';
     case 'NOT_FOUND':
-      return isDecision(action)
-        ? 'This task is no longer assigned to you.'
-        : isBudget(action)
-          ? 'This budget line is not available in the selected role’s scope.'
-          : 'This requisition is not available in the selected role’s scope.';
+      return notFoundText(action);
     case 'STALE_VERSION':
       return isBudget(action)
         ? 'The revision changed since it was loaded. It has been reloaded: check it and try again.'
@@ -157,12 +159,6 @@ export function refusalText(error: unknown, action: Act): string | null {
 export function Refusal({ error, action }: { error: unknown; action: Act }) {
   if (!error) return null;
   const text = refusalText(error, action);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return text === null ? <ErrorNote error={error} /> : <Notice notice={{ text, ok: false }} />;
 }
 

@@ -3,11 +3,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { ButtonRow, CheckField, FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, NotPermitted, Section, StateBadge } from '../../ui';
 import { Refusal, reportGone } from './refusals';
-import { CODE, DUE_OFFSET_LIMIT, dueOffsetText, FIELDS, FLUSH, GROUP, Loading, LONG_CODE, MAX_NAME, MAX_TASKS, Notice, type NoticeState, OWNER_ROLES, ownerText, PATHS, Problem, PROCESS_TYPES, QueryProblem, RoleReady, SCROLL, shown, TEMPLATE_MANAGE, TEMPLATE_READ, typeLabel, useKeys, UUID } from './shared';
+import { CODE, DUE_OFFSET_LIMIT, dueOffsetText, FIELDS, LONG_CODE, MAX_NAME, MAX_TASKS, Notice, type NoticeState, OWNER_ROLES, ownerText, PATHS, Problem, PROCESS_TYPES, QueryProblem, RoleReady, shown, TEMPLATE_MANAGE, TEMPLATE_READ, typeLabel, useKeys, UUID } from './shared';
 import type { TemplateDetail, TemplateRevision, TemplateSummary, TemplateTask, TemplateTaskInput } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -18,10 +26,10 @@ export function TemplatesScreen() {
   return (
     <>
       <h1>Process templates</h1>
-      <p className="hint">
+      <Hint>
         Checklists for onboarding, probation confirmation, transfer, promotion, exit clearance and other processes: ordered tasks, each with one owner, a required or optional flag, a due date
         and an evidence rule. An employee’s process copies the revision published when it starts.
-      </p>
+      </Hint>
       <RoleReady>
         {can(TEMPLATE_READ) ? (
           <TemplateList />
@@ -42,38 +50,36 @@ function TemplateList() {
   const data = shown(list);
   return (
     <Section title={`Templates${data ? ` (${data.items.length})` : ''}`}>
-      {list.isPending && <Loading>Loading the process templates…</Loading>}
+      {list.isPending && <LoadingLine>Loading the process templates…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="The selected role cannot view process templates." />
       {data && data.items.length === 0 && <Empty>No process templates yet.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Process templates">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Published revision</th>
-                <th>Draft revision</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((t) => (
-                <tr key={t.id}>
-                  <td>
-                    <Link to={PATHS.template(t.id)}>{t.code}</Link>
-                  </td>
-                  <td>{t.name}</td>
-                  <td>{typeLabel(t.processType)}</td>
-                  <td>{t.active ? 'Active' : 'Inactive'}</td>
-                  <td>{t.publishedRevision === null ? 'None yet' : `Revision ${t.publishedRevision}`}</td>
-                  <td>{t.draftRevision === null ? '—' : `Revision ${t.draftRevision}`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Process templates">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Type</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Published revision</TableHead>
+              <TableHead scope="col">Draft revision</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((t) => (
+              <TableRow key={t.id}>
+                <TableCell>
+                  <Link to={PATHS.template(t.id)}>{t.code}</Link>
+                </TableCell>
+                <TableCell>{t.name}</TableCell>
+                <TableCell>{typeLabel(t.processType)}</TableCell>
+                <TableCell>{t.active ? 'Active' : 'Inactive'}</TableCell>
+                <TableCell>{t.publishedRevision === null ? 'None yet' : `Revision ${t.publishedRevision}`}</TableCell>
+                <TableCell>{t.draftRevision === null ? '—' : `Revision ${t.draftRevision}`}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
@@ -122,19 +128,19 @@ function NewTemplateForm() {
   return (
     <Section title="New process template">
       <form aria-label="New process template" className="stack" onSubmit={submit}>
-        <div style={FIELDS}>
-          <label>
+        <div className={FIELDS}>
+          <FormField>
             Template code
-            <input value={code} maxLength={40} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-          </label>
-          <label>
+            <Input value={code} maxLength={40} onChange={(e) => setCode(e.target.value.toUpperCase())} />
+          </FormField>
+          <FormField>
             Template name
-            <input value={name} maxLength={MAX_NAME} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label>
+            <Input value={name} maxLength={MAX_NAME} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+          <FormField>
             Process type
-            <input list={typeListId} value={type} maxLength={60} onChange={(e) => setType(e.target.value.toUpperCase())} />
-          </label>
+            <Input list={typeListId} value={type} maxLength={60} onChange={(e) => setType(e.target.value.toUpperCase())} />
+          </FormField>
           <datalist id={typeListId}>
             {PROCESS_TYPES.map(([c, label]) => (
               <option key={c} value={c}>
@@ -143,15 +149,15 @@ function NewTemplateForm() {
             ))}
           </datalist>
         </div>
-        <p className="hint" style={FLUSH}>
+        <Hint className="m-0">
           The template starts with an empty draft revision 1; add its tasks and publish it on the next screen. The process types offered are the ones every company starts with; your company may
           use others.
-        </p>
+        </Hint>
         <Problem text={problem} />
         <div>
-          <button type="submit" disabled={create.isPending}>
+          <Button type="submit" disabled={create.isPending}>
             Create template
-          </button>
+          </Button>
         </div>
         <Refusal error={create.error} action="template-create" />
         <Notice notice={notice} />
@@ -165,9 +171,7 @@ export function TemplateDetailScreen() {
   const { can } = useSession();
   return (
     <>
-      <p>
-        <Link className="back-link" to={PATHS.templates}>← Process templates</Link>
-      </p>
+      <BackLink to={PATHS.templates}>← Process templates</BackLink>
       {!UUID.test(id) ? (
         <Empty>This process template does not exist.</Empty>
       ) : (
@@ -188,7 +192,7 @@ function TemplateView({ id }: { id: string }) {
   if (!t) {
     return (
       <>
-        {query.isPending && <Loading>Loading the template…</Loading>}
+        {query.isPending && <LoadingLine>Loading the template…</LoadingLine>}
         <QueryProblem error={query.error} forbidden="The selected role cannot view process templates." missing="This process template is not available." />
       </>
     );
@@ -217,7 +221,7 @@ function TemplateView({ id }: { id: string }) {
       </dl>
       <Notice notice={notice} />
       {canManage && <TemplateSettings template={t} onSaved={saved} />}
-      {draft ? (
+      {draft && (
         <Section title={`Draft revision ${draft.revision}`}>
           {canManage ? (
             <TaskEditor key={draft.revision} templateId={t.id} draft={draft} revisionNumber={draft.revision} seed={draft.tasks} onSaved={saved} onGone={refused} />
@@ -225,7 +229,8 @@ function TemplateView({ id }: { id: string }) {
             <RevisionTasks revision={draft} />
           )}
         </Section>
-      ) : canManage ? (
+      )}
+      {!draft && canManage && (
         <Section title="New revision">
           {startingRevision ? (
             <TaskEditor
@@ -245,30 +250,35 @@ function TemplateView({ id }: { id: string }) {
               onCancel={() => setStartingRevision(false)}
             />
           ) : (
-            <>
-              <p className="hint">
-                A published revision is frozen. A change is a new draft revision, published when it is ready; running processes keep the revision they started with.
-              </p>
-              <div>
-                <button type="button" onClick={() => setStartingRevision(true)}>
-                  Start draft revision {nextRevision}
-                </button>
-              </div>
-            </>
+            <StartRevision revision={nextRevision} onStart={() => setStartingRevision(true)} />
           )}
         </Section>
-      ) : null}
+      )}
       {revisions
         .filter((r) => r.state !== 'DRAFT')
         .map((r) => (
           <Section key={r.revision} title={`Revision ${r.revision}`}>
-            <p className="hint" style={FLUSH}>
+            <Hint className="m-0">
               <StateBadge state={r.state} />
               {r.publishedAt ? ` published ${formatDate(r.publishedAt)}` : ''}
-            </p>
+            </Hint>
             <RevisionTasks revision={r} />
           </Section>
         ))}
+    </>
+  );
+}
+
+/** Without a draft, a change starts as the next draft revision (a published revision is frozen). */
+function StartRevision({ revision, onStart }: { revision: number; onStart: () => void }) {
+  return (
+    <>
+      <Hint>A published revision is frozen. A change is a new draft revision, published when it is ready; running processes keep the revision they started with.</Hint>
+      <div>
+        <Button type="button" onClick={onStart}>
+          Start draft revision {revision}
+        </Button>
+      </div>
     </>
   );
 }
@@ -277,36 +287,34 @@ function RevisionTasks({ revision }: { revision: TemplateRevision }) {
   const { me } = useSession();
   if (revision.tasks.length === 0) return <Empty>This revision has no tasks yet.</Empty>;
   return (
-    <div style={SCROLL}>
-      <table aria-label={`Tasks of revision ${revision.revision}`}>
-        <thead>
-          <tr>
-            <th>Order</th>
-            <th>Code</th>
-            <th>Task</th>
-            <th>Owner</th>
-            <th>Required</th>
-            <th>Due</th>
-            <th>Evidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...revision.tasks]
-            .sort((a, b) => a.sequence - b.sequence)
-            .map((task) => (
-              <tr key={task.code}>
-                <td>{task.sequence}</td>
-                <td>{task.code}</td>
-                <td>{task.title}</td>
-                <td>{ownerText(task, me?.userId ?? null)}</td>
-                <td>{task.required ? 'Required' : 'Optional'}</td>
-                <td>{dueOffsetText(task.dueOffsetDays)}</td>
-                <td>{task.evidenceRequired ? 'Required' : 'Not required'}</td>
-              </tr>
-            ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label={`Tasks of revision ${revision.revision}`}>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Order</TableHead>
+          <TableHead scope="col">Code</TableHead>
+          <TableHead scope="col">Task</TableHead>
+          <TableHead scope="col">Owner</TableHead>
+          <TableHead scope="col">Required</TableHead>
+          <TableHead scope="col">Due</TableHead>
+          <TableHead scope="col">Evidence</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {[...revision.tasks]
+          .sort((a, b) => a.sequence - b.sequence)
+          .map((task) => (
+            <TableRow key={task.code}>
+              <TableCell>{task.sequence}</TableCell>
+              <TableCell>{task.code}</TableCell>
+              <TableCell>{task.title}</TableCell>
+              <TableCell>{ownerText(task, me?.userId ?? null)}</TableCell>
+              <TableCell>{task.required ? 'Required' : 'Optional'}</TableCell>
+              <TableCell>{dueOffsetText(task.dueOffsetDays)}</TableCell>
+              <TableCell>{task.evidenceRequired ? 'Required' : 'Not required'}</TableCell>
+            </TableRow>
+          ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -330,30 +338,29 @@ function TemplateSettings({ template, onSaved }: { template: TemplateDetail; onS
   const trimmed = name.trim();
   return (
     <Section title="Template settings">
-      <form
+      <FormGrid
         aria-label="Template settings"
-        className="row"
         onSubmit={(e) => {
           e.preventDefault();
           if (!update.isPending && trimmed && trimmed !== template.name) update.mutate({ name: trimmed, expectedVersion: template.version });
         }}
       >
-        <label>
+        <FormField>
           Template name
-          <input value={name} maxLength={MAX_NAME} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <button type="submit" disabled={update.isPending || !trimmed || trimmed === template.name}>
+          <Input value={name} maxLength={MAX_NAME} onChange={(e) => setName(e.target.value)} />
+        </FormField>
+        <Button type="submit" disabled={update.isPending || !trimmed || trimmed === template.name}>
           Rename
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className={template.active ? 'danger' : undefined}
+          variant={template.active ? 'danger' : 'default'}
           disabled={update.isPending}
           onClick={() => update.mutate({ active: !template.active, expectedVersion: template.version })}
         >
           {template.active ? 'Deactivate template' : 'Activate template'}
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
       <Refusal error={update.error} action="template-update" />
     </Section>
   );
@@ -395,6 +402,15 @@ const blankTask = (key: string): EditableTask => ({
   evidenceRequired: false,
 });
 const editorSignature = (rows: EditableTask[]) => JSON.stringify(rows.map(({ key: _key, ...rest }) => rest));
+/** The required-or-optional choice as the editor keeps it; anything else is "not chosen yet". */
+const requiredChoice = (value: string): EditableTask['required'] => (value === 'REQUIRED' || value === 'OPTIONAL' ? value : '');
+
+/** What publishing needs, or what it does once the saved draft is ready. */
+function publishingText(dirty: boolean, taskCount: number): string {
+  if (dirty) return 'Save the draft before publishing it.';
+  if (taskCount === 0) return 'Add at least one task and save the draft before publishing it.';
+  return 'Publishing freezes this revision and retires the one published before; new processes copy its tasks.';
+}
 
 /** The tasks as the API takes them, or the first problem found (the server checks everything again). */
 function checkTasks(rows: EditableTask[]): { tasks: TemplateTaskInput[] } | { problem: string } {
@@ -525,74 +541,73 @@ function TaskEditor({
   };
   return (
     <form aria-label={`Tasks of draft revision ${revisionNumber}`} className="stack" onSubmit={submit}>
-      <p className="hint" style={FLUSH}>
+      <Hint className="m-0">
         Tasks run in this order. Each has exactly one owner: a role (whoever holds it and can reach the employee) or a named user. A required task can never be skipped, and a process closes only
         when every required task is complete. The due date counts days from the process’s effective date.
-      </p>
+      </Hint>
       {changedElsewhere && !save.error && (
-        <p className="hint" role="status" style={FLUSH}>
+        <Hint role="status" className="m-0">
           This draft was saved elsewhere since you started editing. Your unsaved changes are kept: saving them replaces that version, and discarding them loads it.
-        </p>
+        </Hint>
       )}
       {rows.length === 0 && <Empty>No tasks yet. Add the first task.</Empty>}
       {rows.map((r, i) => (
-        <fieldset key={r.key} style={GROUP}>
-          <legend>Task {i + 1}</legend>
-          <div style={FIELDS}>
-            <label>
+        <FramedFieldset key={r.key} legend={<>Task {i + 1}</>}>
+          <div className={FIELDS}>
+            <FormField>
               Code
-              <input value={r.code} maxLength={40} onChange={(e) => patch(r.key, { code: e.target.value.toUpperCase() })} />
-            </label>
-            <label>
+              <Input value={r.code} maxLength={40} onChange={(e) => patch(r.key, { code: e.target.value.toUpperCase() })} />
+            </FormField>
+            <FormField>
               Title
-              <input value={r.title} maxLength={MAX_NAME} onChange={(e) => patch(r.key, { title: e.target.value })} />
-            </label>
-            <label>
+              <Input value={r.title} maxLength={MAX_NAME} onChange={(e) => patch(r.key, { title: e.target.value })} />
+            </FormField>
+            <FormField>
               Owner type
-              <select value={r.ownerKind} onChange={(e) => patch(r.key, { ownerKind: e.target.value === 'USER' ? 'USER' : 'ROLE' })}>
+              <NativeSelect value={r.ownerKind} onChange={(e) => patch(r.key, { ownerKind: e.target.value === 'USER' ? 'USER' : 'ROLE' })}>
                 <option value="ROLE">A role</option>
                 <option value="USER">A named user</option>
-              </select>
-            </label>
+              </NativeSelect>
+            </FormField>
             {r.ownerKind === 'ROLE' ? (
-              <label>
+              <FormField>
                 Owner role code
-                <input list={roleListId} value={r.ownerRoleCode} maxLength={60} onChange={(e) => patch(r.key, { ownerRoleCode: e.target.value.toUpperCase() })} />
-              </label>
+                <Input list={roleListId} value={r.ownerRoleCode} maxLength={60} onChange={(e) => patch(r.key, { ownerRoleCode: e.target.value.toUpperCase() })} />
+              </FormField>
             ) : (
-              <label>
+              <FormField>
                 Owner user ID
-                <input value={r.ownerUserId} maxLength={36} onChange={(e) => patch(r.key, { ownerUserId: e.target.value })} />
-              </label>
+                <Input value={r.ownerUserId} maxLength={36} onChange={(e) => patch(r.key, { ownerUserId: e.target.value })} />
+              </FormField>
             )}
-            <label>
+            <FormField>
               Required or optional
-              <select value={r.required} onChange={(e) => patch(r.key, { required: e.target.value === 'REQUIRED' ? 'REQUIRED' : e.target.value === 'OPTIONAL' ? 'OPTIONAL' : '' })}>
+              <NativeSelect value={r.required} onChange={(e) => patch(r.key, { required: requiredChoice(e.target.value) })}>
                 <option value="">Choose…</option>
                 <option value="REQUIRED">Required (cannot be skipped)</option>
                 <option value="OPTIONAL">Optional (can be skipped with a reason)</option>
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Due (days from the effective date)
-              <input type="number" step={1} min={-DUE_OFFSET_LIMIT} max={DUE_OFFSET_LIMIT} value={r.dueOffsetDays} onChange={(e) => patch(r.key, { dueOffsetDays: e.target.value })} />
-            </label>
-            <label className="check">
+              <Input type="number" step={1} min={-DUE_OFFSET_LIMIT} max={DUE_OFFSET_LIMIT} value={r.dueOffsetDays} onChange={(e) => patch(r.key, { dueOffsetDays: e.target.value })} />
+            </FormField>
+            <CheckField>
               <input type="checkbox" checked={r.evidenceRequired} onChange={(e) => patch(r.key, { evidenceRequired: e.target.checked })} /> Evidence file required
-            </label>
+            </CheckField>
           </div>
-          <div className="row">
-            <button type="button" className="secondary" disabled={i === 0} onClick={() => move(i, -1)}>
+          <ButtonRow>
+            <Button type="button" variant="outline" disabled={i === 0} onClick={() => move(i, -1)}>
               Move up
-            </button>
-            <button type="button" className="secondary" disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
+            </Button>
+            <Button type="button" variant="outline" disabled={i === rows.length - 1} onClick={() => move(i, 1)}>
               Move down
-            </button>
-            <button type="button" className="secondary" onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}>
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}>
               Remove
-            </button>
-          </div>
-        </fieldset>
+            </Button>
+          </ButtonRow>
+        </FramedFieldset>
       ))}
       <datalist id={roleListId}>
         {OWNER_ROLES.map(([c, label]) => (
@@ -601,10 +616,10 @@ function TaskEditor({
           </option>
         ))}
       </datalist>
-      <div className="row">
-        <button
+      <ButtonRow>
+        <Button
           type="button"
-          className="secondary"
+          variant="outline"
           disabled={rows.length >= MAX_TASKS}
           onClick={() => {
             counter.current += 1;
@@ -612,14 +627,14 @@ function TaskEditor({
           }}
         >
           Add a task
-        </button>
-        <button type="submit" disabled={busy || !dirty || loaded.saved}>
+        </Button>
+        <Button type="submit" disabled={busy || !dirty || loaded.saved}>
           {draft ? 'Save draft' : `Save as draft revision ${revisionNumber}`}
-        </button>
+        </Button>
         {draft && dirty && (
-          <button
+          <Button
             type="button"
-            className="secondary"
+            variant="outline"
             disabled={busy}
             onClick={() => {
               setRows(initial);
@@ -629,29 +644,23 @@ function TaskEditor({
             }}
           >
             Discard changes
-          </button>
+          </Button>
         )}
         {onCancel && (
-          <button type="button" className="secondary" disabled={busy} onClick={onCancel}>
+          <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         )}
-      </div>
+      </ButtonRow>
       <Problem text={problem} />
       <Refusal error={save.error} action="draft-save" except={draft === null ? STALE_ONLY : undefined} />
       {draft && (
         <div className="stack">
-          <p className="hint" style={FLUSH}>
-            {dirty
-              ? 'Save the draft before publishing it.'
-              : draft.tasks.length === 0
-                ? 'Add at least one task and save the draft before publishing it.'
-                : 'Publishing freezes this revision and retires the one published before; new processes copy its tasks.'}
-          </p>
+          <Hint className="m-0">{publishingText(dirty, draft.tasks.length)}</Hint>
           <div>
-            <button type="button" disabled={busy || dirty || draft.tasks.length === 0} onClick={() => publish.mutate(draft)}>
+            <Button type="button" disabled={busy || dirty || draft.tasks.length === 0} onClick={() => publish.mutate(draft)}>
               Publish revision {draft.revision}
-            </button>
+            </Button>
           </div>
           <Refusal error={publish.error} action="publish" except={PUBLISH_GONE} />
         </div>

@@ -1,6 +1,10 @@
 // The tax inputs screen: perquisites (CL-085) and past salary (CL-084 / CL-119).
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatMonth, localDate } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section } from '../../ui';
@@ -36,43 +40,43 @@ export function TaxInputsPage() {
       {can(TAX_READ) && (
         <Section title="Perquisites and past salary">
           {view.data && (
-            <p className="hint" role="note">
+            <Hint role="note">
               Tax projection: {plain(view.data.tdsProjection.status)}. {view.data.tdsProjection.reason}
-            </p>
+            </Hint>
           )}
-          <div className="filters">
-            <label>
+          <FilterBar>
+            <FormField>
               Financial year
-              <input value={year} onChange={(e) => setYear(e.target.value)} pattern="\d{4}-\d{2}" />
-            </label>
-            <label>
+              <Input value={year} onChange={(e) => setYear(e.target.value)} pattern="\d{4}-\d{2}" />
+            </FormField>
+            <FormField>
               Name or code
-              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
-            </label>
-          </div>
+              <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </FormField>
+          </FilterBar>
           <ErrorNote error={view.error} />
           {view.data && view.data.items.length === 0 && <Empty>Nothing is recorded for {year}.</Empty>}
           {view.data && view.data.items.length > 0 && (
-            <table aria-label="Recorded inputs">
-              <thead>
-                <tr>
-                  <th scope="col">Employee</th>
-                  <th scope="col">Perquisites</th>
-                  <th scope="col">Past salary</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="Recorded inputs">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Employee</TableHead>
+                  <TableHead scope="col">Perquisites</TableHead>
+                  <TableHead scope="col">Past salary</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {view.data.items.map((i) => (
-                  <tr key={i.employeeId}>
-                    <td>
+                  <TableRow key={i.employeeId}>
+                    <TableCell>
                       {i.employeeName} ({i.employeeCode})
-                    </td>
-                    <td>{i.perquisites.map((p) => `${formatMonth(p.month)} ${plain(p.perquisiteType)} ${amount(p.value)}`).join('; ') || '—'}</td>
-                    <td>{i.pastSalary.map((s) => `${plain(s.source)} ${formatMonth(s.fromMonth)} to ${formatMonth(s.toMonth)}: salary ${amount(s.taxableSalary)}, TDS ${amount(s.tdsDeducted)}`).join('; ') || '—'}</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell>{i.perquisites.map((p) => `${formatMonth(p.month)} ${plain(p.perquisiteType)} ${amount(p.value)}`).join('; ') || '—'}</TableCell>
+                    <TableCell>{i.pastSalary.map((s) => `${plain(s.source)} ${formatMonth(s.fromMonth)} to ${formatMonth(s.toMonth)}: salary ${amount(s.taxableSalary)}, TDS ${amount(s.tdsDeducted)}`).join('; ') || '—'}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </Section>
       )}

@@ -3,11 +3,34 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, NotPermitted, Section, When } from '../../ui';
 import { Problem, QueryProblem, Refusal } from './refusals';
-import { FeedbackState, has, HISTORY_LABEL, optional, PART_ENROL, PART_READ, participantLabel, ParticipationState, PATHS, PLAN_READ, SCROLL, shown, STATE_LABEL, TEXTAREA, useKeys, useRefetchAll, ViewBadge } from './shared';
+import {
+  FeedbackState,
+  has,
+  HISTORY_LABEL,
+  optional,
+  PART_ENROL,
+  PART_READ,
+  participantLabel,
+  ParticipationState,
+  PATHS,
+  PLAN_READ,
+  shown,
+  STATE_LABEL,
+  useKeys,
+  useRefetchAll,
+  ViewBadge,
+} from './shared';
 import type { EmployeeParticipation, Participant, ParticipantDetail } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -28,7 +51,7 @@ export function ParticipantScreen() {
   const t = shown(detail);
   return (
     <div className="stack">
-      {detail.isLoading && <p className="hint loading">Loading…</p>}
+      {detail.isLoading && <LoadingLine>Loading…</LoadingLine>}
       <QueryProblem error={detail.error} forbidden="The selected role cannot read this participation." />
       {t && (
         <>
@@ -52,43 +75,53 @@ export function ParticipantScreen() {
             </dl>
           </Section>
           <Section title="History">
-            {t.history.length === 0 ? (
-              <Empty>No changes recorded.</Empty>
-            ) : (
-              <div style={SCROLL}>
-                <table aria-label="Participation history">
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Change</th>
-                      <th>From</th>
-                      <th>To</th>
-                      <th>By</th>
-                      <th>Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {t.history.map((h, i) => (
-                      <tr key={`${h.occurredAt}-${i}`}>
-                        <td>
-                          <When at={h.occurredAt} />
-                        </td>
-                        <td>{HISTORY_LABEL[h.action] ?? readable(h.action)}</td>
-                        <td>{h.fromState ? (STATE_LABEL[h.fromState] ?? readable(h.fromState)) : '—'}</td>
-                        <td>{STATE_LABEL[h.toState] ?? readable(h.toState)}</td>
-                        <td>{optional(h.actorName)}</td>
-                        <td>{typeof h.reason === 'string' && h.reason !== '' ? h.reason : h.reasonRecorded ? 'A reason was recorded (confidential)' : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {t.history.length === 0 ? <Empty>No changes recorded.</Empty> : <HistoryTable history={t.history} />}
           </Section>
         </>
       )}
     </div>
   );
+}
+
+type HistoryLine = ParticipantDetail['history'][number];
+
+/** The changes of one participation, as the server lists them, each with who made it and its reason when the role may read it. */
+function HistoryTable({ history }: { history: HistoryLine[] }) {
+  return (
+    <Table aria-label="Participation history">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">When</TableHead>
+          <TableHead scope="col">Change</TableHead>
+          <TableHead scope="col">From</TableHead>
+          <TableHead scope="col">To</TableHead>
+          <TableHead scope="col">By</TableHead>
+          <TableHead scope="col">Reason</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {history.map((h, i) => (
+          <TableRow key={`${h.occurredAt}-${i}`}>
+            <TableCell>
+              <When at={h.occurredAt} />
+            </TableCell>
+            <TableCell>{HISTORY_LABEL[h.action] ?? readable(h.action)}</TableCell>
+            <TableCell>{h.fromState ? (STATE_LABEL[h.fromState] ?? readable(h.fromState)) : '—'}</TableCell>
+            <TableCell>{STATE_LABEL[h.toState] ?? readable(h.toState)}</TableCell>
+            <TableCell>{optional(h.actorName)}</TableCell>
+            <TableCell>{reasonText(h)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+/** A history line's reason as returned; that one was recorded when the role may not read it; a dash when there is none. */
+function reasonText(h: HistoryLine): string {
+  if (typeof h.reason === 'string' && h.reason !== '') return h.reason;
+  if (h.reasonRecorded) return 'A reason was recorded (confidential)';
+  return '—';
 }
 
 export function EmployeeTrainingScreen() {
@@ -114,66 +147,73 @@ export function ParticipationList({ employeeId, linked, own }: { employeeId: str
   });
   const data = shown(list);
   const withReasons = data?.items.some((t) => has(t, 'cancellationReason')) ?? false;
+  const withdrawable = own && can(PART_ENROL);
   return (
     <>
-      {list.isLoading && <p className="hint loading">Loading…</p>}
+      {list.isLoading && <LoadingLine>Loading…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="The selected role cannot read these participations." />
       {data && data.items.length === 0 && <Empty>{own ? 'You have no training enrolments or assigned sessions yet.' : 'No training participations.'}</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label={own ? 'My training' : 'Training participations'}>
-            <thead>
-              <tr>
-                <th>Training</th>
-                <th>Dates</th>
-                <th>Mode, venue and trainer</th>
-                <th>Nomination</th>
-                <th>State</th>
-                <th>Attendance recorded</th>
-                <th>Completed</th>
-                <th>Feedback</th>
-                {withReasons && <th>Cancellation reason</th>}
-                {own && can(PART_ENROL) && <th>Withdraw</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((t) => (
-                <tr key={t.id}>
-                  <td>
-                    {linked && can(PART_READ) ? <Link to={PATHS.participant(t.id)}>{t.plan.title}</Link> : t.plan.title} ({t.plan.code})
-                    {t.plan.ownerName ? <div className="hint">Owner: {t.plan.ownerName}</div> : null}
-                  </td>
-                  <td>
-                    {formatDate(t.plan.startDate)} to {formatDate(t.plan.endDate)} <ViewBadge view={t.plan.view} />
-                  </td>
-                  <td>
-                    {t.plan.mode.label}
-                    {t.plan.venue ? ` · ${t.plan.venue}` : ''}
-                    {t.plan.trainer ? ` · ${t.plan.trainer}` : ''}
-                  </td>
-                  <td>{t.selfNominated ? (own ? 'You nominated yourself' : 'Self-nominated') : 'Assigned by the coordinator'}</td>
-                  <td>
-                    <ParticipationState state={t.state} />
-                  </td>
-                  <td>
-                    <When at={t.attendanceRecordedAt} />
-                  </td>
-                  <td>
-                    <When at={t.completedAt} />
-                  </td>
-                  <td>
-                    <FeedbackState status={t.feedbackStatus} />
-                  </td>
-                  {withReasons && <td>{optional(t.cancellationReason)}</td>}
-                  {own && can(PART_ENROL) && <td>{t.state === 'NOMINATED' && t.selfNominated ? <WithdrawForm participation={t} /> : '—'}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label={own ? 'My training' : 'Training participations'}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Training</TableHead>
+              <TableHead scope="col">Dates</TableHead>
+              <TableHead scope="col">Mode, venue and trainer</TableHead>
+              <TableHead scope="col">Nomination</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Attendance recorded</TableHead>
+              <TableHead scope="col">Completed</TableHead>
+              <TableHead scope="col">Feedback</TableHead>
+              {withReasons && <TableHead scope="col">Cancellation reason</TableHead>}
+              {withdrawable && <TableHead scope="col">Withdraw</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((t) => (
+              <TableRow key={t.id}>
+                <TableCell>
+                  {linked && can(PART_READ) ? <Link to={PATHS.participant(t.id)}>{t.plan.title}</Link> : t.plan.title} ({t.plan.code})
+                  {t.plan.ownerName ? <HintLine>Owner: {t.plan.ownerName}</HintLine> : null}
+                </TableCell>
+                <TableCell>
+                  {formatDate(t.plan.startDate)} to {formatDate(t.plan.endDate)} <ViewBadge view={t.plan.view} />
+                </TableCell>
+                <TableCell>
+                  {t.plan.mode.label}
+                  {t.plan.venue ? ` · ${t.plan.venue}` : ''}
+                  {t.plan.trainer ? ` · ${t.plan.trainer}` : ''}
+                </TableCell>
+                <TableCell>{nominationText(t.selfNominated, own)}</TableCell>
+                <TableCell>
+                  <ParticipationState state={t.state} />
+                </TableCell>
+                <TableCell>
+                  <When at={t.attendanceRecordedAt} />
+                </TableCell>
+                <TableCell>
+                  <When at={t.completedAt} />
+                </TableCell>
+                <TableCell>
+                  <FeedbackState status={t.feedbackStatus} />
+                </TableCell>
+                {withReasons && <TableCell>{optional(t.cancellationReason)}</TableCell>}
+                {withdrawable && (
+                  <TableCell>{t.state === 'NOMINATED' && t.selfNominated ? <WithdrawForm participation={t} /> : '—'}</TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </>
   );
+}
+
+/** Who nominated: the employee (said to them as "you") or the coordinator. */
+function nominationText(selfNominated: boolean, own: boolean | undefined): string {
+  if (!selfNominated) return 'Assigned by the coordinator';
+  return own ? 'You nominated yourself' : 'Self-nominated';
 }
 
 function WithdrawForm({ participation }: { participation: EmployeeParticipation }) {
@@ -191,14 +231,17 @@ function WithdrawForm({ participation }: { participation: EmployeeParticipation 
   });
   if (!open) {
     return (
-      <button type="button" className="secondary" onClick={() => setOpen(true)} aria-label={`Withdraw from ${participation.plan.title}`}>
-        Withdraw
-      </button>
+      <RowActions>
+        <Button type="button" variant="danger" size="sm" onClick={() => setOpen(true)} aria-label={`Withdraw from ${participation.plan.title}`}>
+          Withdraw
+        </Button>
+      </RowActions>
     );
   }
   return (
     <form
       aria-label={`Withdraw from ${participation.plan.title}`}
+      className="flex flex-col gap-2"
       onSubmit={(e) => {
         e.preventDefault();
         const text = reason.trim();
@@ -208,16 +251,18 @@ function WithdrawForm({ participation }: { participation: EmployeeParticipation 
       }}
       noValidate
     >
-      <label>
+      <FormField>
         Why you withdraw
-        <textarea style={TEXTAREA} rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <button type="submit" disabled={withdraw.isPending}>
-        {withdraw.isPending ? 'Withdrawing…' : 'Withdraw my nomination'}
-      </button>{' '}
-      <button type="button" className="secondary" onClick={() => setOpen(false)}>
-        Keep it
-      </button>
+        <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <ButtonRow>
+        <Button type="submit" size="sm" disabled={withdraw.isPending}>
+          {withdraw.isPending ? 'Withdrawing…' : 'Withdraw my nomination'}
+        </Button>{' '}
+        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>
+          Keep it
+        </Button>
+      </ButtonRow>
       <Problem text={problem} />
       <Refusal error={withdraw.error} action="withdraw" />
     </form>

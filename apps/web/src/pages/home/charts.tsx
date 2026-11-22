@@ -5,6 +5,8 @@
 // maps each fill name to a token), so the charts follow the light and dark themes.
 
 import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { Section } from '../../ui';
 import '../../styles/dashboard-charts.css';
 
@@ -21,15 +23,27 @@ export type Fill = 'good' | 'warn' | 'bad' | 'info' | 'off' | 'none' | 'series1'
 export function ChartCard({ title, table, foot, children }: { title: string; table?: ReactNode; foot?: ReactNode; children: ReactNode }) {
   const [asTable, setAsTable] = useState(false);
   const toggle = table ? (
-    <button type="button" className="link dash-chart-toggle" onClick={() => setAsTable((v) => !v)}>
+    <Button type="button" variant="outline" size="sm" onClick={() => setAsTable((v) => !v)}>
       {asTable ? 'Show as chart' : 'Show as table'}
-    </button>
+    </Button>
   ) : undefined;
   return (
     <Section title={title} actions={toggle}>
       {asTable && table ? table : children}
       {foot}
     </Section>
+  );
+}
+
+/**
+ * The link under a chart to the page its figures come from ("Open Leave"): a link-styled button at the card's foot, its words lined
+ * up with the card's content (no padding of its own), a 44px target on a phone.
+ */
+export function ChartFootLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Button asChild variant="link" size="sm" className="mt-3 px-0">
+      <Link to={to}>{children}</Link>
+    </Button>
   );
 }
 

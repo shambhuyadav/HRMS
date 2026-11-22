@@ -1,7 +1,7 @@
 // Refusals of the lifecycle routes in plain words: the actions, their refusal texts and the refusal line.
 
 import { ApiError } from '../../api';
-import { ErrorNote } from '../../ui';
+import { ErrorNote, Notice } from '../../ui';
 import { roleLabel } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -245,13 +245,7 @@ export function Refusal({ error, action, except }: { error: unknown; action: Act
   if (!error) return null;
   if (except && error instanceof ApiError && except.has(error.code)) return null;
   const text = refusalText(error, action);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return text === null ? <ErrorNote error={error} /> : <Notice notice={{ text, ok: false }} />;
 }
 
 /** What a finished action tells its screen: a confirmation, or (ok false) a refusal that outlives the form. */

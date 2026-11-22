@@ -1,9 +1,13 @@
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 // Development server proxies API calls to the local API (apps/api/src/server.ts on port 3000).
 export default defineConfig({
-  plugins: [react()],
+  // Tailwind CSS 4 builds the utility classes the shadcn/ui components use (src/tailwind.css).
+  plugins: [react(), tailwindcss()],
+  // "@/components/ui/button": shadcn/ui's import paths, from the web app's src folder.
+  resolve: { alias: [{ find: /^@\//, replacement: '/src/' }] },
   server: {
     port: 5173,
     proxy: {

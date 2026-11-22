@@ -8,10 +8,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, formatMonth, readable, retryTransient } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, Item, Section } from '../ui';
+import { Badge, Empty, ErrorNote, Item, NotPermitted, Notice, Section } from '../ui';
 
 /** GET /v1/bulk-jobs/:id (modules/bulk/service.ts jobView). */
 export interface BulkJob {
@@ -183,17 +187,13 @@ function ResultCounts({ job }: { job: BulkJob }) {
 function JobProblem({ job }: { job: BulkJob }) {
   if (!job.errorCode) return null;
   if (job.state === 'FAILED') {
-    return (
-      <p role="alert" className="error">
-        Stopped: {jobErrorText(job.errorCode)} Work done before it stopped is kept. (Error class {job.errorCode})
-      </p>
-    );
+    return <Notice notice={{ text: `Stopped: ${jobErrorText(job.errorCode)} Work done before it stopped is kept. (Error class ${job.errorCode})`, ok: false }} />;
   }
   return (
-    <p className="hint">
+    <Hint>
       A part of this job failed: {jobErrorText(job.errorCode)} It is retried automatically
       {job.nextAttemptAt ? ` at ${formatInstant(job.nextAttemptAt)}` : ''}. (Error class {job.errorCode}, attempt {job.attempts})
-    </p>
+    </Hint>
   );
 }
 
@@ -221,29 +221,29 @@ function UnprocessedEmployees({ jobId }: { jobId: string }) {
       <ErrorNote error={page.error} />
       {page.data?.items.length === 0 && <Empty>Every employee in your scope was processed.</Empty>}
       {!!page.data?.items.length && (
-        <table>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Employee</th>
-              <th>Why</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Why</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {page.data.items.map((e) => (
-              <tr key={e.employeeId}>
-                <td>{e.employeeCode}</td>
-                <td>{e.employeeName}</td>
-                <td>{e.errorCode ? `The job stopped on this employee: ${jobErrorText(e.errorCode)} (${e.errorCode})` : 'Not reached'}</td>
-              </tr>
+              <TableRow key={e.employeeId}>
+                <TableCell className="whitespace-nowrap">{e.employeeCode}</TableCell>
+                <TableCell>{e.employeeName}</TableCell>
+                <TableCell>{e.errorCode ? `The job stopped on this employee: ${jobErrorText(e.errorCode)} (${e.errorCode})` : 'Not reached'}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       {page.data?.nextAfter && (
-        <button type="button" className="secondary" onClick={() => setAfter(page.data!.nextAfter)}>
+        <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => setAfter(page.data!.nextAfter)}>
           Next employees
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -259,17 +259,9 @@ export function BulkJobStatus({ jobId }: { jobId: string }) {
   const data = job.isSuccess ? job.data : undefined;
   return (
     <div role="region" aria-label="Background job status" aria-live="polite">
-      {job.isPending && <p className="hint loading">Loading the job…</p>}
-      {isStatus(job.error, 404) && (
-        <p role="note" className="hint">
-          This job does not exist, or it was started by someone else or under another role.
-        </p>
-      )}
-      {isStatus(job.error, 403) && (
-        <p role="note">
-          <Badge tone="warn">not permitted</Badge> The selected role no longer holds the permission this job was started under.
-        </p>
-      )}
+      {job.isPending && <LoadingLine>Loading the job…</LoadingLine>}
+      {isStatus(job.error, 404) && <Hint role="note">This job does not exist, or it was started by someone else or under another role.</Hint>}
+      {isStatus(job.error, 403) && <NotPermitted>The selected role no longer holds the permission this job was started under.</NotPermitted>}
       {job.error && !isStatus(job.error, 404) && !isStatus(job.error, 403) && <ErrorNote error={job.error} />}
       {data && (
         <>
@@ -284,7 +276,7 @@ export function BulkJobStatus({ jobId }: { jobId: string }) {
             <Item term="Started">{formatInstant(data.startedAt)}</Item>
             {data.finishedAt && <Item term="Finished">{formatInstant(data.finishedAt)}</Item>}
           </dl>
-          {jobActive(data) && <p className="hint">{data.state === 'QUEUED' ? 'Waiting for a background worker.' : 'Running in the background.'} This status refreshes by itself.</p>}
+          {jobActive(data) && <Hint>{data.state === 'QUEUED' ? 'Waiting for a background worker.' : 'Running in the background.'} This status refreshes by itself.</Hint>}
           <JobProblem job={data} />
           {data.kind === 'ATTENDANCE_PROCESSING' && data.errorCode && data.errorCode !== 'ACCESS_REVOKED' && <UnprocessedEmployees jobId={data.id} />}
         </>
@@ -306,44 +298,42 @@ function BulkJobsScreen() {
     <>
       <h1>My background jobs</h1>
       <Section title="Jobs you started">
-        <p className="hint">Long tasks you start, such as processing attendance, run in the background and appear here. Only you see them, in the role you started them in.</p>
-        {jobs.isPending && <p className="hint loading">Loading jobs…</p>}
+        <Hint>Long tasks you start, such as processing attendance, run in the background and appear here. Only you see them, in the role you started them in.</Hint>
+        {jobs.isPending && <LoadingLine>Loading jobs…</LoadingLine>}
         <ErrorNote error={jobs.error} />
         {jobs.isSuccess && items.length === 0 && <Empty>You haven’t started any background jobs in this role.</Empty>}
         {items.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Job</th>
-                  <th scope="col">For</th>
-                  <th scope="col">State</th>
-                  <th scope="col">Employees processed</th>
-                  <th scope="col">Started</th>
-                  <th scope="col">Finished</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((j) => (
-                  <tr key={j.id}>
-                    <td>
-                      <Link to={PATHS.job(j.id)}>{jobKindLabel(j.kind)}</Link>
-                    </td>
-                    <td>{subject(j) ?? '—'}</td>
-                    <td>
-                      <StateBadge state={j.state} />
-                      {j.errorCode && <span className="hint"> {jobErrorText(j.errorCode)}</span>}
-                    </td>
-                    <td>{j.processed}</td>
-                    <td>{formatInstant(j.startedAt)}</td>
-                    <td>{formatInstant(j.finishedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Job</TableHead>
+                <TableHead scope="col">For</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Employees processed</TableHead>
+                <TableHead scope="col">Started</TableHead>
+                <TableHead scope="col">Finished</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((j) => (
+                <TableRow key={j.id}>
+                  <TableCell>
+                    <Link to={PATHS.job(j.id)}>{jobKindLabel(j.kind)}</Link>
+                  </TableCell>
+                  <TableCell>{subject(j) ?? '—'}</TableCell>
+                  <TableCell>
+                    <StateBadge state={j.state} />
+                    {j.errorCode && <Hint as="span"> {jobErrorText(j.errorCode)}</Hint>}
+                  </TableCell>
+                  <TableCell>{j.processed}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatInstant(j.startedAt)}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatInstant(j.finishedAt)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
-        {items.length === LIST_LIMIT && <p className="hint">Showing your {LIST_LIMIT} newest jobs.</p>}
+        {items.length === LIST_LIMIT && <Hint>Showing your {LIST_LIMIT} newest jobs.</Hint>}
       </Section>
     </>
   );

@@ -1,10 +1,17 @@
 // The batch upload panel (through the shared import screens) and the upload templates of the payroll extras screens.
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, ApiError, fileToBase64, idempotencyKey } from '../../api';
 import { ErrorNote, Section } from '../../ui';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from '../records';
 import { CHALLAN_MANAGE, TAX_IMPORT } from './shared';
+
+/** The file field and its Validate button side by side, their bottoms lined up (the old `div.inline`). */
+const FIELD_ROW = 'flex flex-wrap items-end gap-x-4 gap-y-3';
 
 // ---------------------------------------------------------------------------------------------------------
 // A batch upload through the shared import screens (preview, commit or cancel, the caller's own batches).
@@ -56,25 +63,26 @@ export function UploadPanel({ template: t, title, fileLabel }: { template: Impor
     <>
       <Section title={title}>
         <form
-          className="stack"
+          className="flex flex-col gap-3"
           aria-label={title}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             if (file && !busy) upload.mutate(file);
           }}
         >
-          <p className="hint">
-            CSV with exactly the header <code>{t.columns}</code>. {t.note} Nothing is applied until you commit the preview, and one row with a problem rejects the whole file.
-          </p>
+          <Hint>
+            {/* The header is one long word of comma-joined column names: it may break anywhere, or it runs out of the card on a phone. */}
+            CSV with exactly the header <code className="break-all">{t.columns}</code>. {t.note} Nothing is applied until you commit the preview, and one row with a problem rejects the whole file.
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               {fileLabel}
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         <ErrorNote error={upload.error ?? resume.error} />

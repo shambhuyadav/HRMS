@@ -3,6 +3,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, formatUnits } from '../../api';
 import { useSession } from '../../session';
 import { Icon, type IconName } from '../../icons';
@@ -76,6 +80,9 @@ interface PendingTask {
 /** FR-041 KRA review (I-77 item 3): listed with the tasks, but reviewed on the appraisal (POST /v1/appraisals/:id/goal-review). */
 const GOAL_REVIEW = 'appraisal_goal_review';
 
+/** A date in a task row stays on one line ("3 Nov 2026", not "3 Nov" over "2026"). */
+const DATE_CELL = 'whitespace-nowrap';
+
 /** Codes whose plain reading is not just the code in words. */
 const VALUE_WORDS: Record<string, string> = { NOT_PROCESSED: 'Not yet calculated' };
 
@@ -97,40 +104,40 @@ function PendingTasks() {
     <Section title={`Pending tasks${tasks.data ? ` (${tasks.data.total})` : ''}`}>
       {tasks.data?.items.length === 0 && <Empty>Nothing waiting for you.</Empty>}
       {!!tasks.data?.items.length && (
-        <table>
-          <thead>
-            <tr>
-              <th>Task</th>
-              <th>Employee</th>
-              <th>Assigned</th>
-              <th>Due</th>
-              <th>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Task</TableHead>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Assigned</TableHead>
+              <TableHead scope="col">Due</TableHead>
+              <TableHead scope="col">
                 <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {tasks.data.items.map((t) => (
-              <tr key={t.taskId ?? `goal-review:${t.appraisalId}`}>
-                <td>
+              <TableRow key={t.taskId ?? `goal-review:${t.appraisalId}`}>
+                <TableCell>
                   {t.kind === GOAL_REVIEW ? 'Goal (KRA) review' : words(t.kind)} {t.delegated && <Badge tone="warn">delegated</Badge>}
-                </td>
-                <td>{t.ownerName ? `${t.ownerName} (${t.ownerEmployeeCode})` : '—'}</td>
-                <td>{formatDate(t.assignedAt)}</td>
-                <td>
+                </TableCell>
+                <TableCell>{t.ownerName ? `${t.ownerName} (${t.ownerEmployeeCode})` : '—'}</TableCell>
+                <TableCell className={DATE_CELL}>{formatDate(t.assignedAt)}</TableCell>
+                <TableCell>
                   {formatDate(t.dueAt)} {t.overdue && <Badge tone="warn">overdue</Badge>}
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   {t.kind === GOAL_REVIEW && t.appraisalId ? (
                     <Link to={`/appraisal/appraisals/${encodeURIComponent(t.appraisalId)}`}>Review the goals</Link>
                   ) : (
                     <Link to="/tasks">Open decisions</Link>
                   )}
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       <ErrorNote error={tasks.error} />
     </Section>
@@ -158,24 +165,24 @@ function RecentActivity() {
       {a?.status === 'NOT_CONFIGURED' && <Empty>{a.message}</Empty>}
       {a?.status === 'OK' && a.items.length === 0 && <Empty>Nothing recorded for this role in that time.</Empty>}
       {a?.status === 'OK' && a.items.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>What</th>
-              <th>Record kind</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">When</TableHead>
+              <TableHead scope="col">What</TableHead>
+              <TableHead scope="col">Record kind</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {a.items.map((item, i) => (
-              <tr key={`${item.occurredAt}-${i}`}>
-                <td>{new Date(item.occurredAt).toLocaleString()}</td>
-                <td>{words(item.action)}</td>
-                <td>{words(item.resource)}</td>
-              </tr>
+              <TableRow key={`${item.occurredAt}-${i}`}>
+                <TableCell>{new Date(item.occurredAt).toLocaleString()}</TableCell>
+                <TableCell>{words(item.action)}</TableCell>
+                <TableCell>{words(item.resource)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       <ErrorNote error={activity.error} />
     </Section>
@@ -233,7 +240,10 @@ const TASK_SHORTCUTS: readonly { to: string; label: string; permissions: readonl
   { to: '/timesheets', label: 'Fill in my timesheet', permissions: ['timesheet.read.operational', 'timesheet.submit.operational'], ownRecord: true },
 ];
 
-const greetingAt = (hour: number) => (hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening');
+function greetingAt(hour: number): string {
+  if (hour < 12) return 'Good morning';
+  return hour < 17 ? 'Good afternoon' : 'Good evening';
+}
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 /** The company's business date (YYYY-MM-DD) as a person reads it, e.g. "Wednesday, 11 November 2026". */
@@ -365,16 +375,18 @@ interface ListAnswer {
   total?: number;
 }
 
+const recordsWord = (count: number | undefined) => (count === 1 ? 'record' : 'records');
+
 function SourceRows({ list }: { list: SourceList }) {
   const rows = useQuery({ queryKey: ['widget-source', list.api], queryFn: () => api<ListAnswer>(list.api) });
   const count = list.sumOf ? rows.data?.items.reduce((n, r) => n + Number(r[list.sumOf!] ?? 0), 0) : (rows.data?.total ?? rows.data?.items.length);
   return (
     <>
       {rows.data && (
-        <p className="hint">
+        <Hint>
           {list.label ? `${list.label}: ` : ''}
-          {count} {list.sumOf ? 'in total' : count === 1 ? 'record' : 'records'}
-        </p>
+          {count} {list.sumOf ? 'in total' : recordsWord(count)}
+        </Hint>
       )}
       {rows.data?.items.length === 0 && <Empty>No records.</Empty>}
       {!!rows.data?.items.length && <SimpleTable rows={rows.data.items.map(flatRow)} />}
@@ -394,14 +406,19 @@ export function WidgetSourcePage() {
   const widget = dashboard.data?.widgets.find((w) => w.code === code);
   return (
     <>
-      <Link className="back-link" to="/">← Home</Link>
+      <BackLink to="/">← Home</BackLink>
       {dashboard.data && !widget?.source && <Empty>This list is not available in the selected role.</Empty>}
       {widget?.source && (
         <Section title={widget.title}>
           {widget.source.lists.map((list) => (
             <SourceRows key={list.api} list={list} />
           ))}
-          {widget.source.shortcut && <Link to={widget.source.shortcut.to}>Open {widget.source.shortcut.label}</Link>}
+          {/* Under the records, the way on to the screen where they are worked on. */}
+          {widget.source.shortcut && (
+            <Button asChild variant="outline" className="mt-4">
+              <Link to={widget.source.shortcut.to}>Open {widget.source.shortcut.label}</Link>
+            </Button>
+          )}
         </Section>
       )}
       <ErrorNote error={dashboard.error} />

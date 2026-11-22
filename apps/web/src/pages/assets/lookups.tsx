@@ -2,12 +2,22 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, type EmployeeHit, personLabel, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, NotPermitted } from '../../ui';
 import { QueryProblem } from './refusals';
-import { EMPLOYEE_LIST, FLUSH, shown, useKeys } from './shared';
+import { EMPLOYEE_LIST, shown, useKeys } from './shared';
 import type { Category } from './types';
+
+/** The matching employees, one choice per line (the old `.choices` list). */
+const CHOICE_LIST = 'm-0 mt-3 flex list-none flex-col gap-[0.6rem] p-0';
+/** One matching employee as a full-width choice, its words at the start, tinted in the accent on hover (the old `.choices button`). */
+const CHOICE = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
 
 // ---------------------------------------------------------------------------------------------------------
 // Lookups: categories (DF04 controlled list) and employees
@@ -44,17 +54,17 @@ export function CategorySelect({
   const list = categories ?? [];
   const options = current && !list.some((c) => c.code === current.code) ? [current, ...list] : list;
   return (
-    <label>
+    <FormField>
       {label}
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">{allLabel ?? 'Choose a category'}</option>
         {options.map((c) => (
           <option key={c.code} value={c.code}>
             {c.label}
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
 }
 
@@ -78,28 +88,30 @@ export function EmployeePicker({ value, onChange }: { value: EmployeeHit | null;
   if (!canSearch) return <NotPermitted>The selected role cannot search employees, so it cannot choose whom to issue the item to.</NotPermitted>;
   const found = term !== '' ? shown(hits) : undefined;
   return (
-    <div className="wide">
-      <p style={FLUSH}>
+    <div className="col-span-full">
+      <p className="m-0">
         Issue to: <strong>{value ? personLabel(value) : 'nobody chosen yet'}</strong>{' '}
         {value && (
-          <button type="button" className="secondary" onClick={() => onChange(null)}>
+          <Button type="button" variant="outline" onClick={() => onChange(null)}>
             Clear
-          </button>
+          </Button>
         )}
       </p>
-      <label>
+      <FormField>
         Find the employee
-        <input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
-      </label>
-      {term !== '' && hits.isLoading && <p className="hint">Searching…</p>}
+        <Input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
+      </FormField>
+      {term !== '' && hits.isLoading && <Hint>Searching…</Hint>}
       <QueryProblem error={hits.error} forbidden="The selected role cannot search employees." />
       {found && found.items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
       {found && found.items.length > 0 && (
-        <ul className="choices" aria-label="Matching employees">
+        <ul className={CHOICE_LIST} aria-label="Matching employees">
           {found.items.map((e) => (
             <li key={e.id}>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                className={CHOICE}
                 aria-label={`Choose ${personLabel(e)}`}
                 onClick={() => {
                   onChange(e);
@@ -108,7 +120,7 @@ export function EmployeePicker({ value, onChange }: { value: EmployeeHit | null;
                 }}
               >
                 {personLabel(e)} · {readable(e.status).toLowerCase()}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

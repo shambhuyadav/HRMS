@@ -1,6 +1,6 @@
 // The confirmation API's refusals in plain words.
 import { ApiError, formatDate } from '../../api';
-import { ErrorNote } from '../../ui';
+import { ErrorNote, Notice } from '../../ui';
 import type { ExceptionAction } from './shared';
 
 /**
@@ -25,11 +25,12 @@ export function refusalText(error: unknown, action: ExceptionAction, sent?: { ki
       return 'An exception of this kind is already waiting for a decision on this case. It has to be decided or withdrawn before another one can be proposed.';
     case 'NO_CHANGE':
       return 'That date is already the case’s due date. Choose a different date.';
-    case 'RULE_VIOLATION':
+    case 'RULE_VIOLATION': {
       // The rule the API names for a proposed due date; any other rule keeps the API's own words.
-      return propose && sent?.kind === 'DUE_DATE_OVERRIDE'
-        ? `The new due date cannot be before the employee’s start date${sent.startDate ? ` (${formatDate(sent.startDate)})` : ''}.`
-        : null;
+      if (!propose || sent?.kind !== 'DUE_DATE_OVERRIDE') return null;
+      const startDate = sent.startDate ? ` (${formatDate(sent.startDate)})` : '';
+      return `The new due date cannot be before the employee’s start date${startDate}.`;
+    }
     case 'INVALID_DATE':
       return 'Enter a valid new due date.';
     case 'SELF_ACTION':
@@ -39,7 +40,8 @@ export function refusalText(error: unknown, action: ExceptionAction, sent?: { ki
     case 'INVALID_STATE':
       return action === 'withdraw' ? 'This proposal has already been decided or withdrawn, so it can no longer be withdrawn.' : 'This proposal has already been decided or withdrawn.';
     case 'NOT_FOUND':
-      return propose ? null : action === 'withdraw' ? 'Only the HR user who proposed it can withdraw this proposal.' : 'This proposal is no longer available in the selected role’s scope.';
+      if (propose) return null;
+      return action === 'withdraw' ? 'Only the HR user who proposed it can withdraw this proposal.' : 'This proposal is no longer available in the selected role’s scope.';
     case 'IDEMPOTENCY_KEY_REUSED':
       return 'Nothing was recorded: this attempt was matched to a different decision. Send your decision again.';
     default:
@@ -51,11 +53,5 @@ export function refusalText(error: unknown, action: ExceptionAction, sent?: { ki
 export function Refusal({ error, action, sent }: { error: unknown; action: ExceptionAction; sent?: { kind?: string | undefined; startDate?: string | undefined } }) {
   if (!error) return null;
   const text = refusalText(error, action, sent);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return text === null ? <ErrorNote error={error} /> : <Notice notice={{ text, ok: false }} />;
 }

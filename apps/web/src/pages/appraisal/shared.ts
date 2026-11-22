@@ -1,5 +1,5 @@
 // Shared by the appraisal screens: permission keys, screen paths and constants, the API shapes, query keys, styles and label helpers.
-import { type CSSProperties, useMemo } from 'react';
+import { useMemo } from 'react';
 import { formatDate, isForbidden, isNotFound, readable } from '../../api';
 import { type MeContext, useSession } from '../../session';
 
@@ -426,20 +426,24 @@ export function useKeys() {
   }, [context]);
 }
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const FLUSH: CSSProperties = { margin: 0 };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.5rem 0 0' };
-export const SPACED: CSSProperties = { marginTop: '0.75rem' };
-export const GROUP: CSSProperties = { border: '1px solid var(--line)', borderRadius: 6, margin: '0.5rem 0', padding: '0.5rem 0.75rem', minWidth: 0 };
-export const TEXTAREA: CSSProperties = {
-  font: 'inherit',
-  padding: '0.4rem 0.5rem',
-  border: '1px solid var(--line)',
-  borderRadius: 6,
-  color: 'var(--text)',
-  background: 'var(--surface)',
-  resize: 'vertical',
-};
+// The module's own layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026). The shared helpers (FormField, FramedFieldset,
+// Hint, Table …) cover fields, framed fieldsets, hints and tables; these cover the framed blocks and rows of fields they do not.
+/** A framed block of related content (a revision, the goal review): a hairline frame, apart from what is above and below it. */
+export const GROUP = 'my-2 min-w-0 rounded-md border border-border px-3 py-2';
+/** Fields side by side (with a button at the end), bottoms aligned, wrapping on a narrow screen; each FormField in it is `w-auto`. */
+export const FIELD_ROW = 'flex flex-wrap items-end gap-x-[1.1rem] gap-y-[0.95rem]';
+
+/** Whether a party's part is entered; a dash when the server left the flag out (the selected role may not see it). */
+export function enteredText(entered: boolean | undefined): string {
+  if (entered === undefined) return '—';
+  return entered ? 'Entered' : 'Not entered';
+}
+
+/** Whether a party's part of a section is filled; a dash when the server left the flag out. */
+export function filledText(filled: boolean | undefined): string {
+  if (filled === undefined) return '—';
+  return filled ? 'Filled' : 'Not filled';
+}
 
 /** The latest answer, unless the server has since refused it (403/404): what the role may no longer see is not kept. */
 export function shown<T>(query: { data: T | undefined; error: unknown }): T | undefined {

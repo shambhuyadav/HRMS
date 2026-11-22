@@ -6,9 +6,17 @@
 // says plainly that email is off and offers no send. The email channel sends plain text only, so there is no attachment.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useMemo, useRef, useState } from 'react';
+import { FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, fileToBase64, idempotencyKey, plural } from '../api';
 import type { ScreenRoute } from '../screens';
-import { Empty, ErrorNote, Section } from '../ui';
+import { Empty, ErrorNote, Notice, Section } from '../ui';
 import type { OrgChart, OrgChartNode } from './org-chart';
 import { TemplateDownload } from './records';
 
@@ -107,12 +115,11 @@ function refusal(error: unknown): string | null {
 function Refusal({ error }: { error: unknown }) {
   const words = refusal(error);
   if (!words) return <ErrorNote error={error} />;
-  return (
-    <p role="alert" className="error">
-      {words}
-    </p>
-  );
+  return <Notice notice={{ text: words, ok: false }} />;
 }
+
+/** The file field and its Review button side by side, their bottoms lined up (the old `div.inline`). */
+const FIELD_ROW = 'flex flex-wrap items-end gap-x-4 gap-y-3';
 
 export function SendMailPage() {
   const qc = useQueryClient();
@@ -203,98 +210,98 @@ export function SendMailPage() {
     <>
       <Section title="Send mail">
         <ErrorNote error={channel.error} />
-        {channel.data && !on && (
-          <p role="alert" className="error">
-            Email is off: no mail server is configured, so nothing can be sent. Recipients can still be chosen and reviewed.
-          </p>
+        {channel.data && !on && <Notice notice={{ text: 'Email is off: no mail server is configured, so nothing can be sent. Recipients can still be chosen and reviewed.', ok: false }} />}
+        {on && (
+          <StatusNote tone="info" role="status">
+            Email is on. A message goes to each recipient’s work email, sent in the background by the email channel with its retries.
+          </StatusNote>
         )}
-        {on && <p role="status">Email is on. A message goes to each recipient’s work email, sent in the background by the email channel with its retries.</p>}
         {limits && (
-          <p className="hint">
+          <Hint>
             One message goes to at most {limits.recipients} employees in your role’s scope who are employed and have a work email. The subject is one line of at most {limits.subject}{' '}
             characters and the message plain text of at most {limits.message}. No attachment: the email channel sends plain text only.
-          </p>
+          </Hint>
         )}
-        {done && <p role="status">{done}</p>}
+        {done && <Notice notice={{ text: done, ok: true }} />}
       </Section>
 
       <Section title="1. Choose the recipients">
         <ErrorNote error={chart.error instanceof ApiError && chart.error.status === 403 ? null : chart.error} />
-        {chart.error instanceof ApiError && chart.error.status === 403 && <p className="hint">Your role cannot list people here; upload a list of employee codes instead.</p>}
+        {chart.error instanceof ApiError && chart.error.status === 403 && <Hint>Your role cannot list people here; upload a list of employee codes instead.</Hint>}
         {people.length > 0 && (
           <>
-            <div className="filters">
-              <label>
+            <FilterBar>
+              <FormField>
                 Department
-                <select value={department} onChange={(e) => setDepartment(e.target.value)}>
+                <NativeSelect value={department} onChange={(e) => setDepartment(e.target.value)}>
                   <option value="">All</option>
                   {departments.map((d) => (
                     <option key={d}>{d}</option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </NativeSelect>
+              </FormField>
+              <FormField>
                 Name or code
-                <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
-              </label>
-            </div>
+                <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
+              </FormField>
+            </FilterBar>
             {shown.length === 0 ? (
               <Empty>No one matches these filters.</Empty>
             ) : (
-              <table aria-label="People">
-                <thead>
-                  <tr>
-                    <th scope="col">
+              <Table aria-label="People">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">
                       <input type="checkbox" aria-label="Choose everyone shown" checked={allShownChosen} onChange={toggleShown} />
-                    </th>
-                    <th scope="col">Code</th>
-                    <th scope="col">Name</th>
-                    <th scope="col">Department</th>
-                    <th scope="col">Location</th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                    <TableHead scope="col">Code</TableHead>
+                    <TableHead scope="col">Name</TableHead>
+                    <TableHead scope="col">Department</TableHead>
+                    <TableHead scope="col">Location</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {shown.map((p: OrgChartNode) => (
-                    <tr key={p.id}>
-                      <td>
+                    <TableRow key={p.id}>
+                      <TableCell>
                         <input type="checkbox" aria-label={`Choose ${p.name}`} checked={chosen.has(p.id)} onChange={() => toggle(p.id)} />
-                      </td>
-                      <td>{p.code}</td>
-                      <td>{p.name}</td>
-                      <td>{p.department ?? '—'}</td>
-                      <td>{p.location ?? '—'}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{p.code}</TableCell>
+                      <TableCell>{p.name}</TableCell>
+                      <TableCell>{p.department ?? '—'}</TableCell>
+                      <TableCell>{p.location ?? '—'}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             )}
             <p>
-              <button type="button" disabled={chosen.size === 0 || check.isPending} onClick={() => check.mutate('chosen')}>
+              <Button type="button" disabled={chosen.size === 0 || check.isPending} onClick={() => check.mutate('chosen')}>
                 Review {plural(chosen.size, 'person', 'people')} chosen
-              </button>
+              </Button>
             </p>
           </>
         )}
         <form
-          className="stack"
+          className="flex flex-col gap-3"
           aria-label="Upload a list"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             if (file && !check.isPending) check.mutate('file');
           }}
         >
-          <p className="hint">
+          <Hint>
             Or upload a CSV file with the header <code>employee_code</code> and one employee code per row (template HR_MAIL_RECIPIENTS_V1). The file is checked for malware and read, never kept.
-          </p>
+          </Hint>
           <TemplateDownload base={RECIPIENTS} code="HR_MAIL_RECIPIENTS_V1" />
-          <div className="inline">
-            <label>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               List of employee codes (CSV)
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={check.isPending} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || check.isPending}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={check.isPending} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || check.isPending}>
               Review the list
-            </button>
+            </Button>
           </div>
         </form>
         <Refusal error={check.error} />
@@ -302,41 +309,41 @@ export function SendMailPage() {
 
       {review && (
         <Section title="2. Review the recipients">
-          <p role="status">
+          <StatusNote tone="info" role="status">
             {plural(review.eligible, 'person', 'people')} will receive it{review.refused > 0 ? `; ${review.refused} will not, as shown` : ''}.
-          </p>
-          {review.tooMany && <p className="error">That is more than {review.maxRecipients} recipients. Send it in parts.</p>}
-          <table aria-label="Recipients">
-            <thead>
-              <tr>
-                {review.recipients.some((r) => r.row !== undefined) && <th scope="col">Row</th>}
-                <th scope="col">Code</th>
-                <th scope="col">Name</th>
-                <th scope="col">Work email</th>
-                <th scope="col">Outcome</th>
-              </tr>
-            </thead>
-            <tbody>
+          </StatusNote>
+          {review.tooMany && <StatusNote tone="error">That is more than {review.maxRecipients} recipients. Send it in parts.</StatusNote>}
+          <Table aria-label="Recipients">
+            <TableHeader>
+              <TableRow>
+                {review.recipients.some((r) => r.row !== undefined) && <TableHead scope="col">Row</TableHead>}
+                <TableHead scope="col">Code</TableHead>
+                <TableHead scope="col">Name</TableHead>
+                <TableHead scope="col">Work email</TableHead>
+                <TableHead scope="col">Outcome</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {review.recipients.map((r, i) => (
-                <tr key={`${r.row ?? ''}-${r.employeeId ?? r.employeeCode ?? i}`}>
-                  {review.recipients.some((x) => x.row !== undefined) && <td>{r.row ?? ''}</td>}
-                  <td>{r.employeeCode ?? '—'}</td>
-                  <td>{r.displayName ?? '—'}</td>
-                  <td>{r.workEmail ?? '—'}</td>
-                  <td>{OUTCOME_WORDS[r.outcome] ?? r.outcome}</td>
-                </tr>
+                <TableRow key={`${r.row ?? ''}-${r.employeeId ?? r.employeeCode ?? i}`}>
+                  {review.recipients.some((x) => x.row !== undefined) && <TableCell>{r.row ?? ''}</TableCell>}
+                  <TableCell className="whitespace-nowrap">{r.employeeCode ?? '—'}</TableCell>
+                  <TableCell>{r.displayName ?? '—'}</TableCell>
+                  <TableCell>{r.workEmail ?? '—'}</TableCell>
+                  <TableCell>{OUTCOME_WORDS[r.outcome] ?? r.outcome}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </Section>
       )}
 
       {review && (
         <Section title="3. Write and send">
-          <form className="grid-form" aria-label="Message" onSubmit={submit}>
-            <label className="wide">
+          <FormGrid aria-label="Message" onSubmit={submit}>
+            <FormField className="col-span-full">
               Subject
-              <input
+              <Input
                 value={subject}
                 maxLength={limits?.subject ?? 150}
                 onChange={(e) => {
@@ -345,10 +352,10 @@ export function SendMailPage() {
                 }}
                 required
               />
-            </label>
-            <label className="wide">
+            </FormField>
+            <FormField className="col-span-full">
               Message
-              <textarea
+              <Textarea
                 value={message}
                 maxLength={limits?.message ?? 5000}
                 rows={8}
@@ -358,15 +365,15 @@ export function SendMailPage() {
                 }}
                 required
               />
-            </label>
-            <p className="hint wide">
+            </FormField>
+            <Hint>
               Plain text only. An email leaves the system and may be forwarded, so it may not carry figures such as amounts, percentages, currency, account numbers or links.
-            </p>
-            <button type="submit" disabled={!ready}>
+            </Hint>
+            <Button type="submit" disabled={!ready}>
               {send.isPending ? 'Sending…' : `Send to ${plural(eligible.length, 'person', 'people')}`}
-            </button>
-          </form>
-          {!on && channel.data && <p className="hint">Sending is off while email is off.</p>}
+            </Button>
+          </FormGrid>
+          {!on && channel.data && <Hint>Sending is off while email is off.</Hint>}
           <Refusal error={send.error} />
         </Section>
       )}
@@ -385,34 +392,34 @@ function SentMessages() {
       <ErrorNote error={sent.error} />
       {sent.isSuccess && items.length === 0 && <Empty>No message sent yet.</Empty>}
       {items.length > 0 && (
-        <table aria-label="Messages you sent">
-          <thead>
-            <tr>
-              <th scope="col">Sent</th>
-              <th scope="col">Subject</th>
-              <th scope="col">Recipients</th>
-              <th scope="col">Delivered</th>
-              <th scope="col">Waiting</th>
-              <th scope="col">Failed</th>
-              <th scope="col">Not sent</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table aria-label="Messages you sent">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Sent</TableHead>
+              <TableHead scope="col">Subject</TableHead>
+              <TableHead scope="col">Recipients</TableHead>
+              <TableHead scope="col">Delivered</TableHead>
+              <TableHead scope="col">Waiting</TableHead>
+              <TableHead scope="col">Failed</TableHead>
+              <TableHead scope="col">Not sent</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {items.map((m) => (
-              <tr key={m.id}>
-                <td>{new Date(m.sentAt).toLocaleString()}</td>
-                <td>{m.subject ?? '—'}</td>
-                <td>{m.recipientCount}</td>
-                <td>{m.delivery.delivered}</td>
-                <td>{m.delivery.queued}</td>
-                <td>{m.delivery.failed}</td>
-                <td>{m.delivery.suppressed}</td>
-              </tr>
+              <TableRow key={m.id}>
+                <TableCell className="whitespace-nowrap">{new Date(m.sentAt).toLocaleString()}</TableCell>
+                <TableCell>{m.subject ?? '—'}</TableCell>
+                <TableCell>{m.recipientCount}</TableCell>
+                <TableCell>{m.delivery.delivered}</TableCell>
+                <TableCell>{m.delivery.queued}</TableCell>
+                <TableCell>{m.delivery.failed}</TableCell>
+                <TableCell>{m.delivery.suppressed}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
-      <p className="hint">“Not sent” counts recipients the email channel did not send to on purpose: email off, or someone no longer employed or without a work email when it was sent.</p>
+      <Hint>“Not sent” counts recipients the email channel did not send to on purpose: email off, or someone no longer employed or without a work email when it was sent.</Hint>
     </Section>
   );
 }

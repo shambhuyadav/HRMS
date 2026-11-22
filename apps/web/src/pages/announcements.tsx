@@ -2,11 +2,21 @@
 // dashboard shows each person the messages running today and the upcoming events meant for them (the server chooses); HR keeps
 // both lists here. Nothing is deleted: switching off ends an event or a message, and the server audits every change.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleAlertIcon } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
+import { CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, Section } from '../ui';
+import { Badge, Empty, ErrorNote, Notice, Section } from '../ui';
 
 const READ = 'announcement.read.operational';
 const MANAGE = 'announcement.manage.operational';
@@ -53,14 +63,39 @@ function refusal(error: unknown): string | null {
   return null;
 }
 
+/** A refusal in words, in the alert look but not announced: the line it replaces had no role. */
 function Refusal({ error }: { error: unknown }) {
   const text = refusal(error);
-  return text ? <p className="error">{text}</p> : <ErrorNote error={error} />;
+  if (!text) return <ErrorNote error={error} />;
+  return (
+    <Alert asChild variant="destructive" role={undefined}>
+      <p className="error">
+        <CircleAlertIcon aria-hidden="true" />
+        {text}
+      </p>
+    </Alert>
+  );
 }
 
 // ---------------------------------------------------------------------------------------------------------
 // The dashboard panel
 // ---------------------------------------------------------------------------------------------------------
+
+/** Today's messages: a strip edged in the brand colour on its left, its label beside the messages (the old `.ticker`). */
+const TICKER = 'mb-5 flex items-start gap-[0.9rem] rounded-md border border-l-[3px] border-border border-l-[color:var(--accent)] bg-card px-4 py-[0.7rem] shadow-[var(--shadow-sm)]';
+/** The strip's label ("Announcements"): small capitals in the brand colour. */
+const TICKER_LABEL = 'flex-none pt-[0.1rem] text-[0.72rem] font-bold tracking-[0.05em] text-[var(--accent)] uppercase';
+/** The messages, one under another. */
+const TICKER_ITEMS = 'm-0 flex list-none flex-col gap-1 p-0 text-[0.92rem] text-foreground';
+/** The upcoming events, one under another, each a date leaf beside its words. */
+const EVENTS = 'm-0 grid list-none gap-[0.6rem] p-0';
+const EVENT = 'flex items-start gap-[0.9rem]';
+/** An event's day and month in a small framed box, like a calendar leaf. */
+const EVENT_DATE = 'w-[52px] flex-none rounded-md border border-border bg-accent py-[0.3rem] text-center';
+const EVENT_DAY = 'block text-[1.15rem] leading-[1.15] text-foreground';
+const EVENT_MONTH = 'text-[0.72rem] font-semibold text-muted-foreground uppercase';
+/** An event's name, its date and audience, and its description, one under another. */
+const EVENT_BODY = 'flex min-w-0 flex-col gap-[0.1rem]';
 
 /** On the dashboard: today's messages as a banner and the upcoming events, for a session that reads them; nothing otherwise. */
 export function AnnouncementsPanel() {
@@ -72,9 +107,9 @@ export function AnnouncementsPanel() {
   return (
     <>
       {messages.length > 0 && (
-        <div className="ticker" role="region" aria-label="Announcements">
-          <span className="ticker-label">Announcements</span>
-          <ul className="ticker-items">
+        <div className={TICKER} role="region" aria-label="Announcements">
+          <span className={TICKER_LABEL}>Announcements</span>
+          <ul className={TICKER_ITEMS}>
             {messages.map((m) => (
               <li key={m.id}>{m.message}</li>
             ))}
@@ -83,22 +118,22 @@ export function AnnouncementsPanel() {
       )}
       {events.length > 0 && (
         <Section title="Upcoming events">
-          <ul className="events" aria-label="Upcoming events">
+          <ul className={EVENTS} aria-label="Upcoming events">
             {events.map((e) => {
               const [, month, day] = e.eventDate.split('-');
               return (
-                <li key={e.id} className="event">
-                  <span className="event-date" aria-hidden="true">
-                    <strong>{Number(day)}</strong>
-                    <span>{MONTHS[Number(month) - 1]}</span>
+                <li key={e.id} className={EVENT}>
+                  <span className={EVENT_DATE} aria-hidden="true">
+                    <strong className={EVENT_DAY}>{Number(day)}</strong>
+                    <span className={EVENT_MONTH}>{MONTHS[Number(month) - 1]}</span>
                   </span>
-                  <span className="event-body">
-                    <span className="event-name">{e.name}</span>
-                    <span className="event-meta">
+                  <span className={EVENT_BODY}>
+                    <span className="font-semibold text-foreground">{e.name}</span>
+                    <span className="text-[0.8rem] text-muted-foreground">
                       {formatDate(e.eventDate)}
                       {e.for ? ` · ${e.for}` : ''}
                     </span>
-                    {e.description && <span className="event-text">{e.description}</span>}
+                    {e.description && <span className="text-[0.86rem] text-foreground">{e.description}</span>}
                   </span>
                 </li>
               );
@@ -163,57 +198,57 @@ function EventForm({ initial, label, pending, onSubmit }: { initial: EventValues
     onSubmit(v);
   };
   return (
-    <form className="grid-form" onSubmit={submit} aria-label={label}>
-      <label>
+    <FormGrid onSubmit={submit} aria-label={label}>
+      <FormField>
         Event name
-        <input value={v.name} onChange={set('name')} maxLength={120} required />
-      </label>
-      <label>
+        <Input value={v.name} onChange={set('name')} maxLength={120} required />
+      </FormField>
+      <FormField>
         Event date
-        <input type="date" value={v.eventDate} onChange={set('eventDate')} required />
-      </label>
-      <label>
+        <Input type="date" value={v.eventDate} onChange={set('eventDate')} required />
+      </FormField>
+      <FormField>
         For
-        <select value={v.audience} onChange={set('audience')}>
+        <NativeSelect value={v.audience} onChange={set('audience')}>
           <option value="ALL">Everyone</option>
           <option value="DEPARTMENT">One department</option>
           <option value="LOCATION">One location</option>
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {v.audience === 'DEPARTMENT' && (
-        <label>
+        <FormField>
           Department
-          <select value={v.departmentId} onChange={set('departmentId')} required>
+          <NativeSelect value={v.departmentId} onChange={set('departmentId')} required>
             <option value="">Choose…</option>
             {(departments.data?.items ?? []).map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name} ({d.code})
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       )}
       {v.audience === 'LOCATION' && (
-        <label>
+        <FormField>
           Location
-          <select value={v.locationId} onChange={set('locationId')} required>
+          <NativeSelect value={v.locationId} onChange={set('locationId')} required>
             <option value="">Choose…</option>
             {(locations.data?.items ?? []).map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name} ({l.code})
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       )}
-      <label className="wide">
+      <FormField className="col-span-full">
         Description
-        <textarea rows={3} value={v.description} onChange={set('description')} maxLength={1000} />
-      </label>
-      <button type="submit" disabled={pending || !complete}>
+        <Textarea rows={3} value={v.description} onChange={set('description')} maxLength={1000} />
+      </FormField>
+      <Button type="submit" disabled={pending || !complete}>
         {pending ? 'Saving…' : 'Save'}
-      </button>
-    </form>
+      </Button>
+    </FormGrid>
   );
 }
 
@@ -223,7 +258,8 @@ function EventRow({ event, onDone }: { event: CompanyEvent; onDone: (message: st
     mutationFn: (body: Record<string, unknown>) => api<CompanyEvent>(`/v1/company-events/${event.id}`, { method: 'PATCH', body: { expectedVersion: event.version, ...body } }),
     onSuccess: (e, body) => {
       setEditing(false);
-      onDone('active' in body ? `${e.name} switched ${e.active ? 'on' : 'off'}.` : `${e.name} saved.`);
+      const switched = e.active ? 'on' : 'off';
+      onDone('active' in body ? `${e.name} switched ${switched}.` : `${e.name} saved.`);
     },
     onError: (error) => {
       if (error instanceof ApiError && error.code === 'STALE_VERSION') onDone('');
@@ -232,28 +268,37 @@ function EventRow({ event, onDone }: { event: CompanyEvent; onDone: (message: st
   const target = event.audience === 'ALL' ? 'Everyone' : (event.departmentName ?? event.locationName ?? '—');
   return (
     <>
-      <tr>
-        <td>{formatDate(event.eventDate)}</td>
-        <td>{event.name}</td>
-        <td>{target}</td>
-        <td>{event.description ?? '—'}</td>
-        <td>{event.active ? <Badge tone="good">Active</Badge> : <Badge>Off</Badge>}</td>
-        <td>
-          <button type="button" className="link" onClick={() => setEditing((x) => !x)} aria-label={`Edit ${event.name}`} aria-expanded={editing}>
-            Edit
-          </button>{' '}
-          <button type="button" className={event.active ? 'link danger' : 'link'} disabled={change.isPending} onClick={() => change.mutate({ active: !event.active })} aria-label={`${event.active ? 'Switch off' : 'Switch on'} ${event.name}`}>
-            {event.active ? 'Switch off' : 'Switch on'}
-          </button>
-        </td>
-      </tr>
+      <TableRow>
+        <TableCell>{formatDate(event.eventDate)}</TableCell>
+        <TableCell>{event.name}</TableCell>
+        <TableCell>{target}</TableCell>
+        <TableCell>{event.description ?? '—'}</TableCell>
+        <TableCell>{event.active ? <Badge tone="good">Active</Badge> : <Badge>Off</Badge>}</TableCell>
+        <RowActionsCell>
+          <RowActions>
+            <Button type="button" variant="outline" size="sm" onClick={() => setEditing((x) => !x)} aria-label={`Edit ${event.name}`} aria-expanded={editing}>
+              Edit
+            </Button>{' '}
+            <Button
+              type="button"
+              variant={event.active ? 'danger' : 'outline'}
+              size="sm"
+              disabled={change.isPending}
+              onClick={() => change.mutate({ active: !event.active })}
+              aria-label={`${event.active ? 'Switch off' : 'Switch on'} ${event.name}`}
+            >
+              {event.active ? 'Switch off' : 'Switch on'}
+            </Button>
+          </RowActions>
+        </RowActionsCell>
+      </TableRow>
       {(editing || change.error) && (
-        <tr>
-          <td colSpan={6}>
+        <TableRow>
+          <TableCell colSpan={6}>
             {editing && <EventForm initial={valuesOf(event)} label={`Edit ${event.name}`} pending={change.isPending} onSubmit={(v) => change.mutate(bodyOf(v))} />}
             {change.error && <Refusal error={change.error} />}
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       )}
     </>
   );
@@ -282,35 +327,37 @@ export function EventsPage() {
   return (
     <>
       <Section title="Events">
-        <label className="inline">
+        <CheckField className="mb-3">
           <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} /> Show switched-off events
-        </label>
-        {notice && <p role="status">{notice}</p>}
+        </CheckField>
+        {notice && <Notice notice={{ text: notice, ok: true }} />}
         <ErrorNote error={list.error} />
         {list.isSuccess && items.length === 0 && <Empty>No events yet.</Empty>}
         {items.length > 0 && (
-          <table aria-label="Events">
-            <thead>
-              <tr>
-                <th scope="col">Date</th>
-                <th scope="col">Event</th>
-                <th scope="col">For</th>
-                <th scope="col">Description</th>
-                <th scope="col">State</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Events">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Date</TableHead>
+                <TableHead scope="col">Event</TableHead>
+                <TableHead scope="col">For</TableHead>
+                <TableHead scope="col">Description</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {items.map((e) => (
                 <EventRow key={`${e.id}-${e.version}`} event={e} onDone={refresh} />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-        <p className="hint">
+        <Hint>
           Events show on the dashboard of the people they are for from today until the day itself, up to 60 days ahead. An event is never
           deleted: switch it off and it stops showing.
-        </p>
+        </Hint>
       </Section>
       {can(MANAGE) && (
         <Section title="New event">
@@ -336,30 +383,29 @@ function TickerForm({ initial, label, pending, onSubmit }: { initial: TickerValu
   const [v, setV] = useState(initial);
   const set = (k: keyof TickerValues) => (e: { target: { value: string } }) => setV((p) => ({ ...p, [k]: e.target.value }));
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label={label}
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit({ ...v, message: v.message.trim() });
       }}
     >
-      <label className="wide">
+      <FormField className="col-span-full">
         Message
-        <textarea rows={2} value={v.message} onChange={set('message')} maxLength={280} required />
-      </label>
-      <label>
+        <Textarea rows={2} value={v.message} onChange={set('message')} maxLength={280} required />
+      </FormField>
+      <FormField>
         First day
-        <input type="date" value={v.startsOn} onChange={set('startsOn')} required />
-      </label>
-      <label>
+        <Input type="date" value={v.startsOn} onChange={set('startsOn')} required />
+      </FormField>
+      <FormField>
         Last day
-        <input type="date" value={v.endsOn} onChange={set('endsOn')} required />
-      </label>
-      <button type="submit" disabled={pending || v.message.trim() === '' || v.startsOn === '' || v.endsOn === ''}>
+        <Input type="date" value={v.endsOn} onChange={set('endsOn')} required />
+      </FormField>
+      <Button type="submit" disabled={pending || v.message.trim() === '' || v.startsOn === '' || v.endsOn === ''}>
         {pending ? 'Saving…' : 'Save'}
-      </button>
-    </form>
+      </Button>
+    </FormGrid>
   );
 }
 
@@ -369,7 +415,8 @@ function TickerRow({ item, onDone }: { item: TickerMessage; onDone: (message: st
     mutationFn: (body: Record<string, unknown>) => api<TickerMessage>(`/v1/ticker-messages/${item.id}`, { method: 'PATCH', body: { expectedVersion: item.version, ...body } }),
     onSuccess: (t, body) => {
       setEditing(false);
-      onDone('active' in body ? `Message switched ${t.active ? 'on' : 'off'}.` : 'Message saved.');
+      const switched = t.active ? 'on' : 'off';
+      onDone('active' in body ? `Message switched ${switched}.` : 'Message saved.');
     },
     onError: (error) => {
       if (error instanceof ApiError && error.code === 'STALE_VERSION') onDone('');
@@ -377,27 +424,36 @@ function TickerRow({ item, onDone }: { item: TickerMessage; onDone: (message: st
   });
   return (
     <>
-      <tr>
-        <td>{item.message}</td>
-        <td>{formatDate(item.startsOn)}</td>
-        <td>{formatDate(item.endsOn)}</td>
-        <td>{item.active ? <Badge tone="good">Active</Badge> : <Badge>Off</Badge>}</td>
-        <td>
-          <button type="button" className="link" onClick={() => setEditing((x) => !x)} aria-label={`Edit message: ${item.message}`} aria-expanded={editing}>
-            Edit
-          </button>{' '}
-          <button type="button" className={item.active ? 'link danger' : 'link'} disabled={change.isPending} onClick={() => change.mutate({ active: !item.active })} aria-label={`${item.active ? 'Switch off' : 'Switch on'} message: ${item.message}`}>
-            {item.active ? 'Switch off' : 'Switch on'}
-          </button>
-        </td>
-      </tr>
+      <TableRow>
+        <TableCell>{item.message}</TableCell>
+        <TableCell>{formatDate(item.startsOn)}</TableCell>
+        <TableCell>{formatDate(item.endsOn)}</TableCell>
+        <TableCell>{item.active ? <Badge tone="good">Active</Badge> : <Badge>Off</Badge>}</TableCell>
+        <RowActionsCell>
+          <RowActions>
+            <Button type="button" variant="outline" size="sm" onClick={() => setEditing((x) => !x)} aria-label={`Edit message: ${item.message}`} aria-expanded={editing}>
+              Edit
+            </Button>{' '}
+            <Button
+              type="button"
+              variant={item.active ? 'danger' : 'outline'}
+              size="sm"
+              disabled={change.isPending}
+              onClick={() => change.mutate({ active: !item.active })}
+              aria-label={`${item.active ? 'Switch off' : 'Switch on'} message: ${item.message}`}
+            >
+              {item.active ? 'Switch off' : 'Switch on'}
+            </Button>
+          </RowActions>
+        </RowActionsCell>
+      </TableRow>
       {(editing || change.error) && (
-        <tr>
-          <td colSpan={5}>
+        <TableRow>
+          <TableCell colSpan={5}>
             {editing && <TickerForm initial={{ message: item.message, startsOn: item.startsOn, endsOn: item.endsOn }} label="Edit message" pending={change.isPending} onSubmit={(v) => change.mutate({ ...v })} />}
             {change.error && <Refusal error={change.error} />}
-          </td>
-        </tr>
+          </TableCell>
+        </TableRow>
       )}
     </>
   );
@@ -426,31 +482,33 @@ export function TickerPage() {
   return (
     <>
       <Section title="Ticker messages">
-        <label className="inline">
+        <CheckField className="mb-3">
           <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} /> Show switched-off messages
-        </label>
-        {notice && <p role="status">{notice}</p>}
+        </CheckField>
+        {notice && <Notice notice={{ text: notice, ok: true }} />}
         <ErrorNote error={list.error} />
         {list.isSuccess && items.length === 0 && <Empty>No messages yet.</Empty>}
         {items.length > 0 && (
-          <table aria-label="Ticker messages">
-            <thead>
-              <tr>
-                <th scope="col">Message</th>
-                <th scope="col">First day</th>
-                <th scope="col">Last day</th>
-                <th scope="col">State</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Ticker messages">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Message</TableHead>
+                <TableHead scope="col">First day</TableHead>
+                <TableHead scope="col">Last day</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {items.map((t) => (
                 <TickerRow key={`${t.id}-${t.version}`} item={t} onDone={refresh} />
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-        <p className="hint">A message shows on everyone’s dashboard from its first day to its last day. It is never deleted: switch it off and it stops showing.</p>
+        <Hint>A message shows on everyone’s dashboard from its first day to its last day. It is never deleted: switch it off and it stops showing.</Hint>
       </Section>
       {can(MANAGE) && (
         <Section title="New message">

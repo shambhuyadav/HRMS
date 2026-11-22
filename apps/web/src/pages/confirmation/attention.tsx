@@ -1,10 +1,20 @@
 // The attention list (FR-082 / DF11, I-36), and opening a case for an employee on probation (FR-080).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { CheckField, FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, type EmployeeHit, formatDate, isForbidden, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, NotPermitted, Section, StateBadge } from '../../ui';
-import { type AttentionList, employeeSearch, ISSUE_TEXT, ISSUES, LIST_EMPLOYEES, READ, SCROLL, SR_ONLY, useKeys } from './shared';
+import { Empty, ErrorNote, NotPermitted, Notice, Section, StateBadge } from '../../ui';
+import { type AttentionList, employeeSearch, ISSUE_TEXT, LIST_EMPLOYEES, READ, useKeys } from './shared';
+
+/** Said in place of the button once the employee's case is opened, in the success colour (the old `.ok` words). */
+const OPENED_WORDS = 'text-[var(--good)]';
 
 // ---------------------------------------------------------------------------------------------------------
 // FR-080: open a case for an employee on probation (the server sets the planned due date from the policy).
@@ -21,73 +31,68 @@ export function AttentionPanel({ onOpenCase }: { onOpenCase: ((caseId: string) =
   const items = list.data?.items ?? [];
   return (
     <Section title="Needs HR attention">
-      <p className="hint">
+      <Hint>
         Employees on probation in the selected role’s scope whose confirmation cannot move: no case because no policy or more than one applies, or none was opened yet; or an
         open case without a direct manager or an eligible HR reviewer. Nothing is opened, assigned or changed here.
-      </p>
-      {list.isPending && <p className="hint">Checking…</p>}
+      </Hint>
+      {list.isPending && <LoadingLine>Checking…</LoadingLine>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot see the attention list.</NotPermitted> : <ErrorNote error={list.error} />}
       {list.data && items.length === 0 && <Empty>No employee on probation in the selected role’s scope needs attention.</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Needs HR attention">
-            <thead>
-              <tr>
-                <th scope="col">Employee</th>
-                <th scope="col">Joined</th>
-                <th scope="col">Case</th>
-                <th scope="col">What needs attention</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.employeeId}>
-                  <td>
-                    {item.employeeName} <span className="hint">{item.employeeCode}</span>
-                  </td>
-                  <td>{formatDate(item.joiningDate)}</td>
-                  <td>
-                    {item.caseId ? (
-                      <>
-                        <StateBadge state={item.state} />
-                        {onOpenCase && (
-                          <>
-                            {' '}
-                            <button
-                              type="button"
-                              className="link"
-                              aria-label={`View case of ${item.employeeName} (${item.employeeCode}) from the attention list`}
-                              onClick={() => onOpenCase(item.caseId!)}
-                            >
-                              View case
-                            </button>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      'No case'
-                    )}
-                  </td>
-                  <td>
-                    <ul style={ISSUES}>
-                      {item.issues.map((issue) => (
-                        <li key={issue}>
-                          {ISSUE_TEXT[issue] ?? readable(issue)} <span className="hint">{issue}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Needs HR attention">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Joined</TableHead>
+              <TableHead scope="col">Case</TableHead>
+              <TableHead scope="col">What needs attention</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((item) => (
+              <TableRow key={item.employeeId}>
+                <TableCell>
+                  {item.employeeName} <Hint as="span">{item.employeeCode}</Hint>
+                </TableCell>
+                <TableCell>{formatDate(item.joiningDate)}</TableCell>
+                <TableCell>
+                  {item.caseId ? (
+                    <>
+                      <StateBadge state={item.state} />
+                      {onOpenCase && (
+                        <>
+                          {' '}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-label={`View case of ${item.employeeName} (${item.employeeCode}) from the attention list`}
+                            onClick={() => onOpenCase(item.caseId!)}
+                          >
+                            View case
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    'No case'
+                  )}
+                </TableCell>
+                <TableCell>
+                  <ul className="m-0 pl-[1.1rem]">
+                    {item.issues.map((issue) => (
+                      <li key={issue}>
+                        {ISSUE_TEXT[issue] ?? readable(issue)} <Hint as="span">{issue}</Hint>
+                      </li>
+                    ))}
+                  </ul>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      {list.data?.truncated && (
-        <p className="hint" role="note">
-          The check stopped before every employee on probation was examined, so more may need attention than are listed here.
-        </p>
-      )}
+      {list.data?.truncated && <Hint role="note">The check stopped before every employee on probation was examined, so more may need attention than are listed here.</Hint>}
     </Section>
   );
 }
@@ -129,60 +134,61 @@ export function OpenCasePanel({ onOpened }: { onOpened: (caseId: string) => void
 
   return (
     <Section title="Open a confirmation case">
-      <p className="hint">The planned due date comes from the confirmation policy that applies on the employee’s start date.</p>
+      <Hint>The planned due date comes from the confirmation policy that applies on the employee’s start date.</Hint>
       {canSearch ? (
         <>
-          <div className="row">
-            <label className="inline">
+          <FilterBar>
+            <FormField>
               Find employee{' '}
-              <input type="search" value={search} maxLength={100} placeholder="Name, code or work email" onChange={(e) => setSearch(e.target.value)} />
-            </label>
-            <label className="inline check">
+              <Input type="search" value={search} maxLength={100} placeholder="Name, code or work email" onChange={(e) => setSearch(e.target.value)} />
+            </FormField>
+            <CheckField>
               <input type="checkbox" checked={probationOnly} onChange={(e) => setProbationOnly(e.target.checked)} /> Only employees on probation
-            </label>
-          </div>
-          {term === '' && <p className="hint">Type a name, employee code or work email to find the employee.</p>}
-          {term !== '' && hits.isPending && <p className="hint">Searching…</p>}
+            </CheckField>
+          </FilterBar>
+          {term === '' && <Hint>Type a name, employee code or work email to find the employee.</Hint>}
+          {term !== '' && hits.isPending && <Hint>Searching…</Hint>}
           {isForbidden(hits.error) ? <NotPermitted>The selected role cannot search employees.</NotPermitted> : <ErrorNote error={hits.error} />}
           {hits.data && hits.data.items.length === 0 && <Empty>{probationOnly ? `No employees on probation match “${term}”.` : `No employees match “${term}”.`}</Empty>}
           {hits.data && hits.data.items.length > 0 && (
-            <div style={SCROLL}>
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">Code</th>
-                    <th scope="col">Name</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">
-                      <span style={SR_ONLY}>Action</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
+            // The table and its count read as one: the count is a line under the rows, not a note of the card.
+            <div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Code</TableHead>
+                    <TableHead scope="col">Name</TableHead>
+                    <TableHead scope="col">Status</TableHead>
+                    <TableHead scope="col">
+                      <span className="sr-only">Action</span>
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {hits.data.items.map((e) => (
-                    <tr key={e.id}>
-                      <td>{e.employeeCode}</td>
-                      <td>{e.displayName}</td>
-                      <td>
+                    <TableRow key={e.id}>
+                      <TableCell>{e.employeeCode}</TableCell>
+                      <TableCell>{e.displayName}</TableCell>
+                      <TableCell>
                         <StateBadge state={e.status} />
-                      </td>
-                      <td>
+                      </TableCell>
+                      <RowActionsCell>
                         {openedIds.has(e.id) ? (
-                          <span className="ok">Case opened</span>
+                          <span className={OPENED_WORDS}>Case opened</span>
                         ) : (
-                          <button type="button" disabled={open.isPending} aria-label={`Open case for ${e.displayName} (${e.employeeCode})`} onClick={() => open.mutate(e)}>
+                          <Button type="button" size="sm" disabled={open.isPending} aria-label={`Open case for ${e.displayName} (${e.employeeCode})`} onClick={() => open.mutate(e)}>
                             Open case
-                          </button>
+                          </Button>
                         )}
-                      </td>
-                    </tr>
+                      </RowActionsCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
               {hits.data.total > hits.data.items.length && (
-                <p className="hint">
+                <Hint>
                   Showing the first {hits.data.items.length} of {hits.data.total}; refine the search to narrow it down.
-                </p>
+                </Hint>
               )}
             </div>
           )}
@@ -190,13 +196,9 @@ export function OpenCasePanel({ onOpened }: { onOpened: (caseId: string) => void
       ) : (
         <NotPermitted>The selected role cannot search employees, so it cannot open a case from here.</NotPermitted>
       )}
-      {opened && (
-        <p className="ok" role="status">
-          Case opened for {opened.label}; planned due date {formatDate(opened.dueDate)}.
-        </p>
-      )}
+      {opened && <Notice notice={{ text: `Case opened for ${opened.label}; planned due date ${formatDate(opened.dueDate)}.`, ok: true }} />}
       <ErrorNote error={open.error} />
-      {duplicate && <p className="hint">This employee already has an open or pending confirmation case{can(READ) ? '; find it in the list above' : ''}.</p>}
+      {duplicate && <Hint>This employee already has an open or pending confirmation case{can(READ) ? '; find it in the list above' : ''}.</Hint>}
     </Section>
   );
 }

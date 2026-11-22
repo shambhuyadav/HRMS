@@ -5,6 +5,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -14,6 +20,11 @@ const READ_HISTORY = 'employee.read_history.operational';
 const EMPLOYEE_LIST = 'employee.list.operational';
 const EXIT_READ = 'exit.read.operational';
 const CONFIRMATION_READ = 'confirmation.read.operational';
+
+/** The matching employees, one full-width choice under another (the old `.choices` list). */
+const CHOICE_LIST = 'm-0 mt-3 flex list-none flex-col gap-[0.6rem] p-0';
+/** One matching employee as a full-width choice, its words wrapping, tinted red on hover (the old `.choices` button; as in the pilot). */
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
 
 export interface TimelineEvent {
   category: string;
@@ -149,22 +160,21 @@ function AsOfPanel({ employeeId }: { employeeId: string }) {
   const a = view.data?.asOf;
   return (
     <Section title="On a chosen date">
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="On a chosen date"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           setAsked(day);
         }}
       >
-        <label>
+        <FormField>
           Date
-          <input required type="date" value={day} onChange={(e) => setDay(e.target.value)} />
-        </label>
-        <button type="submit" className="secondary">
+          <Input required type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+        </FormField>
+        <Button type="submit" variant="outline">
           Show
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
       <ErrorNote error={view.error} />
       {a && (
         <dl aria-label={`As of ${a.date}`}>
@@ -197,54 +207,57 @@ function HistoryOf({ employeeId }: { employeeId: string }) {
   return (
     <>
       <Section title={`${t.employeeName} (${t.employeeCode})`}>
-        {!t.salaryShown && <p className="hint">Salary and increment events are not shown: the selected role has no salary history grant.</p>}
-        <label>
-          Category
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            <option value="">All</option>
-            {present.map((c) => (
-              <option key={c} value={c}>
-                {CATEGORIES[c] ?? readable(c)}
-              </option>
-            ))}
-          </select>
-        </label>
+        {!t.salaryShown && <Hint>Salary and increment events are not shown: the selected role has no salary history grant.</Hint>}
+        <FilterBar>
+          <FormField>
+            Category
+            <NativeSelect value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="">All</option>
+              {present.map((c) => (
+                <option key={c} value={c}>
+                  {CATEGORIES[c] ?? readable(c)}
+                </option>
+              ))}
+            </NativeSelect>
+          </FormField>
+        </FilterBar>
         {shown.length === 0 && <Empty>No events to show.</Empty>}
         {shown.length > 0 && (
-          <table aria-label="Employee history">
-            <thead>
-              <tr>
-                <th scope="col">Effective</th>
-                <th scope="col">Category</th>
-                <th scope="col">Event</th>
-                <th scope="col">Details</th>
-                <th scope="col">By</th>
-                <th scope="col">Reason</th>
-                <th scope="col">Source</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Employee history">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Effective</TableHead>
+                <TableHead scope="col">Category</TableHead>
+                <TableHead scope="col">Event</TableHead>
+                <TableHead scope="col">Details</TableHead>
+                <TableHead scope="col">By</TableHead>
+                <TableHead scope="col">Reason</TableHead>
+                <TableHead scope="col">Source</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {shown.map((e, i) => (
                 // biome-ignore lint/suspicious/noArrayIndexKey: the server's order is the history's order, and events have no id of their own
-                <tr key={`${e.type}-${e.effectiveDate}-${i}`}>
-                  <td>{formatDate(e.effectiveDate)}</td>
-                  <td>
+                <TableRow key={`${e.type}-${e.effectiveDate}-${i}`}>
+                  {/* A date stays on one line ("1 Nov 2026", not "1 Nov" over "2026"). */}
+                  <TableCell className="whitespace-nowrap">{formatDate(e.effectiveDate)}</TableCell>
+                  <TableCell>
                     <Badge>{CATEGORIES[e.category] ?? readable(e.category)}</Badge>
-                  </td>
-                  <td>{EVENTS[e.type] ?? readable(e.type)}</td>
-                  <td>{detailText(e)}</td>
-                  <td>
+                  </TableCell>
+                  <TableCell>{EVENTS[e.type] ?? readable(e.type)}</TableCell>
+                  <TableCell>{detailText(e)}</TableCell>
+                  <TableCell>
                     {e.actor ?? 'System'}
-                    {e.onBehalfOf && <span className="hint">{` on behalf of ${e.onBehalfOf}`}</span>}
-                  </td>
-                  <td>{e.reason ?? '—'}</td>
-                  <td>
+                    {e.onBehalfOf && <Hint as="span">{` on behalf of ${e.onBehalfOf}`}</Hint>}
+                  </TableCell>
+                  <TableCell>{e.reason ?? '—'}</TableCell>
+                  <TableCell>
                     <SourceLink event={e} />
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </Section>
       <AsOfPanel employeeId={employeeId} />
@@ -272,21 +285,23 @@ function EmployeeFinder() {
     queryFn: () => api<{ items: EmployeeHit[]; total: number }>(`/v1/employees?${new URLSearchParams({ search: term, page: '1', pageSize: '25' }).toString()}`),
     enabled: can(EMPLOYEE_LIST) && term !== '',
   });
-  if (!can(EMPLOYEE_LIST)) return <p className="hint">The selected role cannot search employees; open a history from a link instead.</p>;
+  if (!can(EMPLOYEE_LIST)) return <Hint>The selected role cannot search employees; open a history from a link instead.</Hint>;
   return (
     <>
-      <label>
+      <FormField>
         Find the employee
-        <input type="search" maxLength={100} placeholder="Name, employee code or work email" value={search} onChange={(e) => setSearch(e.target.value)} />
-      </label>
+        <Input type="search" maxLength={100} placeholder="Name, employee code or work email" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </FormField>
       <ErrorNote error={hits.error} />
       {term !== '' && hits.data?.items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
       {term !== '' && hits.data && hits.data.items.length > 0 && (
-        <ul className="choices" aria-label="Matching employees">
+        <ul className={CHOICE_LIST} aria-label="Matching employees">
           {hits.data.items.map((e) => (
             <li key={e.id}>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                className={CHOICE_BUTTON}
                 onClick={() => {
                   setSearch('');
                   setTerm('');
@@ -294,7 +309,7 @@ function EmployeeFinder() {
                 }}
               >
                 {`${e.displayName} (${e.employeeCode})`}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

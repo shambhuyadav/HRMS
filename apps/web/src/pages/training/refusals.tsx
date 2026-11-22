@@ -1,7 +1,8 @@
 // Refusals of the training routes in plain words, the problem line and the pager.
 
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
 import { ApiError, isForbidden, isNotFound, readable } from '../../api';
-import { Empty, ErrorNote, NotPermitted } from '../../ui';
+import { Empty, ErrorNote, Notice, NotPermitted } from '../../ui';
 import { STATE_LABEL } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -25,11 +26,11 @@ function refusalText(error: unknown, action: Act, nameOf?: (employeeId: string) 
   const stateWord = details.state ? (STATE_LABEL[details.state] ?? readable(details.state)).toLowerCase() : null;
   switch (error.code) {
     case 'FORBIDDEN':
-      return action === 'create' || action === 'update' || action === 'cancel'
-        ? 'The selected role is not permitted to do this. Training plans are maintained only in an unrestricted company-scope assignment, and a cost needs the cost permission as well.'
-        : action === 'feedback'
-          ? 'The selected role is not permitted to do this. A comment needs the comment permission; you can send the scores without one.'
-          : 'The selected role is not permitted to do this.';
+      if (action === 'create' || action === 'update' || action === 'cancel') {
+        return 'The selected role is not permitted to do this. Training plans are maintained only in an unrestricted company-scope assignment, and a cost needs the cost permission as well.';
+      }
+      if (action === 'feedback') return 'The selected role is not permitted to do this. A comment needs the comment permission; you can send the scores without one.';
+      return 'The selected role is not permitted to do this.';
     case 'NOT_FOUND':
       if (action === 'enrol') return 'This training is no longer open for self-nomination.';
       if (action === 'nominate' || action === 'transition') return 'A chosen employee or participation is not available in the selected role’s scope.';
@@ -129,13 +130,8 @@ function refusalText(error: unknown, action: Act, nameOf?: (employeeId: string) 
 export function Refusal({ error, action, nameOf }: { error: unknown; action: Act; nameOf?: (employeeId: string) => string | undefined }) {
   if (!error) return null;
   const text = refusalText(error, action, nameOf);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  if (text === null) return <ErrorNote error={error} />;
+  return <Notice notice={{ text, ok: false }} />;
 }
 
 export function QueryProblem({ error, forbidden, action = 'read' }: { error: unknown; forbidden: string; action?: Act }) {
@@ -148,27 +144,24 @@ export function QueryProblem({ error, forbidden, action = 'read' }: { error: unk
 /** A local check before anything is sent (the server applies the same rule). */
 export function Problem({ text }: { text: string | null }) {
   if (!text) return null;
-  return (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return <Notice notice={{ text, ok: false }} />;
 }
 
+/** The pager's line: outline buttons at the end of the list, the page count between them (as the shared Pager of ui.tsx draws it). */
 export function Pager({ page, pageSize, total, onPage, label }: { page: number; pageSize: number; total: number; onPage: (page: number) => void; label: string }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   if (pages <= 1) return null;
   return (
-    <div className="pager" role="navigation" aria-label={label}>
-      <button type="button" className="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+    <PagerRow className="pager" role="navigation" aria-label={label}>
+      <PagerButton disabled={page <= 1} onClick={() => onPage(page - 1)}>
         Previous page
-      </button>
-      <span>
+      </PagerButton>
+      <PagerCount>
         Page {page} of {pages}
-      </span>
-      <button type="button" className="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>
+      </PagerCount>
+      <PagerButton disabled={page >= pages} onClick={() => onPage(page + 1)}>
         Next page
-      </button>
-    </div>
+      </PagerButton>
+    </PagerRow>
   );
 }

@@ -2,19 +2,33 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { api, ApiError, formatDate, localDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Notice, NotPermitted, Section, StateBadge } from '../../ui';
 import { OwnLaterAdjustments } from '../payroll-adjustments';
 import { missedText } from './missed';
 import { ReadProblem, Refusal } from './refusals';
-import { dayLabel, DECISION_LABEL, FLUSH, H3, hm, mondayOf, Problem, QUARTERS, SCROLL, shown, SPACED, TS_READ, TS_SUBMIT, useKeys, weekDays, weekText } from './shared';
+import { dayLabel, DECISION_LABEL, FIELD_ROW, FORM_END, hm, mondayOf, Problem, QUARTERS, Remark, shown, TS_READ, TS_SUBMIT, useKeys, weekDays, weekText } from './shared';
 import { LinesTable, ReopenRequestForm, RevisionTable, SheetFacts, SheetHistory, SheetTable, useSheet } from './sheet';
 import type { Line, MissedWeek, OwnAllocation, OwnRequest, SheetDetail, SheetSummary } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
 // My ESS TN13 (Employee OWN context): own weeks, lines, submission, decisions, allocations and reminders
 // ---------------------------------------------------------------------------------------------------------
+
+/** A step of the week below its lines (submit, or start a new revision): its words, button and refusal stacked. */
+const WEEK_STEP = 'mt-3 flex flex-col gap-3';
+
 export function MyTimesheetsPanel() {
   const { can } = useSession();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -61,25 +75,25 @@ function MyWeeks({ openId, onOpen }: { openId: string | null; onOpen: (id: strin
   const data = shown(list);
   return (
     <Section title="My timesheets">
-      <p className="hint">One timesheet per Monday to Sunday week, due by the following Monday. A later submission is still accepted and flagged late.</p>
+      <Hint>One timesheet per Monday to Sunday week, due by the following Monday. A later submission is still accepted and flagged late.</Hint>
       {can(TS_SUBMIT) && (
-        <form className="row" aria-label="Start a timesheet" onSubmit={submit} noValidate>
-          <label>
+        <form className={cn(FIELD_ROW, 'mb-4')} aria-label="Start a timesheet" onSubmit={submit} noValidate>
+          <FormField className="w-auto">
             Week starting (Monday)
-            <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
-          </label>
-          <button type="submit" disabled={create.isPending || !periodStart}>
+            <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+          </FormField>
+          <Button type="submit" disabled={create.isPending || !periodStart}>
             Start timesheet
-          </button>
+          </Button>
         </form>
       )}
       <Refusal error={create.error} act="week" />
       <Notice notice={notice} />
       <ReadProblem error={list.error} what="your timesheets" />
-      {list.isPending && can(TS_READ) && <p className="hint loading">Loading your timesheets…</p>}
+      {list.isPending && can(TS_READ) && <LoadingLine>Loading your timesheets…</LoadingLine>}
       {data && data.items.length === 0 && <Empty>You have no timesheets yet.</Empty>}
       {data && data.items.length > 0 && <SheetTable items={data.items} onOpen={onOpen} />}
-      {openId && data && !data.items.some((s) => s.id === openId) && <p className="hint">The week opened below is not in the list above yet.</p>}
+      {openId && data && !data.items.some((s) => s.id === openId) && <Hint>The week opened below is not in the list above yet.</Hint>}
     </Section>
   );
 }
@@ -134,32 +148,32 @@ function MyWeek({ id, onClose }: { id: string; onClose: () => void }) {
     <Section
       title={s ? `My week ${weekText(s)}` : 'My week'}
       actions={
-        <button type="button" className="secondary" onClick={onClose}>
+        <Button type="button" variant="outline" onClick={onClose}>
           Close the week
-        </button>
+        </Button>
       }
     >
-      {detail.isPending && <p className="hint loading">Loading the week…</p>}
+      {detail.isPending && <LoadingLine>Loading the week…</LoadingLine>}
       <ReadProblem error={detail.error} what="this timesheet" />
       <Notice notice={notice} />
       {s && (
         <>
           <SheetFacts s={s} />
-          <h3 style={H3}>Lines of revision {s.shownRevision}</h3>
-          {!current && <p className="hint">An earlier revision is shown; it cannot be changed.</p>}
+          <CardSubheading>Lines of revision {s.shownRevision}</CardSubheading>
+          {!current && <Hint>An earlier revision is shown; it cannot be changed.</Hint>}
           <LinesTable
             s={s}
             actions={
               editable
                 ? (l) => (
-                    <div className="row">
-                      <button type="button" className="secondary" disabled={busy} onClick={() => setEditing(l)}>
+                    <RowActions>
+                      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setEditing(l)}>
                         Change line {formatDate(l.workDate)} {l.jobCode}/{l.activityCode}
-                      </button>
-                      <button type="button" className="danger" disabled={busy} onClick={() => remove.mutate(l.id)}>
+                      </Button>
+                      <Button type="button" variant="danger" size="sm" disabled={busy} onClick={() => remove.mutate(l.id)}>
                         Remove line {formatDate(l.workDate)} {l.jobCode}/{l.activityCode}
-                      </button>
-                    </div>
+                      </Button>
+                    </RowActions>
                   )
                 : undefined
             }
@@ -168,30 +182,30 @@ function MyWeek({ id, onClose }: { id: string; onClose: () => void }) {
           {editable && editing && <EditLine key={editing.id} sheetId={id} line={editing} onDone={() => setEditing(null)} />}
           {editable && <AddLine s={s} />}
           {editable && (
-            <div className="stack" style={SPACED}>
+            <div className={WEEK_STEP}>
               <div>
-                <button type="button" disabled={busy || s.lines.length === 0} onClick={() => submitSheet.mutate({ expectedVersion: s.version })}>
+                <Button type="button" disabled={busy || s.lines.length === 0} onClick={() => submitSheet.mutate({ expectedVersion: s.version })}>
                   Submit revision {s.currentRevision}
-                </button>
+                </Button>
               </div>
-              {s.lines.length === 0 && <p className="hint">Add at least one line to submit.</p>}
+              {s.lines.length === 0 && <Hint className="m-0">Add at least one line to submit.</Hint>}
               <Refusal error={submitSheet.error} act="submit" />
             </div>
           )}
           {current && (s.state === 'RETURNED' || s.state === 'REJECTED') && can(TS_SUBMIT) && (
-            <div className="stack" style={SPACED}>
-              <p style={FLUSH}>
+            <div className={WEEK_STEP}>
+              <p className="m-0">
                 {s.state === 'RETURNED' ? 'Your manager returned this timesheet for changes.' : 'Your manager rejected this revision.'} Continue in a new revision; this one stays on record.
               </p>
               <div>
-                <button type="button" disabled={busy} onClick={() => revise.mutate()}>
+                <Button type="button" disabled={busy} onClick={() => revise.mutate()}>
                   Start a new revision
-                </button>
+                </Button>
               </div>
               <Refusal error={revise.error} act="revise" />
             </div>
           )}
-          <h3 style={H3}>Revisions</h3>
+          <CardSubheading>Revisions</CardSubheading>
           <RevisionTable s={s} onShow={(r) => setRevision(r === s.currentRevision ? null : r)} />
           <SheetHistory s={s} />
           {current && <ReopenRequestForm s={s} />}
@@ -238,67 +252,65 @@ function AddLine({ s }: { s: SheetDetail }) {
     add.mutate({ workDate: f.workDate, jobId: f.jobId, activityId: f.activityId, minutes: Number(f.minutes), ...(note ? { note } : {}) });
   };
   return (
-    <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate style={SPACED}>
-      <h3 id={`${id}-title`} className="wide" style={H3}>
-        Add a line
-      </h3>
-      <label>
+    <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+      <CardSubheading id={`${id}-title`}>Add a line</CardSubheading>
+      <FormField>
         Work date
-        <select value={f.workDate} onChange={(e) => setF({ ...f, workDate: e.target.value, jobId: '', activityId: '' })}>
+        <NativeSelect value={f.workDate} onChange={(e) => setF({ ...f, workDate: e.target.value, jobId: '', activityId: '' })}>
           {days.map((d, i) => (
             <option key={d} value={d}>
               {dayLabel(d, i)}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Job
-        <select value={f.jobId} onChange={(e) => setF({ ...f, jobId: e.target.value, activityId: '' })}>
+        <NativeSelect value={f.jobId} onChange={(e) => setF({ ...f, jobId: e.target.value, activityId: '' })}>
           <option value="">{jobs.length === 0 ? 'No allocation covers this day' : 'Choose…'}</option>
           {jobs.map((a) => (
             <option key={a.jobId} value={a.jobId}>
               {a.projectCode} / {a.jobCode}: {a.jobName}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Activity
-        <select value={f.activityId} disabled={!chosen} onChange={(e) => setF({ ...f, activityId: e.target.value })}>
+        <NativeSelect value={f.activityId} disabled={!chosen} onChange={(e) => setF({ ...f, activityId: e.target.value })}>
           <option value="">{chosen ? 'Choose…' : 'Choose a job first'}</option>
           {(chosen?.activities ?? []).map((a) => (
             <option key={a.activityId} value={a.activityId}>
               {a.code}: {a.name}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Time (quarter hours)
-        <select value={f.minutes} onChange={(e) => setF({ ...f, minutes: e.target.value })}>
+        <NativeSelect value={f.minutes} onChange={(e) => setF({ ...f, minutes: e.target.value })}>
           <option value="">Choose…</option>
           {QUARTERS.map((m) => (
             <option key={m} value={m}>
               {hm(m)}
             </option>
           ))}
-        </select>
-      </label>
-      <label className="wide">
+        </NativeSelect>
+      </FormField>
+      <FormField className="col-span-full">
         Note (optional)
-        <input value={f.note} maxLength={500} onChange={(e) => setF({ ...f, note: e.target.value })} />
-      </label>
-      <div className="wide">
+        <Input value={f.note} maxLength={500} onChange={(e) => setF({ ...f, note: e.target.value })} />
+      </FormField>
+      <div className={FORM_END}>
         <ReadProblem error={allocations.error} what="your allocations" />
         <Problem text={problem} />
         <Refusal error={add.error} act="line" />
         <Notice notice={notice} />
-        <button type="submit" disabled={add.isPending}>
+        <Button type="submit" className="self-start" disabled={add.isPending}>
           Add line
-        </button>
+        </Button>
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -333,34 +345,34 @@ function EditLine({ sheetId, line, onDone }: { sheetId: string; line: Line; onDo
     save.mutate(body);
   };
   return (
-    <form className="grid-form" aria-label={`Change the line of ${formatDate(line.workDate)} ${line.jobCode}/${line.activityCode}`} onSubmit={submit} noValidate style={SPACED}>
-      <label>
+    <FormGrid aria-label={`Change the line of ${formatDate(line.workDate)} ${line.jobCode}/${line.activityCode}`} onSubmit={submit} noValidate>
+      <FormField>
         New time (quarter hours)
-        <select value={minutes} onChange={(e) => setMinutes(e.target.value)}>
+        <NativeSelect value={minutes} onChange={(e) => setMinutes(e.target.value)}>
           {QUARTERS.map((m) => (
             <option key={m} value={m}>
               {hm(m)}
             </option>
           ))}
-        </select>
-      </label>
-      <label className="wide">
+        </NativeSelect>
+      </FormField>
+      <FormField className="col-span-full">
         New note
-        <input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
-      </label>
-      <div className="wide">
+        <Input value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+      </FormField>
+      <div className={FORM_END}>
         <Problem text={problem} />
         <Refusal error={save.error} act="line" />
-        <div className="row">
-          <button type="submit" disabled={save.isPending}>
+        <ButtonRow>
+          <Button type="submit" disabled={save.isPending}>
             Save line
-          </button>
-          <button type="button" className="secondary" onClick={onDone}>
+          </Button>
+          <Button type="button" variant="outline" onClick={onDone}>
             Close
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -371,35 +383,33 @@ function MyAllocations() {
   return (
     <Section title="My allocations">
       <ReadProblem error={list.error} what="your allocations" />
-      {list.isPending && <p className="hint loading">Loading your allocations…</p>}
+      {list.isPending && <LoadingLine>Loading your allocations…</LoadingLine>}
       {data && data.items.length === 0 && <Empty>You have no active allocations, so no time can be recorded yet.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="My allocations">
-            <thead>
-              <tr>
-                <th>Project and job</th>
-                <th>Interval</th>
-                <th>Allocation</th>
-                <th>Activities you can book</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    {a.projectCode} / {a.jobCode}: {a.jobName}
-                  </td>
-                  <td>
-                    {formatDate(a.startDate)} to {formatDate(a.endDate)}
-                  </td>
-                  <td>{a.allocationPercent}%</td>
-                  <td>{a.activities.map((x) => `${x.code}: ${x.name}`).join(', ') || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="My allocations">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Project and job</TableHead>
+              <TableHead scope="col">Interval</TableHead>
+              <TableHead scope="col">Allocation</TableHead>
+              <TableHead scope="col">Activities you can book</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell>
+                  {a.projectCode} / {a.jobCode}: {a.jobName}
+                </TableCell>
+                <TableCell>
+                  {formatDate(a.startDate)} to {formatDate(a.endDate)}
+                </TableCell>
+                <TableCell>{a.allocationPercent}%</TableCell>
+                <TableCell>{a.activities.map((x) => `${x.code}: ${x.name}`).join(', ') || '—'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
@@ -411,9 +421,9 @@ function MyReminders() {
   const data = shown(list);
   return (
     <Section title="Missed-submission reminders">
-      <p className="hint">A reminder only: a missed week is never a deduction or a penalty, and a late timesheet is still accepted.</p>
+      <Hint>A reminder only: a missed week is never a deduction or a penalty, and a late timesheet is still accepted.</Hint>
       <ReadProblem error={list.error} what="your reminders" />
-      {list.isPending && <p className="hint loading">Loading your reminders…</p>}
+      {list.isPending && <LoadingLine>Loading your reminders…</LoadingLine>}
       {data && data.items.length === 0 && <Empty>No reminders.</Empty>}
       {data && data.items.length > 0 && (
         <ul aria-label="My reminders">
@@ -438,32 +448,32 @@ function MyDecisionHistory() {
   return (
     <Section title="Status and decision history">
       <ReadProblem error={history.error} what="your decision history" />
-      {history.isPending && <p className="hint loading">Loading your history…</p>}
+      {history.isPending && <LoadingLine>Loading your history…</LoadingLine>}
       {data && data.items.length === 0 && <Empty>No submissions yet.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="My timesheet decisions">
-            <thead>
-              <tr>
-                <th>Started</th>
-                <th>Status</th>
-                <th>Decisions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((r) => (
-                <tr key={r.transactionId}>
-                  <td>{formatDate(r.createdAt)}</td>
-                  <td>
-                    <StateBadge state={r.state} />
-                    {r.pendingWith && <div className="hint">with {r.pendingWith}</div>}
-                  </td>
-                  <td>{r.decisions.length === 0 ? '—' : r.decisions.map((d) => `${DECISION_LABEL[d.decision] ?? readable(d.decision)} on ${formatDate(d.decidedAt)}`).join('; ')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="My timesheet decisions">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Started</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Decisions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((r) => (
+              <TableRow key={r.transactionId}>
+                <TableCell>{formatDate(r.createdAt)}</TableCell>
+                <TableCell>
+                  <StateBadge state={r.state} />
+                  {r.pendingWith && <Remark>with {r.pendingWith}</Remark>}
+                </TableCell>
+                <TableCell>
+                  {r.decisions.length === 0 ? '—' : r.decisions.map((d) => `${DECISION_LABEL[d.decision] ?? readable(d.decision)} on ${formatDate(d.decidedAt)}`).join('; ')}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );

@@ -1,9 +1,13 @@
 // Shared parts of the lifecycle process screens: keys, paths, limits, query keys, labels, helpers and small components.
 
-import { type CSSProperties, type ReactNode, useMemo, useRef } from 'react';
+import { type ReactNode, useMemo, useRef } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { CheckField, FormField } from '@/components/form-field';
+import { LoadingLine } from '@/components/loading-line';
+import { Textarea } from '@/components/ui/textarea';
 import { idempotencyKey, isForbidden, isNotFound, plural, readable } from '../../api';
 import { type MeContext, useSession } from '../../session';
-import { Empty, ErrorNote, NotPermitted, pageParams, Section } from '../../ui';
+import { Empty, ErrorNote, Notice, NotPermitted, pageParams, Section } from '../../ui';
 import type { NoteKind, NoticePeriod, OwnerRef, ProcessTask } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -199,9 +203,9 @@ export const noteTypeText = (n: { kind: string; warningCategory?: string | null 
 /** CL-052 (0283): the checkbox that marks a warning as an absconding warning; the server refuses the mark on any other type. */
 export function AbscondingMark({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <label className="inline">
+    <CheckField>
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /> Absconding warning (away from work without leave or word)
-    </label>
+    </CheckField>
   );
 }
 export const SCAN_TEXT: Record<string, string> = {
@@ -270,35 +274,17 @@ export function useDecisionKey(prefix: string) {
 // ---------------------------------------------------------------------------------------------------------
 // Shared pieces
 // ---------------------------------------------------------------------------------------------------------
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.25rem 0 0' };
-export const FLUSH: CSSProperties = { margin: 0 };
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
-export const GROUP: CSSProperties = { border: '1px solid var(--line)', borderRadius: 8, padding: '0.5rem 0.75rem', margin: 0, minWidth: 0 };
-export const FIELDS: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '0.75rem', alignItems: 'end' };
+/** The fields of a one-column form side by side, in columns at least 190px wide, lined up along their bottom; none outgrows its column. */
+export const FIELDS = 'grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] items-end gap-3 *:min-w-0';
 
 export type NoticeState = { text: string; ok: boolean } | null;
 
-export function Notice({ notice }: { notice: NoticeState }) {
-  if (!notice) return null;
-  return (
-    <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
-      {notice.text}
-    </p>
-  );
-}
+// The screens of this module take their notice from here; it is the app's own, so an outcome reads the same on every screen.
+export { Notice };
 
 export function Problem({ text }: { text: string | null }) {
   if (!text) return null;
-  return (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
-}
-
-export function Loading({ children }: { children: ReactNode }) {
-  return <p className="hint">{children}</p>;
+  return <Notice notice={{ text, ok: false }} />;
 }
 
 /**
@@ -307,7 +293,7 @@ export function Loading({ children }: { children: ReactNode }) {
  */
 export function RoleReady({ children }: { children: ReactNode }) {
   const { me } = useSession();
-  return me ? <>{children}</> : <Loading>Loading your role…</Loading>;
+  return me ? <>{children}</> : <LoadingLine>Loading your role…</LoadingLine>;
 }
 
 /** A read that failed: not permitted, not in scope (when `missing` is given) or the API's own error. */
@@ -323,7 +309,7 @@ export function Block({ title, nested, children }: { title: string; nested?: boo
   if (!nested) return <Section title={title}>{children}</Section>;
   return (
     <div className="stack">
-      <h3 style={H3}>{title}</h3>
+      <CardSubheading>{title}</CardSubheading>
       {children}
     </div>
   );
@@ -331,9 +317,9 @@ export function Block({ title, nested, children }: { title: string; nested?: boo
 
 export function ReasonField({ label, value, onChange, max = MAX_REASON }: { label: string; value: string; onChange: (value: string) => void; max?: number }) {
   return (
-    <label>
+    <FormField>
       {label}
-      <textarea rows={2} maxLength={max} value={value} onChange={(e) => onChange(e.target.value)} style={TEXTAREA} />
-    </label>
+      <Textarea rows={2} maxLength={max} value={value} onChange={(e) => onChange(e.target.value)} className="resize-y" />
+    </FormField>
   );
 }

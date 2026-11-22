@@ -5,7 +5,15 @@
 // use and says plainly what happens to tasks: they never move by themselves when a delegation starts or ends.
 // Cached answers are keyed by the selected company and assignment, so one role's view is never shown under another.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, useState } from 'react';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { RowActions } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -97,6 +105,9 @@ function useContextKey() {
 /** Everything cached here shares this prefix, so a change refreshes every list. */
 const KEY = ['delegations'] as const;
 
+/** A row's actions in its cell: the buttons, a reason being typed and any refusal, one under another, a little closer than a form. */
+const DECISION = 'flex flex-col items-start gap-[0.4rem]';
+
 function useRefresh() {
   const qc = useQueryClient();
   return () => {
@@ -136,10 +147,10 @@ export function DelegatedBadge({ taskId }: { taskId: string }) {
     <>
       {' '}
       <Badge tone="warn">delegated</Badge>{' '}
-      <span className="hint">
+      <Hint as="span">
         from {nameOf(task.delegator)} until {when(task.delegatedUntil)}
         {me?.roleName ? `; you decide as ${me.roleName}` : ''}
-      </span>
+      </Hint>
     </>
   );
 }
@@ -151,14 +162,14 @@ export function DelegatedTasksSection() {
   if (items.length === 0) return null;
   return (
     <Section title={`Delegated to you (${items.length})`}>
-      <p className="hint">
+      <Hint>
         You decide these as a delegate{me?.roleName ? `, acting as ${me.roleName}` : ''}. Your own permissions apply; a delegation adds none. When a delegation ends these stop being yours to read or decide. See{' '}
         <a href="/delegations">My delegations</a>.
-      </p>
+      </Hint>
       <ul>
         {items.map((t) => (
           <li key={t.taskId}>
-            <strong>{t.ownerName ?? 'Request'}</strong> <span className="hint">{t.ownerEmployeeCode}</span> · {kindText(t.kind)} · from {nameOf(t.delegator)} until {when(t.delegatedUntil)}
+            <strong>{t.ownerName ?? 'Request'}</strong> <Hint as="span">{t.ownerEmployeeCode}</Hint> · {kindText(t.kind)} · from {nameOf(t.delegator)} until {when(t.delegatedUntil)}
           </li>
         ))}
       </ul>
@@ -174,22 +185,21 @@ function ReasonForm({ label, confirm, pending, error, onConfirm, onCancel }: { l
   const [reason, setReason] = useState('');
   return (
     <form
-      className="stack"
-      style={{ gap: '0.4rem' }}
+      className={DECISION}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         if (reason.trim() && !pending) onConfirm(reason.trim());
       }}
     >
-      <input aria-label={label} placeholder="Reason (required)" required maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
-      <div className="row">
-        <button type="submit" className="danger" disabled={!reason.trim() || pending}>
+      <Input aria-label={label} placeholder="Reason (required)" required maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
+      <ButtonRow>
+        <Button type="submit" variant="danger" size="sm" disabled={!reason.trim() || pending}>
           {confirm}
-        </button>
-        <button type="button" className="secondary" onClick={onCancel}>
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={onCancel}>
           Cancel
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <ErrorNote error={error} />
     </form>
   );
@@ -257,25 +267,25 @@ function Actions({ d, administering, onNote }: { d: Delegation; administering: b
     return <ReasonForm label={`Reason to ${ending.toLowerCase()} ${subject}`} confirm={`Confirm: ${ending.toLowerCase()}`} pending={end.isPending} error={end.error} onConfirm={(r) => end.mutate(r)} onCancel={() => setMode(null)} />;
   }
   return (
-    <div className="stack" style={{ gap: '0.4rem' }}>
-      <div className="row">
+    <div className={DECISION}>
+      <RowActions>
         {canApprove && (
-          <button type="button" disabled={approve.isPending} onClick={() => approve.mutate()}>
+          <Button type="button" size="sm" disabled={approve.isPending} onClick={() => approve.mutate()}>
             Approve
-          </button>
+          </Button>
         )}
         {canReject && (
-          <button type="button" className="danger" onClick={() => setMode('reject')}>
+          <Button type="button" variant="danger" size="sm" onClick={() => setMode('reject')}>
             Reject
-          </button>
+          </Button>
         )}
         {canEnd && (
-          <button type="button" className="danger" onClick={() => setMode('end')}>
+          <Button type="button" variant="danger" size="sm" onClick={() => setMode('end')}>
             {ending}
-          </button>
+          </Button>
         )}
-      </div>
-      {administering && d.status === 'PENDING' && isParty && <p className="hint">You are a party to this delegation, so someone else approves it.</p>}
+      </RowActions>
+      {administering && d.status === 'PENDING' && isParty && <Hint>You are a party to this delegation, so someone else approves it.</Hint>}
       <ErrorNote error={approve.error} />
     </div>
   );
@@ -290,10 +300,10 @@ function DecisionsTaken({ d, administering }: { d: Delegation; administering: bo
   if (!d.approvedBy) return null;
   return (
     <div>
-      <button type="button" className="secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Button type="button" variant="outline" size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>
         Decisions taken
-      </button>
-      {open && decisions.data?.items.length === 0 && <p className="hint">No decision was taken under this delegation.</p>}
+      </Button>
+      {open && decisions.data?.items.length === 0 && <Hint>No decision was taken under this delegation.</Hint>}
       {open && !!decisions.data?.items.length && (
         <ul>
           {decisions.data.items.map((t) => (
@@ -310,55 +320,47 @@ function DecisionsTaken({ d, administering }: { d: Delegation; administering: bo
 
 function DelegationTable({ items, administering, onNote }: { items: Delegation[]; administering: boolean; onNote: (text: string) => void }) {
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table>
-        <thead>
-          <tr>
-            <th>From</th>
-            <th>To</th>
-            <th>Decisions</th>
-            <th>Period</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((d) => (
-            <tr key={d.id}>
-              <td>{nameOf(d.delegator)}</td>
-              <td>{nameOf(d.delegate)}</td>
-              <td>
-                {kindsText(d.kinds)} {d.confidential && <Badge tone="warn">confidential</Badge>}
-                <div className="hint">{d.permission}</div>
-                {d.purpose && <div className="hint">{d.purpose}</div>}
-              </td>
-              <td>
-                {when(d.effectiveFrom)} – {when(d.effectiveTo)}
-              </td>
-              <td>
-                <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].text}</Badge>
-                {d.approvedBy && <div className="hint">Approved by {nameOf(d.approvedBy)}</div>}
-                {d.rejectionReason && <div className="hint">{d.rejectionReason}</div>}
-                {d.endReason && <div className="hint">{d.endReason}</div>}
-                {!!d.openTasks && <div className="hint">{`${d.openTasks} open ${d.openTasks === 1 ? 'task' : 'tasks'}`}</div>}
-              </td>
-              <td>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">From</TableHead>
+          <TableHead scope="col">To</TableHead>
+          <TableHead scope="col">Decisions</TableHead>
+          <TableHead scope="col">Period</TableHead>
+          <TableHead scope="col">Status</TableHead>
+          <TableHead scope="col">Actions</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((d) => (
+          <TableRow key={d.id}>
+            <TableCell>{nameOf(d.delegator)}</TableCell>
+            <TableCell>{nameOf(d.delegate)}</TableCell>
+            <TableCell>
+              {kindsText(d.kinds)} {d.confidential && <Badge tone="warn">confidential</Badge>}
+              <HintLine>{d.permission}</HintLine>
+              {d.purpose && <HintLine>{d.purpose}</HintLine>}
+            </TableCell>
+            <TableCell>
+              {when(d.effectiveFrom)} – {when(d.effectiveTo)}
+            </TableCell>
+            <TableCell>
+              <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].text}</Badge>
+              {d.approvedBy && <HintLine>Approved by {nameOf(d.approvedBy)}</HintLine>}
+              {d.rejectionReason && <HintLine>{d.rejectionReason}</HintLine>}
+              {d.endReason && <HintLine>{d.endReason}</HintLine>}
+              {!!d.openTasks && <HintLine>{`${d.openTasks} open ${d.openTasks === 1 ? 'task' : 'tasks'}`}</HintLine>}
+            </TableCell>
+            <TableCell>
+              <div className={DECISION}>
                 <Actions d={d} administering={administering} onNote={onNote} />
                 <DecisionsTaken d={d} administering={administering} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Note({ children }: { children: ReactNode }) {
-  return (
-    <p role="status" className="hint">
-      {children}
-    </p>
+              </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -403,20 +405,19 @@ function RequestForm({ onNote }: { onNote: (text: string) => void }) {
   return (
     <>
       {/* The rules first, above the form, rather than between its rows. */}
-      <p className="hint">
+      <Hint>
         At most 30 days. The delegation runs from the start time until just before the end time. The delegate cannot pass it on and uses only their own permissions;
         tasks already waiting for you stay with you.
-      </p>
-      <form
-        className="grid-form"
+      </Hint>
+      <FormGrid
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           if (ready) ask.mutate();
         }}
       >
-        <label>
+        <FormField>
           Decisions to delegate
-          <select
+          <NativeSelect
             value={permission}
             required
             onChange={(e) => {
@@ -430,42 +431,42 @@ function RequestForm({ onNote }: { onNote: (text: string) => void }) {
                 {`${kindsText(o.kinds)}${o.confidential ? ' (confidential)' : ''}`}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Delegate
-          <select value={delegate} required disabled={permission === ''} onChange={(e) => setDelegate(e.target.value)}>
+          <NativeSelect value={delegate} required disabled={permission === ''} onChange={(e) => setDelegate(e.target.value)}>
             <option value="">Choose…</option>
             {(candidates.data?.items ?? []).map((c) => (
               <option key={c.userId} value={c.userId}>
                 {c.displayName ? `${c.displayName} (${c.employeeCode ?? c.accountKey})` : c.accountKey}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         {candidates.data?.items.length === 0 && (
-          <p className="hint">Nobody else can take these decisions: the person you delegate to must already hold them in their own role. Ask your administrator.</p>
+          <Hint>Nobody else can take these decisions: the person you delegate to must already hold them in their own role. Ask your administrator.</Hint>
         )}
         <ErrorNote error={candidates.error} />
-        <label>
+        <FormField>
           Starts
-          <input type="datetime-local" required value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
+          <Input type="datetime-local" required value={from} onChange={(e) => setFrom(e.target.value)} />
+        </FormField>
+        <FormField>
           Ends (not included)
-          <input type="datetime-local" required value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        <label>
+          <Input type="datetime-local" required value={to} onChange={(e) => setTo(e.target.value)} />
+        </FormField>
+        <FormField>
           Purpose (optional)
-          <input maxLength={500} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
-        </label>
-        <div className="row">
-          <button type="submit" disabled={!ready}>
+          <Input maxLength={500} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+        </FormField>
+        <ButtonRow>
+          <Button type="submit" disabled={!ready}>
             Ask for approval
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <ErrorNote error={ask.error} />
-      </form>
+      </FormGrid>
     </>
   );
 }
@@ -488,7 +489,11 @@ function MyDelegationsScreen() {
       )}
       {/* A visible heading: the page is titled "My delegations", which a card of the same name would hide. */}
       <Section title="Delegation history">
-        {note && <Note>{note}</Note>}
+        {note && (
+          <StatusNote tone="info" role="status">
+            {note}
+          </StatusNote>
+        )}
         {mine.data?.items.length === 0 && <Empty>You have not given or received a delegation.</Empty>}
         {!!mine.data?.items.length && <DelegationTable items={mine.data.items} administering={false} onNote={setNote} />}
         <ErrorNote error={mine.error} />
@@ -513,18 +518,24 @@ function DelegationApprovalsScreen() {
   if (!allowed) return <Empty>The selected role cannot read delegations.</Empty>;
   return (
     <Section title="Delegations">
-      <label>
-        Show
-        <select aria-label="Show" value={state} onChange={(e) => setState(e.target.value)}>
-          {STATE_FILTERS.map((s) => (
-            <option key={s} value={s}>
-              {s === 'ACTIVE' ? 'Approved' : s.charAt(0) + s.slice(1).toLowerCase()}
-            </option>
-          ))}
-          <option value="">All</option>
-        </select>
-      </label>
-      {note && <Note>{note}</Note>}
+      <FilterBar>
+        <FormField>
+          Show
+          <NativeSelect aria-label="Show" value={state} onChange={(e) => setState(e.target.value)}>
+            {STATE_FILTERS.map((s) => (
+              <option key={s} value={s}>
+                {s === 'ACTIVE' ? 'Approved' : s.charAt(0) + s.slice(1).toLowerCase()}
+              </option>
+            ))}
+            <option value="">All</option>
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {note && (
+        <StatusNote tone="info" role="status">
+          {note}
+        </StatusNote>
+      )}
       {list.data?.items.length === 0 && <Empty>No delegations here.</Empty>}
       {!!list.data?.items.length && <DelegationTable items={list.data.items} administering onNote={setNote} />}
       <ErrorNote error={list.error} />

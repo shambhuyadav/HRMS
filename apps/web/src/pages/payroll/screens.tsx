@@ -30,7 +30,7 @@ export function HoldsScreen() {
   if (!can(HOLD_READ) && !can(STOP_READ) && !can(STOP_PROPOSE)) {
     return (
       <Section title="Salary holds and stops">
-        <Empty>The selected role cannot see salary holds or salary stops.</Empty>
+        <Empty refusal>The selected role cannot see salary holds or salary stops.</Empty>
       </Section>
     );
   }
@@ -51,7 +51,7 @@ export function InputsScreen() {
   if (!can(INPUT_READ) && !can(INPUT_PREPARE) && !can(INPUT_APPROVE)) {
     return (
       <Section title="Payroll inputs">
-        <Empty>The selected role cannot see payroll inputs.</Empty>
+        <Empty refusal>The selected role cannot see payroll inputs.</Empty>
       </Section>
     );
   }

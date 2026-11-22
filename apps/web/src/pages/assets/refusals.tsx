@@ -1,7 +1,7 @@
 // Refusals of the asset routes in plain words, and the refusal and problem lines.
 
 import { ApiError, isForbidden, isNotFound, readable } from '../../api';
-import { Empty, ErrorNote, NotPermitted } from '../../ui';
+import { Empty, ErrorNote, Notice, NotPermitted } from '../../ui';
 import { dateIn } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -111,13 +111,7 @@ export function refusalText(error: unknown, action: Act): string | null {
 export function Refusal({ error, action }: { error: unknown; action: Act }) {
   if (!error) return null;
   const text = refusalText(error, action);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return text === null ? <ErrorNote error={error} /> : <Notice notice={{ text, ok: false }} />;
 }
 
 export function QueryProblem({ error, forbidden, action = 'read' }: { error: unknown; forbidden: string; action?: Act }) {
@@ -129,10 +123,5 @@ export function QueryProblem({ error, forbidden, action = 'read' }: { error: unk
 
 /** A local check before anything is sent (the server applies the same rule). */
 export function Problem({ text }: { text: string | null }) {
-  if (!text) return null;
-  return (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return <Notice notice={text ? { text, ok: false } : null} />;
 }

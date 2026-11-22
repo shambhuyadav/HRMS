@@ -2,6 +2,12 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { FieldDescription } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, ApiError, type EmployeeHit } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote } from '../../ui';
@@ -35,27 +41,34 @@ export function MasterSelect(props: {
   for (const m of items) names.current.set(m.id, `${m.code} ${m.name}`);
   const offered = items.some((m) => m.id === value);
   return (
-    <div>
-      <label>
-        {label}
-        <select required={required} value={value} onChange={(e) => onChange(e.target.value)}>
-          <option value="">{required ? `Choose a ${label.toLowerCase()}` : 'None'}</option>
-          {value && !offered && (
-            <option value={value}>
-              {names.current.get(value) ?? known ?? 'The current choice'}
-              {options.isSuccess ? ' (not offered on this date)' : ''}
-            </option>
+    <FormField
+      hint={
+        <>
+          {options.isSuccess && items.length === 0 && <FieldDescription>None is valid on this date.</FieldDescription>}
+          {options.error instanceof ApiError && options.error.status === 403 ? (
+            <FieldDescription>Your role cannot read this list, so it cannot be chosen here.</FieldDescription>
+          ) : (
+            <ErrorNote error={options.error} />
           )}
-          {items.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.code} {m.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      {options.isSuccess && items.length === 0 && <p className="hint">None is valid on this date.</p>}
-      {options.error instanceof ApiError && options.error.status === 403 ? <p className="hint">Your role cannot read this list, so it cannot be chosen here.</p> : <ErrorNote error={options.error} />}
-    </div>
+        </>
+      }
+    >
+      {label}
+      <NativeSelect required={required} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{required ? `Choose a ${label.toLowerCase()}` : 'None'}</option>
+        {value && !offered && (
+          <option value={value}>
+            {names.current.get(value) ?? known ?? 'The current choice'}
+            {options.isSuccess ? ' (not offered on this date)' : ''}
+          </option>
+        )}
+        {items.map((m) => (
+          <option key={m.id} value={m.id}>
+            {m.code} {m.name}
+          </option>
+        ))}
+      </NativeSelect>
+    </FormField>
   );
 }
 
@@ -73,29 +86,31 @@ export function EmployeePicker({ label, value, onChange, filter }: { label: stri
     enabled: term !== '' && can(EMPLOYEE_LIST),
     queryFn: () => api<{ items: EmployeeHit[] }>(`/v1/employees?${new URLSearchParams({ search: term, page: '1', pageSize: '25', ...filter }).toString()}`),
   });
-  if (!can(EMPLOYEE_LIST)) return <p className="hint wide">Your role cannot search employees, so it cannot choose one here.</p>;
+  if (!can(EMPLOYEE_LIST)) return <Hint className="col-span-full">Your role cannot search employees, so it cannot choose one here.</Hint>;
   return (
-    <div className="wide">
+    <div className="col-span-full">
       <p>
         {label}: <strong>{value ? `${value.displayName} (${value.employeeCode})` : 'nobody chosen yet'}</strong>{' '}
         {value && (
-          <button type="button" className="secondary" onClick={() => onChange(null)}>
+          <Button type="button" variant="outline" onClick={() => onChange(null)}>
             Clear
-          </button>
+          </Button>
         )}
       </p>
-      <label>
+      <FormField>
         Find by name, code or email
-        <input type="search" maxLength={100} value={search} onChange={(e) => setSearch(e.target.value)} />
-      </label>
+        <Input type="search" maxLength={100} value={search} onChange={(e) => setSearch(e.target.value)} />
+      </FormField>
       <ErrorNote error={hits.error} />
       {hits.isSuccess && term !== '' && hits.data.items.length === 0 && <Empty>Nobody matches “{term}”.</Empty>}
       {term !== '' && !!hits.data?.items.length && (
-        <ul className="choices" aria-label="Matching employees">
+        <ul className="m-0 mt-3 flex list-none flex-col gap-[0.6rem] p-0" aria-label="Matching employees">
           {hits.data.items.map((e) => (
             <li key={e.id}>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                className="h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]"
                 onClick={() => {
                   onChange(e);
                   setSearch('');
@@ -103,7 +118,7 @@ export function EmployeePicker({ label, value, onChange, filter }: { label: stri
                 }}
               >
                 {e.displayName} ({e.employeeCode})
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

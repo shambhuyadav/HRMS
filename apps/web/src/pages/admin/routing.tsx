@@ -1,9 +1,14 @@
 // The reviewer routing screen (DF03): each kind's steps, the HR fallback list, and stranded tasks to reroute.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ButtonRow, CheckField } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, Section } from '../../ui';
+import { Badge, Empty, ErrorNote, Notice, Section } from '../../ui';
 
 // ---------------------------------------------------------------------------------------------------------
 // Reviewer routing (DF03): each kind's steps and the explicit HR fallback list.
@@ -28,23 +33,23 @@ function FallbackEditor({ kind, current, onSaved }: { kind: string; current: Rou
   });
   const toggle = (id: string) => setSelected(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       {candidates.data?.items.length === 0 && <Empty>Nobody currently holds the decision permission for this kind.</Empty>}
       {candidates.data?.items.map((c) => (
-        <label key={c.userId} className="check">
+        <CheckField key={c.userId}>
           <input type="checkbox" checked={selected.includes(c.userId)} onChange={() => toggle(c.userId)} /> {c.displayName ?? c.accountKey}{' '}
-          <span className="hint">
+          <Hint as="span">
             {c.accountKey}
             {selected.includes(c.userId) ? ` · priority ${selected.indexOf(c.userId) + 1}` : ''}
-          </span>
-        </label>
+          </Hint>
+        </CheckField>
       ))}
-      <div className="row">
-        <button type="button" disabled={save.isPending} onClick={() => save.mutate()}>
+      <ButtonRow>
+        <Button type="button" disabled={save.isPending} onClick={() => save.mutate()}>
           Save list
-        </button>
-      </div>
-      <p className="hint">Priority follows the order in which reviewers are ticked.</p>
+        </Button>
+      </ButtonRow>
+      <Hint>Priority follows the order in which reviewers are ticked.</Hint>
       <ErrorNote error={save.error ?? candidates.error} />
     </div>
   );
@@ -76,6 +81,12 @@ interface StrandedTask {
  * person rerouting never chooses the reviewer, never reroutes their own request, and gives a reason, which is audited; the new
  * assignee is told. The server decides every rule; this panel offers the action only with the reroute duty.
  */
+/** Whose request a stranded task is: the employee's code and name, or none for a company-wide one. */
+function strandedOwner(t: StrandedTask): string {
+  if (!t.ownerEmployeeCode) return 'No employee (company-wide)';
+  return t.ownerName ? `${t.ownerEmployeeCode} ${t.ownerName}` : t.ownerEmployeeCode;
+}
+
 function StrandedTasks() {
   const { can } = useSession();
   const qc = useQueryClient();
@@ -100,71 +111,66 @@ function StrandedTasks() {
   const items = stranded.data?.items ?? [];
   return (
     <Section title="Stranded tasks">
-      <p className="hint">
+      <Hint>
         Open approval tasks in your scope that their assignee can no longer decide, for example after a change of manager, scope or role, or when the delegation they were
         assigned under ended. A task never moves by itself. Rerouting keeps it on record and gives the step to whoever its rule now selects: you never choose the reviewer, and
         you cannot reroute your own request.
         {mayReroute ? '' : ' The selected role cannot reroute tasks.'}
-      </p>
+      </Hint>
       {stranded.data && items.length === 0 && <Empty>No stranded tasks in your scope.</Empty>}
       {items.length > 0 && (
-        <div style={{ overflowX: 'auto' }}>
-          <table aria-label="Stranded tasks">
-            <thead>
-              <tr>
-                <th>Request</th>
-                <th>Employee</th>
-                <th>Assigned to</th>
-                <th>Since</th>
-                {mayReroute && <th>Reroute</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((t) => {
-                const who = t.ownerEmployeeCode ? `${t.ownerEmployeeCode}${t.ownerName ? ` ${t.ownerName}` : ''}` : 'No employee (company-wide)';
-                const reason = reasons[t.taskId] ?? '';
-                return (
-                  <tr key={t.taskId}>
-                    <td>
-                      {`${t.kind.replace(/_/g, ' ')}, step ${t.step}`} {t.delegationId && <Badge tone="warn">delegated</Badge>}
-                    </td>
-                    <td>{who}</td>
-                    <td>{t.assigneeAccountKey}</td>
-                    <td>{formatDate(t.assignedAt)}</td>
-                    {mayReroute && (
-                      <td>
-                        <div className="row">
-                          <input
-                            aria-label={`Reason to reroute the task of ${who}`}
-                            placeholder="Reason"
-                            maxLength={500}
-                            value={reason}
-                            onChange={(e) => setReasons({ ...reasons, [t.taskId]: e.target.value })}
-                          />
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={!reason.trim() || reroute.isPending}
-                            onClick={() => reroute.mutate({ task: t, reason: reason.trim() })}
-                            aria-label={`Reroute the task of ${who}`}
-                          >
-                            Reroute
-                          </button>
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Stranded tasks">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Request</TableHead>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Assigned to</TableHead>
+              <TableHead scope="col">Since</TableHead>
+              {mayReroute && <TableHead scope="col">Reroute</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((t) => {
+              const who = strandedOwner(t);
+              const reason = reasons[t.taskId] ?? '';
+              return (
+                <TableRow key={t.taskId}>
+                  <TableCell>
+                    {`${t.kind.replace(/_/g, ' ')}, step ${t.step}`} {t.delegationId && <Badge tone="warn">delegated</Badge>}
+                  </TableCell>
+                  <TableCell>{who}</TableCell>
+                  <TableCell>{t.assigneeAccountKey}</TableCell>
+                  <TableCell>{formatDate(t.assignedAt)}</TableCell>
+                  {mayReroute && (
+                    <TableCell>
+                      <ButtonRow>
+                        <Input
+                          aria-label={`Reason to reroute the task of ${who}`}
+                          placeholder="Reason"
+                          maxLength={500}
+                          className="w-auto"
+                          value={reason}
+                          onChange={(e) => setReasons({ ...reasons, [t.taskId]: e.target.value })}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!reason.trim() || reroute.isPending}
+                          onClick={() => reroute.mutate({ task: t, reason: reason.trim() })}
+                          aria-label={`Reroute the task of ${who}`}
+                        >
+                          Reroute
+                        </Button>
+                      </ButtonRow>
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
-      {note && (
-        <p role="status" className="ok">
-          {note}
-        </p>
-      )}
+      <Notice notice={note ? { text: note, ok: true } : null} />
       <ErrorNote error={reroute.error ?? stranded.error} />
     </Section>
   );
@@ -173,7 +179,7 @@ function StrandedTasks() {
 export function RoutingPage() {
   const { can } = useSession();
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       <ReviewerRouting />
       {can(MANAGE_ROUTING) && <StrandedTasks />}
     </div>
@@ -210,15 +216,16 @@ function ReviewerRouting() {
   const [editing, setEditing] = useState<string | null>(null);
   return (
     <Section title="Reviewer routing">
+      {/* `tasks`: the list's marker class, which styles.css draws each kind by, as in the decision lists. */}
       <ul className="tasks">
         {routing.data?.items.map((k) => (
           <li key={k.kind}>
             <div>
               <strong>{sentence(k.kind)}</strong>{' '}
-              <span className="hint">{k.steps.map((s) => `Step ${s.sequence}: ${RULE_WORDS[s.selectionRule] ?? s.selectionRule.replace(/_/g, ' ').toLowerCase()}`).join(' → ')}</span>
+              <Hint as="span">{k.steps.map((s) => `Step ${s.sequence}: ${RULE_WORDS[s.selectionRule] ?? s.selectionRule.replace(/_/g, ' ').toLowerCase()}`).join(' → ')}</Hint>
             </div>
             {k.routingKind ? (
-              <div className="hint">Uses the {k.routingKind.replace(/_/g, ' ')} fallback list.</div>
+              <HintLine>Uses the {k.routingKind.replace(/_/g, ' ')} fallback list.</HintLine>
             ) : (
               <>
                 <div>
@@ -242,11 +249,11 @@ function ReviewerRouting() {
                     }}
                   />
                 ) : (
-                  <div className="row">
-                    <button type="button" className="secondary" onClick={() => setEditing(k.kind)}>
+                  <ButtonRow>
+                    <Button type="button" variant="outline" onClick={() => setEditing(k.kind)}>
                       Edit list
-                    </button>
-                  </div>
+                    </Button>
+                  </ButtonRow>
                 )}
               </>
             )}

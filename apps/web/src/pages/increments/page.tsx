@@ -1,6 +1,7 @@
 // The increments page: its cycles, cases, off-cycle change and salary sections, each shown to its own grants.
 
 import { useState } from 'react';
+import { LoadingLine } from '@/components/loading-line';
 import { useSession } from '../../session';
 import { NotPermitted, Section } from '../../ui';
 import { CasesSection } from './cases';
@@ -18,7 +19,7 @@ export function IncrementsPage() {
     return (
       <>
         <h1>Increments and salary</h1>
-        <p className="hint loading">Loading…</p>
+        <LoadingLine>Loading…</LoadingLine>
       </>
     );
   }

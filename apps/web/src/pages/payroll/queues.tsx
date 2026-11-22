@@ -1,17 +1,58 @@
 // Decision queues: run reviews and approvals, salary holds, salary stops and payroll input batches, and the task decision.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { type ComponentPropsWithoutRef, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, Section } from '../../ui';
+import { Empty, Notice, Section } from '../../ui';
 import { DelegatedBadge } from '../delegations';
 import { INPUT_SOURCE, type InputBatch, InputBatchView } from './inputs';
-import { byPrefix, Note } from './pickers';
+import { byPrefix, Missing, Note } from './pickers';
 import { type Act, Problem } from './problems';
-import { Fact, FLUSH, H3, type Hold, HOLD_DECIDE, HOLD_KIND, HOLD_READ, INPUT_APPROVE, INPUT_READ, label, money, PATHS, PLAIN_LIST, RUN_APPROVE, RUN_READ_AMOUNT, RUN_REVIEW, RUN_STATE, type SalaryStop, Status, STOP_DECIDE, STOP_MODE, STOP_READ, TASK_STEP, TEXTAREA, useIntentKey, useKeys } from './shared';
+import {
+  Fact,
+  type Hold,
+  HOLD_DECIDE,
+  HOLD_KIND,
+  HOLD_READ,
+  INPUT_APPROVE,
+  INPUT_READ,
+  label,
+  money,
+  PATHS,
+  RUN_APPROVE,
+  RUN_READ_AMOUNT,
+  RUN_REVIEW,
+  RUN_STATE,
+  type SalaryStop,
+  Status,
+  STOP_DECIDE,
+  STOP_MODE,
+  STOP_READ,
+  TASK_STEP,
+  useIntentKey,
+  useKeys,
+} from './shared';
 import type { RunDecided, RunTask } from './types';
+
+/** A queue's tasks, one card under another. */
+const TASK_LIST = 'm-0 flex list-none flex-col gap-3 p-0';
+
+/**
+ * One task of a queue: a card inside the queue's card. It keeps the `card` marker class, so its notes and forms are drawn as a
+ * card's own (a boxed hint, a form without a frame of its own), as they were before the move to shadcn/ui.
+ */
+function TaskCard(props: ComponentPropsWithoutRef<'li'>) {
+  return <li className="card rounded-xl border border-border bg-card px-5 py-4 shadow-xs" {...props} />;
+}
 
 // =========================================================================================================
 // Run decision queues (review, approval and covering approval)
@@ -31,23 +72,23 @@ function RunTaskQueue({ steps, permission, title }: { steps: readonly string[]; 
   if (!can(RUN_READ_AMOUNT)) {
     return (
       <Section title={title}>
-        <p className="hint">The selected role cannot list payroll run tasks: it needs the payroll run amounts.</p>
+        <Hint>The selected role cannot list payroll run tasks: it needs the payroll run amounts.</Hint>
       </Section>
     );
   }
   const mine = (tasks.data?.items ?? []).filter((t) => steps.includes(t.step));
   return (
     <Section title={title}>
-      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
+      {tasks.isPending && <LoadingLine>Loading your tasks…</LoadingLine>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
-        <p key={n.id} role="status" className="ok">
+        <StatusNote key={n.id} tone="success" role="status">
           {n.text} {n.nextRunId && <Link to={PATHS.run(n.nextRunId)}>Open the new revision</Link>}
-        </p>
+        </StatusNote>
       ))}
       {tasks.data && mine.length === 0 && <Empty>Nothing is waiting for you.</Empty>}
       {mine.length > 0 && (
-        <ul style={PLAIN_LIST} className="stack">
+        <ul className={TASK_LIST}>
           {mine.map((t) => (
             <RunTaskItem key={t.taskId} task={t} onFinished={(text, nextRunId) => setNotes((prev) => [...prev, { id: t.taskId, text, ...(nextRunId ? { nextRunId } : {}) }])} />
           ))}
@@ -69,6 +110,12 @@ function decidedText(task: RunTask, decision: 'APPROVE' | 'RETURN', r: RunDecide
   return `${name}: your approval was recorded.`;
 }
 
+/** The route of a run task's decision: each step has its own. */
+function decisionPath(step: string): string {
+  if (step === 'REVIEW') return 'review';
+  return step === 'APPROVAL' ? 'approve' : 'cover';
+}
+
 function RunTaskItem({ task, onFinished }: { task: RunTask; onFinished: (text: string, nextRunId?: string) => void }) {
   const keys = useKeys();
   const qc = useQueryClient();
@@ -77,7 +124,7 @@ function RunTaskItem({ task, onFinished }: { task: RunTask; onFinished: (text: s
   const intent = useIntentKey('payroll-run-decision');
   const [reason, setReason] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
-  const path = task.step === 'REVIEW' ? 'review' : task.step === 'APPROVAL' ? 'approve' : 'cover';
+  const path = decisionPath(task.step);
   const decide = useMutation({
     mutationFn: (body: { decision: 'APPROVE' | 'RETURN'; idempotencyKey: string; reason?: string }) =>
       api<RunDecided>(`/v1/payroll/run-tasks/${encodeURIComponent(task.taskId)}/${path}`, { body }),
@@ -101,38 +148,32 @@ function RunTaskItem({ task, onFinished }: { task: RunTask; onFinished: (text: s
   };
   const name = task.run ? `${task.run.periodCode} revision ${task.run.revision}` : 'Payroll run';
   return (
-    <li aria-labelledby={titleId} className="card">
-      <h3 id={titleId} style={H3}>
-        {`${label(TASK_STEP, task.step)}: ${name}`}
-      </h3>
+    <TaskCard aria-labelledby={titleId}>
+      <CardSubheading id={titleId}>{`${label(TASK_STEP, task.step)}: ${name}`}</CardSubheading>
       <DelegatedBadge taskId={task.taskId} />
       {task.run ? (
-        <p style={FLUSH}>
+        <p className="my-1">
           <Status map={RUN_STATE} code={task.run.state} /> <Link to={PATHS.run(task.run.id)}>Open the run (totals, members and exceptions)</Link>
         </p>
       ) : (
-        <p className="hint">The run is not available in the selected role’s scope.</p>
+        <Hint>The run is not available in the selected role’s scope.</Hint>
       )}
-      {task.step === 'COVER' && <p className="hint">Covering approval: a decider’s own record in this run needs a further, independent approver.</p>}
-      <label htmlFor={reasonId}>
+      {task.step === 'COVER' && <Hint>Covering approval: a decider’s own record in this run needs a further, independent approver.</Hint>}
+      <FormField htmlFor={reasonId}>
         Reason (needed to return)
-        <textarea id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-      </label>
-      <div className="row" style={{ marginTop: '0.5rem' }}>
-        <button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
+        <Textarea id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} />
+      </FormField>
+      <ButtonRow className="mt-2">
+        <Button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
           Approve
-        </button>
-        <button type="button" className="secondary" disabled={decide.isPending} onClick={() => send('RETURN')}>
+        </Button>
+        <Button type="button" variant="outline" disabled={decide.isPending} onClick={() => send('RETURN')}>
           Return to a new revision
-        </button>
-      </div>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
+        </Button>
+      </ButtonRow>
+      <Missing text={problem} />
       <Problem error={decide.error} act="run-decision" />
-    </li>
+    </TaskCard>
   );
 }
 
@@ -141,6 +182,11 @@ export function RunReviewQueue() {
 }
 export function RunApprovalQueue() {
   return <RunTaskQueue steps={['APPROVAL', 'COVER']} permission={RUN_APPROVE} title="Payroll run approvals" />;
+}
+
+/** The note after a decision of a hold, stop or input task: its outcome, or that the same decision had already been recorded. */
+function decidedNote(name: string, replayed: boolean, outcome: string): string {
+  return replayed ? `${name}: this decision had already been recorded; nothing was applied twice.` : `${name}: ${outcome}.`;
 }
 
 /** A task decision (approve or reject) with its idempotency key per intended decision; the reason is needed to reject. */
@@ -187,29 +233,25 @@ function TaskDecision({
     decide.mutate({ decision, idempotencyKey: key, ...(text ? { reason: text } : {}), ...(mode ? { confirmMode: mode } : {}) });
   };
   return (
-    <div className="stack" style={{ marginTop: '0.5rem' }}>
+    <div className="mt-2 flex flex-col gap-3">
       {confirmMode && (
-        <label className="check">
+        <CheckField>
           <input type="checkbox" checked={modeConfirmed} onChange={(e) => setModeConfirmed(e.target.checked)} /> {`I approve the mode: ${label(STOP_MODE, confirmMode)}`}
-        </label>
+        </CheckField>
       )}
-      <label htmlFor={reasonId}>
+      <FormField htmlFor={reasonId}>
         Reason (needed to reject)
-        <textarea id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-      </label>
-      <div className="row">
-        <button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')} aria-label={`Approve ${name}`}>
+        <Textarea id={reasonId} value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} />
+      </FormField>
+      <ButtonRow>
+        <Button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')} aria-label={`Approve ${name}`}>
           Approve
-        </button>
-        <button type="button" className="secondary" disabled={decide.isPending} onClick={() => send('REJECT')} aria-label={`Reject ${name}`}>
+        </Button>
+        <Button type="button" variant="outline" disabled={decide.isPending} onClick={() => send('REJECT')} aria-label={`Reject ${name}`}>
           Reject
-        </button>
-      </div>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
+        </Button>
+      </ButtonRow>
+      <Missing text={problem} />
       <Problem error={decide.error} act={act} />
     </div>
   );
@@ -230,28 +272,26 @@ export function HoldDecisionQueue() {
   if (!can(HOLD_READ)) {
     return (
       <Section title="Salary holds to decide">
-        <p className="hint">The selected role cannot list salary holds.</p>
+        <Hint>The selected role cannot list salary holds.</Hint>
       </Section>
     );
   }
   const refresh = () => qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('payroll-hold') });
   return (
     <Section title="Salary holds to decide">
-      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
+      {tasks.isPending && <LoadingLine>Loading your tasks…</LoadingLine>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
-        <p key={n.id} role="status" className="ok">
-          {n.text}
-        </p>
+        <Notice key={n.id} notice={{ text: n.text, ok: true }} />
       ))}
       {tasks.data && tasks.data.items.length === 0 && <Empty>No salary hold is waiting for you.</Empty>}
       {tasks.data && tasks.data.items.length > 0 && (
-        <ul style={PLAIN_LIST} className="stack">
+        <ul className={TASK_LIST}>
           {tasks.data.items.map(({ taskId, hold: h }) => {
             const name = h ? `${label(HOLD_KIND, h.holdKind)} of ${h.employeeCode} for ${h.periodCode}` : 'Salary hold';
             return (
-              <li key={taskId} aria-label={name} className="card">
-                <h3 style={H3}>{name}</h3>
+              <TaskCard key={taskId} aria-label={name}>
+                <CardSubheading>{name}</CardSubheading>
                 <DelegatedBadge taskId={taskId} />
                 {h ? (
                   <dl className="kv">
@@ -262,10 +302,10 @@ export function HoldDecisionQueue() {
                     {h.releaseCriterion && <Fact term="Release criterion">{h.releaseCriterion}</Fact>}
                   </dl>
                 ) : (
-                  <p className="hint">The hold is not available in the selected role’s scope.</p>
+                  <Hint>The hold is not available in the selected role’s scope.</Hint>
                 )}
                 {h !== null && h.proposedBy === me?.userId ? (
-                  <p className="hint">You proposed this hold, so someone else decides it.</p>
+                  <Hint>You proposed this hold, so someone else decides it.</Hint>
                 ) : (
                   <TaskDecision
                     path={`/v1/payroll/hold-tasks/${encodeURIComponent(taskId)}/decision`}
@@ -274,15 +314,13 @@ export function HoldDecisionQueue() {
                     name={name}
                     onRefused={() => void refresh()}
                     onDecided={(decision, r) => {
-                      setNotes((prev) => [
-                        ...prev,
-                        { id: taskId, text: r.replayed ? `${name}: this decision had already been recorded; nothing was applied twice.` : `${name}: ${decision === 'APPROVE' ? 'approved; the payment is withheld' : 'rejected; nothing is withheld'}.` },
-                      ]);
+                      const outcome = decision === 'APPROVE' ? 'approved; the payment is withheld' : 'rejected; nothing is withheld';
+                      setNotes((prev) => [...prev, { id: taskId, text: decidedNote(name, r.replayed, outcome) }]);
                       void refresh();
                     }}
                   />
                 )}
-              </li>
+              </TaskCard>
             );
           })}
         </ul>
@@ -306,28 +344,26 @@ export function StopDecisionQueue() {
   if (!can(STOP_READ)) {
     return (
       <Section title="Salary stops to decide">
-        <p className="hint">The selected role cannot list salary stops.</p>
+        <Hint>The selected role cannot list salary stops.</Hint>
       </Section>
     );
   }
   const refresh = () => qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('payroll-stop') });
   return (
     <Section title="Salary stops to decide">
-      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
+      {tasks.isPending && <LoadingLine>Loading your tasks…</LoadingLine>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
-        <p key={n.id} role="status" className="ok">
-          {n.text}
-        </p>
+        <Notice key={n.id} notice={{ text: n.text, ok: true }} />
       ))}
       {tasks.data && tasks.data.items.length === 0 && <Empty>No salary stop is waiting for you.</Empty>}
       {tasks.data && tasks.data.items.length > 0 && (
-        <ul style={PLAIN_LIST} className="stack">
+        <ul className={TASK_LIST}>
           {tasks.data.items.map(({ taskId, stop: s }) => {
             const name = s ? `Salary stop of ${s.employeeCode} for ${s.periodCode}` : 'Salary stop';
             return (
-              <li key={taskId} aria-label={name} className="card">
-                <h3 style={H3}>{name}</h3>
+              <TaskCard key={taskId} aria-label={name}>
+                <CardSubheading>{name}</CardSubheading>
                 <DelegatedBadge taskId={taskId} />
                 {s ? (
                   <dl className="kv">
@@ -338,10 +374,10 @@ export function StopDecisionQueue() {
                     {s.evidenceReference && <Fact term="Evidence">{s.evidenceReference}</Fact>}
                   </dl>
                 ) : (
-                  <p className="hint">The salary stop is not available in the selected role’s scope.</p>
+                  <Hint>The salary stop is not available in the selected role’s scope.</Hint>
                 )}
                 {s && s.proposedBy === me?.userId ? (
-                  <p className="hint">You proposed this salary stop, so someone else decides it.</p>
+                  <Hint>You proposed this salary stop, so someone else decides it.</Hint>
                 ) : (
                   <TaskDecision
                     path={`/v1/payroll/stop-tasks/${encodeURIComponent(taskId)}/decision`}
@@ -351,15 +387,12 @@ export function StopDecisionQueue() {
                     onRefused={() => void refresh()}
                     {...(s ? { confirmMode: s.mode } : {})}
                     onDecided={(decision, r) => {
-                      setNotes((prev) => [
-                        ...prev,
-                        { id: taskId, text: r.replayed ? `${name}: this decision had already been recorded; nothing was applied twice.` : `${name}: ${decision === 'APPROVE' ? 'approved' : 'rejected'}.` },
-                      ]);
+                      setNotes((prev) => [...prev, { id: taskId, text: decidedNote(name, r.replayed, decision === 'APPROVE' ? 'approved' : 'rejected') }]);
                       void refresh();
                     }}
                   />
                 )}
-              </li>
+              </TaskCard>
             );
           })}
         </ul>
@@ -384,27 +417,27 @@ export function InputDecisionQueue() {
   if (!can(INPUT_READ)) {
     return (
       <Section title="Payroll inputs to approve">
-        <p className="hint">The selected role cannot list payroll input batches.</p>
+        <Hint>The selected role cannot list payroll input batches.</Hint>
       </Section>
     );
   }
   const refresh = () => qc.invalidateQueries(byPrefix('payroll-input'));
   return (
     <Section title="Payroll inputs to approve">
-      <p className="hint">An approved batch is used by the next calculation of its period; a rejected one is never used.</p>
-      {tasks.isPending && <p className="hint loading">Loading your tasks…</p>}
+      <Hint>An approved batch is used by the next calculation of its period; a rejected one is never used.</Hint>
+      {tasks.isPending && <LoadingLine>Loading your tasks…</LoadingLine>}
       {tasks.error && <Problem error={tasks.error} act="read" />}
       {notes.map((n) => (
         <Note key={n.id} text={n.text} />
       ))}
       {tasks.data && tasks.data.items.length === 0 && <Empty>No input batch is waiting for you.</Empty>}
       {tasks.data && tasks.data.items.length > 0 && (
-        <ul style={PLAIN_LIST} className="stack">
+        <ul className={TASK_LIST}>
           {tasks.data.items.map(({ taskId, batch: b }) => {
             const name = b ? `Input batch of ${b.periodCode} with ${b.lineCount} ${b.lineCount === 1 ? 'line' : 'lines'}` : 'Input batch';
             return (
-              <li key={taskId} aria-label={name} className="card">
-                <h3 style={H3}>{name}</h3>
+              <TaskCard key={taskId} aria-label={name}>
+                <CardSubheading>{name}</CardSubheading>
                 <DelegatedBadge taskId={taskId} />
                 {b ? (
                   <>
@@ -412,16 +445,16 @@ export function InputDecisionQueue() {
                       <Fact term="Source">{label(INPUT_SOURCE, b.source)}</Fact>
                       <Fact term="Submitted">{formatDate(b.submittedAt)}</Fact>
                     </dl>
-                    <button type="button" className="link" onClick={() => setShown(shown === b.id ? null : b.id)} aria-label={`${shown === b.id ? 'Hide' : 'Show'} the lines of ${name}`}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShown(shown === b.id ? null : b.id)} aria-label={`${shown === b.id ? 'Hide' : 'Show'} the lines of ${name}`}>
                       {shown === b.id ? 'Hide the lines' : 'Show the lines'}
-                    </button>
+                    </Button>
                     {shown === b.id && <InputBatchView id={b.id} withActions={false} />}
                   </>
                 ) : (
-                  <p className="hint">The batch is not available in the selected role’s scope.</p>
+                  <Hint>The batch is not available in the selected role’s scope.</Hint>
                 )}
                 {b !== null && b.preparedBy === me?.userId ? (
-                  <p className="hint">You prepared this batch, so someone else decides it.</p>
+                  <Hint>You prepared this batch, so someone else decides it.</Hint>
                 ) : (
                   <TaskDecision
                     path={`/v1/payroll/input-tasks/${encodeURIComponent(taskId)}/decision`}
@@ -430,20 +463,13 @@ export function InputDecisionQueue() {
                     name={name}
                     onRefused={() => void refresh()}
                     onDecided={(decision, r) => {
-                      setNotes((prev) => [
-                        ...prev,
-                        {
-                          id: taskId,
-                          text: r.replayed
-                            ? `${name}: this decision had already been recorded; nothing was applied twice.`
-                            : `${name}: ${decision === 'APPROVE' ? 'approved; the next calculation of the period uses these inputs' : 'rejected; none of its inputs is used'}.`,
-                        },
-                      ]);
+                      const outcome = decision === 'APPROVE' ? 'approved; the next calculation of the period uses these inputs' : 'rejected; none of its inputs is used';
+                      setNotes((prev) => [...prev, { id: taskId, text: decidedNote(name, r.replayed, outcome) }]);
                       void refresh();
                     }}
                   />
                 )}
-              </li>
+              </TaskCard>
             );
           })}
         </ul>

@@ -2,12 +2,39 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, isForbidden, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, ErrorNote, NotPermitted, Section } from '../../ui';
 import { PendingApprovals, UserAssignments } from './grants';
 import { ProposeGrant } from './proposal';
-import { type AccessUser, APPROVE_GRANT, ASSIGN_ROLE, byId, type CatalogueRole, DIMENSION_NOUN, type GrantView, type OrgItem, type OrgKind, PAGE_SIZE, READ_USERS, SCROLL, type SelectedUser, shown, useAccessKeys, useOrgMaster } from './shared';
+import {
+  type AccessUser,
+  APPROVE_GRANT,
+  ASSIGN_ROLE,
+  byId,
+  type CatalogueRole,
+  DIMENSION_NOUN,
+  type GrantView,
+  type OrgItem,
+  type OrgKind,
+  PAGE_SIZE,
+  READ_USERS,
+  type SelectedUser,
+  shown,
+  useAccessKeys,
+  useOrgMaster,
+} from './shared';
+
+/** The selected user's assignments and the proposal form, one card under another. */
+const SELECTED_USER = 'flex flex-col gap-4';
 
 // ---------------------------------------------------------------------------------------------------------
 // Page
@@ -15,7 +42,7 @@ import { type AccessUser, APPROVE_GRANT, ASSIGN_ROLE, byId, type CatalogueRole, 
 
 export function AccessAdminPage() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint loading">Loading…</p>;
+  if (!me) return <LoadingLine>Loading…</LoadingLine>;
   if (!can(READ_USERS)) {
     return (
       <Section title="User access">
@@ -119,86 +146,86 @@ function AccessAdministration({ accountKey }: { accountKey: string }) {
   return (
     <>
       <h1>User access</h1>
-      <p className="hint">
+      <Hint>
         A role grant starts as a proposal and gives no access until an independent approver approves it; neither its requester nor its beneficiary can approve it. Rejected and
         revoked grants stay on record.
-      </p>
+      </Hint>
 
       {can(APPROVE_GRANT) && <PendingApprovals view={view} onSelectUser={select} />}
 
       <Section title={`Users${usersData ? ` (${usersData.total})` : ''}`}>
-        {/* A filter row: the label sits above its field, as everywhere else. */}
-        <div className="inline">
-          <label className="inline">
+        <FilterBar>
+          <FormField>
             Search users
-            <input type="search" value={search} maxLength={100} placeholder="Account or employee" onChange={(e) => setSearch(e.target.value)} />
-          </label>
-        </div>
-        {users.isPending && <p className="hint loading">Loading users…</p>}
+            <Input type="search" value={search} maxLength={100} placeholder="Account or employee" onChange={(e) => setSearch(e.target.value)} />
+          </FormField>
+        </FilterBar>
+        {users.isPending && <LoadingLine>Loading users…</LoadingLine>}
         {isForbidden(users.error) ? <NotPermitted>The selected role cannot list users for access administration.</NotPermitted> : <ErrorNote error={users.error} />}
         {usersData && !users.isPlaceholderData && usersData.total === 0 && (
           <Empty>{query ? `No users match “${query}”.` : 'No users in your administrative scope.'}</Empty>
         )}
         {usersData && usersData.items.length > 0 && (
           <>
-            <div style={SCROLL}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Account</th>
-                    <th>Employee code</th>
-                    <th>Name</th>
-                    <th>Active assignments</th>
-                    <th>Pending assignments</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {usersData.items.map((u) => {
-                    const isSelected = u.userId === selectedId;
-                    return (
-                      <tr key={u.userId}>
-                        <td>
-                          {u.accountKey} {!u.active && <Badge tone="bad">inactive</Badge>} {isSelected && <Badge tone="good">selected</Badge>}
-                        </td>
-                        <td>{u.employee?.employeeCode ?? '—'}</td>
-                        <td>{u.employee ? u.employee.displayName : <span className="hint">No employee link</span>}</td>
-                        <td>{u.assignments.active}</td>
-                        <td>{u.assignments.pending}</td>
-                        <td>
-                          <button
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Account</TableHead>
+                  <TableHead scope="col">Employee code</TableHead>
+                  <TableHead scope="col">Name</TableHead>
+                  <TableHead scope="col">Active assignments</TableHead>
+                  <TableHead scope="col">Pending assignments</TableHead>
+                  <TableHead scope="col">Details</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {usersData.items.map((u) => {
+                  const isSelected = u.userId === selectedId;
+                  return (
+                    <TableRow key={u.userId}>
+                      <TableCell>
+                        {u.accountKey} {!u.active && <Badge tone="bad">inactive</Badge>} {isSelected && <Badge tone="good">selected</Badge>}
+                      </TableCell>
+                      <TableCell>{u.employee?.employeeCode ?? '—'}</TableCell>
+                      <TableCell>{u.employee ? u.employee.displayName : <Hint as="span">No employee link</Hint>}</TableCell>
+                      <TableCell>{u.assignments.active}</TableCell>
+                      <TableCell>{u.assignments.pending}</TableCell>
+                      <RowActionsCell>
+                        <RowActions>
+                          <Button
                             type="button"
-                            className="link"
+                            variant="outline"
+                            size="sm"
                             aria-pressed={isSelected}
                             aria-label={`Show assignments for ${u.accountKey}`}
                             onClick={() => select(u.userId, u.accountKey)}
                           >
                             Show assignments
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="pager">
-              <button type="button" className="secondary" disabled={page <= 1 || users.isPlaceholderData} onClick={() => setPage(page - 1)}>
+                          </Button>
+                        </RowActions>
+                      </RowActionsCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            <PagerRow>
+              <PagerButton disabled={page <= 1 || users.isPlaceholderData} onClick={() => setPage(page - 1)}>
                 Previous
-              </button>
-              <span>
+              </PagerButton>
+              <PagerCount>
                 Page {page} of {pages}
-              </span>
-              <button type="button" className="secondary" disabled={page >= pages || users.isPlaceholderData} onClick={() => setPage(page + 1)}>
+              </PagerCount>
+              <PagerButton disabled={page >= pages || users.isPlaceholderData} onClick={() => setPage(page + 1)}>
                 Next
-              </button>
-            </div>
+              </PagerButton>
+            </PagerRow>
           </>
         )}
       </Section>
 
       {selected && (
-        <div ref={panel} className="stack" style={{ gap: '1rem' }}>
+        <div ref={panel} className={SELECTED_USER}>
           <UserAssignments
             key={selected.userId}
             userId={selected.userId}

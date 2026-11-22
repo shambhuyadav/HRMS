@@ -2,12 +2,22 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, LIST_PAGE_SIZE, Pager, pageParams, Section } from '../../ui';
+import { Empty, LIST_PAGE_SIZE, Notice, Pager, pageParams, Section } from '../../ui';
 import { HoldDetailView, HoldRenew, HoldWithdraw } from './hold-proposals';
+import { Missing } from './pickers';
 import { Problem, ReasonForm } from './problems';
-import { Fact, type Hold, HOLD_DECIDE, HOLD_KIND, HOLD_PROPOSE, HOLD_RELEASE, HOLD_STATE, type HoldTotals, label, money, type SalaryStop, SCROLL, Status, STOP_DECIDE, STOP_MODE, STOP_PROPOSE, STOP_STATE, TEXTAREA, useKeys } from './shared';
+import { Fact, type Hold, HOLD_DECIDE, HOLD_KIND, HOLD_PROPOSE, HOLD_RELEASE, HOLD_STATE, type HoldTotals, label, money, type SalaryStop, Status, STOP_DECIDE, STOP_MODE, STOP_PROPOSE, STOP_STATE, useKeys } from './shared';
 
 // =========================================================================================================
 // Salary holds and salary stops: decisions and release (proposals need verified evidence documents: not here)
@@ -15,15 +25,47 @@ import { Fact, type Hold, HOLD_DECIDE, HOLD_KIND, HOLD_PROPOSE, HOLD_RELEASE, HO
 
 const HOLD_FILTERS = ['PROPOSED', 'APPROVED_ACTIVE', 'EXPIRED_REVIEW', 'RELEASED', 'REJECTED', 'WITHDRAWN'];
 
-export function HoldList() {
+type HoldAction = 'release' | 'withdraw' | 'renew' | 'details';
+
+/** The actions on one hold of the list: its details, and what the selected role may do with it in its state. */
+function HoldRowActions({ hold: h, onOpen }: { hold: Hold; onOpen: (action: HoldAction) => void }) {
   const { can, me } = useSession();
+  const live = h.state === 'APPROVED_ACTIVE' || h.state === 'EXPIRED_REVIEW';
+  const maker = h.proposedBy === me?.userId;
+  const of = `${h.employeeCode} for ${h.periodCode}`;
+  return (
+    <RowActions>
+      <Button type="button" variant="outline" size="sm" onClick={() => onOpen('details')} aria-label={`Details of the hold of ${of}`}>
+        Details
+      </Button>
+      {live && can(HOLD_RELEASE) && (
+        <Button type="button" variant="outline" size="sm" onClick={() => onOpen('release')} aria-label={`Release the hold of ${of}`}>
+          Release
+        </Button>
+      )}
+      {h.state === 'PROPOSED' && maker && can(HOLD_PROPOSE) && (
+        <Button type="button" variant="outline" size="sm" onClick={() => onOpen('withdraw')} aria-label={`Withdraw the hold proposal of ${of}`}>
+          Withdraw
+        </Button>
+      )}
+      {h.state === 'EXPIRED_REVIEW' && h.holdKind === 'POLICY_HOLD' && can(HOLD_DECIDE) && (
+        <Button type="button" variant="outline" size="sm" onClick={() => onOpen('renew')} aria-label={`Renew the review of the hold of ${of}`}>
+          Renew review
+        </Button>
+      )}
+    </RowActions>
+  );
+}
+
+export function HoldList() {
+  const { me } = useSession();
   const keys = useKeys();
   const qc = useQueryClient();
   const [state, setState] = useState('');
-  const [acting, setActing] = useState<{ hold: Hold; action: 'release' | 'withdraw' | 'renew' | 'details' } | null>(null);
+  const [acting, setActing] = useState<{ hold: Hold; action: HoldAction } | null>(null);
   const releasing = acting?.action === 'release' ? acting.hold : null;
   const [note, setNote] = useState<string | null>(null);
-  const open = (hold: Hold, action: 'release' | 'withdraw' | 'renew' | 'details') => {
+  const open = (hold: Hold, action: HoldAction) => {
     setNote(null);
     setActing(acting?.hold.id === hold.id && acting.action === action ? null : { hold, action });
   };
@@ -44,9 +86,9 @@ export function HoldList() {
     <Section
       title="Salary holds"
       actions={
-        <label className="inline">
+        <FormField className="w-auto">
           State
-          <select
+          <NativeSelect
             value={state}
             onChange={(e) => {
               setState(e.target.value);
@@ -59,86 +101,56 @@ export function HoldList() {
                 {label(HOLD_STATE, s)}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       }
     >
-      <p className="hint">
+      <Hint>
         A hold withholds payment of earned salary; it never reduces what was earned. A released amount is paid only through a new manifest and a confirmed outcome. A hold is proposed from the member list of a processed payroll run.
-      </p>
-      {holds.isPending && <p className="hint loading">Loading holds…</p>}
+      </Hint>
+      {holds.isPending && <LoadingLine>Loading holds…</LoadingLine>}
       {holds.error && <Problem error={holds.error} act="read" />}
-      {note && (
-        <p role="status" className="ok">
-          {note}
-        </p>
-      )}
+      <Notice notice={note ? { text: note, ok: true } : null} />
       {holds.data && holds.data.items.length === 0 && <Empty>No salary holds in the selected role’s scope.</Empty>}
       {holds.data && holds.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Salary holds">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Period</th>
-                <th>Kind</th>
-                <th>Held</th>
-                <th>State</th>
-                <th>Review due</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {holds.data.items.map((h) => {
-                const live = h.state === 'APPROVED_ACTIVE' || h.state === 'EXPIRED_REVIEW';
-                const maker = h.proposedBy === me?.userId;
-                const of = `${h.employeeCode} for ${h.periodCode}`;
-                return (
-                  <tr key={h.id}>
-                    <td>{`${h.employeeCode} ${h.employeeName}`}</td>
-                    <td>{`${h.periodCode} revision ${h.runRevision}`}</td>
-                    <td>{label(HOLD_KIND, h.holdKind)}</td>
-                    <td>{h.scope === 'PARTIAL' ? money(h.holdAmount, h.currencyCode) : 'Full net pay'}</td>
-                    <td>
-                      <Status map={HOLD_STATE} code={h.state} />
-                    </td>
-                    <td>{formatDate(h.reviewDueOn)}</td>
-                    <td>
-                      <div className="row">
-                        <button type="button" className="link" onClick={() => open(h, 'details')} aria-label={`Details of the hold of ${of}`}>
-                          Details
-                        </button>
-                        {live && can(HOLD_RELEASE) && (
-                          <button type="button" className="link" onClick={() => open(h, 'release')} aria-label={`Release the hold of ${of}`}>
-                            Release
-                          </button>
-                        )}
-                        {h.state === 'PROPOSED' && maker && can(HOLD_PROPOSE) && (
-                          <button type="button" className="link" onClick={() => open(h, 'withdraw')} aria-label={`Withdraw the hold proposal of ${of}`}>
-                            Withdraw
-                          </button>
-                        )}
-                        {h.state === 'EXPIRED_REVIEW' && h.holdKind === 'POLICY_HOLD' && can(HOLD_DECIDE) && (
-                          <button type="button" className="link" onClick={() => open(h, 'renew')} aria-label={`Renew the review of the hold of ${of}`}>
-                            Renew review
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Salary holds">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Period</TableHead>
+              <TableHead scope="col">Kind</TableHead>
+              <TableHead scope="col">Held</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Review due</TableHead>
+              <TableHead scope="col">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {holds.data.items.map((h) => (
+              <TableRow key={h.id}>
+                <TableCell>{`${h.employeeCode} ${h.employeeName}`}</TableCell>
+                <TableCell>{`${h.periodCode} revision ${h.runRevision}`}</TableCell>
+                <TableCell>{label(HOLD_KIND, h.holdKind)}</TableCell>
+                <TableCell>{h.scope === 'PARTIAL' ? money(h.holdAmount, h.currencyCode) : 'Full net pay'}</TableCell>
+                <TableCell>
+                  <Status map={HOLD_STATE} code={h.state} />
+                </TableCell>
+                <TableCell>{formatDate(h.reviewDueOn)}</TableCell>
+                <RowActionsCell>
+                  <HoldRowActions hold={h} onOpen={(action) => open(h, action)} />
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {holds.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={holds.data.total ?? holds.data.items.length} onPage={setPage} label="Hold pages" noun="hold" />}
       {holds.data?.totals && holds.data.totals.length > 0 && (
         <>
-          <p className="hint">
+          <Hint>
             Totals of every hold matching the filter, on all pages: the held salary still owed until its payment is confirmed (once per payroll record, never more than the record pays), what the payment
             allocations of released holds have reserved, and what the bank confirmed paid less reversals.
-          </p>
+          </Hint>
           {holds.data.totals.map((t) => (
             <dl key={t.currencyCode} className="kv" aria-label={`Hold totals in ${t.currencyCode}`}>
               {t.outstanding !== undefined && <Fact term="Outstanding (held, not yet confirmed paid)">{money(t.outstanding, t.currencyCode)}</Fact>}
@@ -148,7 +160,7 @@ export function HoldList() {
           ))}
         </>
       )}
-      {releasing &&<ReleaseForm key={releasing.id} hold={releasing} maker={releasing.holdKind !== 'PAYMENT_SAFETY_BLOCK' && releasing.proposedBy === me?.userId} onDone={done} />}
+      {releasing && <ReleaseForm key={releasing.id} hold={releasing} maker={releasing.holdKind !== 'PAYMENT_SAFETY_BLOCK' && releasing.proposedBy === me?.userId} onDone={done} />}
       {acting?.action === 'details' && <HoldDetailView key={acting.hold.id} id={acting.hold.id} />}
       {acting?.action === 'withdraw' && <HoldWithdraw key={acting.hold.id} hold={acting.hold} onDone={done} />}
       {acting?.action === 'renew' && <HoldRenew key={acting.hold.id} hold={acting.hold} maker={acting.hold.proposedBy === me?.userId} onDone={done} />}
@@ -177,38 +189,36 @@ function ReleaseForm({ hold, maker, onDone }: { hold: Hold; maker: boolean; onDo
   };
   const name = `Release the hold of ${hold.employeeCode}`;
   return (
-    <form onSubmit={submit} aria-label={name} className="grid-form" style={{ marginTop: '0.5rem' }}>
-      {maker && <p className="hint wide">You proposed this hold, so someone else releases it.</p>}
-      <label className="wide">
+    <FormGrid onSubmit={submit} aria-label={name}>
+      {maker && <Hint>You proposed this hold, so someone else releases it.</Hint>}
+      <FormField className="col-span-full">
         Reason for the release
-        <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-      </label>
-      <label>
+        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} />
+      </FormField>
+      <FormField>
         Evidence reference
-        <input value={evidence} onChange={(e) => setEvidence(e.target.value)} maxLength={500} autoComplete="off" />
-      </label>
-      <div className="row">
-        <button type="submit" disabled={release.isPending || maker}>
+        <Input value={evidence} onChange={(e) => setEvidence(e.target.value)} maxLength={500} autoComplete="off" />
+      </FormField>
+      <ButtonRow>
+        <Button type="submit" disabled={release.isPending || maker}>
           {release.isPending ? 'Releasing…' : 'Release the hold'}
-        </button>
-      </div>
-      {problem && (
-        <p role="alert" className="error wide">
-          {problem}
-        </p>
-      )}
-      <div className="wide">
+        </Button>
+      </ButtonRow>
+      <Missing text={problem} />
+      <div className="col-span-full">
         <Problem error={release.error} act="hold-release" />
       </div>
-    </form>
+    </FormGrid>
   );
 }
+
+type StopAction = 'withdraw' | 'revoke';
 
 export function StopList() {
   const { can, me } = useSession();
   const keys = useKeys();
   const qc = useQueryClient();
-  const [acting, setActing] = useState<{ stop: SalaryStop; action: 'withdraw' | 'revoke' } | null>(null);
+  const [acting, setActing] = useState<{ stop: SalaryStop; action: StopAction } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   // FR-056: one page at a time; `total` counts every salary stop in scope.
@@ -218,7 +228,7 @@ export function StopList() {
     retry: retryTransient,
   });
   const change = useMutation({
-    mutationFn: ({ stop: s, action, reason }: { stop: SalaryStop; action: 'withdraw' | 'revoke'; reason: string }) =>
+    mutationFn: ({ stop: s, action, reason }: { stop: SalaryStop; action: StopAction; reason: string }) =>
       api<SalaryStop>(`/v1/payroll/salary-stops/${encodeURIComponent(s.id)}/${action}`, { body: action === 'withdraw' ? { reason } : { reason, expectedVersion: s.version } }),
     onSuccess: (s, { action }) => {
       setActing(null);
@@ -227,50 +237,50 @@ export function StopList() {
     onSettled: () => qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[0] === 'string' && q.queryKey[0].startsWith('payroll-stop') }),
   });
   /** What the selected role may do with a stop: withdraw its own proposal, or revoke an approved stop it did not make. */
-  const actionOf = (s: SalaryStop): 'withdraw' | 'revoke' | null =>
-    s.state === 'SUBMITTED' && s.proposedBy === me?.userId && can(STOP_PROPOSE) ? 'withdraw' : s.state === 'APPROVED' && s.proposedBy !== me?.userId && can(STOP_DECIDE) ? 'revoke' : null;
+  const actionOf = (s: SalaryStop): StopAction | null => {
+    if (s.state === 'SUBMITTED' && s.proposedBy === me?.userId && can(STOP_PROPOSE)) return 'withdraw';
+    return s.state === 'APPROVED' && s.proposedBy !== me?.userId && can(STOP_DECIDE) ? 'revoke' : null;
+  };
   const withActions = (stops.data?.items ?? []).some((s) => actionOf(s) !== null);
   return (
     <Section title="Salary stops">
-      {stops.isPending && <p className="hint loading">Loading salary stops…</p>}
+      {stops.isPending && <LoadingLine>Loading salary stops…</LoadingLine>}
       {stops.error && <Problem error={stops.error} act="read" />}
-      {note && (
-        <p role="status" className="ok">
-          {note}
-        </p>
-      )}
+      <Notice notice={note ? { text: note, ok: true } : null} />
       {stops.data && stops.data.items.length === 0 && <Empty>No salary stops in the selected role’s scope.</Empty>}
       {stops.data && stops.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Salary stops">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Period</th>
-                <th>Mode</th>
-                <th>State</th>
-                <th>Decided</th>
-                {withActions && <th>Change</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {stops.data.items.map((s) => {
-                const action = actionOf(s);
-                return (
-                  <tr key={s.id}>
-                    <td>{`${s.employeeCode} ${s.employeeName}`}</td>
-                    <td>{s.periodCode}</td>
-                    <td>{label(STOP_MODE, s.approvedMode ?? s.mode)}</td>
-                    <td>
-                      <Status map={STOP_STATE} code={s.state} />
-                    </td>
-                    <td>{formatDate(s.decidedAt)}</td>
-                    {withActions && (
-                      <td>
-                        {action ? (
-                          <button
+        <Table aria-label="Salary stops">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Period</TableHead>
+              <TableHead scope="col">Mode</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Decided</TableHead>
+              {withActions && <TableHead scope="col">Change</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {stops.data.items.map((s) => {
+              const action = actionOf(s);
+              return (
+                <TableRow key={s.id}>
+                  <TableCell>{`${s.employeeCode} ${s.employeeName}`}</TableCell>
+                  <TableCell>{s.periodCode}</TableCell>
+                  <TableCell>{label(STOP_MODE, s.approvedMode ?? s.mode)}</TableCell>
+                  <TableCell>
+                    <Status map={STOP_STATE} code={s.state} />
+                  </TableCell>
+                  <TableCell>{formatDate(s.decidedAt)}</TableCell>
+                  {withActions && (
+                    <RowActionsCell>
+                      {action ? (
+                        <RowActions>
+                          {/* Revoking ends an approved stop; withdrawing only takes back one's own proposal. */}
+                          <Button
                             type="button"
-                            className="link"
+                            variant={action === 'revoke' ? 'danger' : 'outline'}
+                            size="sm"
                             disabled={change.isPending}
                             onClick={() => {
                               change.reset();
@@ -280,18 +290,18 @@ export function StopList() {
                             aria-label={`${action === 'withdraw' ? 'Withdraw' : 'Revoke'} the salary stop of ${s.employeeCode} for ${s.periodCode}`}
                           >
                             {action === 'withdraw' ? 'Withdraw' : 'Revoke'}
-                          </button>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                          </Button>
+                        </RowActions>
+                      ) : (
+                        '—'
+                      )}
+                    </RowActionsCell>
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
       {stops.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={stops.data.total ?? stops.data.items.length} onPage={setPage} label="Salary stop pages" noun="salary stop" />}
       {acting && (

@@ -1,7 +1,13 @@
 // Allocation and timesheet-entry imports (FR-046 bulk upload; FR-047 imported entries) through the shared batch screens.
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { CircleAlertIcon } from 'lucide-react';
 import { type FormEvent, useRef, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, ApiError, fileToBase64, idempotencyKey, pinSession } from '../../api';
 import { useSession } from '../../session';
 import { ErrorNote, NotPermitted, Section } from '../../ui';
@@ -133,10 +139,14 @@ function ImportRefusal({ error, t }: { error: unknown; t: TimesheetImport }) {
   const text = importRefusalText(error, t);
   if (text === null) return <ErrorNote error={error} />;
   return (
-    <div role="alert" className="error">
-      {text}
-      <div className="hint">{(error as ApiError).code}</div>
-    </div>
+    <Alert variant="destructive">
+      <CircleAlertIcon aria-hidden="true" />
+      <AlertTitle asChild>
+        <p className="m-0">{text}</p>
+      </AlertTitle>
+      {/* The code stays under the words for support, as the shared error note shows it. */}
+      <AlertDescription className="block text-xs font-semibold tracking-wide">{(error as ApiError).code}</AlertDescription>
+    </Alert>
   );
 }
 
@@ -251,19 +261,19 @@ function ImportBatch({ t }: { t: TimesheetImport }) {
     <div className="stack">
       <Section title={t.label}>
         <form onSubmit={submit} className="stack" aria-label={t.label}>
-          <p className="hint">
+          <Hint>
             CSV with exactly the header <code>{t.columns}</code> (template {t.code}). {t.note} Nothing is applied until you commit a preview, and a batch is applied all or
             nothing: one row with a problem rejects the whole batch.
-          </p>
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <FormField className="w-auto">
               Import file
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         <ImportRefusal error={upload.error ?? resume.error} t={t} />

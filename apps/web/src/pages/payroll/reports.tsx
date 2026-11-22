@@ -3,14 +3,39 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerRow } from '@/components/pager';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, download, formatDate, formatMonth, readable, retryTransient } from '../../api';
 import { isReportRefusal } from '../../report-failures';
 import { useSession } from '../../session';
 import { Badge, Empty, Section } from '../../ui';
 import { ACT_REFUSALS, Problem } from './problems';
 import { ComponentTable } from './run-detail';
-import { BATCH_STATE, Fact, FLUSH, label, money, PATHS, PAYMENT_STATE, REPORT_EXPORT, REPORT_READ, RUN_STATE, SCROLL, Status, STATUTORY_READ, useKeys } from './shared';
+import {
+  BATCH_STATE,
+  Fact,
+  label,
+  money,
+  PATHS,
+  PAYMENT_STATE,
+  REPORT_EXPORT,
+  REPORT_READ,
+  RUN_STATE,
+  Status,
+  STATUTORY_READ,
+  useKeys,
+} from './shared';
 import type { RunComponents } from './types';
+
+/** A small form on one line (an export's format, the TDS register's quarter): its fields, then its button, bottoms lined up. */
+const FIELDS_AND_BUTTON = 'flex flex-wrap items-end gap-2';
 
 // =========================================================================================================
 // Reports (FR-038) and statutory outputs (FR-039): exactly as returned, nothing computed here
@@ -98,28 +123,28 @@ function RunReportExport({ runId, reportCode, name }: { runId: string; reportCod
   });
   if (!can(REPORT_EXPORT)) return null;
   return (
-    <div style={{ marginTop: '0.5rem' }}>
+    <div className="mt-2">
       <form
-        className="row"
+        className={FIELDS_AND_BUTTON}
         aria-label={`Export the ${name}`}
         onSubmit={(e) => {
           e.preventDefault();
           request.mutate(format);
         }}
       >
-        <label className="inline">
+        <FormField className="w-auto">
           Format
-          <select value={format} onChange={(e) => setFormat(e.target.value)}>
+          <NativeSelect value={format} onChange={(e) => setFormat(e.target.value)}>
             {EXPORT_FORMATS.map((f) => (
               <option key={f} value={f}>
                 {f}
               </option>
             ))}
-          </select>
-        </label>
-        <button type="submit" className="secondary" disabled={request.isPending}>
+          </NativeSelect>
+        </FormField>
+        <Button type="submit" variant="outline" disabled={request.isPending}>
           {`Export the ${name}`}
-        </button>
+        </Button>
       </form>
       <Problem error={request.error} act="export" />
       {requested && <RunReportExportStatus key={requested} id={requested} name={name} />}
@@ -141,18 +166,18 @@ function RunReportExportStatus({ id, name }: { id: string; name: string }) {
   return (
     <div role="status" aria-label={`Export of the ${name}`}>
       {s ? (
-        <p style={FLUSH}>
+        <p className="my-1">
           {label(EXPORT_STATE, s.state)}
           {s.rowCount !== null && ` · ${s.rowCount} ${s.rowCount === 1 ? 'row' : 'rows'}`}
           {s.state === 'FAILED' && s.failureCode && ` · ${label(ACT_REFUSALS.export ?? {}, s.failureCode)}`}{' '}
           {s.state === 'COMPLETED' && (
-            <button type="button" className="link" onClick={() => download(`/v1/reports/${encodeURIComponent(id)}/download`).catch(setError)}>
+            <Button type="button" variant="link" size="inline" onClick={() => download(`/v1/reports/${encodeURIComponent(id)}/download`).catch(setError)}>
               {`Download ${format}`}
-            </button>
+            </Button>
           )}
         </p>
       ) : (
-        !status.error && <p className="hint">Checking the export…</p>
+        !status.error && <Hint>Checking the export…</Hint>
       )}
       <Problem error={status.error} act="read" />
       <Problem error={error} act="download" />
@@ -166,14 +191,17 @@ export function RunReportsScreen() {
   if (!can(REPORT_READ)) {
     return (
       <Section title="Payroll reports">
-        <Empty>The selected role cannot see payroll reports.</Empty>
+        <Empty refusal>The selected role cannot see payroll reports.</Empty>
       </Section>
     );
   }
   return (
     <div className="stack" key={id}>
-      <p style={FLUSH}>
-        <Link to={PATHS.run(id)}>Back to the payroll run</Link>
+      <p className="my-1">
+        {/* The way back shares its line with the statutory outputs link, so it stays in the line rather than above the page title. */}
+        <BackLink className="order-none mb-0" to={PATHS.run(id)}>
+          Back to the payroll run
+        </BackLink>
         {can(STATUTORY_READ) && (
           <>
             {' · '}
@@ -189,7 +217,7 @@ export function RunReportsScreen() {
       {/* FR-038 reimbursement register (I-40 item 11, I-89 item 1): an export only, under the same export key. */}
       {can(REPORT_EXPORT) && (
         <Section title="Reimbursement register">
-          <p className="hint">Each reimbursement line of the run’s calculated records; the columns await the owner’s approval with samples.</p>
+          <Hint>Each reimbursement line of the run’s calculated records; the columns await the owner’s approval with samples.</Hint>
           <RunReportExport runId={id} reportCode="REIMBURSEMENT_REGISTER" name="reimbursement register" />
         </Section>
       )}
@@ -206,7 +234,7 @@ function RegisterReport({ runId }: { runId: string }) {
   const cur = d?.run.currencyCode;
   return (
     <Section title="Payroll register">
-      {register.isPending && <p className="hint loading">Loading the register…</p>}
+      {register.isPending && <LoadingLine>Loading the register…</LoadingLine>}
       {register.error && <Problem error={register.error} act="read" />}
       {d && (
         <>
@@ -218,7 +246,7 @@ function RegisterReport({ runId }: { runId: string }) {
             <Fact term="Lock version">{d.run.lockVersion ?? '—'}</Fact>
             <Fact term="Processed">{formatDate(d.run.processedAt)}</Fact>
           </dl>
-          {d.scope === 'ROW_SCOPE' && <p className="hint">Only the records within your scope are listed and totalled.</p>}
+          {d.scope === 'ROW_SCOPE' && <Hint>Only the records within your scope are listed and totalled.</Hint>}
           <dl className="kv" aria-label="Register totals">
             <Fact term="Records">{d.totals.records}</Fact>
             <Fact term="Earnings">{money(d.totals.earnings, cur)}</Fact>
@@ -232,69 +260,63 @@ function RegisterReport({ runId }: { runId: string }) {
           </dl>
           {d.items.length === 0 && <Empty>No records in this register.</Empty>}
           {d.items.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label="Payroll register">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Calculation</th>
-                    <th>Salary stop</th>
-                    <th>Paid units</th>
-                    <th>Earnings</th>
-                    <th>Deductions</th>
-                    <th>Net</th>
-                    <th>Held</th>
-                    <th>Reserved, not paid</th>
-                    <th>Paid (confirmed)</th>
-                    <th>Bank</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.items.map((r) => (
-                    <tr key={r.recordId}>
-                      <td>{`${r.employeeCode} ${r.employeeName}`}</td>
-                      <td>{readable(r.calculationStatus)}</td>
-                      <td>{r.salaryStopMode ? readable(r.salaryStopMode) : '—'}</td>
-                      <td>{r.paidUnits ?? '—'}</td>
-                      <td>{money(r.earnings, cur)}</td>
-                      <td>{money(r.deductions, cur)}</td>
-                      <td>{money(r.net, cur)}</td>
-                      <td>{money(r.held, cur)}</td>
-                      <td>{money(r.reserved, cur)}</td>
-                      <td>{money(r.paid, cur)}</td>
-                      <td>{r.bankStatus ? readable(r.bankStatus) : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Payroll register">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Employee</TableHead>
+                  <TableHead scope="col">Calculation</TableHead>
+                  <TableHead scope="col">Salary stop</TableHead>
+                  <TableHead scope="col">Paid units</TableHead>
+                  <TableHead scope="col">Earnings</TableHead>
+                  <TableHead scope="col">Deductions</TableHead>
+                  <TableHead scope="col">Net</TableHead>
+                  <TableHead scope="col">Held</TableHead>
+                  <TableHead scope="col">Reserved, not paid</TableHead>
+                  <TableHead scope="col">Paid (confirmed)</TableHead>
+                  <TableHead scope="col">Bank</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {d.items.map((r) => (
+                  <TableRow key={r.recordId}>
+                    <TableCell>{`${r.employeeCode} ${r.employeeName}`}</TableCell>
+                    <TableCell>{readable(r.calculationStatus)}</TableCell>
+                    <TableCell>{r.salaryStopMode ? readable(r.salaryStopMode) : '—'}</TableCell>
+                    <TableCell>{r.paidUnits ?? '—'}</TableCell>
+                    <TableCell>{money(r.earnings, cur)}</TableCell>
+                    <TableCell>{money(r.deductions, cur)}</TableCell>
+                    <TableCell>{money(r.net, cur)}</TableCell>
+                    <TableCell>{money(r.held, cur)}</TableCell>
+                    <TableCell>{money(r.reserved, cur)}</TableCell>
+                    <TableCell>{money(r.paid, cur)}</TableCell>
+                    <TableCell>{r.bankStatus ? readable(r.bankStatus) : '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
-          <div className="row" style={{ marginTop: '0.5rem' }}>
+          <PagerRow>
             {previous.length > 0 && (
-              <button
-                type="button"
-                className="secondary"
+              <PagerButton
                 onClick={() => {
                   setAfter(previous[previous.length - 1] ?? '');
                   setPrevious(previous.slice(0, -1));
                 }}
               >
                 Previous page
-              </button>
+              </PagerButton>
             )}
             {d.next && (
-              <button
-                type="button"
-                className="secondary"
+              <PagerButton
                 onClick={() => {
                   setPrevious([...previous, after]);
                   setAfter(d.next ?? '');
                 }}
               >
                 Next page
-              </button>
+              </PagerButton>
             )}
-          </div>
+          </PagerRow>
         </>
       )}
       <RunReportExport runId={runId} reportCode="PAYROLL_REGISTER" name="payroll register" />
@@ -309,7 +331,7 @@ function DisbursementReport({ runId }: { runId: string }) {
   const cur = d?.run.currencyCode;
   return (
     <Section title="Disbursement reconciliation">
-      {report.isPending && <p className="hint loading">Loading the reconciliation…</p>}
+      {report.isPending && <LoadingLine>Loading the reconciliation…</LoadingLine>}
       {report.error && <Problem error={report.error} act="read" />}
       {d && (
         <>
@@ -329,37 +351,37 @@ function DisbursementReport({ runId }: { runId: string }) {
               {d.totals.reconciles ? <Badge tone="good">Yes: payable equals held, reserved, paid and ready</Badge> : <Badge tone="bad">No: the figures do not reconcile; report this</Badge>}
             </Fact>
           </dl>
-          {d.paymentStatusSource === 'RECORDED_OUTCOME_EVIDENCE_ONLY' && <p className="hint">Payment status comes only from the outcomes recorded from bank evidence.</p>}
+          {d.paymentStatusSource === 'RECORDED_OUTCOME_EVIDENCE_ONLY' && <Hint>Payment status comes only from the outcomes recorded from bank evidence.</Hint>}
           {d.manifests.length === 0 && <Empty>No bank manifest for this run yet.</Empty>}
           {d.manifests.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label="Manifests of the run">
-                <thead>
-                  <tr>
-                    <th>Template</th>
-                    <th>Manifest revision</th>
-                    <th>State</th>
-                    <th>Lines</th>
-                    <th>Total</th>
-                    <th>Payment states</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.manifests.map((m) => (
-                    <tr key={m.id}>
-                      <td>{`${m.templateCode} version ${m.templateVersion}`}</td>
-                      <td>{m.batchRevision}</td>
-                      <td>
-                        <Status map={BATCH_STATE} code={m.state} />
-                      </td>
-                      <td>{m.lineCount}</td>
-                      <td>{money(m.totalAmount, cur)}</td>
-                      <td>{m.ledger.length === 0 ? '—' : m.ledger.map((l) => `${label(PAYMENT_STATE, l.paymentState)}: ${l.lines} ${l.lines === 1 ? 'line' : 'lines'}, ${money(l.amount, cur)}`).join('; ')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Manifests of the run">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Template</TableHead>
+                  <TableHead scope="col">Manifest revision</TableHead>
+                  <TableHead scope="col">State</TableHead>
+                  <TableHead scope="col">Lines</TableHead>
+                  <TableHead scope="col">Total</TableHead>
+                  <TableHead scope="col">Payment states</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {d.manifests.map((m) => (
+                  <TableRow key={m.id}>
+                    <TableCell>{`${m.templateCode} version ${m.templateVersion}`}</TableCell>
+                    <TableCell>{m.batchRevision}</TableCell>
+                    <TableCell>
+                      <Status map={BATCH_STATE} code={m.state} />
+                    </TableCell>
+                    <TableCell>{m.lineCount}</TableCell>
+                    <TableCell>{money(m.totalAmount, cur)}</TableCell>
+                    <TableCell>
+                      {m.ledger.length === 0 ? '—' : m.ledger.map((l) => `${label(PAYMENT_STATE, l.paymentState)}: ${l.lines} ${l.lines === 1 ? 'line' : 'lines'}, ${money(l.amount, cur)}`).join('; ')}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </>
       )}
@@ -376,10 +398,10 @@ function ComparisonReport({ runId }: { runId: string }) {
   const c = report.data;
   return (
     <Section title="Prior-period comparison">
-      {report.isPending && <p className="hint loading">Loading the comparison…</p>}
+      {report.isPending && <LoadingLine>Loading the comparison…</LoadingLine>}
       {report.error && <Problem error={report.error} act="read" />}
-      {c?.basis === 'SCOPE' && <p className="hint">Your scope covers part of this run: the records in your scope are compared with the same employees’ latest earlier processed records.</p>}
-      {c?.basis === 'RUN' && !c.priorPeriodCode && <p className="hint">No earlier processed run of this calendar and scope to compare with.</p>}
+      {c?.basis === 'SCOPE' && <Hint>Your scope covers part of this run: the records in your scope are compared with the same employees’ latest earlier processed records.</Hint>}
+      {c?.basis === 'RUN' && !c.priorPeriodCode && <Hint>No earlier processed run of this calendar and scope to compare with.</Hint>}
       {c && <ComponentTable c={c} currency={header.data?.run.currencyCode ?? ''} name="Prior-period comparison" />}
       <RunReportExport runId={runId} reportCode="PAYROLL_COMPARISON" name="comparison" />
     </Section>
@@ -454,6 +476,12 @@ const STATUTORY_REGISTERS: { code: string; title: string; facts: [string, string
 
 const MONEY_FACTS = new Set(['pfWages', 'contributionWages', 'esicWages', 'gross', 'wages']);
 
+/** A register's fact for one record: a wage as money, anything else in words, a dash when it has none. */
+function factText(key: string, value: unknown, currency: string | undefined): string {
+  if (value === undefined || value === null) return '—';
+  return MONEY_FACTS.has(key) ? money(String(value), currency) : readable(String(value));
+}
+
 function StatutoryRegisters({ runId }: { runId: string }) {
   const keys = useKeys();
   const [code, setCode] = useState('PF_REGISTER');
@@ -468,27 +496,29 @@ function StatutoryRegisters({ runId }: { runId: string }) {
   const cur = d?.run.currencyCode;
   return (
     <Section title="Statutory registers">
-      <label>
-        Register
-        <select
-          value={code}
-          onChange={(e) => {
-            setCode(e.target.value);
-            setAfter('');
-          }}
-        >
-          {STATUTORY_REGISTERS.map((r) => (
-            <option key={r.code} value={r.code}>
-              {r.title}
-            </option>
-          ))}
-        </select>
-      </label>
-      {register.isPending && <p className="hint loading">Loading the register…</p>}
+      <FilterBar>
+        <FormField>
+          Register
+          <NativeSelect
+            value={code}
+            onChange={(e) => {
+              setCode(e.target.value);
+              setAfter('');
+            }}
+          >
+            {STATUTORY_REGISTERS.map((r) => (
+              <option key={r.code} value={r.code}>
+                {r.title}
+              </option>
+            ))}
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {register.isPending && <LoadingLine>Loading the register…</LoadingLine>}
       {register.error && <Problem error={register.error} act="read" />}
       {d && (
         <>
-          <p className="hint">{d.notice}</p>
+          <Hint>{d.notice}</Hint>
           <dl className="kv" aria-label={`${def.title} totals`}>
             <Fact term="Records">{d.totals.records}</Fact>
             {def.amounts.map(([k, l]) => (
@@ -498,43 +528,45 @@ function StatutoryRegisters({ runId }: { runId: string }) {
             ))}
             <Fact term="Pack revisions">{d.packs.map((p) => `${p.packCode} ${p.packRevision === null ? 'none active' : `revision ${p.packRevision}`}`).join('; ') || '—'}</Fact>
           </dl>
-          {d.scope === 'ROW_SCOPE' && <p className="hint">Only the records within your scope are listed and totalled.</p>}
+          {d.scope === 'ROW_SCOPE' && <Hint>Only the records within your scope are listed and totalled.</Hint>}
           {d.items.length === 0 ? (
             <Empty>No record of this run has a valuation for this register.</Empty>
           ) : (
-            <div style={SCROLL}>
-              <table aria-label={def.title}>
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    {def.facts.map(([k, l]) => (
-                      <th key={k}>{l}</th>
-                    ))}
-                    {def.amounts.map(([k, l]) => (
-                      <th key={k}>{l}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.items.map((i) => (
-                    <tr key={i.recordId}>
-                      <td>{`${i.employeeCode} ${i.employeeName}`}</td>
-                      {def.facts.map(([k]) => (
-                        <td key={k}>{i.facts[k] === undefined || i.facts[k] === null ? '—' : MONEY_FACTS.has(k) ? money(String(i.facts[k]), cur) : readable(String(i.facts[k]))}</td>
-                      ))}
-                      {def.amounts.map(([k]) => (
-                        <td key={k}>{i.amounts[k] === null || i.amounts[k] === undefined ? readable(i.notApplicable[k] ?? 'NOT_APPLICABLE') : money(i.amounts[k], cur)}</td>
-                      ))}
-                    </tr>
+            <Table aria-label={def.title}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Employee</TableHead>
+                  {def.facts.map(([k, l]) => (
+                    <TableHead key={k} scope="col">
+                      {l}
+                    </TableHead>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                  {def.amounts.map(([k, l]) => (
+                    <TableHead key={k} scope="col">
+                      {l}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {d.items.map((i) => (
+                  <TableRow key={i.recordId}>
+                    <TableCell>{`${i.employeeCode} ${i.employeeName}`}</TableCell>
+                    {def.facts.map(([k]) => (
+                      <TableCell key={k}>{factText(k, i.facts[k], cur)}</TableCell>
+                    ))}
+                    {def.amounts.map(([k]) => (
+                      <TableCell key={k}>{i.amounts[k] === null || i.amounts[k] === undefined ? readable(i.notApplicable[k] ?? 'NOT_APPLICABLE') : money(i.amounts[k], cur)}</TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
           {d.next && (
-            <button type="button" className="secondary" onClick={() => setAfter(d.next!)}>
-              Next page
-            </button>
+            <PagerRow>
+              <PagerButton onClick={() => setAfter(d.next!)}>Next page</PagerButton>
+            </PagerRow>
           )}
         </>
       )}
@@ -548,7 +580,7 @@ function JournalReport({ runId }: { runId: string }) {
   const notConfigured = jv.error instanceof ApiError && jv.error.code === 'NOT_CONFIGURED';
   return (
     <Section title="Journal voucher">
-      {jv.isPending && <p className="hint">Checking the journal voucher…</p>}
+      {jv.isPending && <Hint>Checking the journal voucher…</Hint>}
       {notConfigured && (
         <p>
           <Badge tone="warn">Not configured</Badge> A journal voucher needs an approved chart-of-accounts mapping for the payroll heads. None is configured, so no voucher is produced.
@@ -568,42 +600,40 @@ export function StatutoryScreen() {
   if (!can(STATUTORY_READ)) {
     return (
       <Section title="Statutory outputs">
-        <Empty>The selected role cannot see statutory outputs.</Empty>
+        <Empty refusal>The selected role cannot see statutory outputs.</Empty>
       </Section>
     );
   }
   return (
     <Section title="Statutory outputs">
-      <p className="hint">
+      <Hint>
         Each statutory register, certificate and return needs an activated rule pack and the payroll owner’s period template. While a PF, ESIC, professional tax or labour welfare fund pack is active, its register is a working register on each run’s reports page: what the calculation recorded, not a filing. Filing formats and the other outputs are not produced until the template and an approved sample exist; the source labels are kept as written until the owner confirms them.
-      </p>
-      {outputs.isPending && <p className="hint loading">Loading statutory outputs…</p>}
+      </Hint>
+      {outputs.isPending && <LoadingLine>Loading statutory outputs…</LoadingLine>}
       {outputs.error && <Problem error={outputs.error} act="read" />}
       {outputs.data && outputs.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Statutory outputs">
-            <thead>
-              <tr>
-                <th>Output</th>
-                <th>Code</th>
-                <th>Status</th>
-                <th>What it needs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {outputs.data.items.map((o) => (
-                <tr key={o.code}>
-                  <td>{o.sourceLabel}</td>
-                  <td>{o.code}</td>
-                  <td>
-                    <Badge tone={o.status === 'AVAILABLE' ? 'good' : 'warn'}>{label(OUTPUT_STATUS, o.status)}</Badge>
-                  </td>
-                  <td>{o.needs.join('; ')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Statutory outputs">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Output</TableHead>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">What it needs</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {outputs.data.items.map((o) => (
+              <TableRow key={o.code}>
+                <TableCell>{o.sourceLabel}</TableCell>
+                <TableCell>{o.code}</TableCell>
+                <TableCell>
+                  <Badge tone={o.status === 'AVAILABLE' ? 'good' : 'warn'}>{label(OUTPUT_STATUS, o.status)}</Badge>
+                </TableCell>
+                <TableCell>{o.needs.join('; ')}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {can(REPORT_READ) && <TdsRegister />}
     </Section>
@@ -635,33 +665,33 @@ function TdsRegister() {
   return (
     <Section title="TDS register (Form 24Q working data)">
       <form
-        className="row"
+        className={FIELDS_AND_BUTTON}
         aria-label="TDS register"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           setAsked({ fiscalYear: fiscalYear.trim(), quarter });
         }}
       >
-        <label>
+        <FormField className="w-auto">
           Financial year
-          <input value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} placeholder="2026-27" />
-        </label>
-        <label>
+          <Input value={fiscalYear} onChange={(e) => setFiscalYear(e.target.value)} placeholder="2026-27" />
+        </FormField>
+        <FormField className="w-auto">
           Quarter
-          <select value={quarter} onChange={(e) => setQuarter(e.target.value)}>
+          <NativeSelect value={quarter} onChange={(e) => setQuarter(e.target.value)}>
             <option value="1">Q1 (April to June)</option>
             <option value="2">Q2 (July to September)</option>
             <option value="3">Q3 (October to December)</option>
             <option value="4">Q4 (January to March)</option>
-          </select>
-        </label>
-        <button type="submit">Show</button>
+          </NativeSelect>
+        </FormField>
+        <Button type="submit">Show</Button>
       </form>
-      {register.isFetching && <p className="hint loading">Loading the register…</p>}
+      {register.isFetching && <LoadingLine>Loading the register…</LoadingLine>}
       {register.error && <Problem error={register.error} act="read" />}
       {d && (
         <>
-          <p className="hint">{d.notice}</p>
+          <Hint>{d.notice}</Hint>
           <dl className="kv" aria-label="TDS register totals">
             <Fact term="Period">{`${formatDate(d.from)} to ${formatDate(d.to)}`}</Fact>
             <Fact term="Employees">{d.totals.employees}</Fact>
@@ -670,36 +700,34 @@ function TdsRegister() {
               <Fact key={m.month} term={formatMonth(m.month)}>{`${money(m.tds, 'INR')} on ${money(m.taxableSalary, 'INR')}`}</Fact>
             ))}
           </dl>
-          {d.scope === 'ROW_SCOPE' && <p className="hint">Only the employees within your scope are listed and totalled.</p>}
+          {d.scope === 'ROW_SCOPE' && <Hint>Only the employees within your scope are listed and totalled.</Hint>}
           {d.items.length === 0 ? (
             <Empty>No TDS was deducted on processed payroll or paid final settlements in this quarter.</Empty>
           ) : (
-            <div style={SCROLL}>
-              <table aria-label="TDS by employee">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Month</th>
-                    <th>Source</th>
-                    <th>Taxable salary</th>
-                    <th>TDS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.items.flatMap((i) =>
-                    i.months.map((m, n) => (
-                      <tr key={`${i.employeeId}-${m.month}-${m.source}`}>
-                        <td>{n === 0 ? `${i.employeeCode} ${i.employeeName}` : ''}</td>
-                        <td>{formatMonth(m.month)}</td>
-                        <td>{m.source === 'FINAL_SETTLEMENT' ? 'Final settlement' : 'Payroll'}</td>
-                        <td>{money(m.taxableSalary, 'INR')}</td>
-                        <td>{money(m.tds, 'INR')}</td>
-                      </tr>
-                    )),
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="TDS by employee">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Employee</TableHead>
+                  <TableHead scope="col">Month</TableHead>
+                  <TableHead scope="col">Source</TableHead>
+                  <TableHead scope="col">Taxable salary</TableHead>
+                  <TableHead scope="col">TDS</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {d.items.flatMap((i) =>
+                  i.months.map((m, n) => (
+                    <TableRow key={`${i.employeeId}-${m.month}-${m.source}`}>
+                      <TableCell>{n === 0 ? `${i.employeeCode} ${i.employeeName}` : ''}</TableCell>
+                      <TableCell>{formatMonth(m.month)}</TableCell>
+                      <TableCell>{m.source === 'FINAL_SETTLEMENT' ? 'Final settlement' : 'Payroll'}</TableCell>
+                      <TableCell>{money(m.taxableSalary, 'INR')}</TableCell>
+                      <TableCell>{money(m.tds, 'INR')}</TableCell>
+                    </TableRow>
+                  )),
+                )}
+              </TableBody>
+            </Table>
           )}
         </>
       )}

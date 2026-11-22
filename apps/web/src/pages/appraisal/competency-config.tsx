@@ -1,13 +1,24 @@
 // Appraisal competency configuration (I-86): the result split, the competency master and the competency sets by grade.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, NotPermitted, Section } from '../../ui';
+import { Empty, Notice, NotPermitted, Section } from '../../ui';
 import { IndicatorList } from './competency-views';
 import { wholeIn } from './goals';
 import { QueryProblem, Refusal } from './refusals';
-import { CYCLE_MANAGE, CYCLE_READ, FLUSH, H3, type MasterItem, ORG_READ, type Scoring, SCROLL, shown, SPACED, TEXTAREA, useKeys } from './shared';
+import { CYCLE_MANAGE, CYCLE_READ, FIELD_ROW, type MasterItem, ORG_READ, type Scoring, shown, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: competencies and the result split (Appraisal Config: FR-041 "grade-mapped competencies"; I-86). The dated
@@ -106,10 +117,8 @@ function ScoringSection() {
   };
   return (
     <Section title="Result split">
-      <p className="hint">
-        How much goals and competencies each count towards the overall result. A new cycle uses the split in force on its start date and keeps it.
-      </p>
-      {query.isPending && <p className="hint loading">Loading the split…</p>}
+      <Hint>How much goals and competencies each count towards the overall result. A new cycle uses the split in force on its start date and keeps it.</Hint>
+      {query.isPending && <LoadingLine>Loading the split…</LoadingLine>}
       <QueryProblem error={query.error} forbidden="The selected role cannot view the result split." />
       {data && (
         <>
@@ -117,70 +126,58 @@ function ScoringSection() {
             In force today:{' '}
             <strong>{data.inForce ? `goals ${data.inForce.goalWeightPercent}%, competencies ${data.inForce.competencyWeightPercent}%` : 'none (cycles cannot take a split until one is set)'}</strong>
           </p>
-          <div style={SCROLL}>
-            <table aria-label="Result split revisions">
-              <thead>
-                <tr>
-                  <th>From</th>
-                  <th>Until</th>
-                  <th>Goals %</th>
-                  <th>Competencies %</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((r) => (
-                  <tr key={r.id}>
-                    <td>{formatDate(r.effectiveFrom)}</td>
-                    <td>{r.effectiveTo ? formatDate(r.effectiveTo) : 'Open'}</td>
-                    <td>{r.goalWeightPercent}</td>
-                    <td>{r.competencyWeightPercent}</td>
-                    <td>{r.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Result split revisions">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">From</TableHead>
+                <TableHead scope="col">Until</TableHead>
+                <TableHead scope="col">Goals %</TableHead>
+                <TableHead scope="col">Competencies %</TableHead>
+                <TableHead scope="col">Reason</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>{formatDate(r.effectiveFrom)}</TableCell>
+                  <TableCell>{r.effectiveTo ? formatDate(r.effectiveTo) : 'Open'}</TableCell>
+                  <TableCell>{r.goalWeightPercent}</TableCell>
+                  <TableCell>{r.competencyWeightPercent}</TableCell>
+                  <TableCell>{r.reason}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </>
       )}
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
       {can(CYCLE_MANAGE) && (
-        <form className="grid-form" aria-label="New result split" onSubmit={submit} noValidate>
-          <label>
+        <FormGrid aria-label="New result split" onSubmit={submit} noValidate>
+          <FormField>
             Starts on
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </label>
-          <label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </FormField>
+          <FormField>
             Goals %
-            <input inputMode="numeric" value={goal} maxLength={3} onChange={(e) => setGoal(e.target.value)} />
-          </label>
-          <label>
+            <Input inputMode="numeric" value={goal} maxLength={3} onChange={(e) => setGoal(e.target.value)} />
+          </FormField>
+          <FormField>
             Competencies %
-            <input inputMode="numeric" value={competency} maxLength={2} onChange={(e) => setCompetency(e.target.value)} />
-          </label>
-          <label className="wide">
+            <Input inputMode="numeric" value={competency} maxLength={2} onChange={(e) => setCompetency(e.target.value)} />
+          </FormField>
+          <FormField className="col-span-full">
             Reason
-            <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-          </label>
-          {problem && (
-            <p role="alert" className="error">
-              {problem}
-            </p>
-          )}
-          <div className="row">
-            <button type="submit" disabled={create.isPending}>
+            <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </FormField>
+          {problem && <Notice notice={{ text: problem, ok: false }} />}
+          <ButtonRow>
+            <Button type="submit" disabled={create.isPending}>
               {create.isPending ? 'Saving…' : 'Save the new split'}
-            </button>
-          </div>
-          <p className="hint" style={FLUSH}>
-            It starts today or later and ends the split in force that day; earlier periods and cycles already created keep theirs.
-          </p>
+            </Button>
+          </ButtonRow>
+          <Hint className="m-0">It starts today or later and ends the split in force that day; earlier periods and cycles already created keep theirs.</Hint>
           <Refusal error={create.error} action="scoring" />
-        </form>
+        </FormGrid>
       )}
     </Section>
   );
@@ -195,46 +192,46 @@ function CompetencyMasterSection() {
   const current = data?.items.find((k) => k.id === editing) ?? null;
   return (
     <Section title="Competencies">
-      {query.isPending && <p className="hint loading">Loading competencies…</p>}
+      {query.isPending && <LoadingLine>Loading competencies…</LoadingLine>}
       <QueryProblem error={query.error} forbidden="The selected role cannot view competencies." />
       {data && data.items.length === 0 && <Empty>No competencies yet.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Competency master">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Competency</th>
-                <th>Active</th>
-                <th>Used in sets</th>
-                {can(CYCLE_MANAGE) && <th>Change</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((k) => (
-                <tr key={k.id}>
-                  <td>{k.code}</td>
-                  <td>
-                    {k.name}
-                    <IndicatorList item={k} />
-                  </td>
-                  <td>
-                    {formatDate(k.activeFrom)} to {k.activeTo ? formatDate(k.activeTo) : 'open'}
-                    {k.activeToday ? '' : ' (not active today)'}
-                  </td>
-                  <td>{k.usedInSets}</td>
-                  {can(CYCLE_MANAGE) && (
-                    <td>
-                      <button type="button" className="secondary" aria-pressed={editing === k.id} onClick={() => setEditing(editing === k.id ? null : k.id)}>
+        <Table aria-label="Competency master">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Competency</TableHead>
+              <TableHead scope="col">Active</TableHead>
+              <TableHead scope="col">Used in sets</TableHead>
+              {can(CYCLE_MANAGE) && <TableHead scope="col">Change</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((k) => (
+              <TableRow key={k.id}>
+                <TableCell>{k.code}</TableCell>
+                <TableCell>
+                  {k.name}
+                  <IndicatorList item={k} />
+                </TableCell>
+                <TableCell>
+                  {formatDate(k.activeFrom)} to {k.activeTo ? formatDate(k.activeTo) : 'open'}
+                  {k.activeToday ? '' : ' (not active today)'}
+                </TableCell>
+                <TableCell>{k.usedInSets}</TableCell>
+                {can(CYCLE_MANAGE) && (
+                  <RowActionsCell>
+                    <RowActions>
+                      <Button type="button" variant="outline" size="sm" aria-pressed={editing === k.id} onClick={() => setEditing(editing === k.id ? null : k.id)}>
                         Change {k.code}
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      </Button>
+                    </RowActions>
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {can(CYCLE_MANAGE) && current && <CompetencyForm key={`${current.id}:${current.version}`} initial={current} onDone={() => setEditing(null)} />}
       {can(CYCLE_MANAGE) && !current && <CompetencyForm key="new" initial={null} onDone={() => undefined} />}
@@ -284,59 +281,50 @@ function CompetencyForm({ initial, onDone }: { initial: CompetencyMaster | null;
     const common = { name: name.trim(), description: description.trim() === '' ? null : description.trim(), indicators: indicators.map((t) => t.trim()), activeFrom };
     save.mutate(initial ? { ...common, activeTo: activeTo === '' ? null : activeTo, expectedVersion: initial.version } : { ...common, code: code.trim() });
   };
+  const saveLabel = initial ? 'Save the competency' : 'Add the competency';
   return (
-    <form className="grid-form" aria-label={initial ? `Change ${initial.code}` : 'New competency'} onSubmit={submit} noValidate style={SPACED}>
-      <h3 style={H3}>{initial ? `Change ${initial.code}` : 'New competency'}</h3>
+    <FormGrid aria-label={initial ? `Change ${initial.code}` : 'New competency'} onSubmit={submit} noValidate>
+      <CardSubheading>{initial ? `Change ${initial.code}` : 'New competency'}</CardSubheading>
       {!initial && (
-        <label>
+        <FormField>
           Code
-          <input value={code} maxLength={40} onChange={(e) => setCode(e.target.value)} />
-        </label>
+          <Input value={code} maxLength={40} onChange={(e) => setCode(e.target.value)} />
+        </FormField>
       )}
-      <label>
+      <FormField>
         Name
-        <input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
-      </label>
-      <label className="wide">
+        <Input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
+      </FormField>
+      <FormField className="col-span-full">
         Description (optional)
-        <textarea rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} style={TEXTAREA} />
-      </label>
+        <Textarea rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
+      </FormField>
       {LEVELS.map((level, i) => (
-        <label key={level} className="wide">
+        <FormField key={level} className="col-span-full">
           Level {level} behaviour
-          <textarea rows={2} maxLength={1000} value={indicators[i] ?? ''} onChange={(e) => setIndicators((prev) => prev.map((t, n) => (n === i ? e.target.value : t)))} style={TEXTAREA} />
-        </label>
+          <Textarea rows={2} maxLength={1000} value={indicators[i] ?? ''} onChange={(e) => setIndicators((prev) => prev.map((t, n) => (n === i ? e.target.value : t)))} />
+        </FormField>
       ))}
-      <label>
+      <FormField>
         Active from
-        <input type="date" value={activeFrom} onChange={(e) => setActiveFrom(e.target.value)} />
-      </label>
+        <Input type="date" value={activeFrom} onChange={(e) => setActiveFrom(e.target.value)} />
+      </FormField>
       {initial && (
-        <label>
+        <FormField>
           Active until (exclusive; empty: open)
-          <input type="date" value={activeTo} onChange={(e) => setActiveTo(e.target.value)} />
-        </label>
+          <Input type="date" value={activeTo} onChange={(e) => setActiveTo(e.target.value)} />
+        </FormField>
       )}
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" disabled={save.isPending}>
-          {save.isPending ? 'Saving…' : initial ? 'Save the competency' : 'Add the competency'}
-        </button>
-      </div>
-      <p className="hint" style={FLUSH}>
-        Appraisals keep the competencies as they were copied at enrolment; a change here applies to later enrolments only.
-      </p>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
+      <ButtonRow>
+        <Button type="submit" disabled={save.isPending}>
+          {save.isPending ? 'Saving…' : saveLabel}
+        </Button>
+      </ButtonRow>
+      <Hint className="m-0">Appraisals keep the competencies as they were copied at enrolment; a change here applies to later enrolments only.</Hint>
       <Refusal error={save.error} action="competency" />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -411,57 +399,52 @@ function CompetencySetsSection() {
   };
   return (
     <Section title="Competency sets by grade">
-      <p className="hint">
+      <Hint>
         Each set maps competencies, with weights totalling exactly 100, to a grade (optionally one designation, which then takes precedence). When an employee is enrolled, the set in force for their grade that day is copied
         into the appraisal and fixed.
-      </p>
-      {query.isPending && <p className="hint loading">Loading the sets…</p>}
+      </Hint>
+      {query.isPending && <LoadingLine>Loading the sets…</LoadingLine>}
       <QueryProblem error={query.error} forbidden="The selected role cannot view competency sets." />
       {data && data.items.length === 0 && <Empty>No competency sets yet: appraisals are scored on goals alone.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Competency sets">
-            <thead>
-              <tr>
-                <th>Grade</th>
-                <th>Designation</th>
-                <th>From</th>
-                <th>Until</th>
-                <th>Competencies (weight)</th>
-                {can(CYCLE_MANAGE) && <th>End</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((s) => (
-                <tr key={s.id}>
-                  <td>{s.grade.name}</td>
-                  <td>{s.designation?.name ?? 'Any'}</td>
-                  <td>{formatDate(s.effectiveFrom)}</td>
-                  <td>{s.effectiveTo ? formatDate(s.effectiveTo) : 'Open'}</td>
-                  <td>{s.items.map((i) => `${i.name} (${i.weight})`).join(', ')}</td>
-                  {can(CYCLE_MANAGE) && (
-                    <td>
-                      {s.effectiveTo === null && (
-                        <button type="button" className="secondary" onClick={() => setEnding({ id: s.id, date: '', reason: '' })}>
+        <Table aria-label="Competency sets">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Grade</TableHead>
+              <TableHead scope="col">Designation</TableHead>
+              <TableHead scope="col">From</TableHead>
+              <TableHead scope="col">Until</TableHead>
+              <TableHead scope="col">Competencies (weight)</TableHead>
+              {can(CYCLE_MANAGE) && <TableHead scope="col">End</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((s) => (
+              <TableRow key={s.id}>
+                <TableCell>{s.grade.name}</TableCell>
+                <TableCell>{s.designation?.name ?? 'Any'}</TableCell>
+                <TableCell>{formatDate(s.effectiveFrom)}</TableCell>
+                <TableCell>{s.effectiveTo ? formatDate(s.effectiveTo) : 'Open'}</TableCell>
+                <TableCell>{s.items.map((i) => `${i.name} (${i.weight})`).join(', ')}</TableCell>
+                {can(CYCLE_MANAGE) && (
+                  <RowActionsCell>
+                    {s.effectiveTo === null && (
+                      <RowActions>
+                        <Button type="button" variant="danger" size="sm" onClick={() => setEnding({ id: s.id, date: '', reason: '' })}>
                           End the {s.grade.name} set
-                        </button>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                        </Button>
+                      </RowActions>
+                    )}
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
       {can(CYCLE_MANAGE) && ending && (
-        <form
-          className="grid-form"
+        <FormGrid
           aria-label="End a competency set"
           noValidate
           onSubmit={(e) => {
@@ -471,111 +454,105 @@ function CompetencySetsSection() {
             end.mutate({ id: s.id, body: { effectiveTo: ending.date, reason: ending.reason.trim(), expectedVersion: s.version } });
           }}
         >
-          <label>
+          <FormField>
             Ends on
-            <input type="date" value={ending.date} onChange={(e) => setEnding({ ...ending, date: e.target.value })} />
-          </label>
-          <label className="wide">
+            <Input type="date" value={ending.date} onChange={(e) => setEnding({ ...ending, date: e.target.value })} />
+          </FormField>
+          <FormField className="col-span-full">
             Reason
-            <textarea rows={2} maxLength={1000} value={ending.reason} onChange={(e) => setEnding({ ...ending, reason: e.target.value })} style={TEXTAREA} />
-          </label>
-          <div className="row">
-            <button type="submit" disabled={end.isPending || !ending.date || !ending.reason.trim()}>
+            <Textarea rows={2} maxLength={1000} value={ending.reason} onChange={(e) => setEnding({ ...ending, reason: e.target.value })} />
+          </FormField>
+          <ButtonRow>
+            <Button type="submit" disabled={end.isPending || !ending.date || !ending.reason.trim()}>
               {end.isPending ? 'Saving…' : 'End the set'}
-            </button>
-            <button type="button" className="secondary" onClick={() => setEnding(null)}>
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setEnding(null)}>
               Keep it
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Refusal error={end.error} action="competency-set" />
-        </form>
+        </FormGrid>
       )}
       {can(CYCLE_MANAGE) && (
-        <form className="grid-form" aria-label="New competency set" onSubmit={submit} noValidate style={SPACED}>
-          <h3 style={H3}>New competency set</h3>
+        <FormGrid aria-label="New competency set" onSubmit={submit} noValidate>
+          <CardSubheading>New competency set</CardSubheading>
           {!can(ORG_READ) ? (
             <NotPermitted>The selected role cannot list grades and designations, so it cannot map a set.</NotPermitted>
           ) : (
             <>
-              <label>
+              <FormField>
                 Grade
-                <select value={gradeId} onChange={(e) => setGradeId(e.target.value)}>
+                <NativeSelect value={gradeId} onChange={(e) => setGradeId(e.target.value)}>
                   <option value="">Choose…</option>
                   {(shown(grades)?.items ?? []).map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.name} ({g.code})
                     </option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </NativeSelect>
+              </FormField>
+              <FormField>
                 Designation (optional)
-                <select value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
+                <NativeSelect value={designationId} onChange={(e) => setDesignationId(e.target.value)}>
                   <option value="">Any designation of the grade</option>
                   {(shown(designations)?.items ?? []).map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.name} ({d.code})
                     </option>
                   ))}
-                </select>
-              </label>
+                </NativeSelect>
+              </FormField>
             </>
           )}
-          <label>
+          <FormField>
             Starts on
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </FormField>
           {rows.map((r, i) => (
-            <div className="row wide" key={r.key}>
-              <label>
+            <div className={cn(FIELD_ROW, 'col-span-full')} key={r.key}>
+              <FormField className="w-auto">
                 Competency {i + 1}
-                <select value={r.competencyId} onChange={(e) => setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, competencyId: e.target.value } : x)))}>
+                <NativeSelect value={r.competencyId} onChange={(e) => setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, competencyId: e.target.value } : x)))}>
                   <option value="">Choose…</option>
                   {choices.map((k) => (
                     <option key={k.id} value={k.id}>
                       {k.name} ({k.code})
                     </option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </NativeSelect>
+              </FormField>
+              <FormField className="w-auto">
                 Weight of competency {i + 1}
-                <input inputMode="numeric" maxLength={3} value={r.weight} onChange={(e) => setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, weight: e.target.value } : x)))} />
-              </label>
+                <Input inputMode="numeric" maxLength={3} value={r.weight} onChange={(e) => setRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, weight: e.target.value } : x)))} />
+              </FormField>
               {rows.length > 1 && (
-                <button type="button" className="secondary" onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}>
+                <Button type="button" variant="outline" onClick={() => setRows((prev) => prev.filter((x) => x.key !== r.key))}>
                   Remove competency {i + 1}
-                </button>
+                </Button>
               )}
             </div>
           ))}
-          <div className="row">
-            <button type="button" className="secondary" disabled={rows.length >= 50} onClick={() => setRows((prev) => [...prev, { key: prev.reduce((m, x) => Math.max(m, x.key), 0) + 1, competencyId: '', weight: '' }])}>
+          <ButtonRow>
+            <Button type="button" variant="outline" disabled={rows.length >= 50} onClick={() => setRows((prev) => [...prev, { key: prev.reduce((m, x) => Math.max(m, x.key), 0) + 1, competencyId: '', weight: '' }])}>
               Add a competency
-            </button>
-            <span className="hint" role="status">
+            </Button>
+            <Hint as="span" role="status">
               Weights entered: {total} of 100.
-            </span>
-          </div>
-          <label className="wide">
+            </Hint>
+          </ButtonRow>
+          <FormField className="col-span-full">
             Reason
-            <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-          </label>
-          {problem && (
-            <p role="alert" className="error">
-              {problem}
-            </p>
-          )}
-          <div className="row">
-            <button type="submit" disabled={create.isPending}>
+            <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </FormField>
+          {problem && <Notice notice={{ text: problem, ok: false }} />}
+          <ButtonRow>
+            <Button type="submit" disabled={create.isPending}>
               {create.isPending ? 'Saving…' : 'Save the set'}
-            </button>
-          </div>
-          <p className="hint" style={FLUSH}>
-            It starts today or later and ends the set in force for the same grade and designation that day.
-          </p>
+            </Button>
+          </ButtonRow>
+          <Hint className="m-0">It starts today or later and ends the set in force for the same grade and designation that day.</Hint>
           <Refusal error={create.error} action="competency-set" />
-        </form>
+        </FormGrid>
       )}
     </Section>
   );

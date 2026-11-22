@@ -1,9 +1,13 @@
 // Pieces several document screens show: classification, scan state, expiry and version history.
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, download, formatDate, isForbidden, retryTransient } from '../../api';
-import { Badge, Empty, ErrorNote, NotPermitted } from '../../ui';
+import { Badge, Empty, ErrorNote, Item, NotPermitted } from '../../ui';
 import { DOWNLOAD_WORDS, Refusal } from './refusals';
-import { isNotFound, type PolicyDetail, type PolicyVersion, SCROLL, SR_ONLY, useKeys, UUID } from './shared';
+import { isNotFound, type PolicyDetail, type PolicyVersion, useKeys, UUID } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Shared pieces: classification, scan state, expiry, version history
@@ -49,48 +53,48 @@ export function VersionHistory({ versions }: { versions: PolicyVersion[] }) {
   if (versions.length === 0) return <Empty>No versions on record.</Empty>;
   return (
     <>
-      <div style={SCROLL}>
-        <table aria-label="Versions">
-          <thead>
-            <tr>
-              <th scope="col">Version</th>
-              <th scope="col">File</th>
-              <th scope="col">Published</th>
-              <th scope="col">Expires</th>
-              <th scope="col">Safety check</th>
-              <th scope="col">Change note</th>
-              <th scope="col">
-                <span style={SR_ONLY}>Open</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {versions.map((v) => (
-              <tr key={v.id}>
-                <td>{v.versionNumber}</td>
-                <td>{v.fileName ?? '—'}</td>
-                <td>{formatDate(v.publishedAt)}</td>
-                <td>
-                  <Expiry expiresOn={v.expiresOn} expired={v.expired} />
-                </td>
-                <td>
-                  <ScanBadge state={v.scanState} />
-                </td>
-                <td>{v.changeNote ?? '—'}</td>
-                <td>
-                  {v.scanState === 'CLEAN' ? (
-                    <button type="button" className="secondary" disabled={open.isPending} aria-label={`Download version ${v.versionNumber}`} onClick={() => open.mutate(v.id)}>
+      <Table aria-label="Versions">
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Version</TableHead>
+            <TableHead scope="col">File</TableHead>
+            <TableHead scope="col">Published</TableHead>
+            <TableHead scope="col">Expires</TableHead>
+            <TableHead scope="col">Safety check</TableHead>
+            <TableHead scope="col">Change note</TableHead>
+            <TableHead scope="col">
+              <span className="sr-only">Open</span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {versions.map((v) => (
+            <TableRow key={v.id}>
+              <TableCell>{v.versionNumber}</TableCell>
+              <TableCell>{v.fileName ?? '—'}</TableCell>
+              <TableCell>{formatDate(v.publishedAt)}</TableCell>
+              <TableCell>
+                <Expiry expiresOn={v.expiresOn} expired={v.expired} />
+              </TableCell>
+              <TableCell>
+                <ScanBadge state={v.scanState} />
+              </TableCell>
+              <TableCell>{v.changeNote ?? '—'}</TableCell>
+              <RowActionsCell>
+                {v.scanState === 'CLEAN' ? (
+                  <RowActions>
+                    <Button type="button" variant="outline" size="sm" disabled={open.isPending} aria-label={`Download version ${v.versionNumber}`} onClick={() => open.mutate(v.id)}>
                       Download
-                    </button>
-                  ) : (
-                    <span className="hint">cannot be opened</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                    </Button>
+                  </RowActions>
+                ) : (
+                  <Hint as="span">cannot be opened</Hint>
+                )}
+              </RowActionsCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
       <Refusal error={open.error} words={DOWNLOAD_WORDS} />
     </>
   );
@@ -99,24 +103,12 @@ export function VersionHistory({ versions }: { versions: PolicyVersion[] }) {
 export function PolicyFacts({ policy }: { policy: PolicyDetail }) {
   return (
     <dl className="kv">
-      <div>
-        <dt>Code</dt>
-        <dd>{policy.policyCode}</dd>
-      </div>
-      <div>
-        <dt>Classification</dt>
-        <dd>
-          <ClassificationBadge classification={policy.classification} />
-        </dd>
-      </div>
-      <div>
-        <dt>Versions</dt>
-        <dd>{policy.versions.length}</dd>
-      </div>
-      <div>
-        <dt>Last changed</dt>
-        <dd>{formatDate(policy.updatedAt)}</dd>
-      </div>
+      <Item term="Code">{policy.policyCode}</Item>
+      <Item term="Classification">
+        <ClassificationBadge classification={policy.classification} />
+      </Item>
+      <Item term="Versions">{policy.versions.length}</Item>
+      <Item term="Last changed">{formatDate(policy.updatedAt)}</Item>
     </dl>
   );
 }
@@ -137,4 +129,3 @@ export function PolicyUnavailable({ error }: { error: unknown }) {
   if (isNotFound(error)) return <Empty>This policy is not available in the selected role’s company.</Empty>;
   return <ErrorNote error={error} />;
 }
-

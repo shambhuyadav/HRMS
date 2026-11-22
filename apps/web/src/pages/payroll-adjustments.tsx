@@ -3,7 +3,16 @@
 // returned and is never typed in. An independent reviewer approves; the first later payroll pays an approved case once and the case then
 // names that payroll. Without an active valuation policy, approval of a timesheet adjustment is not offered and the reason is said.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type ComponentPropsWithoutRef, type FormEvent, useState } from 'react';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatAmount, formatDate, idempotencyKey } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -60,6 +69,18 @@ interface Note {
 
 const KIND: Record<string, string> = { LATE_TIMESHEET: 'Late timesheet', AMENDED_TIMESHEET: 'Amended timesheet' };
 
+// The screens' own layout pieces, as utility classes and small components (shadcn/ui move, 20 Nov 2026).
+/** A textarea keeps a readable width in a one-column form, as the old `.stack > label > textarea` rule had it. */
+const READABLE_WIDTH = 'max-w-[560px]';
+
+/**
+ * One case of a list: a card inside the list's card. It keeps the `card` marker class, so its notes and forms are drawn as a card's
+ * own (a boxed hint, a form without a frame of its own), as they were before the move to shadcn/ui.
+ */
+function CaseCard(props: ComponentPropsWithoutRef<'div'>) {
+  return <div className="card rounded-xl border border-border bg-card px-5 py-4 shadow-xs not-last:mb-3" {...props} />;
+}
+
 function DecisionButtons({ url, canApprove, name, onDone, approveNote }: { url: string; canApprove: boolean; name: string; onDone: () => void; approveNote?: string }) {
   const [reason, setReason] = useState('');
   const decide = useMutation({
@@ -67,26 +88,26 @@ function DecisionButtons({ url, canApprove, name, onDone, approveNote }: { url: 
     onSuccess: () => onDone(),
   });
   return (
-    <form className="stack" aria-label={`Decide ${name}`} onSubmit={(e) => e.preventDefault()}>
-      <label>
+    <form className="flex flex-col gap-3" aria-label={`Decide ${name}`} onSubmit={(e) => e.preventDefault()}>
+      <FormField className={READABLE_WIDTH}>
         Reason (needed to return or reject)
-        <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      {approveNote && <p className="hint">{approveNote}</p>}
+        <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      {approveNote && <Hint>{approveNote}</Hint>}
       <ErrorNote error={decide.error} />
-      <div className="row">
+      <ButtonRow>
         {canApprove && (
-          <button type="button" onClick={() => decide.mutate('APPROVE')} disabled={decide.isPending}>
+          <Button type="button" onClick={() => decide.mutate('APPROVE')} disabled={decide.isPending}>
             Approve
-          </button>
+          </Button>
         )}
-        <button type="button" className="secondary" onClick={() => decide.mutate('RETURN')} disabled={decide.isPending}>
+        <Button type="button" variant="outline" onClick={() => decide.mutate('RETURN')} disabled={decide.isPending}>
           Return
-        </button>
-        <button type="button" className="danger" onClick={() => decide.mutate('REJECT')} disabled={decide.isPending}>
+        </Button>
+        <Button type="button" variant="danger" onClick={() => decide.mutate('REJECT')} disabled={decide.isPending}>
           Reject
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
     </form>
   );
 }
@@ -117,21 +138,21 @@ function DraftActions({ a, onDone }: { a: Adjustment; onDone: () => void }) {
     if (!save.isPending) save.mutate();
   };
   return (
-    <form className="stack" aria-label={`Draft case of ${a.employeeCode}`} onSubmit={submit}>
-      <p className="hint">The figures are calculated from the processed payroll under the valuation policy in effect; saving or submitting values the case again.</p>
-      <label>
+    <form className="flex flex-col gap-3" aria-label={`Draft case of ${a.employeeCode}`} onSubmit={submit}>
+      <Hint>The figures are calculated from the processed payroll under the valuation policy in effect; saving or submitting values the case again.</Hint>
+      <FormField className={READABLE_WIDTH}>
         Explanation
-        <textarea rows={2} maxLength={2000} value={explanation} onChange={(e) => setExplanation(e.target.value)} />
-      </label>
+        <Textarea rows={2} maxLength={2000} value={explanation} onChange={(e) => setExplanation(e.target.value)} />
+      </FormField>
       <ErrorNote error={save.error ?? send.error} />
-      <div className="row">
-        <button type="submit" className="secondary" disabled={save.isPending}>
+      <ButtonRow>
+        <Button type="submit" variant="outline" disabled={save.isPending}>
           Save draft
-        </button>
-        <button type="button" onClick={() => send.mutate()} disabled={send.isPending}>
+        </Button>
+        <Button type="button" onClick={() => send.mutate()} disabled={send.isPending}>
           Submit for review
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
     </form>
   );
 }
@@ -140,14 +161,18 @@ function AdjustmentQueue() {
   const { can } = useSession();
   const qc = useQueryClient();
   const tasks = useQuery({ queryKey: ['adjustment-tasks'], queryFn: () => api<{ items: { taskId: string; adjustment: Adjustment }[]; valuation: Note }>('/v1/payroll/adjustments/tasks/mine'), enabled: can(ADJ_DECIDE) });
-  if (!can(ADJ_DECIDE)) return <p className="hint">The selected role does not decide payroll adjustments.</p>;
+  if (!can(ADJ_DECIDE)) return <Hint>The selected role does not decide payroll adjustments.</Hint>;
   return (
     <Section title="Late-timesheet adjustments to review">
       <ErrorNote error={tasks.error} />
-      {tasks.data && <p role="status">{tasks.data.valuation.message}</p>}
+      {tasks.data && (
+        <StatusNote tone="info" role="status">
+          {tasks.data.valuation.message}
+        </StatusNote>
+      )}
       {tasks.data?.items.length === 0 && <Empty>Nothing is waiting for you.</Empty>}
       {tasks.data?.items.map(({ taskId, adjustment: a }) => (
-        <div className="card" key={taskId} aria-label={`Case of ${a.employeeCode}`}>
+        <CaseCard key={taskId} aria-label={`Case of ${a.employeeCode}`}>
           <strong>{`${a.employeeName} (${a.employeeCode})`}</strong>
           <ul>
             {facts(a).map((f) => (
@@ -163,7 +188,7 @@ function AdjustmentQueue() {
             name={`the case of ${a.employeeCode}`}
             onDone={() => void qc.invalidateQueries({ queryKey: ['adjustment-tasks'] })}
           />
-        </div>
+        </CaseCard>
       ))}
     </Section>
   );
@@ -182,9 +207,9 @@ function AdjustmentsScreen() {
     mutationFn: (c: AdjustmentCandidate) => api<Adjustment>('/v1/payroll/adjustments', { body: { timesheetId: c.timesheetId, revision: c.revision, originRecordId: c.originRecordId } }),
     onSuccess: () => refresh(),
   });
-  if (!can(ADJ_READ) && !can(ADJ_DECIDE)) return <p className="hint">The selected role cannot read payroll adjustments.</p>;
+  if (!can(ADJ_READ) && !can(ADJ_DECIDE)) return <Hint>The selected role cannot read payroll adjustments.</Hint>;
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       {can(ADJ_DECIDE) && <AdjustmentQueue />}
       {can(ADJ_READ) && (
         <Section title="Late or amended timesheets after a processed payroll">
@@ -193,12 +218,12 @@ function AdjustmentsScreen() {
           {candidates.data && candidates.data.items.length > 0 && (
             <ul aria-label="Timesheets to raise">
               {candidates.data.items.map((c) => (
-                <li key={`${c.timesheetId}:${c.originRecordId}`}>
+                <li key={`${c.timesheetId}:${c.originRecordId}`} className="py-1">
                   {`${c.employeeName} (${c.employeeCode}), ${formatDate(c.serviceStart)} to ${formatDate(c.serviceEnd)}, payroll ${c.originPeriodCode}: ${KIND[c.adjustmentKind] ?? c.adjustmentKind} `}
                   {can(ADJ_PROPOSE) && (
-                    <button type="button" className="secondary" onClick={() => open.mutate(c)} disabled={open.isPending}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => open.mutate(c)} disabled={open.isPending}>
                       Open a case
-                    </button>
+                    </Button>
                   )}
                 </li>
               ))}
@@ -209,10 +234,14 @@ function AdjustmentsScreen() {
       {can(ADJ_READ) && (
         <Section title="Adjustment cases">
           <ErrorNote error={list.error} />
-          {list.data && <p role="status">{list.data.valuation.message}</p>}
+          {list.data && (
+            <StatusNote tone="info" role="status">
+              {list.data.valuation.message}
+            </StatusNote>
+          )}
           {list.data?.items.length === 0 && <Empty>No cases yet.</Empty>}
           {list.data?.items.map((a) => (
-            <div className="card" key={a.id} aria-label={`Adjustment of ${a.employeeCode}`}>
+            <CaseCard key={a.id} aria-label={`Adjustment of ${a.employeeCode}`}>
               <strong>{`${a.employeeName} (${a.employeeCode}) `}</strong>
               <StateBadge state={a.state} />
               <ul>
@@ -221,7 +250,7 @@ function AdjustmentsScreen() {
                 ))}
               </ul>
               {a.state === 'DRAFT' && can(ADJ_PROPOSE) && a.createdBy === me?.userId ? <DraftActions key={a.version} a={a} onDone={refresh} /> : a.explanation && <p>{a.explanation}</p>}
-            </div>
+            </CaseCard>
           ))}
         </Section>
       )}
@@ -241,7 +270,7 @@ export function OwnLaterAdjustments() {
       {list.data?.items.length === 0 && <Empty>None of your timesheets has a later-payroll adjustment.</Empty>}
       {list.data && list.data.items.length > 0 && (
         <>
-          <p className="hint">{list.data.notice}</p>
+          <Hint>{list.data.notice}</Hint>
           <ul aria-label="My later-payroll adjustments">
             {list.data.items.map((a) => (
               <li key={a.id}>
@@ -295,23 +324,25 @@ function ArrearsForm({ candidate, onDone }: { candidate: ArrearsCandidate; onDon
   });
   return (
     <form
-      className="stack"
+      className="flex flex-col gap-3"
       aria-label={`Raise arrears for ${candidate.employeeCode} ${candidate.periodCode}`}
       onSubmit={(e) => {
         e.preventDefault();
         if (!propose.isPending) propose.mutate();
       }}
     >
-      <p>{`${candidate.employeeName} (${candidate.employeeCode}): salary revision from ${formatDate(candidate.sourceEffectiveFrom)}, processed payroll ${candidate.periodCode}`}</p>
-      <p className="hint">{`The amounts are calculated in ${candidate.currencyCode} from the processed record and the revision, per component, as the month was paid.`}</p>
-      <label>
+      <p className="m-0">{`${candidate.employeeName} (${candidate.employeeCode}): salary revision from ${formatDate(candidate.sourceEffectiveFrom)}, processed payroll ${candidate.periodCode}`}</p>
+      <Hint>{`The amounts are calculated in ${candidate.currencyCode} from the processed record and the revision, per component, as the month was paid.`}</Hint>
+      <FormField className={READABLE_WIDTH}>
         Reason
-        <textarea rows={2} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
+        <Textarea rows={2} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
       <ErrorNote error={propose.error} />
-      <button type="submit" disabled={propose.isPending || !reason.trim()}>
-        Raise the case
-      </button>
+      <ButtonRow>
+        <Button type="submit" disabled={propose.isPending || !reason.trim()}>
+          Raise the case
+        </Button>
+      </ButtonRow>
     </form>
   );
 }
@@ -320,14 +351,14 @@ function ArrearsQueue() {
   const { can } = useSession();
   const qc = useQueryClient();
   const tasks = useQuery({ queryKey: ['arrears-tasks'], queryFn: () => api<{ items: { taskId: string; case: ArrearsCase }[] }>('/v1/payroll/arrears-cases/tasks/mine'), enabled: can(ARR_DECIDE) });
-  if (!can(ARR_DECIDE)) return <p className="hint">The selected role does not decide arrears cases.</p>;
+  if (!can(ARR_DECIDE)) return <Hint>The selected role does not decide arrears cases.</Hint>;
   return (
     <Section title="Arrears cases to decide">
-      <p className="hint">Approving lets the first later payroll of the employee pay the calculated amount once, or recover a negative one. A processed payroll never changes.</p>
+      <Hint>Approving lets the first later payroll of the employee pay the calculated amount once, or recover a negative one. A processed payroll never changes.</Hint>
       <ErrorNote error={tasks.error} />
       {tasks.data?.items.length === 0 && <Empty>Nothing is waiting for you.</Empty>}
       {tasks.data?.items.map(({ taskId, case: c }) => (
-        <div className="card" key={taskId} aria-label={`Arrears of ${c.employeeCode}`}>
+        <CaseCard key={taskId} aria-label={`Arrears of ${c.employeeCode}`}>
           <strong>{`${c.employeeName} (${c.employeeCode}), ${c.periodCode}, revision from ${formatDate(c.sourceEffectiveFrom)}`}</strong>
           <ul>
             {c.lines.map((l) => (
@@ -336,7 +367,7 @@ function ArrearsQueue() {
           </ul>
           <p>{c.reason}</p>
           <DecisionButtons url={`/v1/payroll/arrears-tasks/${encodeURIComponent(taskId)}/decision`} canApprove name={`the arrears of ${c.employeeCode}`} onDone={() => void qc.invalidateQueries({ queryKey: ['arrears-tasks'] })} />
-        </div>
+        </CaseCard>
       ))}
     </Section>
   );
@@ -348,14 +379,14 @@ function ArrearsScreen() {
   const [raising, setRaising] = useState<ArrearsCandidate | null>(null);
   const register = useQuery({ queryKey: ['arrears-register'], queryFn: () => api<{ items: ArrearsCase[]; calculation: Note }>('/v1/payroll/arrears-cases?page=1&pageSize=50'), enabled: can(ARR_READ) });
   const candidates = useQuery({ queryKey: ['arrears-candidates'], queryFn: () => api<{ items: ArrearsCandidate[] }>('/v1/payroll/arrears-cases/candidates?page=1&pageSize=50'), enabled: can(ARR_READ) });
-  if (!can(ARR_READ) && !can(ARR_DECIDE)) return <p className="hint">The selected role cannot read arrears cases.</p>;
+  if (!can(ARR_READ) && !can(ARR_DECIDE)) return <Hint>The selected role cannot read arrears cases.</Hint>;
   const refresh = () => {
     setRaising(null);
     void qc.invalidateQueries({ queryKey: ['arrears-register'] });
     void qc.invalidateQueries({ queryKey: ['arrears-candidates'] });
   };
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       {can(ARR_DECIDE) && <ArrearsQueue />}
       {can(ARR_READ) && (
         <Section title="Salary revisions a processed payroll did not reach">
@@ -364,12 +395,12 @@ function ArrearsScreen() {
           {candidates.data && candidates.data.items.length > 0 && (
             <ul aria-label="Revisions to raise">
               {candidates.data.items.map((c) => (
-                <li key={`${c.sourceRevisionId}:${c.originRecordId}`}>
+                <li key={`${c.sourceRevisionId}:${c.originRecordId}`} className="py-1">
                   {`${c.employeeName} (${c.employeeCode}): revision from ${formatDate(c.sourceEffectiveFrom)}, payroll ${c.periodCode} `}
                   {can(ARR_PROPOSE) && (
-                    <button type="button" className="secondary" onClick={() => setRaising(c)}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setRaising(c)}>
                       Raise a case
-                    </button>
+                    </Button>
                   )}
                 </li>
               ))}
@@ -381,39 +412,41 @@ function ArrearsScreen() {
       {can(ARR_READ) && (
         <Section title="Arrear register">
           <ErrorNote error={register.error} />
-          {register.data && <p role="status">{register.data.calculation.message}</p>}
+          {register.data && (
+            <StatusNote tone="info" role="status">
+              {register.data.calculation.message}
+            </StatusNote>
+          )}
           {register.data?.items.length === 0 && <Empty>No arrears cases yet.</Empty>}
           {register.data && register.data.items.length > 0 && (
-            <div style={{ overflowX: 'auto' }}>
-              <table aria-label="Arrear register">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Source revision from</th>
-                    <th>Period</th>
-                    <th>Component detail</th>
-                    <th>Total</th>
-                    <th>State</th>
-                    <th>Paid in</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {register.data.items.map((c) => (
-                    <tr key={c.id}>
-                      <td>{`${c.employeeName} (${c.employeeCode})`}</td>
-                      <td>{formatDate(c.sourceEffectiveFrom)}</td>
-                      <td>{c.periodCode}</td>
-                      <td>{c.lines.map((l) => `${l.componentCode} ${formatAmount(l.amount, c.currencyCode)}`).join('; ')}</td>
-                      <td>{formatAmount(c.totalEntered, c.currencyCode)}</td>
-                      <td>
-                        <StateBadge state={c.state} />
-                      </td>
-                      <td>{c.appliedPeriodCode ?? (c.appliedSettlementId ? 'Final settlement' : '—')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Arrear register">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Employee</TableHead>
+                  <TableHead scope="col">Source revision from</TableHead>
+                  <TableHead scope="col">Period</TableHead>
+                  <TableHead scope="col">Component detail</TableHead>
+                  <TableHead scope="col">Total</TableHead>
+                  <TableHead scope="col">State</TableHead>
+                  <TableHead scope="col">Paid in</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {register.data.items.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell>{`${c.employeeName} (${c.employeeCode})`}</TableCell>
+                    <TableCell className="whitespace-nowrap">{formatDate(c.sourceEffectiveFrom)}</TableCell>
+                    <TableCell>{c.periodCode}</TableCell>
+                    <TableCell>{c.lines.map((l) => `${l.componentCode} ${formatAmount(l.amount, c.currencyCode)}`).join('; ')}</TableCell>
+                    <TableCell className="whitespace-nowrap">{formatAmount(c.totalEntered, c.currencyCode)}</TableCell>
+                    <TableCell>
+                      <StateBadge state={c.state} />
+                    </TableCell>
+                    <TableCell>{c.appliedPeriodCode ?? (c.appliedSettlementId ? 'Final settlement' : '—')}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </Section>
       )}
@@ -462,49 +495,48 @@ function ValuationPolicyForm({ onDone }: { onDone: () => void }) {
   });
   const ready = effectiveFrom && arrears.trim() && adjustment.trim() && (unit === 'DAY' || hours.trim());
   return (
-    <form
-      className="stack"
+    <FormGrid
       aria-label="New valuation policy"
       onSubmit={(e) => {
         e.preventDefault();
         if (!create.isPending && ready) create.mutate();
       }}
     >
-      <p className="hint">Each component is a pay head on the input basis: arrears and adjustments are earnings, the recovery is a deduction. Without a recovery deduction, a negative arrear or adjustment cannot be approved.</p>
-      <label>
+      <Hint>Each component is a pay head on the input basis: arrears and adjustments are earnings, the recovery is a deduction. Without a recovery deduction, a negative arrear or adjustment cannot be approved.</Hint>
+      <FormField>
         Effective from
-        <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </FormField>
+      <FormField>
         Arrears component code
-        <input value={arrears} onChange={(e) => setArrears(e.target.value)} />
-      </label>
-      <label>
+        <Input value={arrears} onChange={(e) => setArrears(e.target.value)} />
+      </FormField>
+      <FormField>
         Timesheet adjustment component code
-        <input value={adjustment} onChange={(e) => setAdjustment(e.target.value)} />
-      </label>
-      <label>
+        <Input value={adjustment} onChange={(e) => setAdjustment(e.target.value)} />
+      </FormField>
+      <FormField>
         Recovery deduction code (optional)
-        <input value={recovery} onChange={(e) => setRecovery(e.target.value)} />
-      </label>
-      <label>
+        <Input value={recovery} onChange={(e) => setRecovery(e.target.value)} />
+      </FormField>
+      <FormField>
         Timesheet unit
-        <select value={unit} onChange={(e) => setUnit(e.target.value as 'DAY' | 'HOUR')}>
+        <NativeSelect value={unit} onChange={(e) => setUnit(e.target.value as 'DAY' | 'HOUR')}>
           <option value="DAY">Day</option>
           <option value="HOUR">Hour</option>
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {unit === 'HOUR' && (
-        <label>
+        <FormField>
           Hours a day
-          <input inputMode="decimal" value={hours} onChange={(e) => setHours(e.target.value)} />
-        </label>
+          <Input inputMode="decimal" value={hours} onChange={(e) => setHours(e.target.value)} />
+        </FormField>
       )}
       <ErrorNote error={create.error} />
-      <button type="submit" disabled={create.isPending || !ready}>
+      <Button type="submit" disabled={create.isPending || !ready}>
         Save as draft
-      </button>
-    </form>
+      </Button>
+    </FormGrid>
   );
 }
 
@@ -518,53 +550,55 @@ function ValuationPoliciesScreen() {
     onSuccess: () => refresh(),
   });
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       <Section title="Valuation policies">
-        <p className="hint">
+        <Hint>
           The active policy in effect pays approved arrears and late-timesheet adjustments through the first later payroll, and values a late timesheet by the day or by the hour. A policy is activated by
           someone other than the person who drafted it; one with a later start date takes over from that date.
-        </p>
+        </Hint>
         <ErrorNote error={policies.error ?? activate.error} />
         {policies.data?.items.length === 0 && <Empty>No valuation policy yet: arrears and timesheet adjustments cannot be approved.</Empty>}
         {policies.data && policies.data.items.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
-            <table aria-label="Valuation policies">
-              <thead>
-                <tr>
-                  <th>Revision</th>
-                  <th>From</th>
-                  <th>Arrears</th>
-                  <th>Adjustment</th>
-                  <th>Recovery</th>
-                  <th>Unit</th>
-                  <th>State</th>
-                  <th scope="col"><span className="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {policies.data.items.map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.revision}</td>
-                    <td>{formatDate(p.effectiveFrom)}</td>
-                    <td>{p.arrearsComponentCode}</td>
-                    <td>{p.adjustmentComponentCode}</td>
-                    <td>{p.recoveryComponentCode ?? 'None'}</td>
-                    <td>{p.timesheetUnit === 'HOUR' ? `Hour (${p.hoursPerDay} a day)` : 'Day'}</td>
-                    <td>
-                      <StateBadge state={p.state} />
-                    </td>
-                    <td>
-                      {p.state === 'DRAFT' && can(CONFIG_ACTIVATE) && p.createdBy !== me?.userId && (
-                        <button type="button" className="secondary" onClick={() => activate.mutate(p)} disabled={activate.isPending}>
+          <Table aria-label="Valuation policies">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">From</TableHead>
+                <TableHead scope="col">Arrears</TableHead>
+                <TableHead scope="col">Adjustment</TableHead>
+                <TableHead scope="col">Recovery</TableHead>
+                <TableHead scope="col">Unit</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {policies.data.items.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell>{p.revision}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formatDate(p.effectiveFrom)}</TableCell>
+                  <TableCell>{p.arrearsComponentCode}</TableCell>
+                  <TableCell>{p.adjustmentComponentCode}</TableCell>
+                  <TableCell>{p.recoveryComponentCode ?? 'None'}</TableCell>
+                  <TableCell>{p.timesheetUnit === 'HOUR' ? `Hour (${p.hoursPerDay} a day)` : 'Day'}</TableCell>
+                  <TableCell>
+                    <StateBadge state={p.state} />
+                  </TableCell>
+                  <RowActionsCell>
+                    {p.state === 'DRAFT' && can(CONFIG_ACTIVATE) && p.createdBy !== me?.userId && (
+                      <RowActions>
+                        <Button type="button" variant="outline" size="sm" onClick={() => activate.mutate(p)} disabled={activate.isPending}>
                           Activate
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        </Button>
+                      </RowActions>
+                    )}
+                  </RowActionsCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </Section>
       {can(CONFIG_MANAGE) && (

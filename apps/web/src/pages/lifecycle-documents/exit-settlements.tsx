@@ -2,12 +2,20 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, NotPermitted, Section, StateBadge } from '../../ui';
+import { Empty, Notice, NotPermitted, Section, StateBadge } from '../../ui';
 import { CREATE_WORDS, Refusal } from './refusals';
 import { NoticePeriod } from './settlements';
-import { CalculationNote, CURRENCY, enc, EXIT_READ, isSelf, Item, LIVE_STATES, LoadProblem, Money, PATHS, SCROLL, SETTLEMENT_PREPARE, SETTLEMENT_READ, settlementLabel, SettlementState, SR_ONLY, useKeys, UserRef, useSettlementRefresh, UUID, when } from './shared';
+import { CalculationNote, CURRENCY, enc, EXIT_READ, isSelf, Item, LINK_ROW, LIVE_STATES, LoadProblem, Money, PATHS, SETTLEMENT_PREPARE, SETTLEMENT_READ, settlementLabel, SettlementState, useKeys, UserRef, useSettlementRefresh, UUID, when } from './shared';
 import type { Calculation, ExitCase, SettlementDetail } from './types';
 
 // =========================================================================================================
@@ -55,7 +63,7 @@ function ExitSettlements({ exitId }: { exitId: string }) {
   return (
     <>
       <h1>{who ? `Settlements for ${who}` : 'Exit settlements'}</h1>
-      <p className="row">
+      <p className={LINK_ROW}>
         <Link to={PATHS.settlements}>All settlements</Link>
         {can(EXIT_READ) && <Link to={PATHS.exit(exitId)}>Open the exit case</Link>}
       </p>
@@ -63,7 +71,7 @@ function ExitSettlements({ exitId }: { exitId: string }) {
         <Section title="Exit">
           <dl className="kv">
             <Item term="Employee">
-              {x.employeeName} <span className="hint">{x.employeeCode}</span>
+              {x.employeeName} <Hint as="span">{x.employeeCode}</Hint>
             </Item>
             <Item term="Exit state">
               <StateBadge state={x.state} />
@@ -77,52 +85,50 @@ function ExitSettlements({ exitId }: { exitId: string }) {
       )}
       <Section title="Settlement revisions">
         <CalculationNote calculation={list.data?.calculation} />
-        {list.isPending && <p className="hint loading">Loading the settlement revisions…</p>}
+        {list.isPending && <LoadingLine>Loading the settlement revisions…</LoadingLine>}
         <LoadProblem error={list.error} forbidden="The selected role cannot view settlements." missing="This exit is not available in the selected role’s scope." />
         {list.data && items.length === 0 && <Empty>No settlement has been prepared for this exit yet.</Empty>}
         {items.length > 0 && (
-          <div style={SCROLL}>
-            <table aria-label="Settlement revisions">
-              <thead>
-                <tr>
-                  <th scope="col">Revision</th>
-                  <th scope="col">State</th>
-                  <th scope="col">Currency</th>
-                  {withAmounts && <th scope="col">Net amount</th>}
-                  <th scope="col">Prepared by</th>
-                  <th scope="col">Created</th>
-                  <th scope="col">
-                    <span style={SR_ONLY}>Revision</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((s) => (
-                  <tr key={s.id}>
-                    <td>{s.revision}</td>
-                    <td>
-                      <SettlementState state={s.state} />
-                    </td>
-                    <td>{s.currencyCode}</td>
-                    {withAmounts && (
-                      <td>
-                        <Money value={s.netAmount} currency={s.currencyCode} />
-                      </td>
-                    )}
-                    <td>
-                      <UserRef userId={s.preparedBy} />
-                    </td>
-                    <td>{when(s.createdAt)}</td>
-                    <td>
-                      <Link to={PATHS.settlement(s.id)} aria-label={`Open revision ${s.revision}`}>
-                        Open
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Settlement revisions">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Currency</TableHead>
+                {withAmounts && <TableHead scope="col">Net amount</TableHead>}
+                <TableHead scope="col">Prepared by</TableHead>
+                <TableHead scope="col">Created</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Revision</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((s) => (
+                <TableRow key={s.id}>
+                  <TableCell>{s.revision}</TableCell>
+                  <TableCell>
+                    <SettlementState state={s.state} />
+                  </TableCell>
+                  <TableCell>{s.currencyCode}</TableCell>
+                  {withAmounts && (
+                    <TableCell>
+                      <Money value={s.netAmount} currency={s.currencyCode} />
+                    </TableCell>
+                  )}
+                  <TableCell>
+                    <UserRef userId={s.preparedBy} />
+                  </TableCell>
+                  <TableCell>{when(s.createdAt)}</TableCell>
+                  <RowActionsCell>
+                    <Link to={PATHS.settlement(s.id)} aria-label={`Open revision ${s.revision}`}>
+                      Open
+                    </Link>
+                  </RowActionsCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </Section>
       {can(SETTLEMENT_PREPARE) && list.data && !own && <PrepareRevision exitId={exitId} revisions={items} />}
@@ -166,36 +172,32 @@ function PrepareRevision({ exitId, revisions }: { exitId: string; revisions: rea
   return (
     <Section title="Prepare a revision">
       {created && (
-        <p className="ok" role="status">
+        <StatusNote tone="success" role="status">
           Revision {created.revision} created as a draft. <Link to={PATHS.settlement(created.id)}>Open revision {created.revision}</Link> to enter or upload its lines.
-        </p>
+        </StatusNote>
       )}
       {live ? (
-        <p className="hint">
+        <Hint>
           Revision {live.revision} is live ({settlementLabel(live.state).toLowerCase()}): a new revision can be prepared only once it is returned, rejected or cancelled.
-        </p>
+        </Hint>
       ) : (
-        <form className="grid-form" aria-label="Prepare a revision" onSubmit={submit}>
-          <p className="hint wide">
+        <FormGrid aria-label="Prepare a revision" onSubmit={submit}>
+          <Hint>
             You calculate the new draft from a snapshot on the server, or enter or upload its lines yourself; an independent reviewer and approver then decide it.
             {latest &&
               ` With the same currency as revision ${latest.revision}, its lines (active pay components only) are copied into the new draft as a starting point.`}
-          </p>
-          <label>
+          </Hint>
+          <FormField>
             {latest ? `Currency (leave blank to keep ${latest.currencyCode})` : 'Currency (ISO 4217 code, required)'}
-            <input value={currency} maxLength={3} placeholder={latest ? latest.currencyCode : 'INR'} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
-          </label>
-          {problem && (
-            <p role="alert" className="error wide">
-              {problem}
-            </p>
-          )}
-          <div className="wide row">
-            <button type="submit" disabled={create.isPending}>
+            <Input value={currency} maxLength={3} placeholder={latest ? latest.currencyCode : 'INR'} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+          </FormField>
+          {problem && <Notice notice={{ text: problem, ok: false }} />}
+          <ButtonRow className="col-span-full">
+            <Button type="submit" disabled={create.isPending}>
               Prepare a new revision
-            </button>
-          </div>
-        </form>
+            </Button>
+          </ButtonRow>
+        </FormGrid>
       )}
       {/* Outside the form: a refusal stays readable when the reloaded revisions replace the form (a live revision). */}
       <Refusal

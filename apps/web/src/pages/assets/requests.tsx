@@ -3,13 +3,32 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, Notice, NotPermitted, Section, When } from '../../ui';
 import { DelegatedBadge } from '../delegations';
 import { RequestHistory } from './employee-assets';
 import { Problem, QueryProblem, Refusal, refusalText } from './refusals';
-import { FLUSH, holderLabel, optional, PAGE_SIZE, PATHS, REQUEST_DECIDE, REQUEST_FILTERS, REQUEST_READ, shown, TEXTAREA, useAttemptKey, useKeys, useRefetchAll } from './shared';
+import {
+  holderLabel,
+  optional,
+  PAGE_SIZE,
+  PATHS,
+  REQUEST_DECIDE,
+  REQUEST_FILTERS,
+  REQUEST_READ,
+  shown,
+  useAttemptKey,
+  useKeys,
+  useRefetchAll,
+} from './shared';
 import type { AssetRequest, Page, RequestTask } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -18,12 +37,12 @@ import type { AssetRequest, Page, RequestTask } from './types';
 export function RequestsScreen() {
   const { can } = useSession();
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       <h1>Custody requests</h1>
-      <p className="hint">
+      <Hint>
         Approving a request records the decision only: it never issues an item. Issue the item from the <Link to={PATHS.register}>asset register</Link> and name the
         approved request there.
-      </p>
+      </Hint>
       {can(REQUEST_DECIDE) && <CustodyRequestQueue />}
       {can(REQUEST_READ) && <RequestList />}
       {!can(REQUEST_DECIDE) && !can(REQUEST_READ) && <NotPermitted>The selected role cannot read or decide custody requests.</NotPermitted>}
@@ -46,9 +65,9 @@ function RequestList() {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   return (
     <Section title="All custody requests">
-      <label>
+      <FormField>
         Show
-        <select
+        <NativeSelect
           value={filter}
           onChange={(e) => {
             setFilter(e.target.value);
@@ -60,23 +79,23 @@ function RequestList() {
               {label}
             </option>
           ))}
-        </select>
-      </label>
-      {list.isPending && <p className="hint loading">Loading the requests…</p>}
+        </NativeSelect>
+      </FormField>
+      {list.isPending && <LoadingLine>Loading the requests…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="The selected role cannot read custody requests." />
       {data && <RequestHistory requests={data.items} label="Custody requests" empty="No custody requests match." showEmployee />}
       {data && data.items.length > 0 && (
-        <div className="pager">
-          <button type="button" className="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+        <PagerRow>
+          <PagerButton disabled={page <= 1} onClick={() => setPage(page - 1)}>
             Previous page
-          </button>
-          <span>
+          </PagerButton>
+          <PagerCount>
             Page {data.page} of {pages} · {data.total} request{data.total === 1 ? '' : 's'}
-          </span>
-          <button type="button" className="secondary" disabled={page >= pages} onClick={() => setPage(page + 1)}>
+          </PagerCount>
+          <PagerButton disabled={page >= pages} onClick={() => setPage(page + 1)}>
             Next page
-          </button>
-        </div>
+          </PagerButton>
+        </PagerRow>
       )}
     </Section>
   );
@@ -103,12 +122,13 @@ export function CustodyRequestQueue() {
   return (
     <div ref={region} role="region" aria-label="Custody requests to decide" tabIndex={-1}>
       <Section title={`Custody requests to decide${data ? ` (${items.length})` : ''}`}>
-        <p className="hint">Approve a request, or reject it with a note. Approval issues nothing: the item is issued separately from the register.</p>
-        {tasks.isPending && <p className="hint loading">Loading the requests waiting for you…</p>}
+        <Hint>Approve a request, or reject it with a note. Approval issues nothing: the item is issued separately from the register.</Hint>
+        {tasks.isPending && <LoadingLine>Loading the requests waiting for you…</LoadingLine>}
         <QueryProblem error={tasks.error} forbidden="The selected role cannot decide custody requests." action="decide" />
         <Notice notice={notice} />
         {data && items.length === 0 && <Empty>No custody requests are waiting for your decision.</Empty>}
         {items.length > 0 && (
+          // `tasks`: the decision-list marker class that styles.css draws each request by, also in the decision inbox.
           <ul className="tasks" aria-label="Custody requests waiting for your decision">
             {items.map((t) => (
               <TaskItem key={t.taskId} task={t} onFinished={done} />
@@ -120,12 +140,18 @@ export function CustodyRequestQueue() {
   );
 }
 
+/** Who asked: from the request when the role may see it, else from the task's owner, else "An employee". */
+function requesterLabel(t: RequestTask): string {
+  if (t.request) return holderLabel(t.request);
+  return t.ownerName ? holderLabel({ employeeName: t.ownerName, employeeCode: t.ownerEmployeeCode ?? undefined }) : 'An employee';
+}
+
 function TaskItem({ task: t, onFinished }: { task: RequestTask; onFinished: (t: RequestTask, text: string, ok: boolean) => void }) {
   const attempt = useAttemptKey('asset-decision');
   const [note, setNote] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const r = t.request;
-  const who = r ? holderLabel(r) : t.ownerName ? holderLabel({ employeeName: t.ownerName, employeeCode: t.ownerEmployeeCode ?? undefined }) : 'An employee';
+  const who = requesterLabel(t);
   const decide = useMutation({
     mutationFn: (body: { decision: 'APPROVE' | 'REJECT'; reason?: string; idempotencyKey: string }) =>
       api<{ requestId: string; state: string }>(`/v1/asset-requests/tasks/${t.taskId}/decision`, { method: 'POST', body }),
@@ -167,7 +193,7 @@ function TaskItem({ task: t, onFinished }: { task: RequestTask; onFinished: (t: 
           </dl>
           {r.currentlyHeld !== undefined && (
             <div>
-              <p style={FLUSH}>Items the employee holds now:</p>
+              <p className="m-0">Items the employee holds now:</p>
               {r.currentlyHeld.length === 0 ? (
                 <Empty>None.</Empty>
               ) : (
@@ -181,23 +207,23 @@ function TaskItem({ task: t, onFinished }: { task: RequestTask; onFinished: (t: 
               )}
             </div>
           )}
-          <label>
+          <FormField>
             Note (required to reject; the employee never sees it)
-            <textarea style={TEXTAREA} rows={2} value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} />
-          </label>
-          <div className="row">
-            <button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
+            <Textarea rows={2} value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} />
+          </FormField>
+          <ButtonRow>
+            <Button type="button" disabled={decide.isPending} onClick={() => send('APPROVE')}>
               Approve
-            </button>
-            <button type="button" className="danger" disabled={decide.isPending} onClick={() => send('REJECT')}>
+            </Button>
+            <Button type="button" variant="danger" disabled={decide.isPending} onClick={() => send('REJECT')}>
               Reject
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Problem text={problem} />
           <Refusal error={decide.error} action="decide" />
         </>
       ) : (
-        <p className="hint">This request’s employee is outside the selected role’s scope, so it cannot be shown or decided here.</p>
+        <Hint>This request’s employee is outside the selected role’s scope, so it cannot be shown or decided here.</Hint>
       )}
     </li>
   );

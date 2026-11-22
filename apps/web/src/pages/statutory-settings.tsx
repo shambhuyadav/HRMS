@@ -11,10 +11,16 @@
 // call and every rule; this screen shows what it returned and its refusals in plain words.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Empty, ErrorNote, Section } from '../ui';
+import { Empty, ErrorNote, Notice, Section } from '../ui';
 
 const CONFIG_READ = 'payroll_config.read.operational';
 const CONFIG_MANAGE = 'payroll_config.manage.operational';
@@ -45,6 +51,17 @@ const BASIS: Record<string, string> = {
   HIGHER_WAGES: 'On higher wages (joint option, para 26(6))',
 };
 
+// The screen's own layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026).
+/** The employees a search found, one under another. */
+const MATCH_LIST = 'my-3 flex flex-col gap-1 pl-5';
+/** A found employee: a link-styled button without a button's height and padding, so it reads as the list item's text. */
+const MATCH_BUTTON = 'h-auto p-0';
+/** A date of a table: it stays on one line. */
+const DATE_CELL = 'whitespace-nowrap';
+
+/** The outcome of recording a setting, as a status (nothing while there is none). */
+const recorded = (note: string | null) => (note ? { text: note, ok: true } : null);
+
 function LocationStates() {
   const { can } = useSession();
   const qc = useQueryClient();
@@ -65,35 +82,34 @@ function LocationStates() {
   });
   return (
     <Section title="Work location states">
-      <p className="hint">
+      <Hint>
         The state of each work location from a date. An employee’s professional tax and labour welfare fund packs are those of the state of their work location on the day valued; a location
         without a state blocks those heads.
-      </p>
+      </Hint>
       <ErrorNote error={states.error} />
       {states.data && states.data.items.length === 0 && <Empty>No work location has a state recorded.</Empty>}
       {states.data && states.data.items.length > 0 && (
-        <table aria-label="Work location states">
-          <thead>
-            <tr>
-              <th>Location</th>
-              <th>From</th>
-              <th>State</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table aria-label="Work location states">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Location</TableHead>
+              <TableHead scope="col">From</TableHead>
+              <TableHead scope="col">State</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {states.data.items.map((s) => (
-              <tr key={s.id}>
-                <td>{s.locationCode}</td>
-                <td>{formatDate(s.effectiveFrom)}</td>
-                <td>{s.stateCode}</td>
-              </tr>
+              <TableRow key={s.id}>
+                <TableCell>{s.locationCode}</TableCell>
+                <TableCell className={DATE_CELL}>{formatDate(s.effectiveFrom)}</TableCell>
+                <TableCell>{s.stateCode}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       {can(CONFIG_MANAGE) && (
-        <form
-          className="row"
+        <FormGrid
           aria-label="Record a work location state"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -101,25 +117,25 @@ function LocationStates() {
             record.mutate({ locationCode: locationCode.trim(), effectiveFrom, stateCode: stateCode.trim().toUpperCase() });
           }}
         >
-          <label>
+          <FormField>
             Location code
-            <input value={locationCode} onChange={(e) => setLocationCode(e.target.value)} required />
-          </label>
-          <label>
+            <Input value={locationCode} onChange={(e) => setLocationCode(e.target.value)} required />
+          </FormField>
+          <FormField>
             From
-            <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} required />
-          </label>
-          <label>
+            <Input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} required />
+          </FormField>
+          <FormField>
             State (two letters)
-            <input value={stateCode} onChange={(e) => setStateCode(e.target.value)} maxLength={2} required />
-          </label>
-          <button type="submit" disabled={record.isPending}>
+            <Input value={stateCode} onChange={(e) => setStateCode(e.target.value)} maxLength={2} required />
+          </FormField>
+          <Button type="submit" disabled={record.isPending}>
             {record.isPending ? 'Recording…' : 'Record the state'}
-          </button>
-        </form>
+          </Button>
+        </FormGrid>
       )}
       <ErrorNote error={record.error} />
-      {note && <p role="status">{note}</p>}
+      <Notice notice={recorded(note)} />
     </Section>
   );
 }
@@ -154,37 +170,37 @@ function PfOptions() {
   });
   return (
     <Section title="PF contribution basis">
-      <p className="hint">An employee contributes on wages up to the PF pack’s ceiling unless a joint option to contribute on higher wages is recorded, from its date.</p>
-      <form
-        className="row"
+      <Hint>An employee contributes on wages up to the PF pack’s ceiling unless a joint option to contribute on higher wages is recorded, from its date.</Hint>
+      <FormGrid
         aria-label="Find an employee"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           setAsked(term.trim());
         }}
       >
-        <label>
+        <FormField>
           Employee code or name
-          <input value={term} onChange={(e) => setTerm(e.target.value)} />
-        </label>
-        <button type="submit" className="secondary">
+          <Input value={term} onChange={(e) => setTerm(e.target.value)} />
+        </FormField>
+        <Button type="submit" variant="outline">
           Find
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
       <ErrorNote error={hits.error} />
       {hits.data && hits.data.items.length === 0 && <Empty>No employee matches.</Empty>}
       {hits.data && hits.data.items.length > 0 && (
-        <ul aria-label="Matching employees">
+        <ul aria-label="Matching employees" className={MATCH_LIST}>
           {hits.data.items.map((h) => (
             <li key={h.id}>
-              <button
+              <Button
                 type="button"
-                className="link"
+                variant="link"
+                className={MATCH_BUTTON}
                 onClick={() => {
                   setEmployee(h);
                   setNote(null);
                 }}
-              >{`${h.employeeCode} ${h.displayName}`}</button>
+              >{`${h.employeeCode} ${h.displayName}`}</Button>
             </li>
           ))}
         </ul>
@@ -195,27 +211,26 @@ function PfOptions() {
           <ErrorNote error={options.error} />
           {options.data && options.data.items.length === 0 && <Empty>No option recorded: contributions are on wages up to the ceiling.</Empty>}
           {options.data && options.data.items.length > 0 && (
-            <table aria-label="PF options">
-              <thead>
-                <tr>
-                  <th>From</th>
-                  <th>Basis</th>
-                  <th>Reference</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="PF options">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">From</TableHead>
+                  <TableHead scope="col">Basis</TableHead>
+                  <TableHead scope="col">Reference</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {options.data.items.map((o) => (
-                  <tr key={o.id}>
-                    <td>{formatDate(o.effectiveFrom)}</td>
-                    <td>{BASIS[o.contributionBasis] ?? o.contributionBasis}</td>
-                    <td>{o.reference}</td>
-                  </tr>
+                  <TableRow key={o.id}>
+                    <TableCell className={DATE_CELL}>{formatDate(o.effectiveFrom)}</TableCell>
+                    <TableCell>{BASIS[o.contributionBasis] ?? o.contributionBasis}</TableCell>
+                    <TableCell>{o.reference}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
-          <form
-            className="row"
+          <FormGrid
             aria-label="Record a PF option"
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
@@ -223,27 +238,27 @@ function PfOptions() {
               record.mutate({ employeeId: employee.id, effectiveFrom, contributionBasis: basis, reference: reference.trim() });
             }}
           >
-            <label>
+            <FormField>
               From
-              <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} required />
-            </label>
-            <label>
+              <Input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} required />
+            </FormField>
+            <FormField>
               Basis
-              <select value={basis} onChange={(e) => setBasis(e.target.value as 'STATUTORY_CEILING' | 'HIGHER_WAGES')}>
+              <NativeSelect value={basis} onChange={(e) => setBasis(e.target.value as 'STATUTORY_CEILING' | 'HIGHER_WAGES')}>
                 <option value="HIGHER_WAGES">{BASIS.HIGHER_WAGES}</option>
                 <option value="STATUTORY_CEILING">{BASIS.STATUTORY_CEILING}</option>
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Reference (the option form)
-              <input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} required />
-            </label>
-            <button type="submit" disabled={record.isPending}>
+              <Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} required />
+            </FormField>
+            <Button type="submit" disabled={record.isPending}>
               {record.isPending ? 'Recording…' : 'Record the option'}
-            </button>
-          </form>
+            </Button>
+          </FormGrid>
           <ErrorNote error={record.error} />
-          {note && <p role="status">{note}</p>}
+          <Notice notice={recorded(note)} />
         </>
       )}
     </Section>
@@ -255,12 +270,12 @@ function StatutorySettingsScreen() {
   if (!can(CONFIG_READ) && !can(CONFIG_MANAGE)) {
     return (
       <Section title="Statutory settings">
-        <Empty>The selected role cannot see the statutory settings.</Empty>
+        <Empty refusal>The selected role cannot see the statutory settings.</Empty>
       </Section>
     );
   }
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       {can(CONFIG_READ) && <LocationStates />}
       {/* An employee's PF option says their wages are above the ceiling: read and recorded under the manage duty only (I-85). */}
       {can(CONFIG_MANAGE) && <PfOptions />}

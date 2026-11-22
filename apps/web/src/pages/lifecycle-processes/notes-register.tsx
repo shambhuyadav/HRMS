@@ -3,6 +3,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, download, type EmployeeHit, fileToBase64, formatDate, idempotencyKey, isForbidden, localDate, plural, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, NotPermitted, Pager, Section, When } from '../../ui';
@@ -10,7 +20,7 @@ import { keepOnPage, ReportExport } from '../leave-admin';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from '../records';
 import { NOTE_EXPORT } from './absconding-audit';
 import { Refusal } from './refusals';
-import { AbscondingMark, EMPLOYEE_LIST, EMPLOYEE_PAGE_SIZE, FIELDS, FILE_NAME, H3, ISO_DATE, Loading, MAX_FILE_BYTES, MAX_FILE_NAME, MAX_NOTE, NOTE_KINDS, NOTE_READ, NOTE_WRITE, noteKindLabel, noteTypeText, Notice, type NoticeState, type Paged, pagedUrl, PATHS, Problem, QueryProblem, ReasonField, RoleReady, SCAN_TEXT, SCAN_TONE, SCROLL, shown, totalOf, useKeys, userText } from './shared';
+import { AbscondingMark, EMPLOYEE_LIST, EMPLOYEE_PAGE_SIZE, FIELDS, FILE_NAME, ISO_DATE, MAX_FILE_BYTES, MAX_FILE_NAME, MAX_NOTE, NOTE_KINDS, NOTE_READ, NOTE_WRITE, noteKindLabel, noteTypeText, Notice, type NoticeState, type Paged, pagedUrl, PATHS, Problem, QueryProblem, ReasonField, RoleReady, SCAN_TEXT, SCAN_TONE, shown, totalOf, useKeys, userText } from './shared';
 import type { NoteKind, ScanState } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -73,9 +83,9 @@ export function NotesRegisterScreen() {
         )}
         {can(NOTE_WRITE) && <NewRegisterNote />}
         {can(NOTE_IMPORT) && can(NOTE_WRITE) && (
-          <p className="hint">
+          <Hint>
             <Link to={PATHS.notesUpload}>Upload several notes from a file</Link>
-          </p>
+          </Hint>
         )}
       </RoleReady>
     </>
@@ -118,138 +128,134 @@ function NotesRegister() {
   const canVoid = can(NOTE_VOID);
   return (
     <Section title="Notes register">
-      <p className="hint">Restricted notes about the employees in the selected role’s scope; notes about your own record are never shown. Notes are never changed or deleted: a correction is a new note, and a note recorded by mistake is voided with a reason and stays on record.</p>
-      <form role="search" aria-label="Filter notes" className="stack" onSubmit={submit}>
-        <div style={FIELDS}>
-          <label>
+      <Hint>Restricted notes about the employees in the selected role’s scope; notes about your own record are never shown. Notes are never changed or deleted: a correction is a new note, and a note recorded by mistake is voided with a reason and stays on record.</Hint>
+      <FilterBar asChild>
+        <form role="search" aria-label="Filter notes" onSubmit={submit}>
+          <FormField>
             From
-            <input type="date" {...field('from')} />
-          </label>
-          <label>
+            <Input type="date" {...field('from')} />
+          </FormField>
+          <FormField>
             To
-            <input type="date" {...field('to')} />
-          </label>
-          <label>
+            <Input type="date" {...field('to')} />
+          </FormField>
+          <FormField>
             Type
-            <select {...field('kind')}>
+            <NativeSelect {...field('kind')}>
               <option value="">All types</option>
               {NOTE_KINDS.map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
                 </option>
               ))}
-            </select>
-          </label>
-          <label>
+            </NativeSelect>
+          </FormField>
+          <FormField>
             Status
-            <select {...field('status')}>
+            <NativeSelect {...field('status')}>
               <option value="">Any status</option>
               {NOTE_STATUSES.map(([k, label]) => (
                 <option key={k} value={k}>
                   {label}
                 </option>
               ))}
-            </select>
-          </label>
-          <label>
+            </NativeSelect>
+          </FormField>
+          <FormField>
             Employee, code or submitted by
-            <input maxLength={100} {...field('search')} />
-          </label>
-        </div>
-        <div className="row">
-          <button type="submit">Show notes</button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              setDraft(NO_FILTERS);
-              setApplied(NO_FILTERS);
-              setPage(1);
-              setProblem(null);
-            }}
-          >
-            Clear filters
-          </button>
-        </div>
-        <Problem text={problem} />
-      </form>
+            <Input maxLength={100} {...field('search')} />
+          </FormField>
+          <ButtonRow>
+            <Button type="submit">Show notes</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDraft(NO_FILTERS);
+                setApplied(NO_FILTERS);
+                setPage(1);
+                setProblem(null);
+              }}
+            >
+              Clear filters
+            </Button>
+          </ButtonRow>
+          <Problem text={problem} />
+        </form>
+      </FilterBar>
       <Notice notice={notice} />
-      {list.isPending && <Loading>Loading the notes…</Loading>}
+      {list.isPending && <LoadingLine>Loading the notes…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="The selected role cannot read restricted notes." />
       {data && data.items.length === 0 && <Empty>No notes match.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <p className="hint">{plural(totalOf(data), 'note')} match.</p>
-          <table aria-label="Notes">
-            <thead>
-              <tr>
-                <th scope="col">Date</th>
-                <th scope="col">Employee</th>
-                <th scope="col">Type</th>
-                <th scope="col">Note</th>
-                <th scope="col">Submitted by</th>
-                <th scope="col">Status</th>
-                <th scope="col">File</th>
-                {canVoid && <th scope="col">Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
+        <div>
+          <Hint>{plural(totalOf(data), 'note')} match.</Hint>
+          <Table aria-label="Notes">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Date</TableHead>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Type</TableHead>
+                <TableHead scope="col">Note</TableHead>
+                <TableHead scope="col">Submitted by</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">File</TableHead>
+                {canVoid && <TableHead scope="col">Actions</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {data.items.map((n) => (
-                <tr key={n.id}>
-                  <td>{formatDate(n.noteDate)}</td>
-                  <td>
-                    {n.employee.displayName} <span className="hint">({n.employee.employeeCode})</span>
-                  </td>
-                  <td>
+                <TableRow key={n.id}>
+                  <TableCell>{formatDate(n.noteDate)}</TableCell>
+                  <TableCell>
+                    {n.employee.displayName} <Hint as="span">({n.employee.employeeCode})</Hint>
+                  </TableCell>
+                  <TableCell>
                     <Badge tone={n.kind === 'WARNING' || n.kind === 'PIP' ? 'warn' : 'neutral'}>{noteTypeText(n)}</Badge>
-                    {n.source === 'IMPORT' && <div className="hint">uploaded</div>}
-                  </td>
-                  <td>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                    {n.void && <div className="hint">{`Voided: ${n.void.reason}`}</div>}
-                    {n.supersedesNoteId && <div className="hint">Corrects an earlier note.</div>}
-                  </td>
-                  <td>
+                    {n.source === 'IMPORT' && <HintLine>uploaded</HintLine>}
+                  </TableCell>
+                  {/* A note is free text: it wraps rather than widening the table. */}
+                  <TableCell className="min-[561px]:whitespace-normal">
+                    <div className="whitespace-pre-wrap">{n.body}</div>
+                    {n.void && <HintLine>{`Voided: ${n.void.reason}`}</HintLine>}
+                    {n.supersedesNoteId && <HintLine>Corrects an earlier note.</HintLine>}
+                  </TableCell>
+                  <TableCell>
                     {n.createdBy === me?.userId ? 'You' : (n.submittedByName ?? userText(n.createdBy, null))}
-                    <div className="hint">
+                    <HintLine>
                       <When at={n.createdAt} />
-                    </div>
-                  </td>
-                  <td>
+                    </HintLine>
+                  </TableCell>
+                  <TableCell>
                     <Badge tone={NOTE_STATUS_TONE[n.status] ?? 'neutral'}>{noteStatusLabel(n.status).toLowerCase()}</Badge>
-                  </td>
-                  <td>
-                    {!n.attachment ? (
-                      '—'
-                    ) : n.attachment.scanState === 'CLEAN' ? (
-                      <button type="button" className="link" disabled={file.isPending} onClick={() => file.mutate(n.id)}>
-                        {n.attachment.fileName ?? 'Download the file'}
-                      </button>
-                    ) : (
-                      <Badge tone={SCAN_TONE[n.attachment.scanState ?? ''] ?? 'neutral'}>{SCAN_TEXT[n.attachment.scanState ?? ''] ?? 'not available'}</Badge>
-                    )}
-                  </td>
+                  </TableCell>
+                  <TableCell>
+                    <NoteFile attachment={n.attachment} busy={file.isPending} onDownload={() => file.mutate(n.id)} />
+                  </TableCell>
                   {canVoid && (
-                    <td>
+                    <RowActionsCell>
                       {n.status === 'ACTIVE' && (
-                        <button
-                          type="button"
-                          className="secondary"
-                          aria-label={`Void the ${noteKindLabel(n.kind).toLowerCase()} of ${formatDate(n.noteDate)} about ${n.employee.displayName}`}
-                          onClick={() => {
-                            setVoiding(n);
-                            setNotice(null);
-                          }}
-                        >
-                          Void
-                        </button>
+                        <RowActions>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            aria-label={`Void the ${noteKindLabel(n.kind).toLowerCase()} of ${formatDate(n.noteDate)} about ${n.employee.displayName}`}
+                            onClick={() => {
+                              setVoiding(n);
+                              setNotice(null);
+                            }}
+                          >
+                            Void
+                          </Button>
+                        </RowActions>
                       )}
-                    </td>
+                    </RowActionsCell>
                   )}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
       {data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(data)} onPage={setPage} label="Note pages" noun="note" />}
@@ -269,6 +275,19 @@ function NotesRegister() {
         />
       )}
     </Section>
+  );
+}
+
+/** A note's supporting file: offered for download once the malware scan has released it (FR-106), otherwise its scan state. */
+function NoteFile({ attachment, busy, onDownload }: { attachment: RegisterNote['attachment']; busy: boolean; onDownload: () => void }) {
+  if (!attachment) return <>—</>;
+  if (attachment.scanState !== 'CLEAN') {
+    return <Badge tone={SCAN_TONE[attachment.scanState ?? ''] ?? 'neutral'}>{SCAN_TEXT[attachment.scanState ?? ''] ?? 'not available'}</Badge>;
+  }
+  return (
+    <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onDownload}>
+      {attachment.fileName ?? 'Download the file'}
+    </Button>
   );
 }
 
@@ -298,17 +317,17 @@ function VoidNoteForm({ note, onCancel, onDone }: { note: RegisterNote; onCancel
         : null;
   return (
     <form aria-label="Void a note" className="stack" onSubmit={submit}>
-      <h3 style={H3}>{`Void the ${noteKindLabel(note.kind).toLowerCase()} of ${formatDate(note.noteDate)} about ${note.employee.displayName}`}</h3>
+      <CardSubheading>{`Void the ${noteKindLabel(note.kind).toLowerCase()} of ${formatDate(note.noteDate)} about ${note.employee.displayName}`}</CardSubheading>
       <ReasonField label="Why it is voided" value={reason} onChange={setReason} />
       <Problem text={problem ?? refusal} />
-      <div className="row">
-        <button type="submit" disabled={save.isPending}>
+      <ButtonRow>
+        <Button type="submit" disabled={save.isPending}>
           Void the note
-        </button>
-        <button type="button" className="secondary" disabled={save.isPending} onClick={onCancel}>
+        </Button>
+        <Button type="button" variant="outline" disabled={save.isPending} onClick={onCancel}>
           Keep it
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       {!refusal && <Refusal error={save.error} action="note" />}
     </form>
   );
@@ -378,67 +397,66 @@ function NewRegisterNote() {
         <NotPermitted>The selected role cannot search employees, so it cannot choose whom a note is about here.</NotPermitted>
       ) : (
         <>
-          <form
+          <FormGrid
             role="search"
             aria-label="Find the employee"
-            className="row"
             onSubmit={(e) => {
               e.preventDefault();
               setTerm(typed.trim());
               setEmployeeId('');
             }}
           >
-            <label>
+            <FormField>
               Employee name or code
-              <input value={typed} maxLength={100} onChange={(e) => setTyped(e.target.value)} />
-            </label>
-            <button type="submit" className="secondary">
+              <Input value={typed} maxLength={100} onChange={(e) => setTyped(e.target.value)} />
+            </FormField>
+            <Button type="submit" variant="outline">
               Find
-            </button>
-          </form>
-          {term !== null && results.isPending && <Loading>Searching…</Loading>}
+            </Button>
+          </FormGrid>
+          {term !== null && results.isPending && <LoadingLine>Searching…</LoadingLine>}
           {term !== null && <QueryProblem error={results.error} forbidden="The selected role cannot search employees." />}
           {hits && hits.length === 0 && <Empty>No employee in the selected role’s scope matches.</Empty>}
           <form aria-label="New note" className="stack" onSubmit={submit} noValidate>
-            <div style={FIELDS}>
-              <label>
+            <div className={FIELDS}>
+              <FormField>
                 Employee
-                <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} disabled={!hits || hits.length === 0}>
+                <NativeSelect value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} disabled={!hits || hits.length === 0}>
                   <option value="">Choose…</option>
                   {(hits ?? []).map((h) => (
                     <option key={h.id} value={h.id}>
                       {`${h.displayName} (${h.employeeCode})`}
                     </option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </NativeSelect>
+              </FormField>
+              <FormField>
                 Type
-                <select value={kind} onChange={(e) => setKind((NOTE_KINDS.find(([k]) => k === e.target.value)?.[0] ?? 'NOTE') as NoteKind)}>
+                <NativeSelect value={kind} onChange={(e) => setKind((NOTE_KINDS.find(([k]) => k === e.target.value)?.[0] ?? 'NOTE') as NoteKind)}>
                   {NOTE_KINDS.map(([k, label]) => (
                     <option key={k} value={k}>
                       {label}
                     </option>
                   ))}
-                </select>
-              </label>
+                </NativeSelect>
+              </FormField>
               {kind === 'WARNING' && <AbscondingMark checked={absconding} onChange={setAbsconding} />}
-              <label>
+              <FormField>
                 Date it is about (blank: today)
-                <input type="date" value={noteDate} max={localDate()} onChange={(e) => setNoteDate(e.target.value)} />
-              </label>
-              <label>
+                <Input type="date" value={noteDate} max={localDate()} onChange={(e) => setNoteDate(e.target.value)} />
+              </FormField>
+              <FormField>
                 Supporting file (optional)
-                <input key={formKey} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              </label>
+                <Input key={formKey} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              </FormField>
             </div>
             <ReasonField label="Note (restricted to authorised HR)" value={body} onChange={setBody} max={MAX_NOTE} />
             <Problem text={problem ?? dateRefusal ?? fileRefusal} />
-            <div className="row">
-              <button type="submit" disabled={save.isPending}>
+            <ButtonRow>
+              <Button type="submit" disabled={save.isPending}>
                 {chosen ? `Add the note about ${chosen.displayName}` : 'Add the note'}
-              </button>
-            </div>
+              </Button>
+            </ButtonRow>
             {!dateRefusal && !fileRefusal && <Refusal error={save.error} action="note" />}
           </form>
           <Notice notice={notice} />
@@ -554,15 +572,15 @@ function NotesUpload() {
     <>
       <Section title="Upload notes">
         <form onSubmit={submit} className="stack" aria-label="Upload notes">
-          <p className="hint">
+          <Hint>
             CSV with exactly the header <code>{t.columns}</code> (template {t.code}). {t.note} Nothing is recorded until you add the previewed rows, and a file is applied all or nothing: one row with
             a problem rejects the whole file. Notes are restricted to authorised HR, and notes about your own record are refused.
-          </p>
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <FormField className="w-auto">
               Notes file (CSV)
-              <input
+              <Input
                 key={fileInput}
                 type="file"
                 accept=".csv,text/csv"
@@ -572,16 +590,19 @@ function NotesUpload() {
                   uploadKey.current = null;
                 }}
               />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Upload and preview
-            </button>
+            </Button>
           </div>
         </form>
         {isForbidden(upload.error) ? <NotPermitted>The selected role cannot upload notes.</NotPermitted> : <ErrorNote error={upload.error ?? resume.error} />}
-        <p className="hint">
-          <Link to={PATHS.notes}>Back to the notes register</Link>
-        </p>
+        <Hint>
+          {/* Here the way back sits in the card's closing note, not above the page title, so it keeps its place and spacing. */}
+          <BackLink className="order-none mb-0" to={PATHS.notes}>
+            Back to the notes register
+          </BackLink>
+        </Hint>
       </Section>
       {job && (
         <>
@@ -610,19 +631,19 @@ function NotesRegisterExport({ filters }: { filters: RegisterFilters }) {
   };
   return (
     <div className="stack">
-      <p className="hint">
+      <Hint>
         Export the notes the list shows (its filters as last applied) as a file: the employee, type, date, status, who submitted the note, when it was recorded and whether it was uploaded.
         The text of a note and the reason for a void are never in the file.
-      </p>
-      <form className="grid-form" aria-label="Notes register export" onSubmit={keepOnPage}>
-        <label>
+      </Hint>
+      <FormGrid aria-label="Notes register export" onSubmit={keepOnPage}>
+        <FormField>
           Format
-          <select value={format} onChange={(e) => setFormat(e.target.value === 'XLSX' ? 'XLSX' : 'CSV')}>
+          <NativeSelect value={format} onChange={(e) => setFormat(e.target.value === 'XLSX' ? 'XLSX' : 'CSV')}>
             <option value="CSV">CSV</option>
             <option value="XLSX">XLSX</option>
-          </select>
-        </label>
-      </form>
+          </NativeSelect>
+        </FormField>
+      </FormGrid>
       <ReportExport key={`${JSON.stringify(sent)}:${format}`} reportCode="EMPLOYEE_NOTES_REGISTER" filters={sent} format={format} label="Export the notes register" />
     </div>
   );

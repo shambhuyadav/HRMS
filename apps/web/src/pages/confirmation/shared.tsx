@@ -1,5 +1,5 @@
-// Shared by the confirmation screens: permission keys, limits and views, the API's shapes, query keys, styles and helpers.
-import { type CSSProperties, useMemo } from 'react';
+// Shared by the confirmation screens: permission keys, limits and views, the API's shapes, query keys and helpers.
+import { useMemo } from 'react';
 import { api, formatDate, readable } from '../../api';
 import { useSession } from '../../session';
 import { Badge } from '../../ui';
@@ -197,14 +197,6 @@ export function useKeys() {
   );
 }
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const PANEL: CSSProperties = { marginTop: '0.75rem' };
-export const GROUP: CSSProperties = { border: 'none', margin: 0, padding: 0, minWidth: 0 };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.5rem 0 0' };
-export const ISSUES: CSSProperties = { margin: 0, paddingLeft: '1.1rem' };
-export const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
-export const SR_ONLY: CSSProperties = { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 };
-
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function asTabView(value: string | null): TabView {
@@ -259,8 +251,11 @@ export function employeeSearch(term: string, probationOnly: boolean): string {
 
 export const viewButtonId = (caseId: string) => `confirmation-view-${caseId}`;
 
+/** The tone of a timing that needs attention: overdue is late, due (or no longer on probation) needs acting on now. */
+const TIMING_TONE: Readonly<Record<string, 'bad' | 'warn'>> = { OVERDUE: 'bad', DUE: 'warn', NOT_ON_PROBATION: 'warn' };
+
 /** The server-derived timing of a case that is still running; confirmed and cancelled cases say so in their state. */
 export function TimingBadge({ view }: { view: string }) {
   if (view === 'CONFIRMED' || view === 'CANCELLED') return null;
-  return <Badge tone={view === 'OVERDUE' ? 'bad' : view === 'DUE' || view === 'NOT_ON_PROBATION' ? 'warn' : 'neutral'}>{view.replace(/_/g, ' ').toLowerCase()}</Badge>;
+  return <Badge tone={TIMING_TONE[view] ?? 'neutral'}>{view.replace(/_/g, ' ').toLowerCase()}</Badge>;
 }

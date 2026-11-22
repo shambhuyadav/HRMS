@@ -2,10 +2,19 @@
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { Action } from '@/components/action-bar';
+import { CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { NothingChanged } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Field, FieldDescription } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, Section } from '../../ui';
-import { Action } from './changes';
+import { Badge, Empty, ErrorNote, Notice, Section } from '../../ui';
 import { Fact } from './record';
 import { ReadProblem, refusalText } from './refusals';
 import { EMPLOYEE_MANAGE_PAYROLL_ID, EMPLOYEE_MANAGE_PRIVATE, EMPLOYEE_PAYROLL_ID, EMPLOYEE_PRIVATE, enc, keys, type ListSectionKey, type PayrollIdentifiers, type RecordSectionsAnswer, type SectionEntry, words } from './shared';
@@ -154,11 +163,7 @@ function identifierRefusalText(error: unknown): string | null {
 function SaidRefusal({ error, say }: { error: unknown; say: (error: unknown) => string | null }) {
   const text = say(error);
   if (!text) return <ErrorNote error={error} />;
-  return (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return <Notice notice={{ text, ok: false }} />;
 }
 
 /** The sections moved on underneath: read them again, leaving what was typed in place. */
@@ -184,27 +189,34 @@ function ReferenceSelect(props: { category: string; label: string; value: string
   const items = options.data?.items ?? [];
   const offered = items.some((o) => o.code === value);
   return (
-    <div>
-      <label>
-        {label}
-        <select required={required} value={value} onChange={(e) => onChange(e.target.value)}>
-          <option value="">{`Choose a ${label.toLowerCase()}`}</option>
-          {value && !offered && (
-            <option value={value}>
-              {known || words(value)}
-              {options.isSuccess ? ' (no longer offered)' : ''}
-            </option>
+    <FormField
+      hint={
+        <>
+          {options.isSuccess && items.length === 0 && <FieldDescription>The company’s list has no values yet.</FieldDescription>}
+          {options.error instanceof ApiError && options.error.status === 403 ? (
+            <FieldDescription>Your role cannot read this list, so it cannot be chosen here.</FieldDescription>
+          ) : (
+            <ErrorNote error={options.error} />
           )}
-          {items.map((o) => (
-            <option key={o.code} value={o.code}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      {options.isSuccess && items.length === 0 && <p className="hint">The company’s list has no values yet.</p>}
-      {options.error instanceof ApiError && options.error.status === 403 ? <p className="hint">Your role cannot read this list, so it cannot be chosen here.</p> : <ErrorNote error={options.error} />}
-    </div>
+        </>
+      }
+    >
+      {label}
+      <NativeSelect required={required} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{`Choose a ${label.toLowerCase()}`}</option>
+        {value && !offered && (
+          <option value={value}>
+            {known || words(value)}
+            {options.isSuccess ? ' (no longer offered)' : ''}
+          </option>
+        )}
+        {items.map((o) => (
+          <option key={o.code} value={o.code}>
+            {o.label}
+          </option>
+        ))}
+      </NativeSelect>
+    </FormField>
   );
 }
 
@@ -249,18 +261,18 @@ function cellText(f: SectionField, entry: SectionEntry): string {
 function EntryField({ field: f, value, known, onChange }: { field: SectionField; value: string | boolean; known?: string | undefined; onChange: (value: string | boolean) => void }) {
   if (f.kind === 'boolean') {
     return (
-      <label className="check">
+      <CheckField>
         <input type="checkbox" checked={value === true} onChange={(e) => onChange(e.target.checked)} /> {f.label}
-      </label>
+      </CheckField>
     );
   }
   const text = typeof value === 'string' ? value : '';
   if (f.kind === 'reference') return <ReferenceSelect category={f.list ?? ''} label={f.label} value={text} known={known} required={f.required} onChange={onChange} />;
   const listId = f.suggestions ? `suggest-${f.name}` : undefined;
   return (
-    <label>
+    <FormField>
       {f.label}
-      <input
+      <Input
         type={f.kind === 'date' ? 'date' : f.kind === 'year' ? 'number' : 'text'}
         required={f.required}
         maxLength={f.kind === 'text' ? 200 : undefined}
@@ -269,7 +281,7 @@ function EntryField({ field: f, value, known, onChange }: { field: SectionField;
         onChange={(e) => onChange(e.target.value)}
       />
       {f.suggestions && listId && <Suggestions id={listId} category={f.suggestions} />}
-    </label>
+    </FormField>
   );
 }
 
@@ -308,8 +320,7 @@ function EntryForm({ employeeId, section, entry, onSaved, onConflict, close }: S
     onError: reloadOnSectionConflict(onConflict, ['STALE_VERSION', 'ENTRY_REMOVED']),
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label={entry ? `Edit ${section.noun}` : `Add a ${section.noun}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
@@ -325,18 +336,18 @@ function EntryForm({ employeeId, section, entry, onSaved, onConflict, close }: S
           onChange={(value) => setValues({ ...values, [f.name]: value })}
         />
       ))}
-      <button type="submit" disabled={save.isPending}>
+      <Button type="submit" disabled={save.isPending}>
         Save {section.noun}
-      </button>
+      </Button>
       {entry && (
-        <button type="button" className="secondary" onClick={close}>
+        <Button type="button" variant="outline" onClick={close}>
           Cancel
-        </button>
+        </Button>
       )}
-      <div className="wide">
+      <div className="col-span-full">
         <SaidRefusal error={save.error} say={sectionRefusalText} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -355,34 +366,33 @@ function RemoveEntryForm({ employeeId, section, entry, onSaved, onConflict, clos
     onError: reloadOnSectionConflict(onConflict, ['STALE_VERSION', 'ENTRY_REMOVED']),
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label={`Remove ${section.noun}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         remove.mutate();
       }}
     >
-      <p className="wide">
+      <p>
         {section.fields
           .slice(0, 2)
           .map((f) => cellText(f, entry))
           .join(', ')}
       </p>
-      <label className="wide">
+      <FormField className="col-span-full">
         Reason
-        <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <button type="submit" disabled={remove.isPending}>
+        <Input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <Button type="submit" disabled={remove.isPending}>
         Confirm removal
-      </button>
-      <button type="button" className="secondary" onClick={close}>
+      </Button>
+      <Button type="button" variant="outline" onClick={close}>
         Cancel
-      </button>
-      <div className="wide">
+      </Button>
+      <div className="col-span-full">
         <SaidRefusal error={remove.error} say={sectionRefusalText} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -400,25 +410,30 @@ function ListSectionView({ section, entries, ...changes }: SectionChangeProps & 
       {entries.length === 0 ? (
         <Empty>Nothing recorded yet.</Empty>
       ) : (
-        <table aria-label={section.title}>
-          <thead>
-            <tr>
+        <Table aria-label={section.title}>
+          <TableHeader>
+            <TableRow>
               {section.fields.map((f) => (
-                <th key={f.name} scope="col">
+                <TableHead key={f.name} scope="col">
                   {f.label}
-                </th>
+                </TableHead>
               ))}
-              {(manage || removed) && <th scope="col"><span className="sr-only">Actions</span></th>}
-            </tr>
-          </thead>
-          <tbody>
+              {(manage || removed) && (
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {entries.map((e) => (
-              <tr key={e.id}>
+              <TableRow key={e.id}>
                 {section.fields.map((f) => (
-                  <td key={f.name}>{cellText(f, e)}</td>
+                  <TableCell key={f.name}>{cellText(f, e)}</TableCell>
                 ))}
                 {(manage || removed) && (
-                  <td>
+                  // A removal's reason is free text: the cell takes the room it needs, wrapping rather than widening the table.
+                  <RowActionsCell expanded={!!e.removedAt}>
                     {e.removedAt ? (
                       <>
                         <Badge tone="warn">removed</Badge> {formatDate(e.removedAt)}
@@ -426,22 +441,22 @@ function ListSectionView({ section, entries, ...changes }: SectionChangeProps & 
                       </>
                     ) : (
                       manage && (
-                        <>
-                          <button type="button" className="secondary" onClick={() => setOpen({ mode: 'edit', entry: e })}>
+                        <RowActions>
+                          <Button type="button" variant="outline" size="sm" onClick={() => setOpen({ mode: 'edit', entry: e })}>
                             Edit
-                          </button>{' '}
-                          <button type="button" className="secondary" onClick={() => setOpen({ mode: 'remove', entry: e })}>
+                          </Button>{' '}
+                          <Button type="button" variant="danger" size="sm" onClick={() => setOpen({ mode: 'remove', entry: e })}>
                             Remove
-                          </button>
-                        </>
+                          </Button>
+                        </RowActions>
                       )
                     )}
-                  </td>
+                  </RowActionsCell>
                 )}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       {manage &&
         open &&
@@ -491,8 +506,7 @@ function PayrollIdentifiersForm({ employeeId, identifiers, onSaved, onConflict, 
     return out;
   };
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label="Change payroll identifiers"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
@@ -504,27 +518,27 @@ function PayrollIdentifiersForm({ employeeId, identifiers, onSaved, onConflict, 
       }}
     >
       {IDENTIFIERS.map((i) => (
-        <div key={i.key}>
-          <label>
+        <Field key={i.key} className="gap-2">
+          <FormField>
             {i.label}
-            <input autoComplete="off" spellCheck={false} maxLength={40} disabled={cleared[i.key]} value={typed[i.key]} onChange={(e) => setTyped({ ...typed, [i.key]: e.target.value })} />
-          </label>
+            <Input autoComplete="off" spellCheck={false} maxLength={40} disabled={cleared[i.key]} value={typed[i.key]} onChange={(e) => setTyped({ ...typed, [i.key]: e.target.value })} />
+          </FormField>
           {identifiers.values[i.key] !== null && (
-            <label className="check">
+            <CheckField>
               <input type="checkbox" checked={cleared[i.key]} onChange={(e) => setCleared({ ...cleared, [i.key]: e.target.checked })} /> Clear the {i.label}
-            </label>
+            </CheckField>
           )}
-        </div>
+        </Field>
       ))}
-      <button type="submit" disabled={save.isPending}>
+      <Button type="submit" disabled={save.isPending}>
         Save payroll identifiers
-      </button>
-      <p className="hint wide">Type only the identifiers to change: one left blank stays as it is.</p>
-      <div className="wide">
-        {unchanged && <p role="status">Nothing changed.</p>}
+      </Button>
+      <Hint>Type only the identifiers to change: one left blank stays as it is.</Hint>
+      <div className="col-span-full">
+        {unchanged && <NothingChanged />}
         <SaidRefusal error={save.error} say={identifierRefusalText} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -593,19 +607,20 @@ export function RecordSectionsPanel({ employeeId }: { employeeId: string }) {
     <Section
       title={RECORD_SECTIONS_TITLE}
       actions={
-        <button type="button" className="secondary" aria-expanded={shown} onClick={() => setShown(!shown)}>
+        // A long label wraps on a narrow screen rather than running past the card.
+        <Button type="button" variant="outline" className="h-auto min-h-[var(--control-h)] shrink py-1.5 whitespace-normal" aria-expanded={shown} onClick={() => setShown(!shown)}>
           {shown ? 'Hide family, qualifications and prior employment' : 'Show family, qualifications and prior employment'}
-        </button>
+        </Button>
       }
     >
       {shown && (
         <>
-          {notice && <p role="status">{notice}</p>}
+          {notice && <Notice notice={{ text: notice, ok: true }} />}
           {sections.error ? <ReadProblem error={sections.error} /> : null}
           {lists.length > 0 && (
-            <label className="check">
+            <CheckField>
               <input type="checkbox" checked={includeRemoved} onChange={(e) => setIncludeRemoved(e.target.checked)} /> Show removed entries
-            </label>
+            </CheckField>
           )}
           {lists.map(({ section, entries }) => (
             <ListSectionView key={section.key} {...changes} section={section} entries={entries} />

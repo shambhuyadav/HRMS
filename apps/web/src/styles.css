@@ -7,7 +7,16 @@
    from one semantic set (text, tint, edge). Every rule keeps its selector, so no screen loses a layout behaviour.
    Dark theme (20 Nov 2026): every colour below is a token with a dark value of its own (chosen for the dark surfaces, not inverted),
    following the device setting unless the person picks a theme in the top bar (theme.ts sets data-theme on <html>). Text links and
-   filled buttons use separate accent tokens, so each keeps 4.5:1 in both themes. */
+   filled buttons use separate accent tokens, so each keeps 4.5:1 in both themes.
+   Accessibility pass (20 Nov 2026, a review against Apple's Human Interface Guidelines, foundations only): text at least 4.5:1 and
+   10.4px; field edges 3:1; keyboard focus in its own blue; the text size follows the browser setting (16px on a phone); 44px
+   targets on a phone; the closed phone menu hidden from the keyboard; answers for increased contrast, reduced motion and Windows
+   high-contrast mode (at the end of this file). */
+
+/* The whole file is in the "legacy" cascade layer (order set in tailwind.css): shadcn/ui components, built from Tailwind's utility
+   layer, take precedence over these rules. What is left here: the tokens, the rules for native elements, and the rules for the
+   marker classes the screens still render. (Contents not re-indented.) */
+@layer legacy {
 
 /* Inter (SIL Open Font License 1.1, ./assets/fonts/OFL.txt), served by this app itself: the content security policy loads nothing from
    other sites. Two files: Latin, and Latin Extended (which has the rupee sign). */
@@ -41,13 +50,19 @@
   --line: #e6e9ef;
   --line-strong: #d3d8e0;
   --line-hover: #b8bfca;
-  /* Brand. */
-  --accent: #d1402f;
-  --accent-hover: #b83525;
+  /* A field's edge: 3:1 against the card, so an empty field can be seen (a hairline is not enough for a control). */
+  --field-edge: #878f9f;
+  --field-edge-hover: #6b7485;
+  /* Brand. Accent text keeps 4.5:1 on white, on the page and on its own tint. */
+  --accent: #bf3a2a;
+  --accent-hover: #a02e21;
   --accent-bright: #e74c3c;
   --accent-soft: #fdf0ee;
   --accent-edge: #f4c7c1;
-  --ring: rgba(231, 76, 60, 0.28);
+  /* Keyboard focus has a colour of its own, so a focused field does not look like a field in error. */
+  --focus: #1f5fa8;
+  --focus-on-dark: #80b6f6;
+  --ring: rgba(31, 95, 168, 0.25);
   /* A filled button or link: white text on it keeps 4.5:1. */
   --accent-fill: #d1402f;
   --accent-fill-hover: #b83525;
@@ -69,6 +84,9 @@
   /* The sidebar and other dark surfaces. */
   --dark: #10141b;
   --dark-2: #171c24;
+  /* The light red on a dark surface: the lit icon of the menu's current page, the sign-in panel's feature marks. Those surfaces are
+     dark in both themes, so it is set once here for both. */
+  --accent-on-dark: #ff8a7d;
   /* Shape and depth: hairline-first, a shadow only where something floats. */
   --radius-lg: 12px;
   --radius: 10px;
@@ -89,9 +107,13 @@
   --chart-axis: #c3c8d1;
   --chart-track: #eef1f5;
   --tab-hover: rgba(255, 255, 255, 0.65);
+  /* Marks drawn in a framed tile (an empty list; a list the role may not see), stroked in --muted and --warn of each theme. */
+  --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235d6779' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
+  --icon-refusal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a5a00' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2'/%3E%3Cpath d='M8 10.5V7a4 4 0 0 1 8 0v3.5'/%3E%3C/svg%3E");
   color-scheme: light;
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  font-size: 14.5px;
+  /* 14.5px at the browser's default text size, and larger or smaller with the person's own text-size setting. */
+  font-size: 90.625%;
   line-height: 1.5;
   color: var(--body);
   background: var(--bg);
@@ -113,12 +135,15 @@
     --line: #262d37;
     --line-strong: #343c48;
     --line-hover: #4b5462;
+    --field-edge: #657080;
+    --field-edge-hover: #7d8796;
     --accent: #ff8070;
     --accent-hover: #ffa093;
     --accent-bright: #ec5a49;
     --accent-soft: #2a1a1b;
     --accent-edge: #5e2c27;
-    --ring: rgba(236, 90, 73, 0.42);
+    --focus: #80b6f6;
+    --ring: rgba(128, 182, 246, 0.35);
     --accent-fill: #d1402f;
     --accent-fill-hover: #b83525;
     --link-underline: rgba(255, 128, 112, 0.4);
@@ -148,6 +173,8 @@
     --chart-axis: #3a4350;
     --chart-track: #1f262f;
     --tab-hover: rgba(255, 255, 255, 0.06);
+    --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa4b2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
+    --icon-refusal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f2c25f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2'/%3E%3Cpath d='M8 10.5V7a4 4 0 0 1 8 0v3.5'/%3E%3C/svg%3E");
     color-scheme: dark;
   }
 }
@@ -163,12 +190,15 @@
   --line: #262d37;
   --line-strong: #343c48;
   --line-hover: #4b5462;
+  --field-edge: #657080;
+  --field-edge-hover: #7d8796;
   --accent: #ff8070;
   --accent-hover: #ffa093;
   --accent-bright: #ec5a49;
   --accent-soft: #2a1a1b;
   --accent-edge: #5e2c27;
-  --ring: rgba(236, 90, 73, 0.42);
+  --focus: #80b6f6;
+  --ring: rgba(128, 182, 246, 0.35);
   --accent-fill: #d1402f;
   --accent-fill-hover: #b83525;
   --link-underline: rgba(255, 128, 112, 0.4);
@@ -198,6 +228,8 @@
   --chart-axis: #3a4350;
   --chart-track: #1f262f;
   --tab-hover: rgba(255, 255, 255, 0.06);
+  --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa4b2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
+  --icon-refusal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f2c25f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2'/%3E%3Cpath d='M8 10.5V7a4 4 0 0 1 8 0v3.5'/%3E%3C/svg%3E");
   color-scheme: dark;
 }
 
@@ -212,79 +244,13 @@ a { color: var(--accent); }
 a:hover { color: var(--accent-hover); }
 .icon { flex: none; }
 
-/* ---- Shell: sidebar | (top bar / page) ---------------------------------------------------------------------------------------- */
-/* (100dvh where the browser has it: on a phone 100vh reaches under the browser's own toolbar, which would hide the bottom bar.) */
-.shell { display: grid; grid-template-columns: 264px minmax(0, 1fr); height: 100vh; height: 100dvh; }
-.side { display: flex; flex-direction: column; min-height: 0; background: var(--dark); color: rgba(255, 255, 255, 0.72); box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.05); }
-.side-brand { display: flex; align-items: center; gap: 0.75rem; min-height: 60px; padding: 0.85rem 1.25rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
-.brand-mark {
-  position: relative;
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: var(--accent-bright);
-  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.18);
-}
-.brand-mark::after { content: ''; position: absolute; inset: 8.5px; border: 2.5px solid rgba(255, 255, 255, 0.95); border-radius: 4px; }
-.brand-text { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
-.brand { font-weight: 700; font-size: 1.05rem; color: #fff; letter-spacing: -0.01em; }
-.brand-company { font-size: 0.74rem; color: rgba(255, 255, 255, 0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.sidebar { flex: 1; min-height: 0; overflow-y: auto; padding: 0.85rem 0.75rem 1.5rem; display: flex; flex-direction: column; gap: 1.1rem; scrollbar-color: #3a414d transparent; scrollbar-width: thin; }
-.nav-section { display: flex; flex-direction: column; gap: 2px; }
-.nav-section-title { margin: 0.2rem 0.75rem 0.4rem; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(255, 255, 255, 0.38); }
-.sidebar a { display: flex; align-items: center; gap: 0.7rem; padding: 0.46rem 0.75rem; border-radius: var(--radius-xs); color: rgba(255, 255, 255, 0.74); text-decoration: none; font-size: 0.87rem; font-weight: 500; transition: background 0.12s, color 0.12s; }
-.sidebar a .icon { color: rgba(255, 255, 255, 0.46); }
-.sidebar a:hover { background: rgba(255, 255, 255, 0.055); color: #fff; }
-.sidebar a.active { background: rgba(255, 255, 255, 0.085); color: #fff; box-shadow: inset 2px 0 0 var(--accent-bright); }
-.sidebar a.active .icon { color: #ff8a7d; }
-.sidebar a:focus-visible, .sidebar button:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
-.sidebar .nav-group-toggle {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  width: 100%;
-  padding: 0.46rem 0.75rem;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: rgba(255, 255, 255, 0.74);
-  min-height: 0;
-  font-size: 0.87rem;
-  font-weight: 500;
-  text-align: left;
-  box-shadow: none;
-}
-.sidebar .nav-group-toggle .icon { color: rgba(255, 255, 255, 0.45); }
-.sidebar .nav-group-toggle:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); color: #fff; box-shadow: none; border: 0; }
-.sidebar .nav-group.current > .nav-group-toggle { color: #fff; }
-.sidebar .nav-group.current > .nav-group-toggle .icon { color: #ff8a7d; }
-.nav-group-label { flex: 1; min-width: 0; }
-.nav-count { font-size: 0.68rem; font-weight: 600; min-width: 1.4rem; text-align: center; padding: 0.05rem 0.4rem; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.55); }
-.sidebar .nav-group-toggle .chevron { color: rgba(255, 255, 255, 0.35); transition: transform 0.15s; }
-.nav-group.open > .nav-group-toggle .chevron { transform: rotate(90deg); }
-.nav-group-items { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 1.45rem; padding-left: 0.65rem; border-left: 1px solid rgba(255, 255, 255, 0.09); }
-.sidebar .nav-group-items a { padding: 0.4rem 0.65rem; font-size: 0.84rem; }
-
-.main-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.topbar { display: flex; align-items: center; gap: 1rem; min-height: 60px; padding: 0.5rem 1.75rem; background: var(--surface); border-bottom: 1px solid var(--line); position: relative; z-index: 5; }
-.crumbs { display: flex; align-items: center; gap: 0.35rem; flex: 1; min-width: 0; font-size: 0.9rem; color: var(--muted); }
-.crumb { white-space: nowrap; }
-.crumb.current { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-.crumb-sep { color: var(--faint); }
-.topbar-actions { display: flex; align-items: center; gap: 0.45rem; }
+/* ---- Shell: the frame of every page, and the top bar's role chip ------------------------------------------------------------- */
+/* The shell is as tall as the window and the page scrolls inside it (.content), so the top bar and the phone bar stay in place.
+   (100dvh where the browser has it: on a phone 100vh reaches under the browser's own toolbar, which would hide the bottom bar.) */
+.shell { height: 100vh; height: 100dvh; }
 .role-chip { display: flex; flex-direction: column; line-height: 1.25; padding: 0.32rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); max-width: 260px; }
 .role-name { font-size: 0.8rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .role-meta { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.user-chip { display: flex; align-items: center; gap: 0.55rem; margin-left: 0.25rem; padding-left: 0.75rem; border-left: 1px solid var(--line); }
-.avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 0.74rem; font-weight: 650; color: var(--info); background: var(--info-soft); box-shadow: inset 0 0 0 1px var(--info-edge); }
-.user-name { font-size: 0.85rem; font-weight: 600; color: var(--text); max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.icon-button { display: inline-grid; place-items: center; width: 36px; height: 36px; min-height: 0; padding: 0; border-radius: var(--radius-sm); border: 1px solid transparent; background: transparent; color: var(--body); text-decoration: none; }
-.icon-button:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--line); color: var(--text); box-shadow: none; }
-a.icon-button.active { color: var(--accent); background: var(--accent-soft); }
-.menu-toggle { display: none; }
-.scrim { display: none; }
 
 /* --content-top is the page's top padding: a sticky box stops below it, so sticky headings are lifted by it to meet the top bar. */
 .content { --content-top: 1.75rem; flex: 1; min-height: 0; overflow-y: auto; padding: var(--content-top) 2.25rem 3rem; display: flex; flex-direction: column; gap: 1.25rem; }
@@ -292,88 +258,18 @@ a.icon-button.active { color: var(--accent); background: var(--accent-soft); }
    column and clip its content behind an inner scrollbar). */
 .content > * { width: 100%; max-width: 1320px; flex: none; }
 
-/* ---- Signed-out pages: the product beside the card --------------------------------------------------------------------------- */
-.auth { min-height: 100vh; display: grid; grid-template-columns: minmax(340px, 1fr) minmax(380px, 1fr); background: var(--bg); }
-.auth-brand {
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 2rem;
-  padding: 2.5rem 3rem;
-  color: #fff;
-  background: var(--dark);
-  box-shadow: inset 4px 0 0 var(--accent-bright);
-}
-.auth-brand::after { content: none; }
-.auth-brand > * { position: relative; z-index: 1; }
-.auth-logo { display: flex; align-items: center; gap: 0.75rem; font-weight: 700; font-size: 1.35rem; letter-spacing: -0.01em; }
-.auth-headline { font-size: 2.1rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.02em; max-width: 27rem; margin: 0 0 1.75rem; color: #fff; }
-.auth-features { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.9rem; color: rgba(255, 255, 255, 0.84); }
-.auth-features li { display: flex; align-items: center; gap: 0.8rem; }
-.auth-feature-icon { width: 36px; height: 36px; display: grid; place-items: center; flex: none; border-radius: 10px; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); color: #ff8a7d; }
-.auth-foot { margin: 0; font-size: 0.8rem; color: rgba(255, 255, 255, 0.45); }
-.auth-panel { display: flex; align-items: center; justify-content: center; padding: 2rem 1.5rem; }
-.auth .narrow { margin: 0; width: 100%; }
-
 /* ---- Cards, forms, buttons -------------------------------------------------------------------------------------------------- */
-.narrow { max-width: 440px; margin: 10vh auto; padding: 2.25rem 2rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 0.9rem; }
-.narrow h1 { font-size: 1.6rem; }
 .stack { display: flex; flex-direction: column; gap: 0.75rem; }
 /* In a one-column form a field keeps a readable width; a date never needs the whole card. */
-.stack > label > input:not([type='checkbox']):not([type='radio']):not([type='file']), .stack > label > select, .stack > label > textarea { max-width: 560px; }
+.stack > label > input:not([type='checkbox']):not([type='radio']):not([type='file']), .stack > label > textarea { max-width: 560px; }
 .stack > label > input[type='date'], .stack > label > input[type='datetime-local'] { max-width: 260px; }
 .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
-.grid-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 0.95rem 1.1rem; align-items: end; border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1.15rem 1.2rem; background: var(--surface); }
-.grid-form .wide { grid-column: 1 / -1; }
-/* An optional part of a form, folded until it is needed ("Rehiring a former employee?"). */
-details.form-more > summary { cursor: pointer; width: max-content; font-size: 0.86rem; font-weight: 600; color: var(--accent); }
-details.form-more[open] > summary { margin-bottom: 0.6rem; }
-/* A control never outgrows its cell: a long option or a date picker used to run under the next field. Its label wraps above it instead. */
-.grid-form > * { min-width: 0; }
-.grid-form label.inline { flex-wrap: wrap; margin-bottom: 0; }
-.grid-form label.inline > input:not([type='checkbox']):not([type='radio']), .grid-form label.inline > select { flex: 1 1 9rem; min-width: 0; max-width: 100%; }
 /* A checkbox or radio sits beside its words (a plain label stacks its children, which left the box floating above the text). */
 label:has(> input[type='checkbox']), label:has(> input[type='radio']) { flex-direction: row; align-items: flex-start; gap: 0.5rem; }
 label:has(> input[type='checkbox']) > input, label:has(> input[type='radio']) > input { flex: none; margin: 0.15rem 0 0; }
-/* Fields grouped under a legend: a quiet frame, full width in a form grid. */
+/* Fields grouped under a legend: a quiet frame. */
 fieldset { margin: 0; padding: 0.75rem 1rem 0.9rem; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 0.55rem; }
 legend { padding: 0 0.35rem; font-size: 0.82rem; font-weight: 600; color: var(--text); }
-.grid-form > fieldset { grid-column: 1 / -1; }
-/* A form or filter row: fields keep their label above them, and buttons line up with the fields' bottom edge. */
-div.inline, form.inline { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem 1rem; margin-bottom: 0.75rem; }
-td form.inline { margin: 0.4rem 0 0; }
-.row:has(> label.inline) { align-items: flex-end; }
-.row > label.inline, .inline > label.inline, .filters label.inline { margin-bottom: 0; }
-.row > label.inline:has(> input:not([type='checkbox']):not([type='radio'])), .row > label.inline:has(> select),
-.inline > label.inline:has(> input:not([type='checkbox']):not([type='radio'])), .inline > label.inline:has(> select),
-.filters label.inline:has(> input:not([type='checkbox']):not([type='radio'])), .filters label.inline:has(> select) { flex-direction: column; align-items: stretch; gap: 0.3rem; }
-.row > label.inline:has(> input[type='checkbox']), .inline > label.inline:has(> input[type='checkbox']) { margin-bottom: 0.6rem; }
-/* Inside a card the form needs no box of its own: the card is the box. A field's label sits above it (a filter's too), and a form's
-   buttons keep their own width. A form after other content in the card is set apart by a rule. */
-.card .grid-form { background: transparent; border: 0; padding: 0; border-radius: 0; }
-.card .grid-form:not(:last-child) { margin-bottom: 1.15rem; }
-.card > * + .grid-form, .card > * + form > .grid-form:first-child { margin-top: 0.25rem; padding-top: 1.15rem; border-top: 1px solid var(--line); }
-.card > header + .grid-form, .card > header + p + .grid-form, .card > header + form > .grid-form:first-child,
-.card > .sr-only + .grid-form, .card > .sr-only + form > .grid-form:first-child, .card > .sr-only + p + .grid-form { margin-top: 0; padding-top: 0; border-top: 0; }
-.card > .sr-only + p.hint { margin: 0 0 1rem; }
-.grid-form label.inline:has(> input:not([type='checkbox']):not([type='radio'])),
-.grid-form label.inline:has(> select) { flex-direction: column; align-items: stretch; gap: 0.3rem; margin: 0; }
-.grid-form label.inline:has(> input:not([type='checkbox']):not([type='radio'])) > input,
-.grid-form label.inline:has(> select) > select { flex: none; width: 100%; }
-.grid-form > button, .grid-form > .row { justify-self: start; }
-/* Two or more buttons together (Show + Clear filters) get a line of their own, side by side, rather than wrapping in one column. */
-.grid-form > .row:has(> button + button) { grid-column: 1 / -1; flex-wrap: nowrap; }
-/* A heading, sentence or note in a form grid is not a field: it spans the row (in one cell it squeezed into a narrow column beside
-   the fields). A file field needs room for its button and the file name. */
-.grid-form > h2, .grid-form > h3, .grid-form > h4, .grid-form > p, .grid-form > [role='note'], .grid-form > [role='alert'], .grid-form > .error { grid-column: 1 / -1; }
-.grid-form > h3, .grid-form > h4 { margin: 0; }
-.grid-form > label:has(> input[type='file']) { grid-column: 1 / -1; max-width: 560px; }
-/* A field with help text under it is taller than its neighbours: such a form lines its fields up along the top (bottom alignment
-   would lift that field's input above the others). Its buttons stay on the bottom line. */
-.grid-form:has(> div > label + p.hint) { align-items: start; }
-.grid-form:has(> div > label + p.hint) > button, .grid-form:has(> div > label + p.hint) > .row { align-self: end; }
 input[type='file'] { font: inherit; font-size: 0.88rem; color: var(--muted); }
 input[type='file']::file-selector-button {
   margin-right: 0.75rem;
@@ -389,52 +285,24 @@ input[type='file']::file-selector-button {
   box-shadow: var(--shadow-sm);
 }
 input[type='file']::file-selector-button:hover { background: var(--surface-soft); border-color: var(--line-hover); }
-.grid-form > button { min-width: 8rem; }
 label { display: flex; flex-direction: column; gap: 0.32rem; font-size: 0.83rem; font-weight: 500; color: var(--body); }
-label.inline { flex-direction: row; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
-/* A field's name sits above it on every screen, as in the filter rows and forms; only a checkbox or radio keeps its text beside it,
-   and the pager's "Rows per page" stays one line. */
-label.inline:not(.pager label):has(> select),
-label.inline:not(.pager label):has(> input:not([type='checkbox']):not([type='radio'])),
-label.inline:not(.pager label):has(> textarea) { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
-label.check { flex-direction: row; align-items: center; }
 input:not([type='checkbox']):not([type='radio']):not([type='file']), select { min-height: var(--control-h); }
-input, select, textarea { font: inherit; font-size: 0.92rem; padding: 0.45rem 0.75rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); box-shadow: var(--shadow-xs); transition: border-color 0.12s, box-shadow 0.12s; }
-input::placeholder, textarea::placeholder { color: var(--faint); }
-input:hover, select:hover, textarea:hover { border-color: var(--line-hover); }
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-bright); box-shadow: 0 0 0 3px var(--ring); }
+input, select, textarea { font: inherit; font-size: 0.92rem; padding: 0.45rem 0.75rem; border: 1px solid var(--field-edge); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); box-shadow: var(--shadow-xs); transition: border-color 0.12s, box-shadow 0.12s; }
+input::placeholder, textarea::placeholder { color: var(--muted); }
+input:hover, select:hover, textarea:hover { border-color: var(--field-edge-hover); }
+/* The transparent outline is drawn only in Windows high-contrast mode, where box shadows are not: a focused field still shows. */
+input:focus, select:focus, textarea:focus { outline: 2px solid transparent; outline-offset: 1px; border-color: var(--focus); box-shadow: 0 0 0 3px var(--ring); }
 input:disabled, select:disabled, textarea:disabled { background: var(--surface-sunken); color: var(--muted); border-color: var(--line); box-shadow: none; cursor: not-allowed; }
 input[type='checkbox'], input[type='radio'] { accent-color: var(--accent); padding: 0; box-shadow: none; }
 button { font: inherit; font-weight: 600; font-size: 0.89rem; line-height: 1.3; min-height: var(--control-h); padding: 0.45rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); cursor: pointer; box-shadow: var(--shadow-xs); transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, color 0.12s; }
 button:hover:not(:disabled) { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-/* A disabled main button is grey, not a washed-out red that reads as an error. */
-button:disabled:not(.secondary):not(.ghost):not(.danger):not(.link) { opacity: 1; background: var(--surface-sunken); border-color: var(--line); color: var(--faint); box-shadow: none; }
-button.block { width: 100%; min-height: 42px; }
-button.secondary { background: var(--surface); color: var(--text); border-color: var(--line-strong); }
-button.secondary:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--line-hover); color: var(--text); }
-button.ghost { display: inline-flex; align-items: center; gap: 0.4rem; background: transparent; border-color: transparent; color: var(--body); font-weight: 500; padding: 0.45rem 0.7rem; box-shadow: none; }
-button.ghost:hover:not(:disabled) { background: var(--surface-sunken); border-color: transparent; color: var(--text); }
-button.danger { background: var(--surface); color: var(--bad); border-color: var(--bad-edge); }
-button.danger:hover:not(:disabled) { background: var(--bad-soft); color: var(--bad); border-color: var(--bad); }
-button.link { min-height: 0; background: none; border: none; color: var(--accent); padding: 0; font-weight: 500; text-decoration: underline; text-decoration-color: var(--accent-edge); text-underline-offset: 3px; box-shadow: none; }
-button.link:hover:not(:disabled) { background: none; color: var(--accent-hover); text-decoration-color: currentColor; }
-/* Tabs and view toggles choose what is shown; they are not actions, so they never look like the red main button. Outside the ESS tab
-   groups, a tab list is a segmented control: a sunken track with the chosen tab raised on it. */
-:not(.ess-tabs) > [role='tablist'], .toggle-group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px; border-radius: var(--radius-sm); background: var(--surface-sunken); border: 1px solid var(--line); width: fit-content; max-width: 100%; }
-button[role='tab'], .toggle-group > button[aria-pressed] { min-height: 32px; padding: 0.3rem 0.85rem; border-radius: var(--radius-xs); font-size: 0.85rem; font-weight: 500; background: transparent; color: var(--muted); border: 1px solid transparent; box-shadow: none; }
-button[role='tab']:hover:not(:disabled), .toggle-group > button[aria-pressed]:hover:not(:disabled) { background: var(--tab-hover); border-color: transparent; color: var(--text); }
-button[role='tab'][aria-selected='true'], .toggle-group > button[aria-pressed='true'] { background: var(--surface); border-color: var(--line); color: var(--text); font-weight: 600; box-shadow: var(--shadow-sm); }
-:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+/* A disabled button is grey, not a washed-out red that reads as an error. */
+button:disabled { cursor: not-allowed; background: var(--surface-sunken); border-color: var(--line); color: var(--faint); box-shadow: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1.25rem 1.4rem; box-shadow: var(--shadow-xs); overflow-x: auto; }
-.card-header { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; min-height: 2.1rem; margin: 0 -1.4rem 1.1rem; padding: 0 1.4rem 0.95rem; border-bottom: 1px solid var(--line); }
-.card-header h2 { font-size: 1rem; font-weight: 600; }
-.card-header-plain { border-bottom: 0; padding-bottom: 0; margin-bottom: 0.85rem; min-height: 0; }
-.card-header-plain:has(> .card-count:empty) { justify-content: flex-end; }
-.card-count { font-size: 0.85rem; font-weight: 500; color: var(--muted); }
 /* A link in a card's header is the card's action (New requisition, Documents): it looks like a button, not body text. */
-.card-header > a, .card-header > .row > a {
+.card-header > a {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -452,18 +320,10 @@ button[role='tab'][aria-selected='true'], .toggle-group > button[aria-pressed='t
   box-shadow: var(--shadow-xs);
   transition: background 0.12s, border-color 0.12s;
 }
-.card-header > a:hover, .card-header > .row > a:hover { background: var(--surface-soft); border-color: var(--line-hover); color: var(--text); }
-/* The card's main action (New requisition): filled, like a primary button. */
-.card-header > a.primary, .card-header > .row > a.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
-.card-header > a.primary:hover, .card-header > .row > a.primary:hover { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); color: var(--on-accent); }
-/* "← Employees": a quiet way back above the page, not a red underlined sentence. */
-a.back-link { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.86rem; font-weight: 500; color: var(--muted); text-decoration: none; }
-a.back-link:hover { color: var(--accent); }
-/* It sits above the page title, where a way back is expected. */
-.content > a.back-link, .content > p:has(> a.back-link) { order: -1; width: auto; align-self: flex-start; margin: 0 0 -0.85rem; }
+.card-header > a:hover { background: var(--surface-soft); border-color: var(--line-hover); color: var(--text); }
 /* Links in running text: the brand colour with a light underline that firms up on hover (colour alone would not mark them). */
-.card a:not(.back-link) { text-decoration-color: var(--link-underline); text-underline-offset: 3px; }
-.card a:not(.back-link):hover { text-decoration-color: currentColor; }
+.card a { text-decoration-color: var(--link-underline); text-underline-offset: 3px; }
+.card a:hover { text-decoration-color: currentColor; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.89rem; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 0.68rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; font-size: 0.79rem; letter-spacing: 0; background: var(--surface-soft); white-space: nowrap; }
@@ -471,35 +331,16 @@ th { color: var(--muted); font-weight: 600; font-size: 0.79rem; letter-spacing: 
 thead th { border-top: 1px solid var(--line); }
 thead th:first-child { border-top-left-radius: var(--radius-sm); border-bottom-left-radius: var(--radius-sm); border-left: 1px solid var(--line); }
 thead th:last-child { border-top-right-radius: var(--radius-sm); border-bottom-right-radius: var(--radius-sm); border-right: 1px solid var(--line); }
-th button.link { color: var(--muted); text-decoration: none; font-weight: 600; font-size: inherit; text-transform: inherit; letter-spacing: inherit; }
-th button.link:hover:not(:disabled) { color: var(--text); }
-th[aria-sort='ascending'] button.link, th[aria-sort='descending'] button.link { color: var(--text); }
 tbody tr { transition: background 0.1s; }
 tbody tr:hover td { background: var(--surface-soft); }
 td a { color: var(--text); font-weight: 600; text-decoration: none; }
 td a:hover { color: var(--accent); text-decoration: underline; }
-/* A button in a row is one of the row's actions: a small outlined button, kept whole, with room between neighbours. One that takes
-   something out of use (Deactivate, End) is outlined in red, apart from Edit beside it (the brand colour is red too, so colour
-   alone would not tell them apart). */
-td button.link { display: inline-block; margin: 0.1rem 0.35rem 0.1rem 0; padding: 0.22rem 0.6rem; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: var(--text); font-weight: 500; font-size: 0.8rem; line-height: 1.4; text-decoration: none; white-space: nowrap; }
-td button.link:last-child { margin-right: 0; }
-td button.link:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--line-hover); color: var(--text); text-decoration: none; }
-button.link.danger { background: none; border: none; padding: 0; color: var(--bad); }
-button.link.danger:hover:not(:disabled) { background: none; color: var(--bad); text-decoration-color: currentColor; }
-td button.link.danger { padding: 0.22rem 0.6rem; border: 1px solid var(--bad-edge); background: var(--surface); color: var(--bad); }
-td button.link.danger:hover:not(:disabled) { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
 tbody tr:last-child td { border-bottom: none; }
-/* The row actions take the room they need and no more, so the data columns beside them are not squeezed into wrapping. */
-td:last-child:has(> button.link):not(:has(> :not(button):not(.sr-only))) { width: 1%; white-space: nowrap; }
 /* A list in a cell starts on the row's first line, without the paragraph margins of a list in text. */
 td ul, td ol { margin: 0; padding-left: 1.1rem; }
-/* A date or code cell stays on one line ("3 Nov 2026", not "3 Nov" over "2026"). */
-td.nowrap { white-space: nowrap; }
 td li + li { margin-top: 0.15rem; }
 /* A row's own heading in the body (a Total row) reads as a bold cell of that row, not as a grey column header. */
 tbody th[scope='row'] { background: none; color: var(--text); font-size: inherit; font-weight: 700; text-transform: none; letter-spacing: 0; white-space: normal; border-radius: 0; }
-/* A table with many columns lets its headings wrap rather than run past the card. */
-table.wrap-head th { white-space: normal; vertical-align: bottom; }
 /* On a phone a table reads as a list of cards, one per row, each value beside its column's name (App.tsx gives each cell the name),
    instead of a grid that runs past the screen and scrolls sideways inside its card. */
 @media (max-width: 560px) {
@@ -521,10 +362,6 @@ table.wrap-head th { white-space: normal; vertical-align: bottom; }
   .content table:has(> thead) > tbody > tr > [data-card-title] { order: -1; }
   .content table:has(> thead) > tbody > tr > td > .empty { width: 100%; }
 }
-.pager { display: flex; gap: 0.75rem; align-items: center; justify-content: flex-end; margin-top: 1rem; font-size: 0.86rem; color: var(--muted); }
-/* Paging is never the page's main action: every pager's buttons look secondary, whichever page drew them. */
-.pager button:not(.link) { min-height: 34px; background: var(--surface); color: var(--text); border-color: var(--line-strong); padding: 0.36rem 0.9rem; font-size: 0.86rem; }
-.pager button:not(.link):hover:not(:disabled) { background: var(--surface-soft); border-color: var(--line-hover); color: var(--text); }
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem 1.5rem; margin: 0; }
 .kv dt { color: var(--muted); font-size: 0.8rem; font-weight: 500; }
 .kv dd { margin: 0.15rem 0 0; color: var(--text); font-weight: 500; }
@@ -537,12 +374,8 @@ table.wrap-head th { white-space: normal; vertical-align: bottom; }
 .page-header { display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: -0.25rem; }
 .page-eyebrow { margin: 0; font-size: 0.74rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .page-title, .content > h1 { margin: 0; font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text); line-height: 1.25; }
-/* A page with its own title and introduction: the introduction reads as the page's subtitle. */
-.content > h1 + .hint { margin-top: -0.75rem; max-width: 72ch; font-size: 0.9rem; }
-/* Notes between cards read at a comfortable line length, like the introduction under the title. */
+/* A note on the page ("Loading your workspace…", App.tsx) reads at a comfortable line length. */
 .content > p.hint { max-width: 90ch; }
-/* Two notes in a row read as one block, not as two sections. */
-.content > p.hint + p.hint { margin-top: -0.75rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* ---- Dashboard ------------------------------------------------------------------------------------------------------------- */
@@ -588,10 +421,10 @@ table.wrap-head th { white-space: normal; vertical-align: bottom; }
 .widget:nth-child(4n + 3) .widget-icon { color: var(--good); background: var(--good-soft); }
 .widget:nth-child(4n + 4) .widget-icon { color: var(--warn); background: var(--warn-soft); }
 .widget-value { font-size: 1.85rem; font-weight: 650; overflow-wrap: anywhere; color: var(--text); letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
-.widget-value button.link, .widget-value a { color: var(--text); text-decoration: none; }
+.widget-value a { color: var(--text); text-decoration: none; }
 /* A state ("Not processed"), not a count: set as a label, not as a large figure. */
 .widget-value.widget-value-text { font-size: 1.2rem; font-weight: 650; letter-spacing: -0.01em; padding: 0.35rem 0; }
-.widget-value button.link:hover:not(:disabled), .widget-value a:hover { color: var(--accent); }
+.widget-value a:hover { color: var(--accent); }
 .widget-note { color: var(--muted); font-size: 0.82rem; }
 .widget-foot { margin-top: auto; padding-top: 0.35rem; font-size: 0.78rem; font-weight: 600; color: var(--accent); text-decoration: none; align-self: flex-start; }
 .widget-foot:hover { text-decoration: underline; }
@@ -627,56 +460,30 @@ table.wrap-head th { white-space: normal; vertical-align: bottom; }
 .badge-good { color: var(--good); border-color: var(--good-edge); background-color: var(--good-soft); }
 .badge-warn { color: var(--warn); border-color: var(--warn-edge); background-color: var(--warn-soft); }
 .badge-bad { color: var(--bad); border-color: var(--bad-edge); background-color: var(--bad-soft); }
+.badge-info { color: var(--info); border-color: var(--info-edge); background-color: var(--info-soft); }
 
 .tasks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.65rem; }
 .tasks li { border: 1px solid var(--line); border-radius: var(--radius); padding: 0.9rem 1.05rem; display: flex; flex-direction: column; gap: 0.4rem; background: var(--surface); transition: border-color 0.12s, box-shadow 0.12s; }
 .tasks li:hover { border-color: var(--line-strong); box-shadow: var(--shadow-xs); }
 .tasks li.unread { border-left: 3px solid var(--accent-bright); }
-/* A list item stacks its children at full width; a state badge or a plain link keeps its own size. */
-.tasks li > .badge, .tasks li > button.link { align-self: flex-start; }
+/* A list item stacks its children at full width; a state badge keeps its own size. */
+.tasks li > .badge { align-self: flex-start; }
 /* A list still loading (or with nothing in it, which its empty note says) takes no room. */
 .tasks:empty { display: none; }
 
 /* Decisions: the queues with something waiting come first; a queue with nothing waiting is one quiet line (its title and "nothing
-   waiting"), its explanations left out, so an empty inbox is a short list rather than a column of large blank cards. */
+   waiting"), its explanations left out, so an empty inbox is a short list rather than a column of large blank cards. The card's
+   padding, tint and header of that line are drawn by Section and Hint themselves (QuietWhenEmptyContext, components/card-context.ts). */
 /* (A module's queue may wrap its card in a region of its own: the rules hold for the card at any depth.) */
 .decision-queues { display: flex; flex-direction: column; gap: 0.75rem; }
 .decision-queues > * { flex: none; }
 .decision-queues > :has(p.empty.compact) { order: 1; }
-.decision-queues .card:has(p.empty.compact) { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.85rem; padding: 0.7rem 1.1rem; background: var(--surface-soft); box-shadow: none; }
-.decision-queues .card:has(p.empty.compact) > .card-header { margin: 0; padding: 0; border: 0; }
-.decision-queues .card:has(p.empty.compact) > .card-header h2 { font-size: 0.92rem; font-weight: 600; color: var(--text); }
-.decision-queues .card:has(p.empty.compact) p.hint,
+.decision-queues .card:has(p.empty.compact) { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.85rem; }
 .decision-queues .card:has(p.empty.compact) [role='note'],
 .decision-queues .card:has(p.empty.compact) .tasks { display: none; }
 .decision-queues .card:has(p.empty.compact) p.empty.compact { padding: 0; font-size: 0.86rem; }
-.card > .card-header:has(+ .tasks:empty:last-child) { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
-.choices { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
-.choices button { width: 100%; display: flex; align-items: center; gap: 0.85rem; text-align: left; background: var(--surface); color: var(--text); border-color: var(--line-strong); font-weight: 500; padding: 0.8rem 1rem; }
-.choices button:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent-bright); color: var(--text); box-shadow: none; }
-.choice-icon { width: 40px; height: 40px; display: grid; place-items: center; flex: none; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
-.choice-text { flex: 1; display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.choice-go { color: var(--muted); }
+/* A note: quiet text, not body copy. */
 .hint { color: var(--muted); font-size: 0.84rem; }
-/* Help text under a card's content reads as a quiet note, not as body copy. */
-/* A block, not a flex row: a link or code inside the note stays in the sentence (as a flex row each became its own column). The
-   icon sits in the left padding. A note followed by more content keeps a gap below it. */
-.card > p.hint { position: relative; display: block; margin: 1rem 0 0; padding: 0.7rem 0.9rem 0.7rem 2.3rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); line-height: 1.5; max-width: none; }
-.card > p.hint:not(:last-child) { margin-bottom: 1rem; }
-.card > p.hint + p.hint { margin-top: -0.4rem; }
-.card > p.hint::before {
-  content: '';
-  position: absolute;
-  left: 0.8rem;
-  top: 0.82rem;
-  width: 16px;
-  height: 16px;
-  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235f6878' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 11v5M12 8h.01'/%3E%3C/svg%3E") no-repeat center / contain;
-}
-.card > p.hint:first-child, .card > header + p.hint { margin: 0 0 1rem; }
-/* "Loading…" is a passing state, not a note: quiet text, no box or note mark. */
-.card > p.hint.loading, p.hint.loading { padding: 0.25rem 0; border: 0; background: none; color: var(--muted); }
-.card > p.hint.loading::before { content: none; }
 /* An empty list says so in the middle of its card, with a quiet mark above. */
 .empty { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; margin: 0; padding: 1.6rem 1rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
 .empty::before {
@@ -685,7 +492,7 @@ table.wrap-head th { white-space: normal; vertical-align: bottom; }
   height: 42px;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: var(--surface-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa2ae' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E") no-repeat center / 20px;
+  background: var(--surface-soft) var(--icon-empty) no-repeat center / 20px;
 }
 td .empty, li .empty { flex-direction: row; justify-content: center; padding: 0.75rem; }
 td .empty::before, li .empty::before { display: none; }
@@ -693,62 +500,13 @@ td .empty::before, li .empty::before { display: none; }
 .empty.compact::before { display: none; }
 .error { border: 1px solid var(--bad-edge); border-left: 3px solid var(--bad); color: var(--bad); background: var(--bad-soft); border-radius: var(--radius-sm); padding: 0.7rem 0.9rem; }
 .error > div { margin-top: 0.25rem; font-size: 0.88rem; color: var(--text); }
-/* A step that asks "are you sure?" before something hard to undo. */
-.confirm-box { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.85rem 1rem; border: 1px solid var(--accent-edge); border-left: 3px solid var(--accent-bright); border-radius: var(--radius-sm); background: var(--accent-soft); }
-.confirm-box p { margin: 0; color: var(--text); }
 .error-code { margin-left: 0.35rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.04em; color: var(--muted); }
 .ok { color: var(--good); }
-/* "Not permitted" notes: a quiet callout, so a screen the role cannot use explains itself instead of showing one stray line. */
-p[role='note']:has(> .badge-warn:first-child) { margin: 0; padding: 0.75rem 0.95rem; border: 1px solid var(--warn-edge); border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--text); line-height: 1.55; }
-p[role='note']:has(> .badge-warn:first-child) > .badge-warn { margin-right: 0.35rem; background-color: var(--surface); }
 
-/* ---- Action bars: a row of buttons; an opened form takes the full width below all of them ------------------------------------ */
-.action-bar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.5rem; }
-.action-bar > div { display: contents; }
-.action-bar > div > button[aria-expanded='true'] { background: var(--accent-soft); border-color: var(--accent-bright); color: var(--accent); }
-.action-bar > div > :not(button) { flex: 0 0 100%; order: 1; margin-top: 0.5rem; }
-
-/* ---- My ESS: tab groups, one row per group with its name in a fixed column ---------------------------------------------------- */
-.ess-tabs { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.6rem 1.1rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-xs); }
-.ess-tabs > [role='tablist'] { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; padding: 0.5rem 0; }
-.ess-tabs > [role='tablist'] + [role='tablist'] { border-top: 1px solid var(--line); }
-.ess-tabs > [role='tablist'] > strong { flex: 0 0 10rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.ess-tabs [role='tab'] { min-height: 32px; padding: 0.3rem 0.85rem; border-radius: 999px; font-size: 0.84rem; font-weight: 500; background: var(--surface); color: var(--body); border: 1px solid var(--line); box-shadow: none; }
-.ess-tabs [role='tab']:hover:not(:disabled) { background: var(--surface-soft); border-color: var(--line-strong); color: var(--text); box-shadow: none; }
-.ess-tabs [role='tab'][aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent-edge); color: var(--accent); font-weight: 600; box-shadow: none; }
+/* ---- My ESS: the chosen tab's panel stacks its cards as the page does -------------------------------------------------------- */
 .content > [role='tabpanel'] { display: flex; flex-direction: column; gap: 1.25rem; }
-/* The ESS items not yet offered (Form 16 before the year closes) are listed once, folded, with their reasons. */
-.content > details.hint { margin: 0; }
-details.hint > summary { cursor: pointer; width: max-content; font-weight: 600; }
-/* An expense line is its own bordered block, named "Line N". */
-.stack > fieldset > legend { font-size: 0.9rem; font-weight: 600; }
-@media (max-width: 560px) {
-  .ess-tabs > [role='tablist'] > strong { flex-basis: 100%; }
-}
-
-/* ---- Filter bars ------------------------------------------------------------------------------------------------------------- */
-.filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem 1rem; margin-bottom: 1rem; }
-.filters label { flex: 1 1 180px; max-width: 280px; }
-
-/* ---- Announcements and events ------------------------------------------------------------------------------------------------ */
-.ticker { display: flex; align-items: flex-start; gap: 0.9rem; padding: 0.7rem 1rem; margin-bottom: 1.25rem; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
-.ticker-label { flex: none; padding-top: 0.1rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--accent); }
-.ticker-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.92rem; color: var(--text); }
-.events { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
-.event { display: flex; align-items: flex-start; gap: 0.9rem; }
-.event-date { flex: none; width: 52px; padding: 0.3rem 0; text-align: center; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); }
-.event-date strong { display: block; font-size: 1.15rem; line-height: 1.15; color: var(--text); }
-.event-date span { font-size: 0.68rem; font-weight: 600; text-transform: uppercase; color: var(--muted); }
-.event-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.event-name { font-weight: 600; color: var(--text); }
-.event-meta { font-size: 0.8rem; color: var(--muted); }
-.event-text { font-size: 0.86rem; color: var(--text); }
 
 /* ---- Organisation chart ------------------------------------------------------------------------------------------------------ */
-.org-stats { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 1.5rem; padding: 0.8rem 1rem; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); font-size: 0.88rem; color: var(--muted); }
-.org-stats strong { color: var(--text); font-size: 1.05rem; margin-right: 0.15rem; }
-.org-stats .hint { margin-left: auto; }
-.org-search { max-width: 460px; margin-bottom: 1rem; }
 .org-tree, .org-children { list-style: none; margin: 0; padding: 0; }
 .org-children { position: relative; margin-left: 13px; padding-left: 26px; }
 .org-children::before { content: ""; position: absolute; left: 0; top: 0; bottom: 1.6rem; border-left: 1px solid var(--line-strong); }
@@ -763,6 +521,8 @@ details.hint > summary { cursor: pointer; width: max-content; font-weight: 600; 
 .org-toggle-spacer { flex: none; width: 26px; }
 .org-card { display: flex; align-items: center; gap: 0.75rem; min-width: 0; max-width: 560px; flex: 1; padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-sm); }
 .org-card.hit { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* The person's initials on the card. */
+.avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 0.74rem; font-weight: 650; color: var(--info); background: var(--info-soft); box-shadow: inset 0 0 0 1px var(--info-edge); }
 .org-card-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1; }
 .org-card-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .org-card-name a { color: var(--text); text-decoration: none; }
@@ -770,103 +530,82 @@ details.hint > summary { cursor: pointer; width: max-content; font-weight: 600; 
 .org-card-code { font-weight: 500; font-size: 0.78rem; color: var(--muted); margin-left: 0.25rem; }
 .org-card-role { font-size: 0.86rem; color: var(--text); }
 .org-card-place { font-size: 0.8rem; color: var(--muted); }
-/* Team size is information, not an alert: a neutral pill, not the brand red. */
-.org-card-team { flex: none; font-size: 0.76rem; font-weight: 600; color: var(--info); background: var(--info-soft); border-radius: 999px; padding: 0.2rem 0.6rem; white-space: nowrap; }
 @media (max-width: 560px) {
   .org-children { margin-left: 6px; padding-left: 14px; }
   .org-children > .org-item::before { left: -14px; width: 14px; }
-  .org-card-team { display: none; }
-  .org-stats .hint { margin-left: 0; }
 }
 
-/* ---- Lists: headings in view, filters as one strip, empty lists ------------------------------------------------------------- */
+/* ---- Lists: headings in view, empty lists ---------------------------------------------------------------------------------- */
 /* A list whose table fits its card keeps its column headings at the top while the page scrolls (sticky-heads.ts marks those cards; a
    card that scrolls sideways keeps its headings in its own box). Not on a phone, where rows read as cards without a heading row. */
+/* A record page's section bar (section-bar.tsx) holds the top of the page: its height is set here, for the bar and for what has to
+   clear it. The page's sections come to rest below it, and the column headings stop just under it rather than behind it. */
+.content:has(> [data-slot='section-bar']) { --section-bar-h: 3.6rem; }
+.content:has(> [data-slot='section-bar']) > section { scroll-margin-top: calc(var(--section-bar-h) + 0.75rem); }
+@media (max-width: 560px) {
+  .content:has(> [data-slot='section-bar']) { --section-bar-h: 3.4rem; }
+}
 @media (min-width: 561px) {
   .card[data-fit] { overflow: visible; }
   .card[data-fit] table > thead > tr > th { position: sticky; top: calc(-1 * var(--content-top, 0rem)); z-index: 2; }
+  .content:has(> [data-slot='section-bar']) .card[data-fit] table > thead > tr > th { top: calc(var(--section-bar-h) - var(--content-top)); }
 }
-/* A list's filters read as one tinted strip above its results, apart from the rows they filter. */
-.card .grid-form.filter-bar, .card :is(form, div).grid-form[aria-label*='filter' i], .card .filters {
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-soft);
-}
-.card .grid-form.filter-bar:not(:last-child), .card :is(form, div).grid-form[aria-label*='filter' i]:not(:last-child) { margin-bottom: 1rem; }
 /* An empty list is a quiet framed panel in its card, so "nothing here" reads as a state of the list, not as a stray line of text. */
 .card > .empty:not(.compact) { margin: 0.25rem 0; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: var(--surface-soft); }
-
-/* ---- Phone bottom bar (App.tsx PhoneBar; rendered at phone width only) -------------------------------------------------------- */
-.phone-bar {
-  flex: none;
-  position: relative;
-  z-index: 6;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 0.15rem;
-  padding: 0.3rem 0.35rem calc(0.3rem + env(safe-area-inset-bottom, 0px));
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-}
-.phone-bar a, .phone-bar button {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.2rem;
-  min-width: 0;
-  min-height: 54px;
-  padding: 0.3rem 0.15rem;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.7rem;
-  font-weight: 600;
-  line-height: 1.2;
-  text-decoration: none;
-  box-shadow: none;
-}
-.phone-bar span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.phone-bar .icon { box-sizing: content-box; padding: 0.15rem 0.85rem; border-radius: 999px; transition: background 0.12s; }
-.phone-bar a.active, .phone-bar button[aria-expanded='true'] { color: var(--text); }
-.phone-bar a.active .icon, .phone-bar button[aria-expanded='true'] .icon { color: var(--accent); background: var(--accent-soft); }
-.phone-bar a:hover, .phone-bar button:hover:not(:disabled) { background: transparent; color: var(--text); border: 0; }
-/* With the bar, "More" opens the menu: the top bar's menu button is not needed twice. */
-.shell.has-phone-bar .menu-toggle { display: none; }
+/* A list the acting role may not see is a refusal, not an empty list: a locked mark on the warning tint (the words are unchanged). */
+.empty.empty-refusal:not(.compact) { border: 1px solid var(--warn-edge); border-radius: var(--radius); background: var(--warn-soft); color: var(--text); }
+.empty.empty-refusal::before { border-color: var(--warn-edge); background: var(--surface) var(--icon-refusal) no-repeat center / 20px; }
 
 /* ---- Smaller screens --------------------------------------------------------------------------------------------------------- */
 @media (max-width: 1180px) {
-  .user-name, .role-meta { display: none; }
-  .user-chip { padding-left: 0.5rem; }
+  .role-meta { display: none; }
 }
 @media (max-width: 920px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
-  .side { position: fixed; inset: 0 auto 0 0; width: 280px; z-index: 30; transform: translateX(-100%); transition: transform 0.2s; }
-  .shell.menu-open .side { transform: none; box-shadow: var(--shadow-lg); }
-  .shell.menu-open .scrim { display: block; position: fixed; inset: 0; z-index: 20; background: rgba(18, 21, 25, 0.45); }
-  .menu-toggle { display: inline-grid; }
-  .topbar { padding: 0.5rem 1rem; gap: 0.5rem; }
-  .topbar-actions button.ghost span { display: none; }
   .content { --content-top: 1.25rem; padding: var(--content-top) 1rem 2rem; }
-  /* One column: the brand bar keeps its own height (a stretched row left a third of a phone screen dark and empty), the card follows. */
-  .auth { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .auth-brand { padding: 1.25rem 1.5rem; }
-  .auth-panel { align-items: flex-start; padding-top: 2.5rem; }
-  .auth-pitch, .auth-foot { display: none; }
 }
 @media (max-width: 560px) {
-  /* The page title sits just below; a cut-off copy of it ("Emplo…") in the bar adds nothing. */
-  .crumbs .crumb, .crumbs .crumb-sep { display: none; }
-  .user-chip { display: none; }
-  /* Two figures a row, so quick actions are not two screens down; a card's title and its actions may wrap. */
+  /* Two figures a row, so quick actions are not two screens down. */
   .widgets { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
   .widget-value { font-size: 1.5rem; }
-  .card-header { flex-wrap: wrap; }
-  /* Bigger targets for a finger. */
-  :root { --control-h: 42px; }
+  /* Text at the phone's own reading size (16px at the default setting), and fields at 16px or more so the browser does not zoom
+     the page when one is focused. */
+  :root { font-size: 100%; }
+  input, select, textarea { font-size: max(1rem, 16px); }
+  /* Bigger targets for a finger (44px). */
+  :root { --control-h: 44px; }
   input[type='checkbox'], input[type='radio'] { width: 18px; height: 18px; }
-  .ess-tabs [role='tab'], button[role='tab'] { padding: 0.5rem 0.9rem; }
+  .widget-foot { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: -0.5rem; }
+  /* The top bar still fits a 360px screen: the role chip gives way first. */
+  .role-chip { min-width: 0; }
+  /* A card has no line for a column with nothing in it (an empty Actions cell). */
+  .content table:has(> thead) > tbody > tr > td:empty { display: none; }
 }
+
+/* ---- Skip link: the first stop for the keyboard, shown only when focused ---------------------------------------------------- */
+.skip-link { position: absolute; left: 1rem; top: 0.75rem; z-index: 60; padding: 0.5rem 0.9rem; border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-weight: 600; text-decoration: none; box-shadow: var(--shadow); transform: translateY(-200%); }
+.skip-link:focus { transform: none; }
+#main:focus { outline: none; }
+
+/* ---- The person's display settings ------------------------------------------------------------------------------------------ */
+/* Increased contrast: muted text, hairlines and field edges darken (lighten in the dark theme); links keep a solid underline. */
+@media (prefers-contrast: more) {
+  :root { --muted: #3f4a5c; --faint: #5d6779; --line: #b8bfca; --field-edge: #6b7485; }
+  .card a { text-decoration-color: currentColor; }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) { --muted: #b9c1cc; --faint: #9aa4b2; --line: #4b5462; --field-edge: #8a94a3; }
+}
+@media (prefers-contrast: more) {
+  :root[data-theme='dark'] { --muted: #b9c1cc; --faint: #9aa4b2; --line: #4b5462; --field-edge: #8a94a3; }
+}
+/* Reduced motion: the organisation chart's chevrons do not turn and the dashboard's bars do not grow. */
+@media (prefers-reduced-motion: reduce) {
+  .org-toggle .icon, .dash-charts .dash-bar-part > i { transition: none; }
+}
+/* Windows high-contrast mode: today's tile in the attendance month keeps a frame of its own (that mode draws every tile's border in
+   the same system colour and leaves out the inset shadow that marks today). */
+@media (forced-colors: active) {
+  .dash-charts .dash-day-today { outline: 2px solid CanvasText; outline-offset: -3px; }
+}
+
+} /* end of @layer legacy */

@@ -1,12 +1,18 @@
 // The KRA upload (FR-041, template APPRAISAL_GOALS_V1): new draft appraisals only, after a preview.
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, fileToBase64, idempotencyKey, readable } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Notice, NotPermitted, Section, StateBadge } from '../../ui';
 import { HeldBatchWatchNote, ImportBatches, TemplateDownload, useBatchFollowUp } from '../records';
-import { Refusal } from './refusals';
-import { IMPORT, type ImportJob, MANAGE, SCROLL, useKeys } from './shared';
+import { Refusal, UnannouncedError } from './refusals';
+import { IMPORT, type ImportJob, MANAGE, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: the KRA upload (FR-041, template APPRAISAL_GOALS_V1): new DRAFT appraisals only, after a preview
@@ -122,15 +128,15 @@ function GoalUpload() {
   return (
     <div className="stack">
       <Section title="KRA upload">
-        <p className="hint">
+        <Hint>
           One row per goal: <code>cycleCode,employeeCode,sequence,description,target,weight</code> (template APPRAISAL_GOALS_V1). The rows of one employee and cycle become one new draft appraisal with
           those goals; each employee’s weights must total exactly 100. An upload never submits, rates or approves anything: each employee still enters a self-assessment and the review route decides.
-        </p>
+        </Hint>
         <TemplateDownload base={GOAL_IMPORTS} code="APPRAISAL_GOALS_V1" />
-        <form className="grid-form" aria-label="Upload goals" onSubmit={submit} noValidate>
-          <label>
+        <FormGrid aria-label="Upload goals" onSubmit={submit} noValidate>
+          <FormField>
             Goal file (CSV)
-            <input
+            <Input
               key={inputKey}
               type="file"
               accept=".csv,text/csv"
@@ -139,14 +145,14 @@ function GoalUpload() {
                 uploadKey.current = null;
               }}
             />
-          </label>
-          <div className="row">
-            <button type="submit" disabled={busy || !file}>
+          </FormField>
+          <ButtonRow>
+            <Button type="submit" disabled={busy || !file}>
               {upload.isPending ? 'Checking…' : 'Upload and preview'}
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Refusal error={upload.error ?? resume.error} action="upload" />
-        </form>
+        </FormGrid>
         <Notice notice={notice} />
       </Section>
       {job && (
@@ -157,57 +163,56 @@ function GoalUpload() {
           </p>
           {held && (
             <>
-              <p role="status">
+              <StatusNote tone="info" role="status">
                 The file is waiting for the malware scan, so nothing in it has been read yet. This is usually a short wait. You can discard the upload meanwhile; it stays in your uploads below, so it
                 can be opened again after you leave this page.
-              </p>
-              <div className="row">
+              </StatusNote>
+              <ButtonRow>
                 <HeldBatchWatchNote watch={watch} />
-                <button type="button" className="secondary" disabled={busy} onClick={() => resume.mutate(job.id)}>
+                <Button type="button" variant="outline" disabled={busy} onClick={() => resume.mutate(job.id)}>
                   Check the scan again
-                </button>
-                <button type="button" className="secondary" disabled={busy} onClick={() => act.mutate({ id: job.id, action: 'cancel' })}>
+                </Button>
+                <Button type="button" variant="outline" disabled={busy} onClick={() => act.mutate({ id: job.id, action: 'cancel' })}>
                   Discard the upload
-                </button>
+                </Button>
                 {resume.data?.id === job.id && resume.data.state === 'UPLOADED' && !resume.isPending && <span role="status">Still waiting for the malware scan.</span>}
-              </div>
+              </ButtonRow>
             </>
           )}
           {job.state === 'PREVIEWED' && <p>Every row is valid. Committing creates the draft appraisals in one go; nothing is applied before that.</p>}
-          {job.state === 'REJECTED' && <p className="error">The file was rejected as a whole: correct the rows below and upload it again. Nothing was applied.</p>}          {job.rows.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label="Upload rows">
-                <thead>
-                  <tr>
-                    <th>Row</th>
-                    <th>Cycle / employee # sequence</th>
-                    <th>State</th>
-                    <th>Problem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {job.rows.map((r) => (
-                    <tr key={r.rowNumber}>
-                      <td>{r.rowNumber}</td>
-                      <td>{r.businessKey ?? '—'}</td>
-                      <td>{readable(r.state)}</td>
-                      <td>{r.errorCode ? (ROW_PROBLEMS[r.errorCode] ?? r.errorCode) : '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {job.state === 'REJECTED' && <UnannouncedError>The file was rejected as a whole: correct the rows below and upload it again. Nothing was applied.</UnannouncedError>}
+          {job.rows.length > 0 && (
+            <Table aria-label="Upload rows">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Row</TableHead>
+                  <TableHead scope="col">Cycle / employee # sequence</TableHead>
+                  <TableHead scope="col">State</TableHead>
+                  <TableHead scope="col">Problem</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {job.rows.map((r) => (
+                  <TableRow key={r.rowNumber}>
+                    <TableCell>{r.rowNumber}</TableCell>
+                    <TableCell>{r.businessKey ?? '—'}</TableCell>
+                    <TableCell>{readable(r.state)}</TableCell>
+                    <TableCell>{r.errorCode ? (ROW_PROBLEMS[r.errorCode] ?? r.errorCode) : '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
           {problems.length === 0 && job.state === 'REJECTED' && <Empty>No row-level problem was reported.</Empty>}
           {job.state === 'PREVIEWED' && (
-            <div className="row">
-              <button type="button" disabled={busy} onClick={() => act.mutate({ id: job.id, action: 'commit' })}>
+            <ButtonRow className="mt-3">
+              <Button type="button" disabled={busy} onClick={() => act.mutate({ id: job.id, action: 'commit' })}>
                 {act.isPending ? 'Working…' : 'Commit: create the draft appraisals'}
-              </button>
-              <button type="button" className="secondary" disabled={busy} onClick={() => act.mutate({ id: job.id, action: 'cancel' })}>
+              </Button>
+              <Button type="button" variant="outline" disabled={busy} onClick={() => act.mutate({ id: job.id, action: 'cancel' })}>
                 Discard the upload
-              </button>
-            </div>
+              </Button>
+            </ButtonRow>
           )}
           <Refusal error={act.error} action={act.variables?.action === 'cancel' ? 'discard' : 'commit'} />
         </Section>

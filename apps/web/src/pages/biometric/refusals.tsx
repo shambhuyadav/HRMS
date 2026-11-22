@@ -1,6 +1,6 @@
 // The biometric API's refusals in plain words, mapping errors included.
 import { ApiError } from '../../api';
-import { ErrorNote } from '../../ui';
+import { ErrorNote, Notice } from '../../ui';
 
 const REFUSALS: Readonly<Record<string, string>> = {
   STALE_VERSION: 'This changed since you opened it. It has been reloaded; review it and try again.',
@@ -37,17 +37,9 @@ export function Refusal({ error }: { error: unknown }) {
   if (error.code === 'MAPPING_INVALID') {
     const errors = (error.details as { errors?: string[] } | undefined)?.errors ?? [];
     const words = errors.map((code) => (code.startsWith('INVALID_PATH:') ? `the source path of ${code.slice(13)} is not a plain field path` : (MAPPING_ERRORS[code] ?? code)));
-    return (
-      <p role="alert" className="error">
-        This mapping cannot be used: {words.join('; ')}.
-      </p>
-    );
+    return <Notice notice={{ text: `This mapping cannot be used: ${words.join('; ')}.`, ok: false }} />;
   }
   const words = REFUSALS[error.code];
   if (!words) return <ErrorNote error={error} />;
-  return (
-    <p role="alert" className="error">
-      {words}
-    </p>
-  );
+  return <Notice notice={{ text: words, ok: false }} />;
 }

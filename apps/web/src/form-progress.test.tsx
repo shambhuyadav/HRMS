@@ -96,7 +96,7 @@ describe('steps of a long form', () => {
     expect(stepNames()[0]).toBe('Step 1: Who, 0 of 1 required');
     type('Full name', 'Synthetic Person');
     expect(stepNames()[0]).toBe('Step 1: Who, complete');
-    expect(steps()[0]!.closest('li')!.className).toBe('done');
+    expect(steps()[0]!.closest('li')!.getAttribute('data-state')).toBe('done');
     expect(steps()[0]!.querySelector('svg')).toBeTruthy();
     type('City', 'SYN');
     expect(stepNames()[1]).toBe('Step 2: Where, 1 of 2 required');

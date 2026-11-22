@@ -8,6 +8,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ApiError, api, formatAmount, formatDate, localDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { Empty, ErrorNote, Section } from '../ui';
@@ -57,6 +63,17 @@ const H = 260;
 const PAD = { top: 16, right: 16, bottom: 36, left: 88 };
 const day = (d: string) => Date.parse(`${d}T00:00:00Z`);
 
+/** The chart scales to its container up to its own width (W), in the page's font. */
+const CHART = 'block max-w-[640px] [font-family:inherit]';
+/** The chart's caption: one muted line under it. */
+const CAPTION = 'text-[0.84rem] text-muted-foreground';
+/** The employee search: its field and the Find button side by side, their bottoms lined up. */
+const FIELD_ROW = 'flex flex-wrap items-end gap-2';
+/** The search field keeps a readable width beside its button. */
+const SEARCH_FIELD = 'w-72 max-w-full';
+/** The employees found, each a link-styled button in the list (no box of its own). */
+const FOUND_LINK = 'h-auto px-0';
+
 /**
  * One currency's step line: each stored arrangement holds its value until the next one starts, so the line steps at effective
  * dates; a marker on each financial year's value date carries the year's figure. One series, one axis, no legend (the heading
@@ -83,8 +100,8 @@ export function ProgressionChart({ data, currency }: { data: Progression; curren
   const ticks = [0, max / 2, max].map((v) => Math.round(v));
   const label = `${BASIS_LABEL[data.basis]} of ${data.employeeName} in ${currency}, ${data.span.from} to ${data.span.to}`;
   return (
-    <figure className="progression-chart" style={{ margin: 0 }}>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={label} style={{ maxWidth: W, display: 'block', fontFamily: 'inherit' }}>
+    <figure className="m-0">
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={label} className={CHART}>
         {ticks.map((t) => (
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="var(--line)" strokeWidth={1} />
@@ -118,7 +135,7 @@ export function ProgressionChart({ data, currency }: { data: Progression; curren
           </g>
         )}
       </svg>
-      <figcaption className="hint">{label}. Each step is an approved salary arrangement as stored.</figcaption>
+      <figcaption className={CAPTION}>{label}. Each step is an approved salary arrangement as stored.</figcaption>
     </figure>
   );
 }
@@ -126,26 +143,26 @@ export function ProgressionChart({ data, currency }: { data: Progression; curren
 /** The chart's table view: every financial year's value, its change and why a change is not shown. */
 export function ProgressionTable({ data }: { data: Progression }) {
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>Financial year</th>
-          <th>Value on</th>
-          <th>{BASIS_LABEL[data.basis]}</th>
-          <th>Change on the year before</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Financial year</TableHead>
+          <TableHead scope="col">Value on</TableHead>
+          <TableHead scope="col">{BASIS_LABEL[data.basis]}</TableHead>
+          <TableHead scope="col">Change on the year before</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {data.years.map((y) => (
-          <tr key={y.financialYear}>
-            <td>FY {y.label}</td>
-            <td>{formatDate(y.valueDate)}</td>
-            <td>{y.amount === null ? '—' : formatAmount(y.amount, y.currency ?? undefined)}</td>
-            <td>{y.changePercent !== null ? `${y.changePercent}%` : (NA_TEXT[y.percentNaReason ?? ''] ?? '—')}</td>
-          </tr>
+          <TableRow key={y.financialYear}>
+            <TableCell className="whitespace-nowrap">FY {y.label}</TableCell>
+            <TableCell className="whitespace-nowrap">{formatDate(y.valueDate)}</TableCell>
+            <TableCell className="whitespace-nowrap">{y.amount === null ? '—' : formatAmount(y.amount, y.currency ?? undefined)}</TableCell>
+            <TableCell>{y.changePercent !== null ? `${y.changePercent}%` : (NA_TEXT[y.percentNaReason ?? ''] ?? '—')}</TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -171,20 +188,22 @@ function EmployeePicker({ onPick }: { onPick: (id: string) => void }) {
         setQuery(search.trim());
       }}
     >
-      <label>
-        Employee <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code or email" />
-      </label>{' '}
-      <button type="submit" disabled={search.trim().length === 0}>
-        Find
-      </button>
+      <div className={FIELD_ROW}>
+        <FormField className={SEARCH_FIELD}>
+          Employee <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code or email" />
+        </FormField>{' '}
+        <Button type="submit" disabled={search.trim().length === 0}>
+          Find
+        </Button>
+      </div>
       {found.data && found.data.items.length === 0 && <Empty>No employee found.</Empty>}
       {!!found.data?.items.length && (
         <ul aria-label="Employees found">
           {found.data.items.map((e) => (
             <li key={e.id}>
-              <button type="button" className="link" onClick={() => onPick(e.id)}>
+              <Button type="button" variant="link" className={FOUND_LINK} onClick={() => onPick(e.id)}>
                 {e.displayName} ({e.employeeCode})
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -220,33 +239,33 @@ export function SalaryProgressionScreen() {
   return (
     <>
       <h1>Salary progression</h1>
-      <p className="hint">
+      <Hint>
         One employee’s approved salary by financial year (1 April to 31 March): the value in force at each year end, or today for the current year, and its change on the year before
         in the same currency. Confidential: shown only to a role holding the salary read and salary history grants for this employee.
-      </p>
+      </Hint>
       <EmployeePicker onPick={(id) => set({ employeeId: id })} />
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', margin: '0.75rem 0' }}>
-        <label>
+      <FilterBar>
+        <FormField>
           Measure{' '}
-          <select value={basis} onChange={(e) => set({ basis: e.target.value })}>
+          <NativeSelect value={basis} onChange={(e) => set({ basis: e.target.value })}>
             <option value="MONTHLY_GROSS">{BASIS_LABEL.MONTHLY_GROSS}</option>
             <option value="ANNUAL_CTC">{BASIS_LABEL.ANNUAL_CTC}</option>
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Financial years{' '}
-          <select value={years} onChange={(e) => set({ years: e.target.value })}>
+          <NativeSelect value={years} onChange={(e) => set({ years: e.target.value })}>
             <option value="">Company default</option>
             {[1, 2, 3, 5, 7, 10, 15, 20].map((n) => (
               <option key={n} value={String(n)}>
                 {n}
               </option>
             ))}
-          </select>
-        </label>
-      </div>
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
       {!employeeId && <Empty>Find an employee to see their salary progression.</Empty>}
-      {refused && <Empty>{refused}</Empty>}
+      {refused && <Empty refusal={chart.error instanceof ApiError && chart.error.status === 403}>{refused}</Empty>}
       {!refused && <ErrorNote error={chart.error} />}
       {data && (
         <Section title={`${data.employeeName} (${data.employeeCode}) · ${BASIS_LABEL[data.basis]} · FY ${data.years[0]?.label ?? ''} to FY ${data.years.at(-1)?.label ?? ''}`}>
@@ -260,7 +279,7 @@ export function SalaryProgressionScreen() {
               </div>
             ))
           )}
-          {currencies.length > 1 && <p className="hint">Each currency has its own chart: amounts in different currencies are never drawn or compared on one scale.</p>}
+          {currencies.length > 1 && <Hint>Each currency has its own chart: amounts in different currencies are never drawn or compared on one scale.</Hint>}
           <ProgressionTable data={data} />
         </Section>
       )}
@@ -329,12 +348,12 @@ export function ReportingSettingsScreen() {
   return (
     <>
       <h1>Reporting settings</h1>
-      <p className="hint">
+      <Hint>
         Dated company settings. A dashboard count of people that cannot be opened record by record is shown as “fewer than N” while it is between 1 and N − 1 (1 shows every count). The
         dashboard lists the selected role’s own actions of the last days given here, and the salary progression chart spans this many financial years unless asked otherwise. An
         expense claim’s final decision falls due this many business days (Monday to Friday) after the claim reaches its finance or high-value step; a claim keeps the period in force
         on the day it arrived, and the period changes no approval or escalation. A change starts today or later and keeps every earlier revision.
-      </p>
+      </Hint>
       {current && (
         <Section title="In force today">
           <ul>
@@ -350,65 +369,64 @@ export function ReportingSettingsScreen() {
         </Section>
       )}
       <Section title="Start a new revision">
-        <form
-          className="grid-form"
+        <FormGrid
           onSubmit={(e) => {
             e.preventDefault();
             save.mutate();
           }}
         >
-          <label>
-            From <input type="date" value={values.effectiveFrom} onChange={(e) => change('effectiveFrom', e.target.value)} required />
-          </label>{' '}
-          <label>
-            Small-count threshold <input type="number" min={1} max={100} value={values.smallCountThreshold} onChange={(e) => change('smallCountThreshold', e.target.value)} required />
-          </label>{' '}
-          <label>
-            Recent activity (days) <input type="number" min={1} max={366} value={values.recentActivityDays} onChange={(e) => change('recentActivityDays', e.target.value)} required />
-          </label>{' '}
-          <label>
-            Progression span (years) <input type="number" min={1} max={20} value={values.salaryProgressionYears} onChange={(e) => change('salaryProgressionYears', e.target.value)} required />
-          </label>{' '}
-          <label>
+          <FormField>
+            From <Input type="date" value={values.effectiveFrom} onChange={(e) => change('effectiveFrom', e.target.value)} required />
+          </FormField>{' '}
+          <FormField>
+            Small-count threshold <Input type="number" min={1} max={100} value={values.smallCountThreshold} onChange={(e) => change('smallCountThreshold', e.target.value)} required />
+          </FormField>{' '}
+          <FormField>
+            Recent activity (days) <Input type="number" min={1} max={366} value={values.recentActivityDays} onChange={(e) => change('recentActivityDays', e.target.value)} required />
+          </FormField>{' '}
+          <FormField>
+            Progression span (years) <Input type="number" min={1} max={20} value={values.salaryProgressionYears} onChange={(e) => change('salaryProgressionYears', e.target.value)} required />
+          </FormField>{' '}
+          <FormField>
             Expense decision due (business days){' '}
-            <input type="number" min={1} max={30} value={values.expenseDecisionDueDays} onChange={(e) => change('expenseDecisionDueDays', e.target.value)} required />
-          </label>{' '}
-          <label>
-            Reason <input value={values.reason} onChange={(e) => change('reason', e.target.value)} maxLength={1000} required />
-          </label>{' '}
-          <button type="submit" disabled={save.isPending}>
+            <Input type="number" min={1} max={30} value={values.expenseDecisionDueDays} onChange={(e) => change('expenseDecisionDueDays', e.target.value)} required />
+          </FormField>{' '}
+          <FormField>
+            Reason <Input value={values.reason} onChange={(e) => change('reason', e.target.value)} maxLength={1000} required />
+          </FormField>{' '}
+          <Button type="submit" disabled={save.isPending}>
             Save revision
-          </button>
+          </Button>
           <ErrorNote error={save.error} />
-        </form>
+        </FormGrid>
       </Section>
       <Section title="Revisions">
-        <table>
-          <thead>
-            <tr>
-              <th>From</th>
-              <th>Until</th>
-              <th>Threshold</th>
-              <th>Activity days</th>
-              <th>Span (years)</th>
-              <th>Decision due (business days)</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">From</TableHead>
+              <TableHead scope="col">Until</TableHead>
+              <TableHead scope="col">Threshold</TableHead>
+              <TableHead scope="col">Activity days</TableHead>
+              <TableHead scope="col">Span (years)</TableHead>
+              <TableHead scope="col">Decision due (business days)</TableHead>
+              <TableHead scope="col">Reason</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {settings.data?.items.map((s) => (
-              <tr key={s.id}>
-                <td>{s.effectiveFrom}</td>
-                <td>{s.effectiveTo ?? '—'}</td>
-                <td>{s.smallCountThreshold}</td>
-                <td>{s.recentActivityDays}</td>
-                <td>{s.salaryProgressionYears}</td>
-                <td>{s.expenseDecisionDueDays}</td>
-                <td>{s.reason}</td>
-              </tr>
+              <TableRow key={s.id}>
+                <TableCell className="whitespace-nowrap">{s.effectiveFrom}</TableCell>
+                <TableCell className="whitespace-nowrap">{s.effectiveTo ?? '—'}</TableCell>
+                <TableCell>{s.smallCountThreshold}</TableCell>
+                <TableCell>{s.recentActivityDays}</TableCell>
+                <TableCell>{s.salaryProgressionYears}</TableCell>
+                <TableCell>{s.expenseDecisionDueDays}</TableCell>
+                <TableCell>{s.reason}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </Section>
       <ErrorNote error={settings.error} />
     </>

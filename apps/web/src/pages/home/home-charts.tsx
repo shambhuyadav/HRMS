@@ -14,7 +14,7 @@ import { api, dayText, formatUnits, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty } from '../../ui';
 import { ownRecordInScope } from '../requests';
-import { ChartCard, ChartTip, type Fill, Legend, type Part, SegmentedBar, TipLine, useChartTip } from './charts';
+import { ChartCard, ChartFootLink, ChartTip, type Fill, Legend, type Part, SegmentedBar, TipLine, useChartTip } from './charts';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -138,11 +138,7 @@ function MyLeaveChart({ employeeId }: { employeeId: string }) {
     <ChartCard
       title="My leave balances (days)"
       table={table}
-      foot={
-        <Link className="dash-chart-foot" to="/leave">
-          Open Leave
-        </Link>
-      }
+      foot={<ChartFootLink to="/leave">Open Leave</ChartFootLink>}
     >
       {paid.length > 0 && <Legend label="Leave balance parts" items={LEAVE_SERIES.map((s) => ({ key: s.key, label: s.label, fill: s.fill }))} />}
       {paid.length > 0 && (
@@ -367,11 +363,7 @@ function MyAttendanceChart({ employeeId, businessDate }: { employeeId: string; b
     <ChartCard
       title="My attendance this month"
       table={table}
-      foot={
-        <Link className="dash-chart-foot" to="/me/attendance">
-          Open My attendance
-        </Link>
-      }
+      foot={<ChartFootLink to="/me/attendance">Open My attendance</ChartFootLink>}
     >
       <p className="dash-chart-caption">
         {name}, to {shortDay(businessDate)}
@@ -441,11 +433,7 @@ function TeamTodayPanel() {
   const team = useQuery({ queryKey: ['home-team-today', assignment], queryFn: wholeTeam, retry: retryTransient });
   if (!team.data) return null;
   const { items, total } = team.data;
-  const foot = (
-    <Link className="dash-chart-foot" to="/team">
-      Open My team
-    </Link>
-  );
+  const foot = <ChartFootLink to="/team">Open My team</ChartFootLink>;
   if (items.length === 0) {
     return (
       <ChartCard title="My team today" foot={foot}>

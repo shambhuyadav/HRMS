@@ -1,6 +1,10 @@
 // Appraisal refusals in plain words, and how a failed query is shown.
+import { CircleAlertIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Alert } from '@/components/ui/alert';
+import { cn } from '@/lib/utils';
 import { ApiError, formatDate, isForbidden, readable } from '../../api';
-import { Empty, ErrorNote, NotPermitted } from '../../ui';
+import { Empty, ErrorNote, NotPermitted, Notice } from '../../ui';
 import { goalList, MONTH_NAME, STAGE_LABEL, windowText } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -256,12 +260,21 @@ export function refusalText(error: unknown, action: Act): string | null {
 export function Refusal({ error, action }: { error: unknown; action: Act }) {
   if (!error) return null;
   const text = refusalText(error, action);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
+  return text === null ? <ErrorNote error={error} /> : <Notice notice={{ text, ok: false }} />;
+}
+
+/**
+ * A problem to correct, drawn as an error but not announced: unlike Notice it has no role, because the line it replaces had none
+ * (the behaviour snapshot records every alert, and tests find the one alert of a form).
+ */
+export function UnannouncedError({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <Alert asChild variant="destructive" role={undefined}>
+      <p className={cn('error', className)}>
+        <CircleAlertIcon aria-hidden="true" />
+        {children}
+      </p>
+    </Alert>
   );
 }
 

@@ -269,7 +269,7 @@ describe('my profile', () => {
     });
     show('/me/profile', <MyProfilePage />);
     expect(await screen.findByText('SYN-5 · Analyst')).toBeTruthy();
-    expect(document.querySelector('.profile-name')!.textContent).toBe('Synthetic Self');
+    expect(document.querySelector('[data-slot=profile-name]')!.textContent).toBe('Synthetic Self');
     expect(screen.getByText('Engineering · Head office')).toBeTruthy();
     expect(screen.getByText('Joined 5 Jan 2026')).toBeTruthy();
     expect(screen.getByText('Reports to Synthetic Lead')).toBeTruthy();
@@ -303,7 +303,7 @@ describe('a team member', () => {
     });
     show('/team/e-7', <TeamMemberPage />, '/team/:id');
     expect(await screen.findByText('SYN-7 · Fixed term')).toBeTruthy();
-    expect(document.querySelector('.profile-name')!.textContent).toBe('Synthetic Member');
+    expect(document.querySelector('[data-slot=profile-name]')!.textContent).toBe('Synthetic Member');
     expect(screen.getByText('serving notice')).toBeTruthy();
     expect(screen.getByText('Works in Engineering')).toBeTruthy();
     expect(screen.getByText('Joined 2 Mar 2026')).toBeTruthy();

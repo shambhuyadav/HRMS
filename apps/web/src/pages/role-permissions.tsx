@@ -3,6 +3,12 @@
 // rule (no own approval, nobody holding the role, the role's ceiling, C7 eligibility); this screen shows what it answered.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -63,16 +69,15 @@ function ProposeForm({ roles, onDone }: { roles: CatalogueRole[]; onDone: () => 
     },
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       onSubmit={(e) => {
         e.preventDefault();
         propose.mutate();
       }}
     >
-      <label>
+      <FormField>
         Role
-        <select value={roleCode} onChange={(e) => setRoleCode(e.target.value)} required>
+        <NativeSelect value={roleCode} onChange={(e) => setRoleCode(e.target.value)} required>
           <option value="">Choose a role</option>
           {roles
             .filter((r) => r.active)
@@ -81,39 +86,39 @@ function ProposeForm({ roles, onDone }: { roles: CatalogueRole[]; onDone: () => 
                 {r.name}
               </option>
             ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {/* No change is chosen for the proposer (it used to start on Remove); the options are short, the chosen one explained below. */}
-      <label>
+      <FormField>
         Change
-        <select value={change} onChange={(e) => setChange(e.target.value as ChangeKind | '')}>
+        <NativeSelect value={change} onChange={(e) => setChange(e.target.value as ChangeKind | '')}>
           <option value="">Choose…</option>
           {(['ALLOW', 'REMOVE', 'DENY'] as const).map((k) => (
             <option key={k} value={k}>
               {CHANGE_SHORT[k]}
             </option>
           ))}
-        </select>
-      </label>
-      {change && <p className="hint wide">{CHANGE_LABEL[change]}</p>}
-      <label>
+        </NativeSelect>
+      </FormField>
+      {change && <Hint>{CHANGE_LABEL[change]}</Hint>}
+      <FormField>
         Permission
-        <input list="role-permission-keys" placeholder="resource.action.group" value={permission} onChange={(e) => setPermission(e.target.value)} required />
+        <Input list="role-permission-keys" placeholder="resource.action.group" value={permission} onChange={(e) => setPermission(e.target.value)} required />
         <datalist id="role-permission-keys">
           {suggestions.map((k) => (
             <option key={k} value={k} />
           ))}
         </datalist>
-      </label>
-      <label>
+      </FormField>
+      <FormField>
         Reason
-        <input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} required />
-      </label>
-      <button type="submit" disabled={propose.isPending || !roleCode || !change || !permission.trim() || !reason.trim()}>
+        <Input value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} required />
+      </FormField>
+      <Button type="submit" disabled={propose.isPending || !roleCode || !change || !permission.trim() || !reason.trim()}>
         Propose change
-      </button>
+      </Button>
       <ErrorNote error={propose.error} />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -124,17 +129,18 @@ function DecisionControls({ change, onDone }: { change: RoleChange; onDone: () =
       api(`/v1/access/role-permission-changes/${change.id}/${path}`, { body: path === 'approve' ? { expectedVersion: change.version } : { expectedVersion: change.version, reason: reason.trim() } }),
     onSuccess: onDone,
   });
+  // The buttons keep the field's height (not the small row-action size), so the three line up, as on the rule approvals.
   return (
-    <div className="row">
-      <button disabled={decide.isPending} onClick={() => decide.mutate('approve')}>
+    <ButtonRow>
+      <Button disabled={decide.isPending} onClick={() => decide.mutate('approve')}>
         Approve
-      </button>
-      <input aria-label={`Reason for rejecting ${change.permission}`} placeholder="Reason to reject" value={reason} onChange={(e) => setReason(e.target.value)} />
-      <button className="danger" disabled={decide.isPending || !reason.trim()} onClick={() => decide.mutate('reject')}>
+      </Button>
+      <Input aria-label={`Reason for rejecting ${change.permission}`} placeholder="Reason to reject" className="w-auto" value={reason} onChange={(e) => setReason(e.target.value)} />
+      <Button variant="danger" disabled={decide.isPending || !reason.trim()} onClick={() => decide.mutate('reject')}>
         Reject
-      </button>
+      </Button>
       <ErrorNote error={decide.error} />
-    </div>
+    </ButtonRow>
   );
 }
 
@@ -161,80 +167,82 @@ export function RolePermissionsPage() {
     <>
       {can(MAINTAIN) && (
         <Section title="Propose a role permission change">
-          <p className="hint">Nothing changes until someone else approves it. A role’s ceiling gives nobody the permission by itself; existing assignments do not gain it. Removing or denying a permission ends it on the role’s assignments, and bringing it back later needs a new grant.</p>
+          <Hint>Nothing changes until someone else approves it. A role’s ceiling gives nobody the permission by itself; existing assignments do not gain it. Removing or denying a permission ends it on the role’s assignments, and bringing it back later needs a new grant.</Hint>
           <ProposeForm roles={roles.data?.items ?? []} onDone={refresh} />
           <ErrorNote error={roles.error} />
         </Section>
       )}
       <Section title="Waiting for a decision">
-        <p className="hint">The person who asked and anyone holding the role cannot decide. A change to a role that every approver holds cannot be approved by any of them.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Role</th>
-              <th>Permission</th>
-              <th>Change</th>
-              <th>Current setting</th>
-              <th>Reason</th>
-              <th>Asked by</th>
-              <th scope="col"><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Hint>The person who asked and anyone holding the role cannot decide. A change to a role that every approver holds cannot be approved by any of them.</Hint>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Role</TableHead>
+              <TableHead scope="col">Permission</TableHead>
+              <TableHead scope="col">Change</TableHead>
+              <TableHead scope="col">Current setting</TableHead>
+              <TableHead scope="col">Reason</TableHead>
+              <TableHead scope="col">Asked by</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {open.map((c) => (
-              <tr key={c.id}>
-                <td>{c.roleCode}</td>
-                <td>{c.permission}</td>
-                <td>{CHANGE_SHORT[c.change]}</td>
-                <td>{effectText(c.effectBefore)}</td>
-                <td>{c.reason}</td>
-                <td>
-                  {c.requestedByAccountKey} <span className="hint">{formatDate(c.requestedAt)}</span>
-                </td>
-                <td>{can(APPROVE) && <DecisionControls change={c} onDone={refresh} />}</td>
-              </tr>
+              <TableRow key={c.id}>
+                <TableCell>{c.roleCode}</TableCell>
+                <TableCell>{c.permission}</TableCell>
+                <TableCell>{CHANGE_SHORT[c.change]}</TableCell>
+                <TableCell>{effectText(c.effectBefore)}</TableCell>
+                <TableCell>{c.reason}</TableCell>
+                <TableCell>
+                  {c.requestedByAccountKey} <Hint as="span">{formatDate(c.requestedAt)}</Hint>
+                </TableCell>
+                <TableCell>{can(APPROVE) && <DecisionControls change={c} onDone={refresh} />}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         {changes.data && open.length === 0 && <Empty>No change is waiting for a decision.</Empty>}
         <ErrorNote error={changes.error} />
       </Section>
       <Section title="Decided changes">
-        <table>
-          <thead>
-            <tr>
-              <th>Role</th>
-              <th>Permission</th>
-              <th>Change</th>
-              <th>Outcome</th>
-              <th>Reason</th>
-              <th>Asked by</th>
-              <th>Decided by</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Role</TableHead>
+              <TableHead scope="col">Permission</TableHead>
+              <TableHead scope="col">Change</TableHead>
+              <TableHead scope="col">Outcome</TableHead>
+              <TableHead scope="col">Reason</TableHead>
+              <TableHead scope="col">Asked by</TableHead>
+              <TableHead scope="col">Decided by</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {decided.map((c) => (
-              <tr key={c.id}>
-                <td>{c.roleCode}</td>
-                <td>{c.permission}</td>
-                <td>{CHANGE_SHORT[c.change]}</td>
-                <td>
+              <TableRow key={c.id}>
+                <TableCell>{c.roleCode}</TableCell>
+                <TableCell>{c.permission}</TableCell>
+                <TableCell>{CHANGE_SHORT[c.change]}</TableCell>
+                <TableCell>
                   {/* The decision and what it left in force, in one place (a separate Result column repeated it). */}
                   <StateBadge state={c.state} />
-                  {c.resultingAccess && <div className="hint">{`Now ${effectText(c.resultingAccess.effectAfter)}; ${c.resultingAccess.allowlistEntriesEnded} assignment entries ended`}</div>}
-                </td>
-                <td>
+                  {c.resultingAccess && <HintLine>{`Now ${effectText(c.resultingAccess.effectAfter)}; ${c.resultingAccess.allowlistEntriesEnded} assignment entries ended`}</HintLine>}
+                </TableCell>
+                <TableCell>
                   {c.reason}
-                  {c.decisionReason ? <div className="hint">Rejected because: {c.decisionReason}</div> : null}
-                </td>
-                <td>{c.requestedByAccountKey}</td>
-                <td>
-                  {c.decidedByAccountKey} <span className="hint">{formatDate(c.decidedAt)}</span>
-                </td>
-              </tr>
+                  {c.decisionReason ? <HintLine>Rejected because: {c.decisionReason}</HintLine> : null}
+                </TableCell>
+                <TableCell>{c.requestedByAccountKey}</TableCell>
+                <TableCell>
+                  {c.decidedByAccountKey} <Hint as="span">{formatDate(c.decidedAt)}</Hint>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         {changes.data && decided.length === 0 && <Empty>No change has been decided yet.</Empty>}
       </Section>
     </>

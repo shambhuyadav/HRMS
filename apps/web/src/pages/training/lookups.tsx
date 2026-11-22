@@ -2,6 +2,10 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { ButtonRow, CheckField, FormField, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, type EmployeeHit, personLabel, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, NotPermitted } from '../../ui';
@@ -12,6 +16,10 @@ import type { Choice } from './types';
 // ---------------------------------------------------------------------------------------------------------
 // Lookups: training modes and feedback questions (DF04 controlled lists) and employees
 // ---------------------------------------------------------------------------------------------------------
+
+/** The employee search's matches, stacked, and one match as a full-width choice tinted red on hover (the old `.choices`). */
+const CHOICE_LIST = 'm-0 flex list-none flex-col gap-[0.6rem] p-0';
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
 export function useChoices(kind: 'modes' | 'questions', enabled: boolean) {
   const keys = useKeys();
   return useQuery({
@@ -44,20 +52,22 @@ export function EmployeeSearch({ label, onPick, exclude = [] }: { label: string;
   const found = term !== '' ? shown(hits) : undefined;
   const items = found?.items.filter((e) => !exclude.includes(e.id));
   return (
-    <div className="wide">
-      <label>
+    <div className="col-span-full flex flex-col gap-[0.6rem]">
+      <FormField>
         {label}
-        <input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
-      </label>
-      {term !== '' && hits.isLoading && <p className="hint">Searching…</p>}
+        <Input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
+      </FormField>
+      {term !== '' && hits.isLoading && <Hint className="m-0">Searching…</Hint>}
       <QueryProblem error={hits.error} forbidden="The selected role cannot search employees." />
       {items && items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
       {items && items.length > 0 && (
-        <ul className="choices" aria-label="Matching employees">
+        <ul className={CHOICE_LIST} aria-label="Matching employees">
           {items.map((e) => (
             <li key={e.id}>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                className={CHOICE_BUTTON}
                 aria-label={`Choose ${personLabel(e)}`}
                 onClick={() => {
                   onPick(e);
@@ -66,7 +76,7 @@ export function EmployeeSearch({ label, onPick, exclude = [] }: { label: string;
                 }}
               >
                 {personLabel(e)} · {readable(e.status).toLowerCase()}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -80,42 +90,40 @@ export function OwnerPicker({ value, onChange }: { value: { id: string; label: s
   const { me } = useSession();
   // One labelled group, like the fields around it: who is chosen (or that nobody is), the quick choices, then the search.
   return (
-    <fieldset className="wide">
-      <legend>Plan owner</legend>
-      <div className="row">
-        {value ? <strong>{value.label}</strong> : <span className="hint">Not chosen</span>}
+    <FramedFieldset legend="Plan owner">
+      <ButtonRow>
+        {value ? <strong>{value.label}</strong> : <Hint as="span">Not chosen</Hint>}
         {value && (
-          <button type="button" className="secondary" onClick={() => onChange(null)}>
+          <Button type="button" variant="outline" onClick={() => onChange(null)}>
             Clear the owner
-          </button>
+          </Button>
         )}
         {me?.employeeId && value?.id !== me.employeeId && (
-          <button type="button" className="secondary" onClick={() => onChange({ id: me.employeeId!, label: me.displayName ?? 'Me' })}>
+          <Button type="button" variant="outline" onClick={() => onChange({ id: me.employeeId!, label: me.displayName ?? 'Me' })}>
             Make me the owner
-          </button>
+          </Button>
         )}
-      </div>
+      </ButtonRow>
       <EmployeeSearch label="Find the owner" onPick={(e) => onChange({ id: e.id, label: personLabel(e) })} />
-    </fieldset>
+    </FramedFieldset>
   );
 }
 
 export function QuestionChoice({ questions, chosen, onChange, legend }: { questions: Choice[] | undefined; chosen: string[]; onChange: (codes: string[]) => void; legend: string }) {
-  if (!questions) return <p className="hint wide">Loading the feedback questions…</p>;
-  if (questions.length === 0) return <p className="hint wide">The company has no active feedback question yet.</p>;
+  if (!questions) return <Hint>Loading the feedback questions…</Hint>;
+  if (questions.length === 0) return <Hint>The company has no active feedback question yet.</Hint>;
   return (
-    <fieldset className="wide">
-      <legend>{legend}</legend>
+    <FramedFieldset legend={legend}>
       {questions.map((q) => (
-        <label key={q.code}>
+        <CheckField key={q.code}>
           <input
             type="checkbox"
             checked={chosen.includes(q.code)}
             onChange={(e) => onChange(e.target.checked ? [...chosen, q.code] : chosen.filter((c) => c !== q.code))}
           />{' '}
           {q.label}
-        </label>
+        </CheckField>
       ))}
-    </fieldset>
+    </FramedFieldset>
   );
 }

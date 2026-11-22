@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../api';
 import { placeFact, type ProfileFact, ProfileHeader, profileSubtitle } from '../profile-header';
 import { type BarSection, SectionBar } from '../section-bar';
@@ -11,6 +19,14 @@ import { canRaiseAgain, followedRequests, RaiseAgainNote, RaisedAgainHint } from
 // Employee portal (FR-059): own record, reviewed change requests, attendance corrections and app links.
 // Nothing here changes a record directly; every change waits for an authorised reviewer.
 // ---------------------------------------------------------------------------------------------------------
+
+// Layout pieces of these screens, as utility classes (shadcn/ui move, 20 Nov 2026).
+/** A field and its button side by side, their bottoms lined up, wrapping on a narrow screen (the old `form.inline`). */
+const FIELD_ROW = 'flex flex-wrap items-end gap-x-4 gap-y-3';
+/** A correction form opened in a day's row or under a request: its controls side by side, set a little apart from the row. */
+const CELL_FORM = 'mt-[0.4rem] flex flex-wrap items-end gap-x-4 gap-y-3';
+/** A date in the attendance list stays on one line ("3 Nov 2026", not "3 Nov" over "2026"). */
+const DATE_CELL = 'whitespace-nowrap';
 
 interface OwnRecord {
   employeeCode: string;
@@ -152,27 +168,26 @@ export function MyProfilePage() {
       {can('profile_change.submit.operational') && (
         <Section title="Ask for a change">
           {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
-          <form
-            className="grid-form"
+          <FormGrid
             onSubmit={(e) => {
               e.preventDefault();
               request.mutate();
             }}
           >
-            <label>
+            <FormField>
               New display name
-              <input maxLength={200} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
-            </label>
-            <label>
+              <Input maxLength={200} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
+            </FormField>
+            <FormField>
               New work email
-              <input type="email" maxLength={254} value={form.workEmail} onChange={(e) => setForm({ ...form, workEmail: e.target.value })} />
-            </label>
-            <button type="submit" disabled={request.isPending || (!form.displayName.trim() && !form.workEmail.trim())}>
+              <Input type="email" maxLength={254} value={form.workEmail} onChange={(e) => setForm({ ...form, workEmail: e.target.value })} />
+            </FormField>
+            <Button type="submit" disabled={request.isPending || (!form.displayName.trim() && !form.workEmail.trim())}>
               Send for review
-            </button>
-          </form>
-          <p className="hint">HR reviews every change before it is applied. Other details are maintained by HR.</p>
-          {request.isSuccess && <p className="ok">Sent for review.</p>}
+            </Button>
+          </FormGrid>
+          <Hint>HR reviews every change before it is applied. Other details are maintained by HR.</Hint>
+          {request.isSuccess && <StatusNote tone="success">Sent for review.</StatusNote>}
           <ErrorNote error={request.error} />
         </Section>
       )}
@@ -189,21 +204,22 @@ export function MyProfilePage() {
                   {Object.entries(c.requested)
                     .map(([k, v]) => `${LABEL[k] ?? k}: ${v}`)
                     .join(' · ')}{' '}
-                  <StateBadge state={c.state} /> <span className="hint">{formatDate(c.submittedAt)}</span>
+                  <StateBadge state={c.state} /> <Hint as="span">{formatDate(c.submittedAt)}</Hint>
                   <RaisedAgainHint predecessorRequestId={c.predecessorRequestId} />
                 </div>
                 {c.state === 'SUBMITTED' && (
-                  <div className="row">
-                    <button type="button" className="link" onClick={() => withdraw.mutate(c.id)}>
+                  <ButtonRow>
+                    <Button type="button" variant="danger" size="sm" onClick={() => withdraw.mutate(c.id)}>
                       Withdraw
-                    </button>
-                  </div>
+                    </Button>
+                  </ButtonRow>
                 )}
                 {canRaiseAgain(c, followedRequests(changes.data?.items ?? [])) && can('profile_change.submit.operational') && (
-                  <div className="row">
-                    <button
+                  <ButtonRow>
+                    <Button
                       type="button"
-                      className="link"
+                      variant="outline"
+                      size="sm"
                       onClick={() => {
                         request.reset();
                         setForm({ displayName: c.requested.displayName ?? '', workEmail: c.requested.workEmail ?? '' });
@@ -211,8 +227,8 @@ export function MyProfilePage() {
                       }}
                     >
                       Raise again
-                    </button>
-                  </div>
+                    </Button>
+                  </ButtonRow>
                 )}
               </li>
             ))}
@@ -228,28 +244,28 @@ export function MyProfilePage() {
             {links.data.items.map((l) => (
               <li key={l.id}>
                 <div>
-                  <code>{l.appAccountRef}</code> <StateBadge state={l.state} /> <span className="hint">{formatDate(l.requestedAt)}</span>
+                  <code>{l.appAccountRef}</code> <StateBadge state={l.state} /> <Hint as="span">{formatDate(l.requestedAt)}</Hint>
                 </div>
               </li>
             ))}
           </ul>
           {can('mobile_link.request.operational') && (
             <form
-              className="inline"
+              className={FIELD_ROW}
               onSubmit={(e) => {
                 e.preventDefault();
                 link.mutate();
               }}
             >
-              <label className="inline">
-                App account reference <input required pattern="[A-Za-z0-9._:@\-]{3,200}" value={appRef} onChange={(e) => setAppRef(e.target.value)} />
-              </label>
-              <button type="submit" disabled={link.isPending}>
+              <FormField className="w-auto">
+                App account reference <Input required pattern="[A-Za-z0-9._:@\-]{3,200}" value={appRef} onChange={(e) => setAppRef(e.target.value)} />
+              </FormField>
+              <Button type="submit" disabled={link.isPending}>
                 Request link
-              </button>
+              </Button>
             </form>
           )}
-          <p className="hint">A link is active only after HR approves it.</p>
+          <Hint>A link is active only after HR approves it.</Hint>
           <ErrorNote error={link.error ?? links.error} />
         </Section>
       )}
@@ -292,25 +308,38 @@ function CorrectionForm({ day, predecessorRequestId, initialStatus, onDone }: { 
   });
   return (
     <form
-      className="inline"
+      className={CELL_FORM}
       onSubmit={(e) => {
         e.preventDefault();
         send.mutate();
       }}
     >
-      <select aria-label="Correct to" value={status} onChange={(e) => setStatus(e.target.value)}>
+      <NativeSelect aria-label="Correct to" value={status} onChange={(e) => setStatus(e.target.value)}>
         {options.map((o) => (
           <option key={o} value={o}>
             {o.replace(/_/g, ' ').toLowerCase()}
           </option>
         ))}
-      </select>
-      <input aria-label="Reason (private)" placeholder="Reason (private)" required maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      <button type="submit" disabled={send.isPending || !reason.trim()}>
+      </NativeSelect>
+      <Input aria-label="Reason (private)" placeholder="Reason (private)" required maxLength={1000} className="w-auto" value={reason} onChange={(e) => setReason(e.target.value)} />
+      <Button type="submit" disabled={send.isPending || !reason.trim()}>
         Send
-      </button>
+      </Button>
       <ErrorNote error={send.error} />
     </form>
+  );
+}
+
+/** A correctable day's action: a correction already waiting for review, the correction form once opened, or the button to open it. */
+function DayCorrection({ day, waiting, open, onOpen, onDone }: { day: Day; waiting: boolean; open: boolean; onOpen: () => void; onDone: () => void }) {
+  if (waiting) return <Hint as="span">correction waiting for review</Hint>;
+  if (open) return <CorrectionForm day={day} onDone={onDone} />;
+  return (
+    <RowActions>
+      <Button type="button" variant="outline" size="sm" onClick={onOpen}>
+        Request correction
+      </Button>
+    </RowActions>
   );
 }
 
@@ -341,61 +370,59 @@ export function MyAttendancePage() {
   return (
     <>
       <Section title="My attendance">
-        <div className="row">
-          <label className="inline">
-            From <input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
-          </label>
-          <label className="inline">
-            To <input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
-          </label>
-        </div>
+        <FilterBar>
+          <FormField>
+            From <Input type="date" value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} />
+          </FormField>
+          <FormField>
+            To <Input type="date" value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} />
+          </FormField>
+        </FilterBar>
         {/* Said before the list, so the way to correct a day is known before scanning the rows. */}
-        <p className="hint">
+        <Hint>
           {can('attendance.request_correction.operational') ? 'To correct a day to present, half day or absent, choose Request correction on its row. ' : ''}
           Leave, holidays and outdoor duty are requested on their own pages.
-        </p>
+        </Hint>
         {days.data?.items.length === 0 && <Empty>No attendance recorded for these dates yet.</Empty>}
         {!!days.data?.items.length && (
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Status</th>
-                <th>Worked</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Date</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Worked</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {days.data.items.map((d) => (
-                <tr key={d.id}>
-                  <td>{formatDate(d.workDate)}</td>
-                  <td>
-                    <StateBadge state={d.status} /> {d.late && <span className="hint">late</span>} {d.amended && <span className="hint">amended</span>}
-                  </td>
-                  <td>{d.workedMinutes === null ? '—' : `${Math.floor(d.workedMinutes / 60)}h ${String(d.workedMinutes % 60).padStart(2, '0')}m`}</td>
-                  <td>
-                    {can('attendance.request_correction.operational') &&
-                      CORRECTABLE.includes(d.status) &&
-                      (pendingFor.has(d.workDate.slice(0, 10)) ? (
-                        <span className="hint">correction waiting for review</span>
-                      ) : open === d.id ? (
-                        <CorrectionForm
-                          day={d}
-                          onDone={() => {
-                            setOpen(null);
-                            void qc.invalidateQueries({ queryKey: ['me-corrections'] });
-                          }}
-                        />
-                      ) : (
-                        <button type="button" className="link" onClick={() => setOpen(d.id)}>
-                          Request correction
-                        </button>
-                      ))}
-                  </td>
-                </tr>
+                <TableRow key={d.id}>
+                  <TableCell className={DATE_CELL}>{formatDate(d.workDate)}</TableCell>
+                  <TableCell>
+                    <StateBadge state={d.status} /> {d.late && <Hint as="span">late</Hint>} {d.amended && <Hint as="span">amended</Hint>}
+                  </TableCell>
+                  <TableCell>{d.workedMinutes === null ? '—' : `${Math.floor(d.workedMinutes / 60)}h ${String(d.workedMinutes % 60).padStart(2, '0')}m`}</TableCell>
+                  {/* While a correction form is open the column takes the room the form needs: one narrow cell would narrow them all. */}
+                  <RowActionsCell expanded={open !== null}>
+                    {can('attendance.request_correction.operational') && CORRECTABLE.includes(d.status) && (
+                      <DayCorrection
+                        day={d}
+                        waiting={pendingFor.has(d.workDate.slice(0, 10))}
+                        open={open === d.id}
+                        onOpen={() => setOpen(d.id)}
+                        onDone={() => {
+                          setOpen(null);
+                          void qc.invalidateQueries({ queryKey: ['me-corrections'] });
+                        }}
+                      />
+                    )}
+                  </RowActionsCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
         <ErrorNote error={days.error} />
       </Section>
@@ -412,11 +439,11 @@ export function MyAttendancePage() {
               </div>
               <RaisedAgainHint predecessorRequestId={c.predecessorRequestId} />
               {c.state === 'SUBMITTED' && (
-                <div className="row">
-                  <button type="button" className="link" onClick={() => withdraw.mutate(c.id)}>
+                <ButtonRow>
+                  <Button type="button" variant="danger" size="sm" onClick={() => withdraw.mutate(c.id)}>
                     Withdraw
-                  </button>
-                </div>
+                  </Button>
+                </ButtonRow>
               )}
               {canRaiseAgain(c, followedRequests(corrections.data?.items ?? [])) &&
                 can('attendance.request_correction.operational') &&
@@ -434,11 +461,11 @@ export function MyAttendancePage() {
                     />
                   </>
                 ) : (
-                  <div className="row">
-                    <button type="button" className="link" onClick={() => setRaisingAgain(c.id)}>
+                  <ButtonRow>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setRaisingAgain(c.id)}>
                       Raise again
-                    </button>
-                  </div>
+                    </Button>
+                  </ButtonRow>
                 ))}
             </li>
           ))}

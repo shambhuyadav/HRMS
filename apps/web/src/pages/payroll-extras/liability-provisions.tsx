@@ -1,6 +1,10 @@
 // The liability provisions screen (CL-098).
 import { useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, localDate } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section } from '../../ui';
@@ -35,101 +39,102 @@ export function LiabilityProvisionsPage() {
   return (
     <>
       <Section title="Liability provisions">
-        <form
-          className="filters"
-          aria-label="As on"
-          onSubmit={(e: FormEvent) => {
-            e.preventDefault();
-            setAsked(asOf);
-          }}
-        >
-          <label>
-            As on
-            <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} required />
-          </label>
-          <button type="submit">Show</button>
-        </form>
+        <FilterBar asChild>
+          <form
+            aria-label="As on"
+            onSubmit={(e: FormEvent) => {
+              e.preventDefault();
+              setAsked(asOf);
+            }}
+          >
+            <FormField>
+              As on
+              <Input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} required />
+            </FormField>
+            <Button type="submit">Show</Button>
+          </form>
+        </FilterBar>
         <ErrorNote error={data.error} />
         {d && (
-          <table aria-label="Provision items">
-            <thead>
-              <tr>
-                <th scope="col">Item</th>
-                <th scope="col">Status</th>
-                <th scope="col">Total</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Provision items">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Item</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {d.items.map((i) => (
-                <tr key={i.item}>
-                  <td>{ITEM_LABEL[i.item] ?? i.item}</td>
-                  <td>{i.status === 'CALCULATED' ? 'calculated' : `${plain(i.status)}: ${plain(i.reason ?? '')}`}</td>
-                  <td>{i.status === 'CALCULATED' ? i.totals.map((t) => `${t.currencyCode} ${amount(t.amount)}`).join(', ') || '0.00' : '—'}</td>
-                </tr>
+                <TableRow key={i.item}>
+                  <TableCell>{ITEM_LABEL[i.item] ?? i.item}</TableCell>
+                  <TableCell>{i.status === 'CALCULATED' ? 'calculated' : `${plain(i.status)}: ${plain(i.reason ?? '')}`}</TableCell>
+                  <TableCell>{i.status === 'CALCULATED' ? i.totals.map((t) => `${t.currencyCode} ${amount(t.amount)}`).join(', ') || '0.00' : '—'}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </Section>
       {d && d.departments.length > 0 && (
         <Section title="By department">
-          <table aria-label="By department">
-            <thead>
-              <tr>
-                <th scope="col">Department</th>
+          <Table aria-label="By department">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Department</TableHead>
                 {d.items.map((i) => (
-                  <th scope="col" key={i.item}>
+                  <TableHead scope="col" key={i.item}>
                     {ITEM_LABEL[i.item] ?? i.item}
-                  </th>
+                  </TableHead>
                 ))}
-                <th scope="col">Total</th>
-              </tr>
-            </thead>
-            <tbody>
+                <TableHead scope="col">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {d.departments.map((g) => (
-                <tr key={`${g.departmentCode}-${g.currencyCode}`}>
-                  <td>{g.department || 'No department'}</td>
+                <TableRow key={`${g.departmentCode}-${g.currencyCode}`}>
+                  <TableCell>{g.department || 'No department'}</TableCell>
                   {d.items.map((i) => (
-                    <td key={i.item}>{amount(g.amounts[i.item])}</td>
+                    <TableCell key={i.item}>{amount(g.amounts[i.item])}</TableCell>
                   ))}
-                  <td>
+                  <TableCell>
                     {g.currencyCode} {amount(g.total)}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </Section>
       )}
       {d && d.rows.length > 0 && (
         <Section title="Employees">
-          <table aria-label="Employee provisions">
-            <thead>
-              <tr>
-                <th scope="col">Employee</th>
-                <th scope="col">Department</th>
-                <th scope="col">Item</th>
-                <th scope="col">Amount</th>
-                <th scope="col">Basis</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Employee provisions">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Department</TableHead>
+                <TableHead scope="col">Item</TableHead>
+                <TableHead scope="col">Amount</TableHead>
+                <TableHead scope="col">Basis</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {d.rows.map((r, n) => (
-                <tr key={`${r.item}-${r.employeeCode}-${n}`}>
-                  <td>
+                <TableRow key={`${r.item}-${r.employeeCode}-${n}`}>
+                  <TableCell>
                     {r.employeeName} ({r.employeeCode})
-                  </td>
-                  <td>{r.department || '—'}</td>
-                  <td>{ITEM_LABEL[r.item] ?? r.item}</td>
-                  <td>{r.status === 'CALCULATED' ? amount(r.amount) : plain(r.status)}</td>
-                  <td>
+                  </TableCell>
+                  <TableCell>{r.department || '—'}</TableCell>
+                  <TableCell>{ITEM_LABEL[r.item] ?? r.item}</TableCell>
+                  <TableCell>{r.status === 'CALCULATED' ? amount(r.amount) : plain(r.status)}</TableCell>
+                  <TableCell>
                     {r.basis}
                     {r.vested ? ` (vested: ${r.vested.toLowerCase()})` : ''}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </Section>
       )}
     </>

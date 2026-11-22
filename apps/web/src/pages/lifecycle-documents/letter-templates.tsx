@@ -1,13 +1,28 @@
 // Letter templates (FR-017): the approved placeholders, the template list and a new template.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleAlertIcon } from 'lucide-react';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ButtonRow, CheckField, ChoiceRow, FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 import { api, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, NotPermitted, Section } from '../../ui';
+import { Empty, Notice, NotPermitted, Section } from '../../ui';
 import { Refusal, TEMPLATE_WORDS } from './refusals';
-import { CODE, enc, GROUP, labelOf, LETTER_GENERATE, LETTER_READ, LETTER_TYPE_CODE, LETTER_TYPES, letterTypeLabel, LoadProblem, MAX_BODY, MAX_NAME, MAX_OPTIONAL, OFFER_LETTER_TYPE, PATHS, SCROLL, SOURCE_LABEL, SR_ONLY, TEMPLATE_MANAGE, TEMPLATE_READ, TEXTAREA, usedPlaceholders, useKeys } from './shared';
+import { CODE, enc, FIELD_ROW, labelOf, LETTER_GENERATE, LETTER_READ, LETTER_TYPE_CODE, LETTER_TYPES, letterTypeLabel, LoadProblem, MAX_BODY, MAX_NAME, MAX_OPTIONAL, OFFER_LETTER_TYPE, PATHS, SOURCE_LABEL, TEMPLATE_MANAGE, TEMPLATE_READ, usedPlaceholders, useKeys } from './shared';
 import type { Placeholder, TemplateDetail, TemplateSummary } from './types';
+
+/** A placeholder the text uses that is not approved, beside the checkboxes of the others: in the error colours, not announced (it had no role). */
+const NOT_APPROVED = 'inline-flex items-center gap-1.5 rounded-md border border-[var(--bad-edge)] bg-[var(--bad-soft)] px-2.5 py-1 text-[0.83rem] text-destructive';
 
 export const placeholderLabelMap = (items: readonly Placeholder[] | undefined) => new Map((items ?? []).map((p) => [p.key, p.label]));
 
@@ -36,7 +51,7 @@ export function usePlaceholders(enabled: boolean, letterType?: string) {
 /** I-82 item 1: an OFFER template is used from the approved offer in Hiring only. */
 export function OfferTemplateNote({ letterType }: { letterType: string }) {
   if (letterType !== OFFER_LETTER_TYPE) return null;
-  return <p className="hint wide">An offer letter is issued from the approved offer in Hiring, not from an employee process.</p>;
+  return <Hint>An offer letter is issued from the approved offer in Hiring, not from an employee process.</Hint>;
 }
 
 // =========================================================================================================
@@ -48,7 +63,7 @@ export function LetterTemplatesScreen() {
   return (
     <>
       <h1>Letter templates</h1>
-      <p className="hint">
+      <Hint>
         Versioned templates that may use only the approved placeholders. A template is used for letters while it is active and has a published revision; letters
         already generated keep the revision they were made from.
         {(can(LETTER_READ) || can(LETTER_GENERATE)) && (
@@ -57,7 +72,7 @@ export function LetterTemplatesScreen() {
             Letters for employees are prepared under <Link to={PATHS.letters}>Letters</Link>.
           </>
         )}
-      </p>
+      </Hint>
       {canRead ? (
         <TemplateList />
       ) : (
@@ -80,46 +95,44 @@ function TemplateList() {
   const items = list.data?.items ?? [];
   return (
     <Section title="Letter templates">
-      {list.isPending && <p className="hint loading">Loading the letter templates…</p>}
+      {list.isPending && <LoadingLine>Loading the letter templates…</LoadingLine>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view letter templates." />
       {list.data && items.length === 0 && <Empty>No letter templates yet.</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Letter templates">
-            <thead>
-              <tr>
-                <th scope="col">Code</th>
-                <th scope="col">Name</th>
-                <th scope="col">Letter type</th>
-                <th scope="col">Status</th>
-                <th scope="col">Published revision</th>
-                <th scope="col">Draft revision</th>
-                <th scope="col">Usable for letters</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Template</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.code}</td>
-                  <td>{t.name}</td>
-                  <td>{letterTypeLabel(t.letterType)}</td>
-                  <td>{t.active ? 'Active' : 'Inactive'}</td>
-                  <td>{t.publishedRevision ?? 'None'}</td>
-                  <td>{t.draftRevision ?? 'None'}</td>
-                  <td>{usableText(t)}</td>
-                  <td>
-                    <Link to={PATHS.template(t.id)} aria-label={`Open template ${t.code}`}>
-                      Open
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Letter templates">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Letter type</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Published revision</TableHead>
+              <TableHead scope="col">Draft revision</TableHead>
+              <TableHead scope="col">Usable for letters</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Template</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((t) => (
+              <TableRow key={t.id}>
+                <TableCell>{t.code}</TableCell>
+                <TableCell>{t.name}</TableCell>
+                <TableCell>{letterTypeLabel(t.letterType)}</TableCell>
+                <TableCell>{t.active ? 'Active' : 'Inactive'}</TableCell>
+                <TableCell>{t.publishedRevision ?? 'None'}</TableCell>
+                <TableCell>{t.draftRevision ?? 'None'}</TableCell>
+                <TableCell>{usableText(t)}</TableCell>
+                <RowActionsCell>
+                  <Link to={PATHS.template(t.id)} aria-label={`Open template ${t.code}`}>
+                    Open
+                  </Link>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
@@ -130,35 +143,33 @@ function PlaceholderReference() {
   const items = placeholders.data?.items ?? [];
   return (
     <Section title="Approved placeholders">
-      <p className="hint">
+      <Hint>
         Write a placeholder as {'{{name}}'}. Every placeholder a template uses is mandatory unless the template marks it optional, and a missing mandatory value blocks
         the final letter. These are the placeholders of employee letters; an offer letter template (letter type OFFER) has its own, which its editor lists.
-      </p>
-      {placeholders.isPending && <p className="hint loading">Loading the approved placeholders…</p>}
+      </Hint>
+      {placeholders.isPending && <LoadingLine>Loading the approved placeholders…</LoadingLine>}
       <LoadProblem error={placeholders.error} forbidden="The selected role cannot view the approved placeholders." />
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Approved placeholders">
-            <thead>
-              <tr>
-                <th scope="col">Placeholder</th>
-                <th scope="col">Meaning</th>
-                <th scope="col">Taken from</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((p) => (
-                <tr key={p.key}>
-                  <td>
-                    <code>{`{{${p.key}}}`}</code>
-                  </td>
-                  <td>{p.label}</td>
-                  <td>{labelOf(SOURCE_LABEL, p.source)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Approved placeholders">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Placeholder</TableHead>
+              <TableHead scope="col">Meaning</TableHead>
+              <TableHead scope="col">Taken from</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((p) => (
+              <TableRow key={p.key}>
+                <TableCell>
+                  <code>{`{{${p.key}}}`}</code>
+                </TableCell>
+                <TableCell>{p.label}</TableCell>
+                <TableCell>{labelOf(SOURCE_LABEL, p.source)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
@@ -201,49 +212,49 @@ export function TemplateTextFields({
   const toggle = (key: string, on: boolean) => onOptional(on ? [...optional.filter((k) => k !== key), key] : optional.filter((k) => k !== key));
   return (
     <>
-      <label className="wide">
+      <FormField className="col-span-full">
         Letter text (required)
-        <textarea ref={area} required rows={10} maxLength={MAX_BODY} value={body} disabled={disabled} onChange={(e) => onBody(e.target.value)} style={TEXTAREA} />
-      </label>
+        <Textarea ref={area} required rows={10} maxLength={MAX_BODY} value={body} disabled={disabled} onChange={(e) => onBody(e.target.value)} className="resize-y" />
+      </FormField>
       {approved && approved.length > 0 && (
-        <div className="wide row">
-          <label className="inline">
+        <div className={cn(FIELD_ROW, 'col-span-full')}>
+          <FormField className="w-auto">
             Placeholder to insert{' '}
-            <select value={toInsert} disabled={disabled} onChange={(e) => setToInsert(e.target.value)}>
+            <NativeSelect value={toInsert} disabled={disabled} onChange={(e) => setToInsert(e.target.value)}>
               <option value="">Choose…</option>
               {approved.map((p) => (
                 <option key={p.key} value={p.key}>
                   {p.label} ({`{{${p.key}}}`})
                 </option>
               ))}
-            </select>
-          </label>
-          <button type="button" className="secondary" disabled={disabled || !toInsert} onClick={insert}>
+            </NativeSelect>
+          </FormField>
+          <Button type="button" variant="outline" disabled={disabled || !toInsert} onClick={insert}>
             Insert placeholder
-          </button>
+          </Button>
         </div>
       )}
-      <div className="wide">
+      <div className="col-span-full">
         {used.length === 0 ? (
-          <p className="hint">The text uses no placeholders.</p>
+          <Hint>The text uses no placeholders.</Hint>
         ) : (
-          <fieldset style={GROUP}>
-            <legend>Placeholders the text uses: mandatory unless marked optional</legend>
-            <div className="row">
+          <FramedFieldset legend="Placeholders the text uses: mandatory unless marked optional">
+            <ChoiceRow>
               {used.map((key) =>
                 approvedKeys && !approvedKeys.has(key) ? (
-                  <span key={key} className="error">
+                  <span key={key} className={NOT_APPROVED}>
+                    <CircleAlertIcon aria-hidden="true" className="size-4 shrink-0" />
                     {`{{${key}}}`} is not an approved placeholder
                   </span>
                 ) : (
-                  <label key={key} className="check">
+                  <CheckField key={key}>
                     <input type="checkbox" disabled={disabled} checked={optional.includes(key)} onChange={(e) => toggle(key, e.target.checked)} /> {placeholderName(labels, key)}{' '}
                     optional
-                  </label>
+                  </CheckField>
                 ),
               )}
-            </div>
-          </fieldset>
+            </ChoiceRow>
+          </FramedFieldset>
         )}
       </div>
     </>
@@ -315,19 +326,19 @@ function CreateTemplate() {
   const typeList = `${id}-types`;
   return (
     <Section title="New letter template">
-      <form className="grid-form" aria-label="New letter template" onSubmit={submit}>
-        <label>
+      <FormGrid aria-label="New letter template" onSubmit={submit}>
+        <FormField>
           Template code (required)
-          <input value={code} maxLength={40} required placeholder="RELIEVING_STANDARD" onChange={(e) => setCode(e.target.value.toUpperCase())} />
-        </label>
-        <label>
+          <Input value={code} maxLength={40} required placeholder="RELIEVING_STANDARD" onChange={(e) => setCode(e.target.value.toUpperCase())} />
+        </FormField>
+        <FormField>
           Name (required)
-          <input value={name} maxLength={MAX_NAME} required onChange={(e) => setName(e.target.value)} />
-        </label>
-        <label>
+          <Input value={name} maxLength={MAX_NAME} required onChange={(e) => setName(e.target.value)} />
+        </FormField>
+        <FormField>
           Letter type (required)
-          <input value={letterType} maxLength={60} required list={typeList} onChange={(e) => setLetterType(e.target.value.toUpperCase())} />
-        </label>
+          <Input value={letterType} maxLength={60} required list={typeList} onChange={(e) => setLetterType(e.target.value.toUpperCase())} />
+        </FormField>
         {/* Suggestions only (the seeded letter types); a company may have added others, and the server checks the code. */}
         <datalist id={typeList}>
           {LETTER_TYPES.map(([c, label]) => (
@@ -338,28 +349,24 @@ function CreateTemplate() {
         </datalist>
         <OfferTemplateNote letterType={letterType.trim()} />
         <TemplateTextFields body={body} onBody={setBody} optional={optional} onOptional={setOptional} approved={approved.data?.items} disabled={create.isPending} />
-        <p className="hint wide">The template starts as draft revision 1. Publish it on the template’s page before letters can use it.</p>
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
+        <Hint>The template starts as draft revision 1. Publish it on the template’s page before letters can use it.</Hint>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
         {create.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={create.error} words={TEMPLATE_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={create.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={create.isPending}>
             Create template
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         {created && (
-          <p className="ok wide" role="status">
+          <StatusNote tone="success" role="status">
             Template {created.code} created as draft revision 1. <Link to={PATHS.template(created.id)}>Open template {created.code}</Link> to publish it.
-          </p>
+          </StatusNote>
         )}
-      </form>
+      </FormGrid>
     </Section>
   );
 }

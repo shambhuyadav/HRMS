@@ -2,13 +2,23 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, type EmployeeHit, fileToBase64, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, LIST_PAGE_SIZE, Pager, pageParams, Section } from '../../ui';
 import { TemplateDownload } from '../records';
 import { EmployeePicker, Missing, Note, type PeriodChoice, PeriodPicker, person } from './pickers';
 import { Problem, ReasonForm, ROW_TEXT } from './problems';
-import { Fact, H3, INPUT_APPROVE, INPUT_PREPARE, label, MONEY, money, SCROLL, Status, useIntentKey, useKeys } from './shared';
+import { Fact, INPUT_APPROVE, INPUT_PREPARE, label, MONEY, money, Status, useIntentKey, useKeys } from './shared';
 
 // =========================================================================================================
 // Payroll inputs (FR-031): entry, upload with dry run, submission, independent approval, cancellation and the
@@ -71,15 +81,19 @@ const INPUT_STATE: Record<string, string> = {
 export const INPUT_SOURCE: Record<string, string> = { ENTRY: 'Entered', UPLOAD: 'Uploaded file' };
 const INPUT_FILTERS = ['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'CANCELLED'];
 const UPLOAD_HEADER = 'employee_code,component_code,input_kind,amount,currency_code,effective_date,reference';
+/** A part of a card below what comes before it, its pieces one under another. */
+const CARD_PART = 'mt-3 flex flex-col gap-3';
 
 export function NewInputBatch() {
   const [period, setPeriod] = useState<PeriodChoice | null>(null);
   return (
     <Section title="Enter payroll inputs">
-      <p className="hint">Inputs are entered for one period and approved by someone independent before a calculation uses them. Nothing is saved unless every line is valid.</p>
-      <div className="grid-form" role="group" aria-label="Input period">
-        <PeriodPicker value={period} onChange={setPeriod} purpose="of the inputs" />
-      </div>
+      <Hint>Inputs are entered for one period and approved by someone independent before a calculation uses them. Nothing is saved unless every line is valid.</Hint>
+      <FormGrid asChild>
+        <div role="group" aria-label="Input period">
+          <PeriodPicker value={period} onChange={setPeriod} purpose="of the inputs" />
+        </div>
+      </FormGrid>
       {period && <InputEntryForm key={`entry-${period.periodId}`} period={period} />}
       {period && <InputUploadForm key={`upload-${period.periodId}`} period={period} />}
     </Section>
@@ -156,82 +170,96 @@ function InputEntryForm({ period }: { period: PeriodChoice }) {
     save.mutate({ lines: body, idempotencyKey: intent.key(JSON.stringify([period.periodId, body])) });
   };
   return (
-    <div className="stack" style={{ marginTop: '0.75rem' }}>
-      <h3 style={H3}>{`Enter lines for ${period.periodCode}`}</h3>
-      <form onSubmit={add} aria-label="Add an input line" className="grid-form">
+    <div className={CARD_PART}>
+      <CardSubheading>{`Enter lines for ${period.periodCode}`}</CardSubheading>
+      <FormGrid onSubmit={add} aria-label="Add an input line">
         <EmployeePicker title="Employee" value={employee} onChange={setEmployee} />
-        <label>
+        <FormField>
           Pay component code
-          <input value={componentCode} onChange={(e) => setComponentCode(e.target.value)} maxLength={40} autoComplete="off" />
-        </label>
-        <label>
+          <Input value={componentCode} onChange={(e) => setComponentCode(e.target.value)} maxLength={40} autoComplete="off" />
+        </FormField>
+        <FormField>
           Input kind
-          <input value={inputKind} onChange={(e) => setInputKind(e.target.value)} maxLength={60} autoComplete="off" />
-        </label>
-        <label>
+          <Input value={inputKind} onChange={(e) => setInputKind(e.target.value)} maxLength={60} autoComplete="off" />
+        </FormField>
+        <FormField>
           {`Amount (${period.currencyCode})`}
-          <input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" maxLength={20} autoComplete="off" />
-        </label>
-        <label>
+          <Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" maxLength={20} autoComplete="off" />
+        </FormField>
+        <FormField>
           Effective date
-          <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+        </FormField>
+        <FormField>
           Reference
-          <input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={100} autoComplete="off" />
-        </label>
-        <div className="row">
-          <button type="submit" className="secondary">
+          <Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={100} autoComplete="off" />
+        </FormField>
+        <ButtonRow>
+          <Button type="submit" variant="outline">
             Add the line
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Missing text={problem} />
-      </form>
+      </FormGrid>
       {lines.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Lines to save">
-            <thead>
-              <tr>
-                <th>Row</th>
-                <th>Employee</th>
-                <th>Component</th>
-                <th>Kind</th>
-                <th>Amount</th>
-                <th>Effective</th>
-                <th>Reference</th>
-                <th>Remove</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((l, i) => (
-                <tr key={l.key}>
-                  <td>{i + 1}</td>
-                  <td>{person(l.employee)}</td>
-                  <td>{l.componentCode}</td>
-                  <td>{l.inputKind}</td>
-                  <td>{money(l.amount, period.currencyCode)}</td>
-                  <td>{formatDate(l.effectiveDate)}</td>
-                  <td>{l.reference}</td>
-                  <td>
-                    <button type="button" className="link" disabled={save.isPending} onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label={`Remove row ${i + 1}`}>
+        <Table aria-label="Lines to save">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Row</TableHead>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Component</TableHead>
+              <TableHead scope="col">Kind</TableHead>
+              <TableHead scope="col">Amount</TableHead>
+              <TableHead scope="col">Effective</TableHead>
+              <TableHead scope="col">Reference</TableHead>
+              <TableHead scope="col">Remove</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {lines.map((l, i) => (
+              <TableRow key={l.key}>
+                <TableCell>{i + 1}</TableCell>
+                <TableCell>{person(l.employee)}</TableCell>
+                <TableCell>{l.componentCode}</TableCell>
+                <TableCell>{l.inputKind}</TableCell>
+                <TableCell>{money(l.amount, period.currencyCode)}</TableCell>
+                <TableCell>{formatDate(l.effectiveDate)}</TableCell>
+                <TableCell>{l.reference}</TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button type="button" variant="danger" size="sm" disabled={save.isPending} onClick={() => setLines(lines.filter((x) => x.key !== l.key))} aria-label={`Remove row ${i + 1}`}>
                       Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      <div className="row">
-        <button type="button" disabled={save.isPending || lines.length === 0} onClick={send}>
+      <ButtonRow>
+        <Button type="button" disabled={save.isPending || lines.length === 0} onClick={send}>
           {save.isPending ? 'Saving…' : 'Save the lines as a draft batch'}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Note text={note} />
       <Problem error={save.error} act="input" />
     </div>
   );
+}
+
+/** What an upload did, in words: a file already live, a dry run, a saved batch, or a file refused as a whole. */
+function uploadSummary(r: UploadResult): string {
+  if (r.replayed) return 'This file is already a live batch of this period; nothing was saved twice.';
+  if (r.dryRun) return `Checked only, nothing was saved: ${r.total} rows, ${r.accepted} valid, ${r.rejected} refused.`;
+  if (r.applied) return `Saved as a draft batch of ${r.accepted} rows. Submit it for an independent approval from the list of batches.`;
+  return `Nothing was saved: every row must be valid (${r.rejected} of ${r.total} rows refused).`;
+}
+
+/** The upload button: busy while the server scans and checks the file, else a check (dry run) or the upload itself. */
+function uploadButtonText(pending: boolean, dryRun: boolean): string {
+  if (pending) return 'Scanning and checking…';
+  return dryRun ? 'Check the file' : 'Upload the file';
 }
 
 function InputUploadForm({ period }: { period: PeriodChoice }) {
@@ -261,20 +289,9 @@ function InputUploadForm({ period }: { period: PeriodChoice }) {
     },
   });
   const r = result;
-  const summary = !r
-    ? null
-    : r.replayed
-      ? 'This file is already a live batch of this period; nothing was saved twice.'
-      : r.dryRun
-        ? `Checked only, nothing was saved: ${r.total} rows, ${r.accepted} valid, ${r.rejected} refused.`
-        : r.applied
-          ? `Saved as a draft batch of ${r.accepted} rows. Submit it for an independent approval from the list of batches.`
-          : `Nothing was saved: every row must be valid (${r.rejected} of ${r.total} rows refused).`;
   return (
-    <form
+    <FormGrid
       aria-label="Upload input lines"
-      className="grid-form"
-      style={{ marginTop: '0.75rem' }}
       onSubmit={(e) => {
         e.preventDefault();
         if (!file || upload.isPending) return;
@@ -283,52 +300,53 @@ function InputUploadForm({ period }: { period: PeriodChoice }) {
         upload.mutate({ f: file, dry: dryRun });
       }}
     >
-      <h3 style={H3} className="wide">{`Upload lines for ${period.periodCode}`}</h3>
-      <p className="hint wide">{`A CSV file with the PAYROLL_INPUTS_V1 header: ${UPLOAD_HEADER}. The server scans it for malware before reading it: a flagged file is quarantined and nothing is saved.`}</p>
-      <div className="wide">
+      <CardSubheading>{`Upload lines for ${period.periodCode}`}</CardSubheading>
+      <Hint>{`A CSV file with the PAYROLL_INPUTS_V1 header: ${UPLOAD_HEADER}. The server scans it for malware before reading it: a flagged file is quarantined and nothing is saved.`}</Hint>
+      <div className="col-span-full">
         <TemplateDownload base="/v1/payroll/input-batches" code="PAYROLL_INPUTS_V1" />
       </div>
-      <label>
+      <FormField>
         CSV file
-        <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-      </label>
-      <label className="check">
+        <Input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      </FormField>
+      <CheckField>
         <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)} /> Check only (dry run: nothing is saved)
-      </label>
-      <div className="row">
-        <button type="submit" disabled={!file || upload.isPending}>
-          {upload.isPending ? 'Scanning and checking…' : dryRun ? 'Check the file' : 'Upload the file'}
-        </button>
-      </div>
-      {summary && (
-        <p role="status" className={r && (r.applied || r.replayed || (r.dryRun && r.rejected === 0)) ? 'ok wide' : 'error wide'}>
-          {summary}
-        </p>
+      </CheckField>
+      <ButtonRow>
+        <Button type="submit" disabled={!file || upload.isPending}>
+          {uploadButtonText(upload.isPending, dryRun)}
+        </Button>
+      </ButtonRow>
+      {/* What the upload did is a status whatever it says: a success when the file was saved or checked clean, an error when rows were refused. */}
+      {r && (
+        <StatusNote tone={r.applied || r.replayed || (r.dryRun && r.rejected === 0) ? 'success' : 'error'} role="status">
+          {uploadSummary(r)}
+        </StatusNote>
       )}
       {r && r.errors.length > 0 && (
-        <div className="wide" style={SCROLL}>
-          <table aria-label="Rows refused">
-            <thead>
-              <tr>
-                <th>Row</th>
-                <th>Problem</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div className="col-span-full">
+          <Table aria-label="Rows refused">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Row</TableHead>
+                <TableHead scope="col">Problem</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {r.errors.map((x) => (
-                <tr key={`${x.row}:${x.code}`}>
-                  <td>{x.row}</td>
-                  <td>{label(ROW_TEXT, x.code)}</td>
-                </tr>
+                <TableRow key={`${x.row}:${x.code}`}>
+                  <TableCell>{x.row}</TableCell>
+                  <TableCell>{label(ROW_TEXT, x.code)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
-      <div className="wide">
+      <div className="col-span-full">
         <Problem error={upload.error} act="upload" />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -348,9 +366,9 @@ export function InputBatchList() {
     <Section
       title="Input batches"
       actions={
-        <label className="inline">
+        <FormField className="w-auto">
           State
-          <select
+          <NativeSelect
             value={state}
             onChange={(e) => {
               setState(e.target.value);
@@ -363,48 +381,48 @@ export function InputBatchList() {
                 {label(INPUT_STATE, s)}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       }
     >
-      {batches.isPending && <p className="hint loading">Loading input batches…</p>}
+      {batches.isPending && <LoadingLine>Loading input batches…</LoadingLine>}
       {batches.error && <Problem error={batches.error} act="read" />}
       {batches.data && batches.data.items.length === 0 && <Empty>No input batches.</Empty>}
       {batches.data && batches.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Input batches">
-            <thead>
-              <tr>
-                <th>Period</th>
-                <th>Source</th>
-                <th>Lines</th>
-                <th>State</th>
-                <th>Prepared by</th>
-                <th>Created</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {batches.data.items.map((b) => (
-                <tr key={b.id}>
-                  <td>{b.periodCode}</td>
-                  <td>{label(INPUT_SOURCE, b.source)}</td>
-                  <td>{b.lineCount}</td>
-                  <td>
-                    <Status map={INPUT_STATE} code={b.state} />
-                  </td>
-                  <td>{b.preparedBy === me?.userId ? 'You' : 'Someone else'}</td>
-                  <td>{formatDate(b.createdAt)}</td>
-                  <td>
-                    <button type="button" className="link" onClick={() => setOpenId(openId === b.id ? null : b.id)} aria-label={`Details of the ${b.periodCode} batch created ${formatDate(b.createdAt)}`}>
+        <Table aria-label="Input batches">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Period</TableHead>
+              <TableHead scope="col">Source</TableHead>
+              <TableHead scope="col">Lines</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Prepared by</TableHead>
+              <TableHead scope="col">Created</TableHead>
+              <TableHead scope="col">Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {batches.data.items.map((b) => (
+              <TableRow key={b.id}>
+                <TableCell>{b.periodCode}</TableCell>
+                <TableCell>{label(INPUT_SOURCE, b.source)}</TableCell>
+                <TableCell>{b.lineCount}</TableCell>
+                <TableCell>
+                  <Status map={INPUT_STATE} code={b.state} />
+                </TableCell>
+                <TableCell>{b.preparedBy === me?.userId ? 'You' : 'Someone else'}</TableCell>
+                <TableCell>{formatDate(b.createdAt)}</TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setOpenId(openId === b.id ? null : b.id)} aria-label={`Details of the ${b.periodCode} batch created ${formatDate(b.createdAt)}`}>
                       {openId === b.id ? 'Hide' : 'Details'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {batches.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={batches.data.total ?? batches.data.items.length} onPage={setPage} label="Input batch pages" noun="input batch" plural="input batches" />}
       {openId && <InputBatchView key={openId} id={openId} withActions />}
@@ -433,7 +451,7 @@ export function InputBatchView({ id, withActions }: { id: string; withActions: b
     onSettled: () => qc.invalidateQueries({ queryKey: keys.inputBatchesAll }),
   });
   const b = batch.data;
-  if (batch.isPending) return <p className="hint loading">Loading the batch…</p>;
+  if (batch.isPending) return <LoadingLine>Loading the batch…</LoadingLine>;
   if (!b) return <Problem error={batch.error} act="read" />;
   const name = `Input batch of ${b.periodCode}`;
   const mine = b.preparedBy === me?.userId;
@@ -442,8 +460,8 @@ export function InputBatchView({ id, withActions }: { id: string; withActions: b
   const reversible = withActions && can(INPUT_APPROVE) && b.state === 'APPROVED' && !mine;
   const canReverse = (l: InputLineRow) => reversible && l.state === 'APPROVED' && !l.consumedRecordId;
   return (
-    <div role="region" aria-label={name} style={{ marginTop: '0.5rem' }}>
-      <h3 style={H3}>{name}</h3>
+    <div role="region" aria-label={name} className="mt-2">
+      <CardSubheading>{name}</CardSubheading>
       <dl className="kv">
         <Fact term="State">
           <Status map={INPUT_STATE} code={b.state} />
@@ -454,54 +472,52 @@ export function InputBatchView({ id, withActions }: { id: string; withActions: b
         <Fact term="Submitted">{formatDate(b.submittedAt)}</Fact>
         <Fact term="Decided">{formatDate(b.decidedAt)}</Fact>
       </dl>
-      {!b.scopeComplete && <p className="hint">Some lines of this batch are outside your scope or are your own, so they are not shown.</p>}
+      {!b.scopeComplete && <Hint>Some lines of this batch are outside your scope or are your own, so they are not shown.</Hint>}
       {b.lines.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label={`Lines of the ${b.periodCode} batch`}>
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Component</th>
-                <th>Kind</th>
-                <th>Amount</th>
-                <th>Effective</th>
-                <th>Reference</th>
-                <th>State</th>
-                {reversible && <th>Reverse</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {b.lines.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.employeeCode}</td>
-                  <td>{l.componentCode}</td>
-                  <td>{l.inputKind}</td>
-                  <td>{money(l.amount, l.currencyCode)}</td>
-                  <td>{formatDate(l.effectiveDate)}</td>
-                  <td>{l.reference}</td>
-                  <td>
-                    {l.consumedRecordId ? 'Used by a processed run' : <Status map={INPUT_STATE} code={l.state} />}
-                    {l.reversalReason && <div className="hint">{l.reversalReason}</div>}
-                  </td>
-                  {reversible && (
-                    <td>
-                      {canReverse(l) && (
-                        <input
-                          type="checkbox"
-                          aria-label={`Reverse the line ${l.reference}`}
-                          checked={selected.includes(l.id)}
-                          onChange={(e) => setSelected(e.target.checked ? [...selected, l.id] : selected.filter((x) => x !== l.id))}
-                        />
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label={`Lines of the ${b.periodCode} batch`}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Component</TableHead>
+              <TableHead scope="col">Kind</TableHead>
+              <TableHead scope="col">Amount</TableHead>
+              <TableHead scope="col">Effective</TableHead>
+              <TableHead scope="col">Reference</TableHead>
+              <TableHead scope="col">State</TableHead>
+              {reversible && <TableHead scope="col">Reverse</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {b.lines.map((l) => (
+              <TableRow key={l.id}>
+                <TableCell>{l.employeeCode}</TableCell>
+                <TableCell>{l.componentCode}</TableCell>
+                <TableCell>{l.inputKind}</TableCell>
+                <TableCell>{money(l.amount, l.currencyCode)}</TableCell>
+                <TableCell>{formatDate(l.effectiveDate)}</TableCell>
+                <TableCell>{l.reference}</TableCell>
+                <TableCell>
+                  {l.consumedRecordId ? 'Used by a processed run' : <Status map={INPUT_STATE} code={l.state} />}
+                  {l.reversalReason && <Hint className="m-0">{l.reversalReason}</Hint>}
+                </TableCell>
+                {reversible && (
+                  <TableCell>
+                    {canReverse(l) && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Reverse the line ${l.reference}`}
+                        checked={selected.includes(l.id)}
+                        onChange={(e) => setSelected(e.target.checked ? [...selected, l.id] : selected.filter((x) => x !== l.id))}
+                      />
+                    )}
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      {withActions && can(INPUT_APPROVE) && b.state === 'APPROVED' && mine && <p className="hint">You prepared this batch, so someone independent reverses its approved lines.</p>}
+      {withActions && can(INPUT_APPROVE) && b.state === 'APPROVED' && mine && <Hint>You prepared this batch, so someone independent reverses its approved lines.</Hint>}
       {reversible && b.lines.some(canReverse) && (
         <ReasonForm
           name="Reverse the selected lines"
@@ -516,12 +532,12 @@ export function InputBatchView({ id, withActions }: { id: string; withActions: b
           }}
         />
       )}
-      {withActions && can(INPUT_PREPARE) && open && !mine && <p className="hint">Only its preparer submits or cancels this batch.</p>}
+      {withActions && can(INPUT_PREPARE) && open && !mine && <Hint>Only its preparer submits or cancels this batch.</Hint>}
       {withActions && can(INPUT_PREPARE) && open && mine && (
-        <div className="stack">
+        <div className="flex flex-col gap-3">
           {b.state === 'DRAFT' && (
-            <div className="row">
-              <button
+            <ButtonRow>
+              <Button
                 type="button"
                 disabled={act.isPending}
                 onClick={() => {
@@ -530,8 +546,8 @@ export function InputBatchView({ id, withActions }: { id: string; withActions: b
                 }}
               >
                 {act.isPending && act.variables?.action === 'submit' ? 'Submitting…' : 'Submit for approval'}
-              </button>
-            </div>
+              </Button>
+            </ButtonRow>
           )}
           <ReasonForm
             name="Cancel this batch"

@@ -3,11 +3,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, ChoiceRow, FormField, FramedFieldset } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, download, fileToBase64, formatDate, plural, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, Item, NotPermitted, Section, StateBadge, When } from '../../ui';
 import { type Act, type Done, Refusal, reportGone } from './refusals';
-import { Block, EVIDENCE_READ, EXIT_READ, FILE_NAME, FLUSH, GROUP, H3, Loading, LONG_CODE, MAX_FILE_BYTES, MAX_FILE_NAME, MAX_REMARK, Notice, type NoticeState, OWNER_ROLES, ownerRefText, ownerText, ownsTask, PATHS, Problem, PROCESS_ACTION_LABEL, PROCESS_MANAGE, PROCESS_READ, PROCESS_REOPEN, QueryProblem, ReasonField, RoleReady, SCAN_TEXT, SCAN_TONE, SCROLL, shown, TASK_COMPLETE, typeLabel, useKeys, userText, UUID } from './shared';
+import { Block, EVIDENCE_READ, EXIT_READ, FILE_NAME, LONG_CODE, MAX_FILE_BYTES, MAX_FILE_NAME, MAX_REMARK, Notice, type NoticeState, OWNER_ROLES, ownerRefText, ownerText, ownsTask, PATHS, Problem, PROCESS_ACTION_LABEL, PROCESS_MANAGE, PROCESS_READ, PROCESS_REOPEN, QueryProblem, ReasonField, RoleReady, SCAN_TEXT, SCAN_TONE, shown, TASK_COMPLETE, typeLabel, useKeys, userText, UUID } from './shared';
 import type { ProcessDetail, ProcessEvent, ProcessTask } from './types';
 
 export function ProcessDetailScreen() {
@@ -15,9 +23,7 @@ export function ProcessDetailScreen() {
   const { can } = useSession();
   return (
     <>
-      <p>
-        <Link className="back-link" to={PATHS.processes}>← Employee processes</Link>
-      </p>
+      <BackLink to={PATHS.processes}>← Employee processes</BackLink>
       {!UUID.test(id) ? (
         <Empty>This process does not exist.</Empty>
       ) : (
@@ -44,7 +50,7 @@ export function ProcessView({ processId, embedded = false }: { processId: string
   if (!p) {
     return (
       <>
-        {query.isPending && <Loading>Loading the process…</Loading>}
+        {query.isPending && <LoadingLine>Loading the process…</LoadingLine>}
         <QueryProblem error={query.error} forbidden="The selected role cannot view employee processes." missing="This process is not available in the selected role’s scope." />
       </>
     );
@@ -52,9 +58,9 @@ export function ProcessView({ processId, embedded = false }: { processId: string
   return (
     <>
       {embedded ? (
-        <h3 style={H3}>
+        <CardSubheading>
           {p.processName} ({p.processCode})
-        </h3>
+        </CardSubheading>
       ) : (
         <h1>
           {p.processName} for {p.employeeName} ({p.employeeCode})
@@ -93,9 +99,7 @@ export function ProcessView({ processId, embedded = false }: { processId: string
       </dl>
       <Notice notice={notice} />
       <Block title="Tasks" nested={embedded}>
-        <p className="hint" style={FLUSH}>
-          {`${plural(p.counts.total, 'task')}: ${p.counts.open} open, ${p.counts.requiredOpen} required still open, ${p.counts.overdue} overdue.`}
-        </p>
+        <Hint className="m-0">{`${plural(p.counts.total, 'task')}: ${p.counts.open} open, ${p.counts.requiredOpen} required still open, ${p.counts.overdue} overdue.`}</Hint>
         {p.tasks.length === 0 ? (
           <Empty>This process has no tasks.</Empty>
         ) : (
@@ -147,9 +151,7 @@ function TaskItem({ process, task: t, onDone }: { process: ProcessDetail; task: 
   };
   return (
     <li aria-labelledby={headingId}>
-      <h3 id={headingId} style={H3}>
-        {`${t.sequence}. ${t.title} (${t.code})`}
-      </h3>
+      <CardSubheading id={headingId}>{`${t.sequence}. ${t.title} (${t.code})`}</CardSubheading>
       <TaskFacts task={t} employeeId={process.employeeId} />
       <TaskActions task={t} allowed={allowed} onDone={onDone} />
     </li>
@@ -189,12 +191,12 @@ function EvidenceState({ task: t, canOpen }: { task: ProcessTask; canOpen: boole
   return (
     <>
       <Badge tone={(scan && SCAN_TONE[scan]) || 'warn'}>{scan ? (SCAN_TEXT[scan] ?? readable(scan).toLowerCase()) : 'not scanned'}</Badge>
-      {scan === 'QUARANTINED' && <div className="hint">This file failed the malware scan and counts as no evidence: the task has to be reopened and completed again with a clean file.</div>}
+      {scan === 'QUARANTINED' && <HintLine>This file failed the malware scan and counts as no evidence: the task has to be reopened and completed again with a clean file.</HintLine>}
       {canOpen && scan === 'CLEAN' && (
         <div>
-          <button type="button" className="secondary" disabled={open.isPending} onClick={() => open.mutate()}>
+          <Button type="button" variant="outline" disabled={open.isPending} onClick={() => open.mutate()}>
             Download evidence
-          </button>
+          </Button>
         </div>
       )}
       <Refusal error={open.error} action="evidence" />
@@ -212,28 +214,28 @@ export function TaskActions({ task, allowed, onDone }: { task: ProcessTask; allo
   if (!allowed.complete && !allowed.skip && !allowed.reassign && !allowed.reopen) return null;
   return (
     <div className="stack">
-      <div className="row">
+      <ButtonRow>
         {allowed.complete && (
-          <button type="button" aria-expanded={form === 'complete'} onClick={() => toggle('complete')}>
+          <Button type="button" aria-expanded={form === 'complete'} onClick={() => toggle('complete')}>
             Complete
-          </button>
+          </Button>
         )}
         {allowed.skip && (
-          <button type="button" className="secondary" aria-expanded={form === 'skip'} onClick={() => toggle('skip')}>
+          <Button type="button" variant="outline" aria-expanded={form === 'skip'} onClick={() => toggle('skip')}>
             Skip
-          </button>
+          </Button>
         )}
         {allowed.reassign && (
-          <button type="button" className="secondary" aria-expanded={form === 'reassign'} onClick={() => toggle('reassign')}>
+          <Button type="button" variant="outline" aria-expanded={form === 'reassign'} onClick={() => toggle('reassign')}>
             Reassign
-          </button>
+          </Button>
         )}
         {allowed.reopen && (
-          <button type="button" className="secondary" aria-expanded={form === 'reopen'} onClick={() => toggle('reopen')}>
+          <Button type="button" variant="outline" aria-expanded={form === 'reopen'} onClick={() => toggle('reopen')}>
             Reopen
-          </button>
+          </Button>
         )}
-      </div>
+      </ButtonRow>
       {form === 'complete' && allowed.complete && <CompleteTaskForm task={task} onDone={finish} />}
       {form === 'skip' && allowed.skip && <TaskReasonForm task={task} kind="skip" onDone={finish} />}
       {form === 'reassign' && allowed.reassign && <ReassignTaskForm task={task} onDone={finish} />}
@@ -299,18 +301,16 @@ function CompleteTaskForm({ task: t, onDone }: { task: ProcessTask; onDone: Done
   return (
     <form aria-label={`Complete ${t.title}`} className="stack" onSubmit={submit}>
       <ReasonField label="Remark (optional; restricted to authorised HR)" value={remark} onChange={setRemark} max={MAX_REMARK} />
-      <label>
+      <FormField>
         {t.evidenceRequired ? 'Evidence file (required)' : 'Evidence file (optional)'}
-        <input key={fileKey} type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-      </label>
-      <p className="hint" style={FLUSH}>
-        PDF, JPEG or PNG up to 10 MB. The file is scanned for malware before anyone can open it.
-      </p>
+        <Input key={fileKey} type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+      </FormField>
+      <Hint className="m-0">PDF, JPEG or PNG up to 10 MB. The file is scanned for malware before anyone can open it.</Hint>
       <Problem text={problem} />
       <div>
-        <button type="submit" disabled={complete.isPending}>
+        <Button type="submit" disabled={complete.isPending}>
           Complete task
-        </button>
+        </Button>
       </div>
       <Refusal error={complete.error} action="complete" except={TASK_GONE} />
     </form>
@@ -347,9 +347,9 @@ function TaskReasonForm({ task: t, kind, onDone }: { task: ProcessTask; kind: 's
       <ReasonField label={skip ? 'Reason for skipping (required)' : 'Reason for reopening (required)'} value={reason} onChange={setReason} />
       <Problem text={problem} />
       <div>
-        <button type="submit" disabled={act.isPending}>
+        <Button type="submit" disabled={act.isPending}>
           {skip ? 'Skip task' : 'Reopen task'}
-        </button>
+        </Button>
       </div>
       <Refusal error={act.error} action={kind} except={TASK_GONE} />
     </form>
@@ -399,26 +399,25 @@ function ReassignTaskForm({ task: t, onDone }: { task: ProcessTask; onDone: Done
   };
   return (
     <form aria-label={`Reassign ${t.title}`} className="stack" onSubmit={submit}>
-      <fieldset style={GROUP}>
-        <legend>New owner</legend>
-        <div className="row">
-          <label className="check">
+      <FramedFieldset legend="New owner">
+        <ChoiceRow>
+          <CheckField>
             <input type="radio" name={radioName} checked={kind === 'ROLE'} onChange={() => setKind('ROLE')} /> A role
-          </label>
-          <label className="check">
+          </CheckField>
+          <CheckField>
             <input type="radio" name={radioName} checked={kind === 'USER'} onChange={() => setKind('USER')} /> A named user
-          </label>
-        </div>
+          </CheckField>
+        </ChoiceRow>
         {kind === 'ROLE' ? (
-          <label>
+          <FormField>
             New owner role code
-            <input list={roleListId} value={role} maxLength={60} onChange={(e) => setRole(e.target.value.toUpperCase())} />
-          </label>
+            <Input list={roleListId} value={role} maxLength={60} onChange={(e) => setRole(e.target.value.toUpperCase())} />
+          </FormField>
         ) : (
-          <label>
+          <FormField>
             New owner user ID
-            <input value={user} maxLength={36} onChange={(e) => setUser(e.target.value)} />
-          </label>
+            <Input value={user} maxLength={36} onChange={(e) => setUser(e.target.value)} />
+          </FormField>
         )}
         <datalist id={roleListId}>
           {OWNER_ROLES.map(([c, label]) => (
@@ -427,13 +426,13 @@ function ReassignTaskForm({ task: t, onDone }: { task: ProcessTask; onDone: Done
             </option>
           ))}
         </datalist>
-      </fieldset>
+      </FramedFieldset>
       <ReasonField label="Reason (optional; restricted to authorised HR)" value={reason} onChange={setReason} />
       <Problem text={problem} />
       <div>
-        <button type="submit" disabled={reassign.isPending}>
+        <Button type="submit" disabled={reassign.isPending}>
           Reassign task
-        </button>
+        </Button>
       </div>
       <Refusal error={reassign.error} action="reassign" except={TASK_GONE} />
     </form>
@@ -449,6 +448,19 @@ const PROCESS_GONE: ReadonlySet<string> = new Set(['PROCESS_NOT_OPEN', 'PROCESS_
  * released (a file still waiting for its scan is not evidence yet, and a quarantined file never is).
  */
 const holdsOpen = (t: ProcessTask) => t.required && (t.state !== 'COMPLETED' || (t.evidenceRequired && t.evidenceScanState !== 'CLEAN'));
+
+/** Whether the process can close, and if not, the required tasks that still hold it open (see holdsOpen). */
+function closingText(incomplete: ProcessTask[]): string {
+  if (incomplete.length === 0) return 'Every required task is done, so the process can close; open optional tasks do not hold it.';
+  // Completed, but their required evidence is not released yet (still waiting for the scan) or never will be.
+  const quarantined = incomplete.some((t) => t.state === 'COMPLETED' && t.evidenceScanState === 'QUARANTINED');
+  const awaitingScan = incomplete.some((t) => t.state === 'COMPLETED' && t.evidenceScanState !== 'QUARANTINED');
+  return [
+    `The process closes once every required task is complete. Still incomplete: ${incomplete.map((t) => t.code).join(', ')}.`,
+    awaitingScan ? ' Required evidence still waiting for the malware scan counts once the scan releases it.' : '',
+    quarantined ? ' A required task whose evidence failed the malware scan stays incomplete until it is reopened and completed with a clean file.' : '',
+  ].join('');
+}
 
 /** FR-015/FR-016: close once every required task is complete; cancel an open process or reopen a closed one with a reason. */
 function ProcessActions({ process: p, onDone }: { process: ProcessDetail; onDone: Done }) {
@@ -490,9 +502,6 @@ function ProcessActions({ process: p, onDone }: { process: ProcessDetail; onDone
   if (!canManage && !canReopen) return null;
   const busy = close.isPending || cancel.isPending || reopen.isPending;
   const incomplete = p.tasks.filter(holdsOpen);
-  // Completed, but their required evidence is not released yet (still waiting for the scan) or never will be.
-  const quarantined = incomplete.some((t) => t.state === 'COMPLETED' && t.evidenceScanState === 'QUARANTINED');
-  const awaitingScan = incomplete.some((t) => t.state === 'COMPLETED' && t.evidenceScanState !== 'QUARANTINED');
   const withReason = (form: 'cancel' | 'reopen', typed: string, send: (reason: string) => void) => (e: FormEvent) => {
     e.preventDefault();
     if (busy) return;
@@ -508,26 +517,20 @@ function ProcessActions({ process: p, onDone }: { process: ProcessDetail; onDone
     <Section title="Process actions">
       {canManage && (
         <div className="stack">
-          <p className="hint" style={FLUSH}>
-            {incomplete.length > 0
-              ? `The process closes once every required task is complete. Still incomplete: ${incomplete.map((t) => t.code).join(', ')}.${
-                  awaitingScan ? ' Required evidence still waiting for the malware scan counts once the scan releases it.' : ''
-                }${quarantined ? ' A required task whose evidence failed the malware scan stays incomplete until it is reopened and completed with a clean file.' : ''}`
-              : 'Every required task is done, so the process can close; open optional tasks do not hold it.'}
-          </p>
+          <Hint className="m-0">{closingText(incomplete)}</Hint>
           <div>
-            <button type="button" disabled={busy || incomplete.length > 0} onClick={() => close.mutate()}>
+            <Button type="button" disabled={busy || incomplete.length > 0} onClick={() => close.mutate()}>
               Close process
-            </button>
+            </Button>
           </div>
           <Refusal error={close.error} action="close" except={PROCESS_GONE} />
           <form aria-label="Cancel the process" className="stack" onSubmit={withReason('cancel', cancelReason, (reason) => cancel.mutate(reason))}>
             <ReasonField label="Reason for cancelling (required)" value={cancelReason} onChange={setCancelReason} />
             <Problem text={problem?.form === 'cancel' ? problem.text : null} />
             <div>
-              <button type="submit" className="danger" disabled={busy}>
+              <Button type="submit" variant="danger" disabled={busy}>
                 Cancel process
-              </button>
+              </Button>
             </div>
             <Refusal error={cancel.error} action="cancel" except={PROCESS_GONE} />
           </form>
@@ -538,9 +541,9 @@ function ProcessActions({ process: p, onDone }: { process: ProcessDetail; onDone
           <ReasonField label="Reason for reopening (required)" value={reopenReason} onChange={setReopenReason} />
           <Problem text={problem?.form === 'reopen' ? problem.text : null} />
           <div>
-            <button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy}>
               Reopen process
-            </button>
+            </Button>
           </div>
           <Refusal error={reopen.error} action="reopen" except={PROCESS_GONE} />
         </form>
@@ -569,38 +572,37 @@ function ProcessHistory({ process: p, nested }: { process: ProcessDetail; nested
       {p.history.length === 0 ? (
         <Empty>Nothing recorded yet.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label="Process history">
-            <thead>
-              <tr>
-                <th>Business date</th>
-                <th>Recorded</th>
-                <th>Action</th>
-                <th>Task</th>
-                <th>Change</th>
-                <th>Evidence</th>
-                <th>Remark or reason</th>
-                <th>By</th>
-              </tr>
-            </thead>
-            <tbody>
-              {p.history.map((e, i) => (
-                <tr key={`${e.occurredAt}-${i}`}>
-                  <td>{formatDate(e.businessDate)}</td>
-                  <td>
-                    <When at={e.occurredAt} />
-                  </td>
-                  <td>{PROCESS_ACTION_LABEL[e.action] ?? readable(e.action)}</td>
-                  <td>{e.taskCode ?? '—'}</td>
-                  <td>{historyChange(e, myUserId)}</td>
-                  <td>{e.hasEvidence ? 'Attached' : '—'}</td>
-                  <td>{remarkText(e)}</td>
-                  <td>{userText(e.actorUserId, myUserId)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Process history">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Business date</TableHead>
+              <TableHead scope="col">Recorded</TableHead>
+              <TableHead scope="col">Action</TableHead>
+              <TableHead scope="col">Task</TableHead>
+              <TableHead scope="col">Change</TableHead>
+              <TableHead scope="col">Evidence</TableHead>
+              <TableHead scope="col">Remark or reason</TableHead>
+              <TableHead scope="col">By</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {p.history.map((e, i) => (
+              <TableRow key={`${e.occurredAt}-${i}`}>
+                <TableCell>{formatDate(e.businessDate)}</TableCell>
+                <TableCell>
+                  <When at={e.occurredAt} />
+                </TableCell>
+                <TableCell>{PROCESS_ACTION_LABEL[e.action] ?? readable(e.action)}</TableCell>
+                <TableCell>{e.taskCode ?? '—'}</TableCell>
+                <TableCell>{historyChange(e, myUserId)}</TableCell>
+                <TableCell>{e.hasEvidence ? 'Attached' : '—'}</TableCell>
+                {/* A remark or reason is free text: it wraps rather than widening the table. */}
+                <TableCell className="min-[561px]:whitespace-normal">{remarkText(e)}</TableCell>
+                <TableCell>{userText(e.actorUserId, myUserId)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Block>
   );

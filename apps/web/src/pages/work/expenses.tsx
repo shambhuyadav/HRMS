@@ -2,6 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
+import { ButtonRow, FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, fileToBase64, formatAmount, pinSession } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section, StateBadge } from '../../ui';
@@ -240,153 +248,157 @@ export function ExpensesPage() {
     <>
       {can('expense.draft.operational') && (
         <Section title={correcting === 'RETURNED' ? 'Correct returned claim' : correcting ? 'Edit draft claim' : 'New expense claim'}>
-          {correcting === 'RETURNED' && <p className="hint">Submitting starts a new revision; the one already reviewed is kept as it was.</p>}
-          {raisingAgain && <p className="hint">Attach the receipts again: they stay with the rejected claim.</p>}
+          {correcting === 'RETURNED' && <Hint>Submitting starts a new revision; the one already reviewed is kept as it was.</Hint>}
+          {raisingAgain && <Hint>Attach the receipts again: they stay with the rejected claim.</Hint>}
           {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
-          {receiptDropped && <p className="hint">A receipt on this claim failed the safety check and was removed; attach another.</p>}
+          {receiptDropped && <Hint>A receipt on this claim failed the safety check and was removed; attach another.</Hint>}
           <form
             key={formKey}
             onSubmit={(e) => {
               e.preventDefault();
               create.mutate();
             }}
-            className="stack"
+            className="flex flex-col gap-3"
           >
-            <label>
+            <FormField>
               Business purpose
-              <input value={purpose} onChange={(e) => setPurpose(e.target.value)} required maxLength={500} />
-            </label>
+              {/* In a one-column form a field keeps a readable width. */}
+              <Input className="max-w-[560px]" value={purpose} onChange={(e) => setPurpose(e.target.value)} required maxLength={500} />
+            </FormField>
             {lines.map((l, i) => (
-              // A framed block per line: a grid-form inside a card draws no frame of its own, the fieldset does.
-              <fieldset key={i}>
-                <legend>Line {i + 1}</legend>
-                <div className="grid-form">
-                  {/* Full width, so a long category name is never cut off. */}
-                  <label className="wide">
-                    Category
-                    <select value={l.category} onChange={(e) => update(i, { category: e.target.value })}>
-                      {/* The company's name for each category; the code is what is sent. A code no longer listed keeps its own text. */}
-                      {[...categoryList.map((c) => ({ code: c.code, name: c.name })), ...(categoryList.some((c) => c.code === l.category) ? [] : [{ code: l.category, name: l.category }])].map((c) => (
-                        <option key={c.code} value={c.code}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Date
-                    <input type="date" required value={l.expenseDate} onChange={(e) => update(i, { expenseDate: e.target.value })} />
-                  </label>
-                  {basisOf(l.category) === 'PER_NIGHT' && (
-                    <label>
-                      Nights
-                      <input type="number" min={1} required value={l.nights} onChange={(e) => update(i, { nights: e.target.value })} />
-                    </label>
-                  )}
-                  <label>
-                    Merchant
-                    <input required value={l.merchant} onChange={(e) => update(i, { merchant: e.target.value })} />
-                  </label>
-                  <label>
-                    Invoice reference (if the bill has one)
-                    <input maxLength={100} value={l.invoiceReference} onChange={(e) => update(i, { invoiceReference: e.target.value })} />
-                  </label>
-                  <label>
-                    Currency paid in
-                    <select value={l.currency || 'INR'} onChange={(e) => update(i, { currency: e.target.value === 'INR' ? '' : e.target.value })}>
-                      {/* A currency not in the list (a stored line) keeps its own code. */}
-                      {[...CLAIM_CURRENCIES, ...(l.currency && !CLAIM_CURRENCIES.includes(l.currency) ? [l.currency] : [])].map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    {`Amount (${l.currency || 'INR'})`}
-                    <input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={l.amount} onChange={(e) => update(i, { amount: e.target.value })} />
-                  </label>
-                  <label className="wide">
-                    Description
-                    <input required value={l.description} onChange={(e) => update(i, { description: e.target.value })} />
-                  </label>
-                  <label className="wide">
-                    Exception reason (if over limit, late or without receipt)
-                    <input value={l.exceptionReason} onChange={(e) => update(i, { exceptionReason: e.target.value })} />
-                  </label>
-                  <label className="wide">
-                    Receipt (PDF, JPEG or PNG)
-                    <input type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => update(i, { receipt: e.target.files?.[0] ?? null })} />
-                    {l.keptReceiptId && !l.receipt && <span className="hint">The receipt already on this line is kept unless you choose another file.</span>}
-                  </label>
-                </div>
-              </fieldset>
+              // A framed block per line: a form grid inside a card draws no frame of its own, the fieldset does.
+              <FramedFieldset key={i} legend={<>Line {i + 1}</>}>
+                <FormGrid asChild>
+                  <div>
+                    {/* Full width, so a long category name is never cut off. */}
+                    <FormField className="col-span-full">
+                      Category
+                      <NativeSelect value={l.category} onChange={(e) => update(i, { category: e.target.value })}>
+                        {/* The company's name for each category; the code is what is sent. A code no longer listed keeps its own text. */}
+                        {[...categoryList.map((c) => ({ code: c.code, name: c.name })), ...(categoryList.some((c) => c.code === l.category) ? [] : [{ code: l.category, name: l.category }])].map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </FormField>
+                    <FormField>
+                      Date
+                      <Input type="date" required value={l.expenseDate} onChange={(e) => update(i, { expenseDate: e.target.value })} />
+                    </FormField>
+                    {basisOf(l.category) === 'PER_NIGHT' && (
+                      <FormField>
+                        Nights
+                        <Input type="number" min={1} required value={l.nights} onChange={(e) => update(i, { nights: e.target.value })} />
+                      </FormField>
+                    )}
+                    <FormField>
+                      Merchant
+                      <Input required value={l.merchant} onChange={(e) => update(i, { merchant: e.target.value })} />
+                    </FormField>
+                    <FormField>
+                      Invoice reference (if the bill has one)
+                      <Input maxLength={100} value={l.invoiceReference} onChange={(e) => update(i, { invoiceReference: e.target.value })} />
+                    </FormField>
+                    <FormField>
+                      Currency paid in
+                      <NativeSelect value={l.currency || 'INR'} onChange={(e) => update(i, { currency: e.target.value === 'INR' ? '' : e.target.value })}>
+                        {/* A currency not in the list (a stored line) keeps its own code. */}
+                        {[...CLAIM_CURRENCIES, ...(l.currency && !CLAIM_CURRENCIES.includes(l.currency) ? [l.currency] : [])].map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </NativeSelect>
+                    </FormField>
+                    <FormField>
+                      {`Amount (${l.currency || 'INR'})`}
+                      <Input required inputMode="decimal" pattern="\d+(\.\d{1,2})?" value={l.amount} onChange={(e) => update(i, { amount: e.target.value })} />
+                    </FormField>
+                    <FormField className="col-span-full">
+                      Description
+                      <Input required value={l.description} onChange={(e) => update(i, { description: e.target.value })} />
+                    </FormField>
+                    <FormField className="col-span-full">
+                      Exception reason (if over limit, late or without receipt)
+                      <Input value={l.exceptionReason} onChange={(e) => update(i, { exceptionReason: e.target.value })} />
+                    </FormField>
+                    <FormField className="col-span-full">
+                      Receipt (PDF, JPEG or PNG)
+                      <Input type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => update(i, { receipt: e.target.files?.[0] ?? null })} />
+                      {l.keptReceiptId && !l.receipt && <Hint as="span">The receipt already on this line is kept unless you choose another file.</Hint>}
+                    </FormField>
+                  </div>
+                </FormGrid>
+              </FramedFieldset>
             ))}
-            <div className="row">
-              <button type="button" className="secondary" onClick={() => setLines([...lines, emptyLine()])}>
+            <ButtonRow>
+              <Button type="button" variant="outline" onClick={() => setLines([...lines, emptyLine()])}>
                 Add line
-              </button>
-              <button type="submit" disabled={create.isPending}>
+              </Button>
+              <Button type="submit" disabled={create.isPending}>
                 Submit claim
-              </button>
+              </Button>
               {correcting && (
-                <button type="button" className="secondary" onClick={clearForm}>
+                <Button type="button" variant="outline" onClick={clearForm}>
                   Leave this claim as it is
-                </button>
+                </Button>
               )}
-            </div>
+            </ButtonRow>
           </form>
-          {create.isSuccess && <p className="ok">Claim submitted for review.</p>}
+          {create.isSuccess && <StatusNote tone="success">Claim submitted for review.</StatusNote>}
           <ErrorNote error={create.error} />
-          {create.isError && draftKept && <p className="hint">Your claim is saved as a draft. Correct it and press Submit claim again; receipts already uploaded are reused.</p>}
+          {create.isError && draftKept && <Hint>Your claim is saved as a draft. Correct it and press Submit claim again; receipts already uploaded are reused.</Hint>}
         </Section>
       )}
       <Section title="My claims">
-        <table>
-          <thead>
-            <tr>
-              <th>Purpose</th>
-              <th>Claimed</th>
-              <th>State</th>
-              <th>Payment</th>
-              <th>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Purpose</TableHead>
+              <TableHead scope="col">Claimed</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Payment</TableHead>
+              <TableHead scope="col">
                 <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {claims.data?.items.map((c) => (
-              <tr key={c.id}>
-                <td>{c.purpose}</td>
-                <td>{formatAmount(c.claimedTotal, c.currency)}</td>
-                <td>
+              <TableRow key={c.id}>
+                <TableCell>{c.purpose}</TableCell>
+                <TableCell>{formatAmount(c.claimedTotal, c.currency)}</TableCell>
+                <TableCell>
                   <StateBadge state={c.state} />
                   <RaisedAgainHint predecessorRequestId={c.predecessorRequestId} />
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <StateBadge state={c.paymentState === 'NOT_APPLICABLE' ? null : c.paymentState} />
-                </td>
-                <td>
-                  {(c.state === 'DRAFT' || c.state === 'RETURNED') && can('expense.draft.operational') && (
-                    <button className="link" disabled={correct.isPending} onClick={() => correct.mutate(c.id)}>
-                      {c.state === 'RETURNED' ? 'Correct' : 'Edit'}
-                    </button>
-                  )}{' '}
-                  {canRaiseAgain(c, followedRequests(claims.data?.items ?? [])) && can('expense.draft.operational') && (
-                    <button className="link" disabled={raiseAgain.isPending} onClick={() => raiseAgain.mutate(c.id)}>
-                      Raise again
-                    </button>
-                  )}{' '}
-                  {WITHDRAWABLE_CLAIM.includes(c.state) && can('expense.withdraw.operational') && (
-                    <button className="link" disabled={withdraw.isPending} onClick={() => withdraw.mutate(c.id)}>
-                      Withdraw
-                    </button>
-                  )}
-                </td>
-              </tr>
+                </TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    {(c.state === 'DRAFT' || c.state === 'RETURNED') && can('expense.draft.operational') && (
+                      <Button variant="outline" size="sm" disabled={correct.isPending} onClick={() => correct.mutate(c.id)}>
+                        {c.state === 'RETURNED' ? 'Correct' : 'Edit'}
+                      </Button>
+                    )}{' '}
+                    {canRaiseAgain(c, followedRequests(claims.data?.items ?? [])) && can('expense.draft.operational') && (
+                      <Button variant="outline" size="sm" disabled={raiseAgain.isPending} onClick={() => raiseAgain.mutate(c.id)}>
+                        Raise again
+                      </Button>
+                    )}{' '}
+                    {WITHDRAWABLE_CLAIM.includes(c.state) && can('expense.withdraw.operational') && (
+                      <Button variant="danger" size="sm" disabled={withdraw.isPending} onClick={() => withdraw.mutate(c.id)}>
+                        Withdraw
+                      </Button>
+                    )}
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         {claims.data?.items.length === 0 && <Empty>{can('expense.draft.operational') ? 'No claims yet. Fill in New expense claim above to claim an expense.' : 'No claims yet.'}</Empty>}
         <ErrorNote error={claims.error ?? correct.error ?? raiseAgain.error ?? withdraw.error} />
       </Section>

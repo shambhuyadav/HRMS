@@ -3,12 +3,18 @@
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, NotPermitted, Section, When } from '../../ui';
 import { RaisedAgainHint } from '../requests';
 import { QueryProblem } from './refusals';
-import { ASSET_READ, DECISION_LABEL, holderLabel, optional, PATHS, REQUEST_READ, RequestState, SCROLL, shown, useKeys } from './shared';
+import { ASSET_READ, DECISION_LABEL, holderLabel, optional, PATHS, REQUEST_READ, RequestState, shown, useKeys } from './shared';
 import type { AssetRequest, Custody } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -34,7 +40,7 @@ export function EmployeeAssetsScreen() {
   });
   if (!can(ASSET_READ)) {
     return (
-      <div className="stack">
+      <div className="flex flex-col gap-3">
         <h1>Employee’s items</h1>
         <NotPermitted>The selected role cannot read asset custody.</NotPermitted>
       </div>
@@ -43,19 +49,19 @@ export function EmployeeAssetsScreen() {
   const data = shown(items);
   const asked = shown(requests);
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       <h1>Employee’s items</h1>
       {data?.employee && <p>{holderLabel(data.employee)}</p>}
       <Section title="Items held and returned">
-        <label>
+        <FormField>
           Show
-          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+          <NativeSelect value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">Held and returned items</option>
             <option value="HELD">Held now</option>
             <option value="RETURNED">Returned</option>
-          </select>
-        </label>
-        {items.isPending && <p className="hint loading">Loading the items…</p>}
+          </NativeSelect>
+        </FormField>
+        {items.isPending && <LoadingLine>Loading the items…</LoadingLine>}
         <QueryProblem error={items.error} forbidden="The selected role cannot read this employee’s items." />
         {data && <CustodyTable items={data.items} label="The employee’s items" empty="No items match." />}
       </Section>
@@ -73,42 +79,40 @@ export function EmployeeAssetsScreen() {
 export function CustodyTable({ items, label, empty, acknowledge }: { items: Custody[]; label: string; empty: string; acknowledge?: (k: Custody) => ReactNode }) {
   if (items.length === 0) return <Empty>{empty}</Empty>;
   return (
-    <div style={SCROLL}>
-      <table aria-label={label}>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Category</th>
-            <th>Description</th>
-            <th>Identifier</th>
-            <th>Issued on</th>
-            <th>Condition at issue</th>
-            <th>Returned on</th>
-            <th>Condition at return</th>
-            <th>Status</th>
-            <th>Receipt</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((k) => (
-            <tr key={k.custodyId}>
-              <td>{optional(k.assetCode)}</td>
-              <td>{k.category?.label ?? '—'}</td>
-              <td>{optional(k.description)}</td>
-              <td>{optional(k.identifier)}</td>
-              <td>{formatDate(k.issuedOn)}</td>
-              <td>{k.issueCondition}</td>
-              <td>{formatDate(k.returnedOn)}</td>
-              <td>{optional(k.returnCondition)}</td>
-              <td>
-                <Badge tone={k.status === 'HELD' ? 'warn' : 'neutral'}>{k.status === 'HELD' ? 'Held' : 'Returned'}</Badge>
-              </td>
-              <td>{k.acknowledgedAt ? <>Acknowledged <When at={k.acknowledgedAt} /></> : (acknowledge?.(k) ?? 'Not acknowledged')}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label={label}>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Item</TableHead>
+          <TableHead scope="col">Category</TableHead>
+          <TableHead scope="col">Description</TableHead>
+          <TableHead scope="col">Identifier</TableHead>
+          <TableHead scope="col">Issued on</TableHead>
+          <TableHead scope="col">Condition at issue</TableHead>
+          <TableHead scope="col">Returned on</TableHead>
+          <TableHead scope="col">Condition at return</TableHead>
+          <TableHead scope="col">Status</TableHead>
+          <TableHead scope="col">Receipt</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((k) => (
+          <TableRow key={k.custodyId}>
+            <TableCell>{optional(k.assetCode)}</TableCell>
+            <TableCell>{k.category?.label ?? '—'}</TableCell>
+            <TableCell>{optional(k.description)}</TableCell>
+            <TableCell>{optional(k.identifier)}</TableCell>
+            <TableCell>{formatDate(k.issuedOn)}</TableCell>
+            <TableCell>{k.issueCondition}</TableCell>
+            <TableCell>{formatDate(k.returnedOn)}</TableCell>
+            <TableCell>{optional(k.returnCondition)}</TableCell>
+            <TableCell>
+              <Badge tone={k.status === 'HELD' ? 'warn' : 'neutral'}>{k.status === 'HELD' ? 'Held' : 'Returned'}</Badge>
+            </TableCell>
+            <TableCell>{k.acknowledgedAt ? <>Acknowledged <When at={k.acknowledgedAt} /></> : (acknowledge?.(k) ?? 'Not acknowledged')}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -120,6 +124,12 @@ function decisionsText(r: AssetRequest): ReactNode {
       {DECISION_LABEL[d.decision] ?? readable(d.decision)} <When at={d.decidedAt} />
     </span>
   ));
+}
+
+/** The item issued for a request, or what is still to come for an approved one. */
+function issuedText(r: AssetRequest): string {
+  if (r.fulfilment) return `${r.fulfilment.assetCode}, issued ${formatDate(r.fulfilment.issuedOn)}`;
+  return r.state === 'APPROVED' ? 'Not issued yet (an administrator issues the item separately)' : '—';
 }
 
 /** Custody requests with their state, who they wait for, the decision outcomes (never the reviewer's note) and the item issued for them. */
@@ -138,53 +148,49 @@ export function RequestHistory({
 }) {
   if (requests.length === 0) return <Empty>{empty}</Empty>;
   return (
-    <div style={SCROLL}>
-      <table aria-label={label}>
-        <thead>
-          <tr>
-            <th>Submitted</th>
-            {showEmployee && <th>Employee</th>}
-            <th>Category</th>
-            <th>Item asked for</th>
-            <th>Reason</th>
-            <th>Status</th>
-            <th>Decision</th>
-            <th>Item issued</th>
-            {withdraw && <th>Action</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {requests.map((r) => (
-            <tr key={r.id}>
-              <td>
-                <When at={r.submittedAt} />
-              </td>
-              {showEmployee && (
-                <td>
-                  <Link to={PATHS.employee(r.employeeId)}>{holderLabel(r)}</Link>
-                </td>
-              )}
-              <td>{r.category.label}</td>
-              <td>{optional(r.itemDescription)}</td>
-              <td>{r.reason}</td>
-              <td>
-                <RequestState state={r.state} />
-                {r.state === 'SUBMITTED' && r.pendingWith && <span className="hint"> · with {r.pendingWith}</span>}
-                <RaisedAgainHint predecessorRequestId={r.predecessorRequestId} />
-              </td>
-              <td>{decisionsText(r)}</td>
-              <td>
-                {r.fulfilment
-                  ? `${r.fulfilment.assetCode}, issued ${formatDate(r.fulfilment.issuedOn)}`
-                  : r.state === 'APPROVED'
-                    ? 'Not issued yet (an administrator issues the item separately)'
-                    : '—'}
-              </td>
-              {withdraw && <td>{withdraw(r)}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label={label}>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Submitted</TableHead>
+          {showEmployee && <TableHead scope="col">Employee</TableHead>}
+          <TableHead scope="col">Category</TableHead>
+          <TableHead scope="col">Item asked for</TableHead>
+          <TableHead scope="col">Reason</TableHead>
+          <TableHead scope="col">Status</TableHead>
+          <TableHead scope="col">Decision</TableHead>
+          <TableHead scope="col">Item issued</TableHead>
+          {withdraw && <TableHead scope="col">Action</TableHead>}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {requests.map((r) => (
+          <TableRow key={r.id}>
+            <TableCell>
+              <When at={r.submittedAt} />
+            </TableCell>
+            {showEmployee && (
+              <TableCell>
+                <Link to={PATHS.employee(r.employeeId)}>{holderLabel(r)}</Link>
+              </TableCell>
+            )}
+            <TableCell>{r.category.label}</TableCell>
+            <TableCell>{optional(r.itemDescription)}</TableCell>
+            <TableCell>{r.reason}</TableCell>
+            <TableCell>
+              <RequestState state={r.state} />
+              {r.state === 'SUBMITTED' && r.pendingWith && <Hint as="span"> · with {r.pendingWith}</Hint>}
+              <RaisedAgainHint predecessorRequestId={r.predecessorRequestId} />
+            </TableCell>
+            <TableCell>{decisionsText(r)}</TableCell>
+            <TableCell>{issuedText(r)}</TableCell>
+            {withdraw && (
+              <RowActionsCell>
+                <RowActions>{withdraw(r)}</RowActions>
+              </RowActionsCell>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

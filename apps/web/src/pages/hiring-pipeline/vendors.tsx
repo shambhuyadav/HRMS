@@ -1,11 +1,19 @@
 // The recruitment vendors screen: company-wide masters, deactivated, never deleted (BR-004).
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, Section } from '../../ui';
 import { LoadProblem, Refusal, VENDOR_WORDS } from './refusals';
-import { CANDIDATE_MANAGE, CANDIDATE_READ, Denied, Done, enc, Problem, SCROLL, SR_ONLY, useKeys, useRefresh } from './shared';
+import { CANDIDATE_MANAGE, CANDIDATE_READ, Denied, enc, Notice, Problem, useKeys, useRefresh } from './shared';
 import type { Vendor } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -43,45 +51,45 @@ function VendorList() {
   const items = list.data?.items ?? [];
   return (
     <Section title="Vendors">
-      <p className="hint">A vendor is deactivated, never deleted: it keeps its history and its candidates, but new candidates cannot name it.</p>
-      <label className="inline check">
+      <Hint>A vendor is deactivated, never deleted: it keeps its history and its candidates, but new candidates cannot name it.</Hint>
+      <CheckField>
         <input type="checkbox" checked={includeInactive} onChange={(e) => setIncludeInactive(e.target.checked)} /> Show inactive vendors
-      </label>
-      {list.isPending && <p className="hint loading">Loading vendors…</p>}
+      </CheckField>
+      {list.isPending && <LoadingLine>Loading vendors…</LoadingLine>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view recruitment vendors." />
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice text={notice} />
       {list.data && items.length === 0 && (
         <Empty>{`${includeInactive ? 'No vendors yet.' : 'No active vendors.'}${canManage ? ' Add one with the form below.' : ''}`}</Empty>
       )}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Vendors">
-            <thead>
-              <tr>
-                <th scope="col">Code</th>
-                <th scope="col">Name</th>
-                <th scope="col">Status</th>
-                {canManage && (
-                  <th scope="col">
-                    <span style={SR_ONLY}>Actions</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((v) => (
-                <VendorRow key={v.id} vendor={v} canManage={canManage} onChanged={setNotice} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Vendors">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              {canManage && (
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((v) => (
+              <VendorRow key={v.id} vendor={v} canManage={canManage} onChanged={setNotice} />
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
+}
+
+/** What a vendor change did, in words: a rename, or the vendor's new status. */
+function changedText(saved: Vendor, statusChanged: boolean): string {
+  if (!statusChanged) return `Renamed ${saved.code} to ${saved.name}.`;
+  return `${saved.code} is now ${saved.active ? 'active' : 'inactive'}.`;
 }
 
 function VendorRow({ vendor: v, canManage, onChanged }: { vendor: Vendor; canManage: boolean; onChanged: (notice: string) => void }) {
@@ -95,7 +103,7 @@ function VendorRow({ vendor: v, canManage, onChanged }: { vendor: Vendor; canMan
       setEditing(false);
       setName(saved.name);
       setProblem(null);
-      onChanged(body.active === undefined ? `Renamed ${saved.code} to ${saved.name}.` : `${saved.code} is now ${saved.active ? 'active' : 'inactive'}.`);
+      onChanged(changedText(saved, body.active !== undefined));
       refresh();
     },
     onError: (error) => {
@@ -110,22 +118,24 @@ function VendorRow({ vendor: v, canManage, onChanged }: { vendor: Vendor; canMan
     if (!text) return;
     update.mutate({ name: text, expectedVersion: v.version });
   };
+  // A refusal shown beside the row's buttons is free text: the cell then wraps it rather than keeping to the buttons' width.
+  const refused = problem !== null || update.error !== null;
   return (
-    <tr>
-      <td>{v.code}</td>
-      <td>
+    <TableRow>
+      <TableCell>{v.code}</TableCell>
+      <TableCell>
         {editing ? (
-          <form className="row" onSubmit={rename} noValidate>
-            <label>
+          <form className="flex flex-wrap items-end gap-2" onSubmit={rename} noValidate>
+            <FormField className="w-auto">
               New name for {v.code}
-              <input required maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            <button type="submit" disabled={update.isPending}>
+              <Input required maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
+            </FormField>
+            <Button type="submit" disabled={update.isPending}>
               Save name
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="secondary"
+              variant="outline"
               disabled={update.isPending}
               onClick={() => {
                 setEditing(false);
@@ -135,22 +145,23 @@ function VendorRow({ vendor: v, canManage, onChanged }: { vendor: Vendor; canMan
               }}
             >
               Cancel
-            </button>
+            </Button>
           </form>
         ) : (
           v.name
         )}
-      </td>
-      <td>
+      </TableCell>
+      <TableCell>
         <Badge tone={v.active ? 'good' : 'neutral'}>{v.active ? 'active' : 'inactive'}</Badge>
-      </td>
+      </TableCell>
       {canManage && (
-        <td>
-          <div className="row">
+        <RowActionsCell expanded={refused}>
+          <RowActions>
             {!editing && (
-              <button
+              <Button
                 type="button"
-                className="link"
+                variant="outline"
+                size="sm"
                 aria-label={`Rename ${v.code}`}
                 onClick={() => {
                   // Start from the name shown now: the list may have been read again since this row first appeared.
@@ -159,28 +170,32 @@ function VendorRow({ vendor: v, canManage, onChanged }: { vendor: Vendor; canMan
                 }}
               >
                 Rename
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
-              className="link"
+              variant={v.active ? 'danger' : 'outline'}
+              size="sm"
               disabled={update.isPending}
               aria-label={`${v.active ? 'Deactivate' : 'Reactivate'} ${v.code}`}
               onClick={() => update.mutate({ active: !v.active, expectedVersion: v.version })}
             >
               {v.active ? 'Deactivate' : 'Reactivate'}
-            </button>
-          </div>
-          {problem && (
-            <p role="alert" className="error">
-              {problem}
-            </p>
-          )}
+            </Button>
+          </RowActions>
+          <Problem text={problem} />
           <Refusal error={update.error} words={VENDOR_WORDS} />
-        </td>
+        </RowActionsCell>
       )}
-    </tr>
+    </TableRow>
   );
+}
+
+/** Required-field checks only; whether a code is free is the server's call. */
+function vendorProblem(code: string, name: string): string | null {
+  if (!code.trim()) return 'Enter the vendor’s code.';
+  if (!name.trim()) return 'Enter the vendor’s name.';
+  return null;
 }
 
 function NewVendorForm() {
@@ -200,7 +215,7 @@ function NewVendorForm() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (create.isPending) return;
-    const missing = !code.trim() ? 'Enter the vendor’s code.' : !name.trim() ? 'Enter the vendor’s name.' : null;
+    const missing = vendorProblem(code, name);
     setProblem(missing);
     if (missing) {
       create.reset();
@@ -210,34 +225,33 @@ function NewVendorForm() {
   };
   return (
     <Section title="Add a vendor">
-      <form className="grid-form" aria-label="Add a vendor" onSubmit={submit} noValidate>
-        <label>
+      <FormGrid aria-label="Add a vendor" onSubmit={submit} noValidate>
+        <FormField>
           Code (required)
-          <input required maxLength={40} value={code} onChange={(e) => setCode(e.target.value)} />
-        </label>
-        <label>
+          <Input required maxLength={40} value={code} onChange={(e) => setCode(e.target.value)} />
+        </FormField>
+        <FormField>
           Name (required)
-          <input required maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
-        </label>
-        <p className="hint wide">The code is stored in capitals and cannot change later.</p>
+          <Input required maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
+        </FormField>
+        <Hint>The code is stored in capitals and cannot change later.</Hint>
         <Problem text={problem} />
         {create.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={create.error} words={VENDOR_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={create.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={create.isPending}>
             Add vendor
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         {create.isSuccess && (
-          <Done>
+          <StatusNote tone="success" role="status">
             Added {create.data.code} ({create.data.name}).
-          </Done>
+          </StatusNote>
         )}
-      </form>
+      </FormGrid>
     </Section>
   );
 }
-

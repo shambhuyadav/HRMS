@@ -2,14 +2,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
 import { api, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, NotPermitted, Section } from '../../ui';
+import { Empty, Notice, NotPermitted, Section } from '../../ui';
 import { RecordPayment, ReleaseEligibility, SendStatement, SettlementExport, VoidSettlement, WaiveNotice } from './settlement-actions';
 import { PreparerActions } from './settlement-preparation';
 import { CalculationView, DecisionTrail, recoversNotice, RemainingBalances, SettlementLines } from './settlement-views';
 import { NoticePeriod } from './settlements';
-import { CALCULATION_LABEL, CalculationNote, enc, EXIT_READ, Item, labelOf, LoadProblem, OUTPUT_STATES, PATHS, PAYMENT_STATUS_LABEL, SETTLEMENT_APPROVE, SETTLEMENT_EXPORT, SETTLEMENT_PREPARE, SETTLEMENT_READ, SETTLEMENT_RECORD_PAYMENT, SETTLEMENT_RELEASE, SETTLEMENT_SEND, SETTLEMENT_WAIVE_NOTICE, settlementLabel, SettlementState, STATE_EXPLANATION, useKeys, UserRef, UUID, VOIDABLE_STATES, when } from './shared';
+import { CALCULATION_LABEL, CalculationNote, enc, EXIT_READ, Item, labelOf, LINK_ROW, LoadProblem, OUTPUT_STATES, PATHS, PAYMENT_STATUS_LABEL, SETTLEMENT_APPROVE, SETTLEMENT_EXPORT, SETTLEMENT_PREPARE, SETTLEMENT_READ, SETTLEMENT_RECORD_PAYMENT, SETTLEMENT_RELEASE, SETTLEMENT_SEND, SETTLEMENT_WAIVE_NOTICE, settlementLabel, SettlementState, STATE_EXPLANATION, useKeys, UserRef, UUID, VOIDABLE_STATES, when } from './shared';
 import type { Calculation, ExitCase, SettlementDetail } from './types';
 
 // =========================================================================================================
@@ -57,23 +59,19 @@ function SettlementView({ id }: { id: string }) {
   return (
     <>
       <h1>{s ? `Settlement of ${s.employeeName} (${s.employeeCode}), revision ${s.revision}` : 'Settlement'}</h1>
-      <p className="row">
+      <p className={LINK_ROW}>
         <Link to={PATHS.settlements}>All settlements</Link>
         {s && <Link to={PATHS.exitSettlements(s.exitCaseId)}>All revisions for this exit</Link>}
       </p>
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
       <Section title="Settlement">
-        {detail.isPending && <p className="hint loading">Loading the settlement…</p>}
+        {detail.isPending && <LoadingLine>Loading the settlement…</LoadingLine>}
         <LoadProblem error={detail.error} forbidden="The selected role cannot view settlements." missing="This settlement is not available in the selected role’s scope." />
         {s && (
           <>
             <dl className="kv">
               <Item term="Employee">
-                {s.employeeName} <span className="hint">{s.employeeCode}</span>
+                {s.employeeName} <Hint as="span">{s.employeeCode}</Hint>
               </Item>
               <Item term="Revision">{s.revision}</Item>
               <Item term="State">

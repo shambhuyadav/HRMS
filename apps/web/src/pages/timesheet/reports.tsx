@@ -2,11 +2,31 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { CheckField, FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { api, formatDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, LIST_PAGE_SIZE, NotPermitted, pageParams, Pager, Section } from '../../ui';
 import { Refusal } from './refusals';
-import { type Dimension, DIMENSION_LABEL, DIMENSIONS, MASTER_READ, Problem, SCROLL, shown, TS_REPORT, useKeys } from './shared';
+import {
+  type Dimension,
+  DIMENSION_LABEL,
+  DIMENSIONS,
+  FORM_END,
+  MASTER_READ,
+  Problem,
+  Remark,
+  shown,
+  TS_REPORT,
+  useKeys,
+  WRAPPING_BUTTON,
+} from './shared';
 import type { Activity, HoursGroup, HoursReport, Project, ReportLine, UtilisationItem, UtilisationReport } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -81,140 +101,72 @@ function HoursReportSection() {
   const data = shown(report);
   return (
     <Section title="Hours">
-      <p className="hint">Approved time only, from the latest approved version of each timesheet. The totals add up to the lines below.</p>
-      <form className="grid-form" aria-label="Hours report" onSubmit={run} noValidate>
-        <label>
+      <Hint>Approved time only, from the latest approved version of each timesheet. The totals add up to the lines below.</Hint>
+      <FormGrid aria-label="Hours report" onSubmit={run} noValidate>
+        <FormField>
           From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </FormField>
+        <FormField>
           To
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        <fieldset className="wide">
-          <legend>Group by</legend>
+          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </FormField>
+        <FramedFieldset legend="Group by">
           {DIMENSIONS.map((d) => (
-            <label key={d} className="check">
+            <CheckField key={d}>
               <input type="checkbox" checked={groupBy.includes(d)} onChange={() => toggle(d)} /> {DIMENSION_LABEL[d]}
-            </label>
+            </CheckField>
           ))}
-        </fieldset>
+        </FramedFieldset>
         {masters && (
           <>
-            <label>
+            <FormField>
               Project filter
-              <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <NativeSelect value={projectId} onChange={(e) => setProjectId(e.target.value)}>
                 <option value="">All projects</option>
                 {(shown(projects)?.items ?? []).map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.code}: {p.name}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Activity filter
-              <select value={activityId} onChange={(e) => setActivityId(e.target.value)}>
+              <NativeSelect value={activityId} onChange={(e) => setActivityId(e.target.value)}>
                 <option value="">All activities</option>
                 {(shown(activities)?.items ?? []).map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.code}: {a.name}
                   </option>
                 ))}
-              </select>
-            </label>
+              </NativeSelect>
+            </FormField>
           </>
         )}
-        <div className="wide">
+        <div className={FORM_END}>
           <Problem text={problem} />
-          <button type="submit">Show hours</button>
+          <Button type="submit" className="self-start">
+            Show hours
+          </Button>
         </div>
-      </form>
-      {report.isFetching && <p className="hint loading">Loading the report…</p>}
+      </FormGrid>
+      {report.isFetching && <LoadingLine>Loading the report…</LoadingLine>}
       <Refusal error={report.error} act="report" />
       {data && (
         <>
-          <p className="hint">
+          <Hint>
             {formatDate(data.from)} to {formatDate(data.to)} · basis: {data.basis === 'APPROVED' ? 'approved time in force' : readable(data.basis)}
-          </p>
-          {data.groups.length === 0 ? (
-            <Empty>No approved time in this range.</Empty>
-          ) : (
-            <div style={SCROLL}>
-              <table aria-label="Hours by group">
-                <thead>
-                  <tr>
-                    {data.groupBy.map((d) => (
-                      <th key={d}>{DIMENSION_LABEL[d]}</th>
-                    ))}
-                    <th>Hours</th>
-                    <th>Minutes</th>
-                    <th>Productive minutes</th>
-                    <th>Lines</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.groups.map((g, i) => (
-                    <tr key={i}>
-                      {data.groupBy.map((d) => (
-                        <td key={d}>{groupCell(g, d)}</td>
-                      ))}
-                      <td>{g.hours}</td>
-                      <td>{g.minutes}</td>
-                      <td>{g.productiveMinutes}</td>
-                      <td>{g.lineCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <th colSpan={data.groupBy.length}>Total</th>
-                    <td>{data.totals.hours}</td>
-                    <td>{data.totals.minutes}</td>
-                    <td>{data.totals.productiveMinutes}</td>
-                    <td>{data.totals.lineCount}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-          {(data.totalGroups ?? data.groups.length) > LIST_PAGE_SIZE && <p className="hint">The total covers every group, not only the groups on this page.</p>}
+          </Hint>
+          {data.groups.length === 0 ? <Empty>No approved time in this range.</Empty> : <HoursTable report={data} />}
+          {(data.totalGroups ?? data.groups.length) > LIST_PAGE_SIZE && <Hint>The total covers every group, not only the groups on this page.</Hint>}
           <Pager page={groupPage} pageSize={LIST_PAGE_SIZE} total={data.totalGroups ?? data.groups.length} onPage={setGroupPage} label="Hours group pages" noun="group" />
-          <button type="button" className="secondary" onClick={() => setShowLines(true)} disabled={showLines}>
+          <Button type="button" variant="outline" className={cn('mt-3', WRAPPING_BUTTON)} onClick={() => setShowLines(true)} disabled={showLines}>
             Show the approved lines behind this report
-          </button>
-          {showLines && lines.isPending && <p className="hint loading">Loading the lines…</p>}
+          </Button>
+          {showLines && lines.isPending && <LoadingLine>Loading the lines…</LoadingLine>}
           <Refusal error={lines.error} act="report" />
-          {showLines && shown(lines) && (
-            <div style={SCROLL}>
-              <table aria-label="Approved lines">
-                <thead>
-                  <tr>
-                    <th>Work date</th>
-                    <th>Employee</th>
-                    <th>Project / job / activity</th>
-                    <th>Revision</th>
-                    <th>Minutes</th>
-                    <th>Productive</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown(lines)!.items.map((l) => (
-                    <tr key={l.id}>
-                      <td>{formatDate(l.workDate)}</td>
-                      <td>{l.employeeCode}</td>
-                      <td>
-                        {l.projectCode} / {l.jobCode} / {l.activityCode}
-                      </td>
-                      <td>{l.revision}</td>
-                      <td>{l.minutes}</td>
-                      <td>{l.productive ? 'Yes' : 'No'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {showLines && shown(lines) && <ApprovedLinesTable items={shown(lines)!.items} />}
           {showLines && shown(lines) && (
             <Pager page={linePage} pageSize={LIST_PAGE_SIZE} total={shown(lines)!.total ?? shown(lines)!.items.length} onPage={setLinePage} label="Approved line pages" noun="line" />
           )}
@@ -224,16 +176,93 @@ function HoursReportSection() {
   );
 }
 
+/** The hours of each group, one column per dimension grouped by, with the totals of every group in scope below. */
+function HoursTable({ report }: { report: HoursReport }) {
+  return (
+    <Table aria-label="Hours by group">
+      <TableHeader>
+        <TableRow>
+          {report.groupBy.map((d) => (
+            <TableHead key={d} scope="col">
+              {DIMENSION_LABEL[d]}
+            </TableHead>
+          ))}
+          <TableHead scope="col">Hours</TableHead>
+          <TableHead scope="col">Minutes</TableHead>
+          <TableHead scope="col">Productive minutes</TableHead>
+          <TableHead scope="col">Lines</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {report.groups.map((g, i) => (
+          <TableRow key={i}>
+            {report.groupBy.map((d) => (
+              <TableCell key={d}>{groupCell(g, d)}</TableCell>
+            ))}
+            <TableCell>{g.hours}</TableCell>
+            <TableCell>{g.minutes}</TableCell>
+            <TableCell>{g.productiveMinutes}</TableCell>
+            <TableCell>{g.lineCount}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+      <TableFooter>
+        <TableRow>
+          <TableHead scope="row" colSpan={report.groupBy.length}>
+            Total
+          </TableHead>
+          <TableCell>{report.totals.hours}</TableCell>
+          <TableCell>{report.totals.minutes}</TableCell>
+          <TableCell>{report.totals.productiveMinutes}</TableCell>
+          <TableCell>{report.totals.lineCount}</TableCell>
+        </TableRow>
+      </TableFooter>
+    </Table>
+  );
+}
+
+/** The approved lines the hours report counts, one page at a time. */
+function ApprovedLinesTable({ items }: { items: ReportLine[] }) {
+  return (
+    <Table aria-label="Approved lines">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Work date</TableHead>
+          <TableHead scope="col">Employee</TableHead>
+          <TableHead scope="col">Project / job / activity</TableHead>
+          <TableHead scope="col">Revision</TableHead>
+          <TableHead scope="col">Minutes</TableHead>
+          <TableHead scope="col">Productive</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((l) => (
+          <TableRow key={l.id}>
+            <TableCell>{formatDate(l.workDate)}</TableCell>
+            <TableCell>{l.employeeCode}</TableCell>
+            <TableCell>
+              {l.projectCode} / {l.jobCode} / {l.activityCode}
+            </TableCell>
+            <TableCell>{l.revision}</TableCell>
+            <TableCell>{l.minutes}</TableCell>
+            <TableCell>{l.productive ? 'Yes' : 'No'}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 function UtilisationValue({ u }: { u: UtilisationItem }) {
   if (u.status === 'OK') return <>{u.utilisationPercent}%</>;
   if (u.status === 'NOT_APPLICABLE') return <>{u.display ?? 'N/A'} (no scheduled hours)</>;
   return (
     <>
       <Badge tone="warn">not configured</Badge>
-      <div className="hint">
+      <Remark>
         {u.message ?? 'The scheduled hours are not known.'}
         {u.unscheduledDays !== undefined && ` (${u.unscheduledDays} working days without a shift)`}
-      </div>
+      </Remark>
     </>
   );
 }
@@ -265,73 +294,77 @@ function UtilisationSection() {
   const data = shown(report);
   return (
     <Section title="Utilisation">
-      <form className="grid-form" aria-label="Utilisation report" onSubmit={run} noValidate>
-        <label>
+      <FormGrid aria-label="Utilisation report" onSubmit={run} noValidate>
+        <FormField>
           From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </FormField>
+        <FormField>
           To
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        <div className="wide">
+          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </FormField>
+        <div className={FORM_END}>
           <Problem text={problem} />
-          <button type="submit">Show utilisation</button>
+          <Button type="submit" className="self-start">
+            Show utilisation
+          </Button>
         </div>
-      </form>
-      {report.isFetching && <p className="hint loading">Loading the report…</p>}
+      </FormGrid>
+      {report.isFetching && <LoadingLine>Loading the report…</LoadingLine>}
       <Refusal error={report.error} act="report" />
       {data && (
         <>
-          <p className="hint">
+          <Hint>
             Formula: {data.formula}. Schedule: {data.scheduleBasis}.
-          </p>
-          {data.items.length === 0 ? (
-            <Empty>No employee in scope had an allocation or approved time in this range.</Empty>
-          ) : (
-            <div style={SCROLL}>
-              <table aria-label="Utilisation by employee">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Approved minutes</th>
-                    <th>Productive minutes</th>
-                    <th>Scheduled minutes</th>
-                    <th>Utilisation</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map((u) => (
-                    <tr key={u.employeeId}>
-                      <td>
-                        {u.employeeName} ({u.employeeCode})
-                      </td>
-                      <td>{u.approvedMinutes}</td>
-                      <td>{u.productiveMinutes}</td>
-                      <td>{u.scheduledMinutes ?? '—'}</td>
-                      <td>
-                        <UtilisationValue u={u} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                {data.totals && (
-                  <tfoot>
-                    <tr>
-                      <th>{`All ${data.totals.employees} employees in scope`}</th>
-                      <td>{data.totals.approvedMinutes}</td>
-                      <td>{data.totals.productiveMinutes}</td>
-                      <td>{data.totals.scheduledMinutes ?? 'not known'}</td>
-                      <td>{`${data.totals.byStatus.OK ?? 0} OK · ${data.totals.byStatus.NOT_APPLICABLE ?? 0} N/A · ${data.totals.byStatus.NOT_CONFIGURED ?? 0} not configured`}</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          )}
+          </Hint>
+          {data.items.length === 0 ? <Empty>No employee in scope had an allocation or approved time in this range.</Empty> : <UtilisationTable report={data} />}
           <Pager page={page} pageSize={LIST_PAGE_SIZE} total={data.total ?? data.items.length} onPage={setPage} label="Utilisation pages" noun="employee" />
         </>
       )}
     </Section>
+  );
+}
+
+/** Each employee's utilisation exactly as the API returns it, with the totals of every employee in scope below. */
+function UtilisationTable({ report }: { report: UtilisationReport }) {
+  const totals = report.totals;
+  return (
+    <Table aria-label="Utilisation by employee">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Employee</TableHead>
+          <TableHead scope="col">Approved minutes</TableHead>
+          <TableHead scope="col">Productive minutes</TableHead>
+          <TableHead scope="col">Scheduled minutes</TableHead>
+          <TableHead scope="col">Utilisation</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {report.items.map((u) => (
+          <TableRow key={u.employeeId}>
+            <TableCell>
+              {u.employeeName} ({u.employeeCode})
+            </TableCell>
+            <TableCell>{u.approvedMinutes}</TableCell>
+            <TableCell>{u.productiveMinutes}</TableCell>
+            <TableCell>{u.scheduledMinutes ?? '—'}</TableCell>
+            <TableCell>
+              <UtilisationValue u={u} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+      {totals && (
+        <TableFooter>
+          <TableRow>
+            <TableHead scope="row">{`All ${totals.employees} employees in scope`}</TableHead>
+            <TableCell>{totals.approvedMinutes}</TableCell>
+            <TableCell>{totals.productiveMinutes}</TableCell>
+            <TableCell>{totals.scheduledMinutes ?? 'not known'}</TableCell>
+            <TableCell>{`${totals.byStatus.OK ?? 0} OK · ${totals.byStatus.NOT_APPLICABLE ?? 0} N/A · ${totals.byStatus.NOT_CONFIGURED ?? 0} not configured`}</TableCell>
+          </TableRow>
+        </TableFooter>
+      )}
+    </Table>
   );
 }

@@ -1,6 +1,13 @@
 // Appraisal goals: the goal editor (FR-041) and the read-only goals and scores tables.
+import { ButtonRow, FormField, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { Empty } from '../../ui';
-import { type Appraisal, type EntrySet, FLUSH, type Goal, type GoalInput, GROUP, SCROLL, TEXTAREA, WHOLE } from './shared';
+import { UnannouncedError } from './refusals';
+import { type Appraisal, enteredText, type EntrySet, FIELD_ROW, type Goal, type GoalInput, WHOLE } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Goals: the editor (FR-041) and read-only tables
@@ -40,84 +47,84 @@ export function GoalsEditor({ drafts, onChange }: { drafts: GoalDraft[]; onChang
     onChange([...drafts, { key, sequence: String(Math.min(sequence, 100)), description: '', target: '', weight: '' }]);
   };
   return (
-    <div className="wide">
+    <div className="col-span-full flex flex-col gap-2">
       {drafts.length === 0 && <Empty>No goals yet.</Empty>}
       {drafts.map((d, i) => (
-        <fieldset key={d.key} style={GROUP} aria-label={`Goal ${i + 1}`}>
-          <legend>Goal {i + 1}</legend>
-          <div className="row">
-            <label>
+        <FramedFieldset key={d.key} legend={<>Goal {i + 1}</>} aria-label={`Goal ${i + 1}`}>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               Sequence
-              <input inputMode="numeric" value={d.sequence} maxLength={3} onChange={(e) => set(d.key, { sequence: e.target.value })} />
-            </label>
-            <label>
+              <Input inputMode="numeric" value={d.sequence} maxLength={3} onChange={(e) => set(d.key, { sequence: e.target.value })} />
+            </FormField>
+            <FormField className="w-auto">
               Weight
-              <input inputMode="numeric" value={d.weight} maxLength={3} onChange={(e) => set(d.key, { weight: e.target.value })} />
-            </label>
-            <button type="button" className="secondary" onClick={() => onChange(drafts.filter((x) => x.key !== d.key))}>
+              <Input inputMode="numeric" value={d.weight} maxLength={3} onChange={(e) => set(d.key, { weight: e.target.value })} />
+            </FormField>
+            <Button type="button" variant="outline" onClick={() => onChange(drafts.filter((x) => x.key !== d.key))}>
               Remove goal {i + 1}
-            </button>
+            </Button>
           </div>
-          <label>
+          <FormField>
             Description
-            <input value={d.description} maxLength={500} onChange={(e) => set(d.key, { description: e.target.value })} />
-          </label>
-          <label>
+            <Input value={d.description} maxLength={500} onChange={(e) => set(d.key, { description: e.target.value })} />
+          </FormField>
+          <FormField>
             Target (optional)
-            <textarea rows={2} value={d.target} maxLength={1000} onChange={(e) => set(d.key, { target: e.target.value })} style={TEXTAREA} />
-          </label>
-        </fieldset>
+            <Textarea rows={2} value={d.target} maxLength={1000} onChange={(e) => set(d.key, { target: e.target.value })} />
+          </FormField>
+        </FramedFieldset>
       ))}
-      <div className="row">
-        <button type="button" className="secondary" onClick={add} disabled={drafts.length >= 100}>
+      <ButtonRow>
+        <Button type="button" variant="outline" onClick={add} disabled={drafts.length >= 100}>
           Add a goal
-        </button>
-      </div>
-      <p className="hint" role="status">
+        </Button>
+      </ButtonRow>
+      <Hint role="status" className="m-0">
         Weights entered: {total} of 100. They must total exactly 100 before the employee can submit; the server checks this at submission.
-      </p>
+      </Hint>
     </div>
   );
 }
 
 export function GoalsTable({ a, label }: { a: Appraisal; label: string }) {
   const showManager = a.goals.some((g) => g.managerRatingComplete !== undefined);
+  const total = (
+    <>
+      Goal weights total {a.goalWeightTotal}
+      {a.goalWeightTotal === 100 ? '.' : '; they must total exactly 100 before the appraisal can be submitted.'}
+    </>
+  );
   return (
     <>
       {a.goals.length === 0 ? (
         <Empty>No goals have been set yet.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label={label}>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Goal</th>
-                <th>Target</th>
-                <th>Weight</th>
-                <th>Self-entry</th>
-                {showManager && <th>Manager rating</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {a.goals.map((g) => (
-                <tr key={g.id}>
-                  <td>{g.sequence}</td>
-                  <td>{g.description}</td>
-                  <td>{g.target ?? '—'}</td>
-                  <td>{g.weight}</td>
-                  <td>{g.selfEntryComplete ? 'Entered' : 'Not entered'}</td>
-                  {showManager && <td>{g.managerRatingComplete === undefined ? '—' : g.managerRatingComplete ? 'Entered' : 'Not entered'}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label={label}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">#</TableHead>
+              <TableHead scope="col">Goal</TableHead>
+              <TableHead scope="col">Target</TableHead>
+              <TableHead scope="col">Weight</TableHead>
+              <TableHead scope="col">Self-entry</TableHead>
+              {showManager && <TableHead scope="col">Manager rating</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {a.goals.map((g) => (
+              <TableRow key={g.id}>
+                <TableCell>{g.sequence}</TableCell>
+                <TableCell>{g.description}</TableCell>
+                <TableCell>{g.target ?? '—'}</TableCell>
+                <TableCell>{g.weight}</TableCell>
+                <TableCell>{g.selfEntryComplete ? 'Entered' : 'Not entered'}</TableCell>
+                {showManager && <TableCell>{enteredText(g.managerRatingComplete)}</TableCell>}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      <p className={a.goalWeightTotal === 100 ? 'hint' : 'error'} style={FLUSH}>
-        Goal weights total {a.goalWeightTotal}
-        {a.goalWeightTotal === 100 ? '.' : '; they must total exactly 100 before the appraisal can be submitted.'}
-      </p>
+      {a.goalWeightTotal === 100 ? <Hint className="m-0">{total}</Hint> : <UnannouncedError className="m-0">{total}</UnannouncedError>}
     </>
   );
 }
@@ -127,30 +134,28 @@ export function EntriesTable({ goals, set, label }: { goals: Goal[]; set: EntryS
   const goalOf = new Map(goals.map((g) => [g.id, g]));
   return (
     <>
-      <div style={SCROLL}>
-        <table aria-label={label}>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Goal</th>
-              <th>Score</th>
-              <th>Comment</th>
-            </tr>
-          </thead>
-          <tbody>
-            {set.entries.map((e) => (
-              <tr key={e.goalId}>
-                <td>{e.sequence}</td>
-                <td>{goalOf.get(e.goalId)?.description ?? '—'}</td>
-                <td>{e.score ?? 'Not scored'}</td>
-                <td>{e.comment ?? '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Table aria-label={label}>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">#</TableHead>
+            <TableHead scope="col">Goal</TableHead>
+            <TableHead scope="col">Score</TableHead>
+            <TableHead scope="col">Comment</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {set.entries.map((e) => (
+            <TableRow key={e.goalId}>
+              <TableCell>{e.sequence}</TableCell>
+              <TableCell>{goalOf.get(e.goalId)?.description ?? '—'}</TableCell>
+              <TableCell>{e.score ?? 'Not scored'}</TableCell>
+              <TableCell>{e.comment ?? '—'}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
       {set.entries.length === 0 && <Empty>No scores entered.</Empty>}
-      {set.comment && <p style={FLUSH}>Overall comment: {set.comment}</p>}
+      {set.comment && <p className="m-0">Overall comment: {set.comment}</p>}
     </>
   );
 }

@@ -2,12 +2,18 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, idempotencyKey, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, Item, NotPermitted, Section } from '../../ui';
+import { Empty, Item, Notice, NotPermitted, Section } from '../../ui';
 import { DelegatedBadge } from '../delegations';
 import { DECISION_WORDS, LoadProblem, Refusal, refusalText } from './refusals';
-import { COMPENSATION_APPROVE, COMPENSATION_READ, enc, H3, labelOf, Money, OFFER_READ, OFFER_STATE_LABEL, PATHS, RequisitionStateBadge, TEXTAREA, useKeys, useRefresh } from './shared';
+import { COMPENSATION_APPROVE, COMPENSATION_READ, enc, labelOf, Money, OFFER_READ, OFFER_STATE_LABEL, PATHS, Problem, RequisitionStateBadge, useKeys, useRefresh } from './shared';
 import type { Decision, OfferDecided, OfferTask } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -41,17 +47,13 @@ export function OfferApprovalList() {
   return (
     <div ref={region} role="region" aria-label="Offer approvals" tabIndex={-1}>
       <Section title={`Offer approvals${tasks.data ? ` (${items.length})` : ''}`}>
-        <p className="hint">
+        <Hint>
           Offers whose confidential compensation waits for your independent approval. An offer never reaches the person who prepared it, recorded its compensation
           or submitted it. Returning or rejecting needs a reason; a returned offer becomes a draft again and its next submission is a new revision.
-        </p>
-        {tasks.isPending && <p className="hint loading">Loading the offers waiting for you…</p>}
+        </Hint>
+        {tasks.isPending && <LoadingLine>Loading the offers waiting for you…</LoadingLine>}
         <LoadProblem error={tasks.error} forbidden="The selected role cannot approve offers." />
-        {notice && (
-          <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
-            {notice.text}
-          </p>
-        )}
+        <Notice notice={notice} />
         {tasks.data && items.length === 0 && <Empty>No offers are waiting for your approval.</Empty>}
         {items.length > 0 && (
           <ul className="tasks" aria-label="Offers waiting for your approval">
@@ -123,10 +125,8 @@ function OfferTaskItem({ task: t, onFinished }: { task: OfferTask; onFinished: (
   if (!o) {
     return (
       <li aria-labelledby={titleId}>
-        <h3 id={titleId} style={H3}>
-          An offer outside the selected role’s scope
-        </h3>
-        <p className="hint">This approval’s offer is not in the selected role’s scope, so it cannot be decided here. Assigned {formatDate(t.assignedAt)}.</p>
+        <CardSubheading id={titleId}>An offer outside the selected role’s scope</CardSubheading>
+        <Hint>This approval’s offer is not in the selected role’s scope, so it cannot be decided here. Assigned {formatDate(t.assignedAt)}.</Hint>
       </li>
     );
   }
@@ -135,13 +135,13 @@ function OfferTaskItem({ task: t, onFinished }: { task: OfferTask; onFinished: (
   const requisitionApproved = o.requisition.state === 'APPROVED';
   return (
     <li aria-labelledby={titleId}>
-      <h3 id={titleId} style={H3}>
+      <CardSubheading id={titleId}>
         Offer to {who} for {o.requisition.code}
-      </h3>
+      </CardSubheading>
       <DelegatedBadge taskId={t.taskId} />
       <dl className="kv">
         <Item term="Requisition">
-          {o.requisition.code} <span className="hint">{o.requisition.title}</span> <RequisitionStateBadge state={o.requisition.state} />
+          {o.requisition.code} <Hint as="span">{o.requisition.title}</Hint> <RequisitionStateBadge state={o.requisition.state} />
         </Item>
         <Item term="Revision under review">{review ? review.revision : '—'}</Item>
         <Item term="Proposed joining date">{formatDate(review?.proposedJoiningDate ?? o.proposedJoiningDate)}</Item>
@@ -158,32 +158,28 @@ function OfferTaskItem({ task: t, onFinished }: { task: OfferTask; onFinished: (
         <Item term="Submitted">{formatDate(review?.submittedAt ?? o.submittedAt)}</Item>
         <Item term="Assigned to you">{formatDate(t.assignedAt)}</Item>
       </dl>
-      {!requisitionApproved && <p className="hint">The requisition is no longer approved: the offer can be returned or rejected, not approved.</p>}
+      {!requisitionApproved && <Hint>The requisition is no longer approved: the offer can be returned or rejected, not approved.</Hint>}
       {(can(OFFER_READ) || can(COMPENSATION_READ)) && (
         <div>
           <Link to={PATHS.offer(o.id)}>Open the offer to {who}</Link>
         </div>
       )}
-      <label>
+      <FormField>
         Reason (required to return or reject)
-        <textarea maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="button" disabled={decide.isPending || !requisitionApproved} aria-describedby={titleId} onClick={() => send('APPROVE')}>
+        <Textarea maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <Problem text={problem} />
+      <ButtonRow>
+        <Button type="button" disabled={decide.isPending || !requisitionApproved} aria-describedby={titleId} onClick={() => send('APPROVE')}>
           Approve
-        </button>
-        <button type="button" className="secondary" disabled={decide.isPending} aria-describedby={titleId} onClick={() => send('RETURN')}>
+        </Button>
+        <Button type="button" variant="outline" disabled={decide.isPending} aria-describedby={titleId} onClick={() => send('RETURN')}>
           Return for changes
-        </button>
-        <button type="button" className="danger" disabled={decide.isPending} aria-describedby={titleId} onClick={() => send('REJECT')}>
+        </Button>
+        <Button type="button" variant="danger" disabled={decide.isPending} aria-describedby={titleId} onClick={() => send('REJECT')}>
           Reject
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={decide.error} words={DECISION_WORDS} />
     </li>
   );

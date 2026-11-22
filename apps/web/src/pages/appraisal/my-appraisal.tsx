@@ -1,14 +1,21 @@
 // My ESS TN18 (Employee OWN context): one's own appraisals, self-entry and submission.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, isNotFound, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, Item, Notice, NotPermitted, Section, StateBadge, When } from '../../ui';
+import { Empty, Item, Notice, NotPermitted, Section, StateBadge, WarningNote, When } from '../../ui';
 import { CompetenciesTable, CompetencyEntriesTable, SectionsTable, SectionTexts } from './competency-views';
 import { EntriesTable, GoalsTable } from './goals';
 import { QueryProblem, Refusal } from './refusals';
 import { ScoreForm } from './score-form';
-import { type Appraisal, type AppraisalRow, decisionText, type EntryChanges, H3, inOwnContext, periodText, READ, READ_SELF, SCROLL, SELF_ASSESS, shown, SPACED, stepText, taskStatusText, useKeys, windowText } from './shared';
+import { type Appraisal, type AppraisalRow, decisionText, type EntryChanges, inOwnContext, periodText, READ, READ_SELF, SELF_ASSESS, shown, stepText, taskStatusText, useKeys, windowText } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // My ESS TN18 (Employee OWN context): own goals and task status, own self-entry and submission
@@ -45,43 +52,43 @@ function OwnAppraisals() {
   return (
     <div className="stack">
       <Section title="My appraisal">
-        <p className="hint">Your own appraisals only: your goals, where each stands, and your self-assessment. Manager and reviewer ratings and notes are never shown here, and no result is published to employees.</p>
-        {list.isPending && <p className="hint loading">Loading your appraisals…</p>}
+        <Hint>Your own appraisals only: your goals, where each stands, and your self-assessment. Manager and reviewer ratings and notes are never shown here, and no result is published to employees.</Hint>
+        {list.isPending && <LoadingLine>Loading your appraisals…</LoadingLine>}
         <QueryProblem error={list.error} forbidden="Your Employee role cannot view appraisals." />
         {data && data.items.length === 0 && <Empty>You have no appraisals yet.</Empty>}
         {data && data.items.length > 0 && (
-          <div style={SCROLL}>
-            <table aria-label="My appraisals">
-              <thead>
-                <tr>
-                  <th>Cycle</th>
-                  <th>State</th>
-                  <th>Where it stands</th>
-                  <th>Goals</th>
-                  <th>Open</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      {r.cycle.code}: {r.cycle.name}
-                    </td>
-                    <td>
-                      <StateBadge state={r.state} />
-                    </td>
-                    <td>{taskStatusText(r.taskStatus)}</td>
-                    <td>{r.goalCount}</td>
-                    <td>
-                      <button type="button" className="secondary" aria-pressed={selected === r.id} onClick={() => setOpenId(r.id)}>
+          <Table aria-label="My appraisals">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Cycle</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Where it stands</TableHead>
+                <TableHead scope="col">Goals</TableHead>
+                <TableHead scope="col">Open</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>
+                    {r.cycle.code}: {r.cycle.name}
+                  </TableCell>
+                  <TableCell>
+                    <StateBadge state={r.state} />
+                  </TableCell>
+                  <TableCell>{taskStatusText(r.taskStatus)}</TableCell>
+                  <TableCell>{r.goalCount}</TableCell>
+                  <RowActionsCell>
+                    <RowActions>
+                      <Button type="button" variant="outline" size="sm" aria-pressed={selected === r.id} onClick={() => setOpenId(r.id)}>
                         {selected === r.id ? 'Shown below' : `Show ${r.cycle.code}`}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </Button>
+                    </RowActions>
+                  </RowActionsCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </Section>
       {selected && <OwnAppraisal key={selected} id={selected} />}
@@ -121,7 +128,7 @@ function OwnAppraisal({ id }: { id: string }) {
     },
   });
   const a = shown(query);
-  if (query.isPending) return <Section title="Appraisal">{<p className="hint loading">Loading your appraisal…</p>}</Section>;
+  if (query.isPending) return <Section title="Appraisal">{<LoadingLine>Loading your appraisal…</LoadingLine>}</Section>;
   if (!a) {
     return (
       <Section title="Appraisal">
@@ -158,11 +165,11 @@ function OwnAppraisal({ id }: { id: string }) {
           </Item>
           {'finalRating' in a && a.finalRating !== null && a.finalRating !== undefined && <Item term="Published result">{a.finalRating}</Item>}
         </dl>
-        {a.state === 'APPROVED' && !('finalRating' in a) && <p className="hint">Your appraisal is complete. No result is published to employees.</p>}
+        {a.state === 'APPROVED' && !('finalRating' in a) && <Hint>Your appraisal is complete. No result is published to employees.</Hint>}
         {returned.map((r) => (
-          <p key={r.revision} role="note">
-            <Badge tone="warn">returned</Badge> Revision {r.revision} was returned <When at={r.returnedAt} />: {r.employeeMessage}
-          </p>
+          <WarningNote key={r.revision} badge="returned">
+            Revision {r.revision} was returned <When at={r.returnedAt} />: {r.employeeMessage}
+          </WarningNote>
         ))}
       </Section>
 
@@ -189,11 +196,11 @@ function OwnAppraisal({ id }: { id: string }) {
         ) : editable && can(SELF_ASSESS) ? (
           selfWindow?.entryAllowed ? (
             <>
-              <p className="hint">
+              <Hint>
                 Score each goal{a.competencies && a.competencies.length > 0 ? ' and competency' : ''} from 1 to 5, with a comment if you like
                 {a.sections && a.sections.some((s) => s.filledBy.includes('EMPLOYEE')) ? ', and fill the sections this cycle asks of you' : ''}. Save as often as you need; submitting fixes this revision and
                 sends it to your manager.
-              </p>
+              </Hint>
               <ScoreForm
                 key={`${a.id}:${a.version}`}
                 goals={a.goals}
@@ -212,8 +219,8 @@ function OwnAppraisal({ id }: { id: string }) {
               >
                 <Refusal error={save.error} action="self-entry" />
               </ScoreForm>
-              <div className="row" style={SPACED}>
-                <button
+              <ButtonRow className="mt-3">
+                <Button
                   type="button"
                   disabled={busy || dirty}
                   onClick={() => {
@@ -222,9 +229,9 @@ function OwnAppraisal({ id }: { id: string }) {
                   }}
                 >
                   {submit.isPending ? 'Submitting…' : 'Submit my self-assessment'}
-                </button>
-                {dirty && <span className="hint">Save your changes before submitting.</span>}
-              </div>
+                </Button>
+                {dirty && <Hint as="span">Save your changes before submitting.</Hint>}
+              </ButtonRow>
               <Refusal error={submit.error} action="submit" />
             </>
           ) : (
@@ -242,8 +249,8 @@ function OwnAppraisal({ id }: { id: string }) {
           <Empty>{editable ? 'Your Employee role cannot enter a self-assessment.' : 'Your self-assessment is not open for changes.'}</Empty>
         )}
         {earlier.map((r) => (
-          <div key={r.revision} style={SPACED}>
-            <h4 style={H3}>Revision {r.revision} (as submitted)</h4>
+          <div key={r.revision} className="mt-3">
+            <CardSubheading level={4}>Revision {r.revision} (as submitted)</CardSubheading>
             <EntriesTable goals={a.goals} set={r.selfEntry!} label={`My self-entry of revision ${r.revision}`} />
           </div>
         ))}
@@ -251,30 +258,28 @@ function OwnAppraisal({ id }: { id: string }) {
 
       {a.decisions.length > 0 && (
         <Section title="History">
-          <div style={SCROLL}>
-            <table aria-label="My appraisal history">
-              <thead>
-                <tr>
-                  <th>Revision</th>
-                  <th>Step</th>
-                  <th>What happened</th>
-                  <th>When</th>
-                </tr>
-              </thead>
-              <tbody>
-                {a.decisions.map((d, i) => (
-                  <tr key={`${d.revision}-${d.step}-${i}`}>
-                    <td>{d.revision}</td>
-                    <td>{stepText(d.stage, d.level)}</td>
-                    <td>{decisionText(d.decision, d.stage)}</td>
-                    <td>
-                      <When at={d.decidedAt} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="My appraisal history">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">Step</TableHead>
+                <TableHead scope="col">What happened</TableHead>
+                <TableHead scope="col">When</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {a.decisions.map((d, i) => (
+                <TableRow key={`${d.revision}-${d.step}-${i}`}>
+                  <TableCell>{d.revision}</TableCell>
+                  <TableCell>{stepText(d.stage, d.level)}</TableCell>
+                  <TableCell>{decisionText(d.decision, d.stage)}</TableCell>
+                  <TableCell>
+                    <When at={d.decidedAt} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </Section>
       )}
     </div>

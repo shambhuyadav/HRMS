@@ -1,7 +1,7 @@
 // Shared parts of the asset screens: permission keys, paths, labels, query keys and small helpers.
 
 import { useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { idempotencyKey, isForbidden, isNotFound, readable } from '../../api';
 import { type MeContext, useSession } from '../../session';
 import { Badge } from '../../ui';
@@ -106,19 +106,6 @@ export function useAttemptKey(prefix: string) {
     [prefix],
   );
 }
-
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const FLUSH: CSSProperties = { margin: 0 };
-const SPACED: CSSProperties = { marginTop: '0.75rem' };
-export const TEXTAREA: CSSProperties = {
-  font: 'inherit',
-  padding: '0.4rem 0.5rem',
-  border: '1px solid var(--line)',
-  borderRadius: 6,
-  color: 'var(--text)',
-  background: 'var(--surface)',
-  resize: 'vertical',
-};
 
 /** The latest answer, unless the server has since refused it (403/404): what the role may no longer see is not kept. */
 export function shown<T>(query: { data: T | undefined; error: unknown }): T | undefined {

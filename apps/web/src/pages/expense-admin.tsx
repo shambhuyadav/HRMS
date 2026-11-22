@@ -5,13 +5,26 @@
 // rule; this page only offers what the role can do.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatAmount, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
+import { Badge, Empty, ErrorNote, Notice, Section, StateBadge, WarningNote } from '../ui';
 
 const MANAGE = 'expense_policy.manage.operational';
 const ACTIVATE = 'expense_policy.activate.operational';
+
+// Layout pieces the shared helpers (FormField, Hint, Table …) do not cover (shadcn/ui move, 20 Nov 2026).
+/** A form or a refusal opened below a row's buttons. */
+const BELOW_BUTTONS = 'mt-3';
+/** A list item's button (Activate, Enable, Retire), set apart from the words and the button before it. */
+const ITEM_BUTTON = 'ml-2';
 
 interface Rule {
   id: string;
@@ -104,33 +117,29 @@ function refusalText(error: unknown): string | null {
 function Refusal({ error }: { error: unknown }) {
   const words = refusalText(error);
   if (!words) return <ErrorNote error={error} />;
-  return (
-    <p role="alert" className="error">
-      {words}
-    </p>
-  );
+  return <Notice notice={{ text: words, ok: false }} />;
 }
 
 function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: DraftValues) => void }) {
   const field = (key: keyof DraftValues) => ({ value: values[key], onChange: (e: { target: { value: string } }) => onChange({ ...values, [key]: e.target.value }) });
   return (
     <>
-      <label>
+      <FormField>
         Effective from
-        <input type="date" required {...field('effectiveFrom')} />
-      </label>
-      <label>
+        <Input type="date" required {...field('effectiveFrom')} />
+      </FormField>
+      <FormField>
         Effective until (exclusive, optional)
-        <input type="date" {...field('effectiveTo')} />
-      </label>
-      <label>
+        <Input type="date" {...field('effectiveTo')} />
+      </FormField>
+      <FormField>
         Submission window (calendar days)
-        <input required inputMode="numeric" pattern="[1-9]\d{0,3}" {...field('submissionWindowDays')} />
-      </label>
-      <label>
+        <Input required inputMode="numeric" pattern="[1-9]\d{0,3}" {...field('submissionWindowDays')} />
+      </FormField>
+      <FormField>
         High-value approval above (INR)
-        <input required inputMode="decimal" pattern="\d{1,13}(\.\d{1,2})?" {...field('highValueThreshold')} />
-      </label>
+        <Input required inputMode="decimal" pattern="\d{1,13}(\.\d{1,2})?" {...field('highValueThreshold')} />
+      </FormField>
     </>
   );
 }
@@ -148,24 +157,23 @@ function NewRevision({ onChanged }: { onChanged: () => void }) {
   });
   return (
     <Section title="New policy revision">
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="New policy revision"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <label>
+        <FormField>
           Policy code
-          <input required maxLength={40} pattern="[A-Za-z][A-Za-z0-9_]*" value={code} onChange={(e) => setCode(e.target.value)} />
-        </label>
+          <Input required maxLength={40} pattern="[A-Za-z][A-Za-z0-9_]*" value={code} onChange={(e) => setCode(e.target.value)} />
+        </FormField>
         <DraftFields values={values} onChange={setValues} />
-        <button type="submit" disabled={create.isPending}>
+        <Button type="submit" disabled={create.isPending}>
           Create draft
-        </button>
-      </form>
-      <p className="hint">An existing code gets its next revision; a new code starts at revision 1. The revision stays a draft, applying to nobody, until it has its category rules and someone other than its author activates it. Claims are in INR only.</p>
+        </Button>
+      </FormGrid>
+      <Hint>An existing code gets its next revision; a new code starts at revision 1. The revision stays a draft, applying to nobody, until it has its category rules and someone other than its author activates it. Claims are in INR only.</Hint>
       <Refusal error={create.error} />
     </Section>
   );
@@ -183,56 +191,57 @@ function AddRule({ policy, onDone }: { policy: ExpensePolicy; onDone: () => void
   });
   const chosen = options.data?.categories.find((c) => c.id === rule.categoryId);
   const select = (label: string, key: 'gradeId' | 'locationId', items: Option[] | undefined) => (
-    <label>
+    <FormField>
       {label}
-      <select value={rule[key]} onChange={(e) => setRule({ ...rule, [key]: e.target.value })}>
+      <NativeSelect value={rule[key]} onChange={(e) => setRule({ ...rule, [key]: e.target.value })}>
         <option value="">Any</option>
         {items?.map((o) => (
           <option key={o.id} value={o.id}>
             {key === 'gradeId' ? `${o.name} (${o.code})` : o.name}
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
   return (
-    <form
-      className="grid-form"
+    <FormGrid
+      className={BELOW_BUTTONS}
       aria-label={`Add a rule to ${nameOf(policy)}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         add.mutate();
       }}
     >
-      <label>
+      <FormField>
         Category
-        <select required value={rule.categoryId} onChange={(e) => setRule({ ...rule, categoryId: e.target.value })}>
+        <NativeSelect required value={rule.categoryId} onChange={(e) => setRule({ ...rule, categoryId: e.target.value })}>
           <option value="">Choose</option>
           {options.data?.categories.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
             </option>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {select('Grade', 'gradeId', options.data?.grades)}
       {select('Location', 'locationId', options.data?.locations)}
-      <label>
+      <FormField>
         Limit (INR{chosen ? `, ${BASIS_TEXT[chosen.limitBasis] ?? chosen.limitBasis}` : ''})
-        <input required inputMode="decimal" pattern="\d{1,13}(\.\d{1,2})?" value={rule.limitAmount} onChange={(e) => setRule({ ...rule, limitAmount: e.target.value })} />
-      </label>
-      <label className="check">
+        <Input required inputMode="decimal" pattern="\d{1,13}(\.\d{1,2})?" value={rule.limitAmount} onChange={(e) => setRule({ ...rule, limitAmount: e.target.value })} />
+      </FormField>
+      <CheckField>
         <input type="checkbox" checked={rule.receiptRequired} onChange={(e) => setRule({ ...rule, receiptRequired: e.target.checked })} /> Receipt required
-      </label>
-      <button type="submit" disabled={add.isPending}>
+      </CheckField>
+      <Button type="submit" disabled={add.isPending}>
         Add rule
-      </button>
-      <p className="hint">Leaving both as Any covers the whole company, at the lowest priority. The rule naming most of grade and location wins for an employee on the expense date.</p>
+      </Button>
+      <Hint>Leaving both as Any covers the whole company, at the lowest priority. The rule naming most of grade and location wins for an employee on the expense date.</Hint>
       <Refusal error={options.error ?? add.error} />
-    </form>
+    </FormGrid>
   );
 }
 
+/** A revision's actions cell: its buttons, and the form or refusal a button opens below them. */
 function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy: ExpensePolicy; canManage: boolean; canActivate: boolean; onChanged: () => void }) {
   const [open, setOpen] = useState<'edit' | 'rule' | 'retire' | null>(null);
   const [values, setValues] = useState<DraftValues>({ effectiveFrom: policy.effectiveFrom, effectiveTo: policy.effectiveTo ?? '', submissionWindowDays: String(policy.submissionWindowDays), highValueThreshold: Number(policy.highValueThreshold).toFixed(2) });
@@ -250,32 +259,40 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
   const retireIt = useMutation({ mutationFn: () => api(`/v1/expense/policies/${policy.id}/retire`, { body: { expectedVersion: policy.version, effectiveTo: retire.effectiveTo, reason: retire.reason.trim() } }), onSuccess: done, onError: refreshOnError });
   const name = nameOf(policy);
   const toggle = (which: 'edit' | 'rule' | 'retire') => setOpen(open === which ? null : which);
+  // Only as wide as the buttons, except while a form or a refusal under them needs the room.
+  const showsMore = open !== null || activate.isError;
   return (
-    <>
-      {policy.state === 'DRAFT' && canManage && (
-        <>
-          <button type="button" className="link" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => toggle('edit')}>
-            Edit
-          </button>{' '}
-          <button type="button" className="link" aria-label={`Add a rule to ${name}`} aria-expanded={open === 'rule'} onClick={() => toggle('rule')}>
-            Add a rule
-          </button>{' '}
-        </>
+    <RowActionsCell expanded={showsMore}>
+      <RowActions>
+        {policy.state === 'DRAFT' && canManage && (
+          <>
+            <Button type="button" variant="outline" size="sm" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => toggle('edit')}>
+              Edit
+            </Button>{' '}
+            <Button type="button" variant="outline" size="sm" aria-label={`Add a rule to ${name}`} aria-expanded={open === 'rule'} onClick={() => toggle('rule')}>
+              Add a rule
+            </Button>{' '}
+          </>
+        )}
+        {policy.state === 'DRAFT' && canActivate && (
+          <Button type="button" variant="outline" size="sm" aria-label={`Activate ${name}`} disabled={activate.isPending} onClick={() => activate.mutate()}>
+            Activate
+          </Button>
+        )}
+        {policy.state === 'ACTIVE' && canActivate && (
+          <Button type="button" variant="danger" size="sm" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => toggle('retire')}>
+            Retire
+          </Button>
+        )}
+      </RowActions>
+      {activate.isError && (
+        <div className={BELOW_BUTTONS}>
+          <Refusal error={activate.error} />
+        </div>
       )}
-      {policy.state === 'DRAFT' && canActivate && (
-        <button type="button" className="link" aria-label={`Activate ${name}`} disabled={activate.isPending} onClick={() => activate.mutate()}>
-          Activate
-        </button>
-      )}
-      {policy.state === 'ACTIVE' && canActivate && (
-        <button type="button" className="link danger" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => toggle('retire')}>
-          Retire
-        </button>
-      )}
-      <Refusal error={activate.error} />
       {open === 'edit' && (
-        <form
-          className="grid-form"
+        <FormGrid
+          className={BELOW_BUTTONS}
           aria-label={`Edit ${name}`}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -283,37 +300,37 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
           }}
         >
           <DraftFields values={values} onChange={setValues} />
-          <button type="submit" disabled={edit.isPending}>
+          <Button type="submit" disabled={edit.isPending}>
             Save draft
-          </button>
+          </Button>
           <Refusal error={edit.error} />
-        </form>
+        </FormGrid>
       )}
       {open === 'rule' && <AddRule policy={policy} onDone={done} />}
       {open === 'retire' && (
-        <form
-          className="grid-form"
+        <FormGrid
+          className={BELOW_BUTTONS}
           aria-label={`Retire ${name}`}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             retireIt.mutate();
           }}
         >
-          <label>
+          <FormField>
             No longer applies from
-            <input type="date" required value={retire.effectiveTo} onChange={(e) => setRetire({ ...retire, effectiveTo: e.target.value })} />
-          </label>
-          <label className="wide">
+            <Input type="date" required value={retire.effectiveTo} onChange={(e) => setRetire({ ...retire, effectiveTo: e.target.value })} />
+          </FormField>
+          <FormField className="col-span-full">
             Reason for retiring
-            <input required maxLength={500} value={retire.reason} onChange={(e) => setRetire({ ...retire, reason: e.target.value })} />
-          </label>
-          <button type="submit" disabled={retireIt.isPending}>
+            <Input required maxLength={500} value={retire.reason} onChange={(e) => setRetire({ ...retire, reason: e.target.value })} />
+          </FormField>
+          <Button type="submit" disabled={retireIt.isPending}>
             Confirm retirement
-          </button>
+          </Button>
           <Refusal error={retireIt.error} />
-        </form>
+        </FormGrid>
       )}
-    </>
+    </RowActionsCell>
   );
 }
 
@@ -336,9 +353,9 @@ function RuleList({ policy, names, canRemove, onChanged }: { policy: ExpensePoli
             {canRemove && (
               <>
                 {' '}
-                <button type="button" className="link" aria-label={`Remove ${r.category} for ${appliesTo(r)}`} disabled={remove.isPending} onClick={() => remove.mutate(r.id)}>
+                <Button type="button" variant="danger" size="sm" aria-label={`Remove ${r.category} for ${appliesTo(r)}`} disabled={remove.isPending} onClick={() => remove.mutate(r.id)}>
                   Remove
-                </button>
+                </Button>
               </>
             )}
           </li>
@@ -375,69 +392,73 @@ function CategoriesSection() {
     <Section title="Expense categories">
       <ErrorNote error={categories.error} />
       {categories.data && categories.data.items.length > 0 && (
-        <table aria-label="Expense categories">
-          <thead>
-            <tr>
-              <th scope="col">Code</th>
-              <th scope="col">Name</th>
-              <th scope="col">Limit counts per</th>
-              <th scope="col">Status</th>
-              <th scope="col"><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table aria-label="Expense categories">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Limit counts per</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {categories.data.items.map((c) => (
-              <tr key={c.id}>
-                <td>{c.code}</td>
-                <td>{c.name}</td>
-                <td>{(BASIS_TEXT[c.limitBasis] ?? c.limitBasis).replace(/^a /, '')}</td>
-                <td>{c.active ? <Badge tone="good">Active</Badge> : <Badge>Inactive</Badge>}</td>
-                <td>
-                  <button
-                    type="button"
-                    className={c.active ? 'link danger' : 'link'}
-                    aria-label={c.active ? `Deactivate ${c.code}` : `Reactivate ${c.code}`}
-                    disabled={setActive.isPending}
-                    onClick={() => setActive.mutate(c)}
-                  >
-                    {c.active ? 'Deactivate' : 'Reactivate'}
-                  </button>
-                </td>
-              </tr>
+              <TableRow key={c.id}>
+                <TableCell>{c.code}</TableCell>
+                <TableCell>{c.name}</TableCell>
+                <TableCell>{(BASIS_TEXT[c.limitBasis] ?? c.limitBasis).replace(/^a /, '')}</TableCell>
+                <TableCell>{c.active ? <Badge tone="good">Active</Badge> : <Badge>Inactive</Badge>}</TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button
+                      type="button"
+                      variant={c.active ? 'danger' : 'outline'}
+                      size="sm"
+                      aria-label={c.active ? `Deactivate ${c.code}` : `Reactivate ${c.code}`}
+                      disabled={setActive.isPending}
+                      onClick={() => setActive.mutate(c)}
+                    >
+                      {c.active ? 'Deactivate' : 'Reactivate'}
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="New category"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <label>
+        <FormField>
           Category code
-          <input required maxLength={40} pattern="[A-Za-z][A-Za-z0-9_]*" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
-        </label>
-        <label>
+          <Input required maxLength={40} pattern="[A-Za-z][A-Za-z0-9_]*" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+        </FormField>
+        <FormField>
           Category name
-          <input required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </label>
-        <label>
+          <Input required maxLength={100} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </FormField>
+        <FormField>
           Limit counts per
-          <select required value={form.limitBasis} onChange={(e) => setForm({ ...form, limitBasis: e.target.value })}>
+          <NativeSelect required value={form.limitBasis} onChange={(e) => setForm({ ...form, limitBasis: e.target.value })}>
             <option value="">Choose</option>
             <option value="PER_DAY">Day</option>
             <option value="PER_NIGHT">Night</option>
             <option value="PER_LINE">Line</option>
-          </select>
-        </label>
-        <button type="submit" disabled={create.isPending}>
+          </NativeSelect>
+        </FormField>
+        <Button type="submit" disabled={create.isPending}>
           Add category
-        </button>
-      </form>
-      <p className="hint">A category's code and what its limit counts per are fixed once created. It can be claimed only where the revision in force has a rule for it. Deactivating one stops new lines using it; lines and rules that already name it keep it.</p>
+        </Button>
+      </FormGrid>
+      <Hint>A category's code and what its limit counts per are fixed once created. It can be claimed only where the revision in force has a rule for it. Deactivating one stops new lines using it; lines and rules that already name it keep it.</Hint>
       <Refusal error={create.error ?? setActive.error} />
     </Section>
   );
@@ -464,48 +485,48 @@ export function ExpensePoliciesPage() {
         <ErrorNote error={revisions.error} />
         {revisions.isSuccess && items.length === 0 && <Empty>No expense policy revisions yet.</Empty>}
         {items.length > 0 && (
-          <table aria-label="Expense policy revisions">
-            <thead>
-              <tr>
-                <th scope="col">Revision</th>
-                <th scope="col">State</th>
-                <th scope="col">Period</th>
-                <th scope="col">Values</th>
-                <th scope="col">Rules</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Expense policy revisions">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Period</TableHead>
+                <TableHead scope="col">Values</TableHead>
+                <TableHead scope="col">Rules</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {items.map((p) => (
-                <tr key={p.id}>
-                  <td>{nameOf(p)}</td>
-                  <td>
+                <TableRow key={p.id}>
+                  <TableCell>{nameOf(p)}</TableCell>
+                  <TableCell>
                     <StateBadge state={p.state} />
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>
                     {periodText(p)}
-                    {p.lastUsedOn && <div className="hint">Used by submitted claims up to {formatDate(p.lastUsedOn)}</div>}
-                  </td>
-                  <td>{`Submission within ${p.submissionWindowDays} days; high-value approval above ${money(p.highValueThreshold, p.currency)}`}</td>
-                  <td>
+                    {p.lastUsedOn && <HintLine>Used by submitted claims up to {formatDate(p.lastUsedOn)}</HintLine>}
+                  </TableCell>
+                  <TableCell>{`Submission within ${p.submissionWindowDays} days; high-value approval above ${money(p.highValueThreshold, p.currency)}`}</TableCell>
+                  <TableCell>
                     <RuleList key={p.version} policy={p} names={names} canRemove={p.state === 'DRAFT' && canManage} onChanged={refresh} />
                     {p.warnings.map((w) => (
-                      <p key={w.code} role="note">
-                        <Badge tone="warn">{WARNING_BADGE[w.code] ?? w.code}</Badge> {w.text}
-                      </p>
+                      <WarningNote key={w.code} badge={WARNING_BADGE[w.code] ?? w.code}>
+                        {w.text}
+                      </WarningNote>
                     ))}
-                  </td>
-                  <td>
-                    <RevisionActions key={p.version} policy={p} canManage={canManage} canActivate={canActivate} onChanged={refresh} />
-                  </td>
-                </tr>
+                  </TableCell>
+                  <RevisionActions key={p.version} policy={p} canManage={canManage} canActivate={canActivate} onChanged={refresh} />
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-        <p className="hint">
+        <Hint>
           A claim line is judged by the revision in force on its expense date and the employee's grade and location on that date. An activated revision and its rules never change: a change is a new revision, and activating one ends the earlier revision of its code on the new revision's first day. A limit is a review threshold: a line over it needs a reason and the financial reviewer's decision.
-        </p>
+        </Hint>
       </Section>
       {canManage && <NewRevision onChanged={refresh} />}
       {canManage && <CategoriesSection />}
@@ -553,9 +574,9 @@ function RatesSection({ canActivate }: { canActivate: boolean }) {
   const ready = currency.trim().length === 3 && from && rate.trim() && reason.trim();
   return (
     <Section title="Exchange rates">
-      <p className="hint">
+      <Hint>
         {`${rates.data?.companyCurrency ?? 'INR'} for one unit of an enabled currency, from a date. A claim line in that currency converts once, at submission, at the rate in force on its expense date; a later rate never changes a submitted claim.`}
-      </p>
+      </Hint>
       <ErrorNote error={rates.error ?? add.error ?? decide.error} />
       {rates.data?.items.length === 0 && <Empty>No exchange rate yet.</Empty>}
       {rates.data && rates.data.items.length > 0 && (
@@ -565,54 +586,53 @@ function RatesSection({ canActivate }: { canActivate: boolean }) {
               {`${r.currencyCode} from ${formatDate(r.effectiveFrom)}: ${r.rate} (${r.reason}) `}
               <StateBadge state={r.state} />
               {canActivate && r.state === 'DRAFT' && r.createdBy !== me?.userId && (
-                <button type="button" className="secondary" onClick={() => decide.mutate({ r, action: 'ACTIVATE' })} disabled={decide.isPending}>
+                <Button type="button" variant="outline" className={ITEM_BUTTON} onClick={() => decide.mutate({ r, action: 'ACTIVATE' })} disabled={decide.isPending}>
                   Activate
-                </button>
+                </Button>
               )}
               {canActivate && r.state === 'DRAFT' && (
-                <button type="button" className="secondary" onClick={() => decide.mutate({ r, action: 'CANCEL' })} disabled={decide.isPending}>
+                <Button type="button" variant="outline" className={ITEM_BUTTON} onClick={() => decide.mutate({ r, action: 'CANCEL' })} disabled={decide.isPending}>
                   Cancel
-                </button>
+                </Button>
               )}
             </li>
           ))}
         </ul>
       )}
-      <form
-        className="row"
+      <FormGrid
         aria-label="Enter an exchange rate"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           if (ready && !add.isPending) add.mutate();
         }}
       >
-        <label>
+        <FormField>
           Currency
-          <select value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <NativeSelect value={currency} onChange={(e) => setCurrency(e.target.value)}>
             <option value="">{currencies.isSuccess && enabled.length === 0 ? 'None enabled yet' : 'Choose'}</option>
             {enabled.map((code) => (
               <option key={code} value={code}>
                 {code}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           From
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </FormField>
+        <FormField>
           Rate
-          <input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} />
-        </label>
-        <label>
+          <Input inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} />
+        </FormField>
+        <FormField>
           Source
-          <input maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-        </label>
-        <button type="submit" disabled={!ready || add.isPending}>
+          <Input maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </FormField>
+        <Button type="submit" disabled={!ready || add.isPending}>
           Enter rate
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
     </Section>
   );
 }
@@ -645,9 +665,9 @@ function CurrenciesSection({ canActivate }: { canActivate: boolean }) {
   const others = list.data?.reference.filter((r) => r.code !== list.data?.companyCurrency) ?? [];
   return (
     <Section title="Claim currencies">
-      <p className="hint">
+      <Hint>
         {`Claims are in ${list.data?.companyCurrency ?? 'the company currency'}. Another approved currency is usable once one person asks for it and another enables it; a claim in it is then refused at submission until an exchange rate converts it.`}
-      </p>
+      </Hint>
       <ErrorNote error={list.error ?? ask.error ?? decide.error} />
       {list.data?.items.length === 0 && <Empty>No other currency is enabled.</Empty>}
       {list.data && list.data.items.length > 0 && (
@@ -657,46 +677,45 @@ function CurrenciesSection({ canActivate }: { canActivate: boolean }) {
               {`${c.currencyCode}: ${c.reason} `}
               <StateBadge state={c.state} />
               {canActivate && c.state === 'DRAFT' && c.createdBy !== me?.userId && (
-                <button type="button" className="secondary" onClick={() => decide.mutate({ c, action: 'ACTIVATE' })} disabled={decide.isPending}>
+                <Button type="button" variant="outline" className={ITEM_BUTTON} onClick={() => decide.mutate({ c, action: 'ACTIVATE' })} disabled={decide.isPending}>
                   Enable
-                </button>
+                </Button>
               )}
               {canActivate && c.state === 'ACTIVE' && (
-                <button type="button" className="secondary" onClick={() => decide.mutate({ c, action: 'RETIRE' })} disabled={decide.isPending}>
+                <Button type="button" variant="outline" className={ITEM_BUTTON} onClick={() => decide.mutate({ c, action: 'RETIRE' })} disabled={decide.isPending}>
                   Retire
-                </button>
+                </Button>
               )}
             </li>
           ))}
         </ul>
       )}
-      <form
-        className="row"
+      <FormGrid
         aria-label="Ask for a claim currency"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           if (code && reason.trim() && !ask.isPending) ask.mutate();
         }}
       >
-        <label>
+        <FormField>
           Currency
-          <select value={code} onChange={(e) => setCode(e.target.value)}>
+          <NativeSelect value={code} onChange={(e) => setCode(e.target.value)}>
             <option value="">Choose</option>
             {others.map((r) => (
               <option key={r.code} value={r.code}>
                 {r.code}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Reason
-          <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
-        </label>
-        <button type="submit" disabled={!code || !reason.trim() || ask.isPending}>
+          <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} />
+        </FormField>
+        <Button type="submit" disabled={!code || !reason.trim() || ask.isPending}>
           Ask to enable
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
     </Section>
   );
 }

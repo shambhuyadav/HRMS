@@ -10,11 +10,17 @@
 // The server authorises every call and decides every rule; this screen hides what the selected assignment cannot use, shows what the
 // server returned and says its refusals in plain words (the conventions of lifecycle-documents.tsx, whose helpers it shares).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type FormEvent, useId, useMemo, useState } from 'react';
+import { type FormEvent, useId, useMemo, useState } from 'react';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatAmount, formatDate, isConflict, retryTransient } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, Section } from '../ui';
+import { Badge, Empty, Notice, Section } from '../ui';
 import { Item, labelOf, LoadProblem, PACK_STATE_LABEL, Refusal, UserRef, when, type Words } from './lifecycle-documents';
 
 const PACK_READ = 'statutory_pack.read.operational';
@@ -48,9 +54,14 @@ interface PackList {
 }
 
 const TONE: Record<string, 'good' | 'warn' | 'bad'> = { DRAFT: 'warn', VALIDATED: 'warn', ACTIVE: 'good' };
-const H3: CSSProperties = { fontSize: '1rem', margin: '0.5rem 0 0' };
-const H4: CSSProperties = { fontSize: '0.95rem', margin: '0.25rem 0' };
-const SCROLL: CSSProperties = { overflowX: 'auto' };
+
+// The screen's own layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026).
+/** A revision's heading inside its list item. */
+const ITEM_HEADING = 'my-1 text-[0.95rem]';
+/** A reference field keeps a readable width in a one-column form, as the old `.stack > label > input` rule had it. */
+const READABLE_WIDTH = 'max-w-[560px]';
+/** An amount or a rate of a slab table: it stays on one line. */
+const FIGURE_CELL = 'whitespace-nowrap';
 
 const STALE = 'The revision changed after it was loaded. The rule packs have been reloaded: check it and try again.';
 const GONE = 'This rule pack revision is not available.';
@@ -99,58 +110,54 @@ const money = (v: unknown, currency: string) => {
 
 function Slabs({ slabs, currency }: { slabs: unknown[]; currency: string }) {
   return (
-    <div style={SCROLL}>
-      <table aria-label="Monthly slabs">
-        <thead>
-          <tr>
-            <th scope="col">Monthly gross up to</th>
-            <th scope="col">Amount</th>
-            <th scope="col">In a given month</th>
-          </tr>
-        </thead>
-        <tbody>
-          {slabs.map((raw, i) => {
-            const s = (raw ?? {}) as { upTo?: unknown; amount?: unknown; monthAmounts?: Record<string, unknown> };
-            const months = s.monthAmounts && typeof s.monthAmounts === 'object' ? Object.entries(s.monthAmounts) : [];
-            return (
-              <tr key={i}>
-                <td>{text(s.upTo) ? money(s.upTo, currency) : 'No upper limit'}</td>
-                <td>{money(s.amount, currency)}</td>
-                <td>{months.length === 0 ? '—' : months.map(([m, a]) => `${monthName(m)}: ${money(a, currency)}`).join(', ')}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label="Monthly slabs">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Monthly gross up to</TableHead>
+          <TableHead scope="col">Amount</TableHead>
+          <TableHead scope="col">In a given month</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {slabs.map((raw, i) => {
+          const s = (raw ?? {}) as { upTo?: unknown; amount?: unknown; monthAmounts?: Record<string, unknown> };
+          const months = s.monthAmounts && typeof s.monthAmounts === 'object' ? Object.entries(s.monthAmounts) : [];
+          return (
+            <TableRow key={i}>
+              <TableCell className={FIGURE_CELL}>{text(s.upTo) ? money(s.upTo, currency) : 'No upper limit'}</TableCell>
+              <TableCell className={FIGURE_CELL}>{money(s.amount, currency)}</TableCell>
+              <TableCell>{months.length === 0 ? '—' : months.map(([m, a]) => `${monthName(m)}: ${money(a, currency)}`).join(', ')}</TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
 
 function LwfSlabs({ slabs, currency }: { slabs: unknown[]; currency: string }) {
   return (
-    <div style={SCROLL}>
-      <table aria-label="Wage slabs">
-        <thead>
-          <tr>
-            <th scope="col">Monthly wages up to</th>
-            <th scope="col">Employee</th>
-            <th scope="col">Employer</th>
-          </tr>
-        </thead>
-        <tbody>
-          {slabs.map((raw, i) => {
-            const s = (raw ?? {}) as { upTo?: unknown; employee?: unknown; employer?: unknown };
-            return (
-              <tr key={i}>
-                <td>{text(s.upTo) ? money(s.upTo, currency) : 'No upper limit'}</td>
-                <td>{money(s.employee, currency)}</td>
-                <td>{money(s.employer, currency)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label="Wage slabs">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Monthly wages up to</TableHead>
+          <TableHead scope="col">Employee</TableHead>
+          <TableHead scope="col">Employer</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {slabs.map((raw, i) => {
+          const s = (raw ?? {}) as { upTo?: unknown; employee?: unknown; employer?: unknown };
+          return (
+            <TableRow key={i}>
+              <TableCell className={FIGURE_CELL}>{text(s.upTo) ? money(s.upTo, currency) : 'No upper limit'}</TableCell>
+              <TableCell className={FIGURE_CELL}>{money(s.employee, currency)}</TableCell>
+              <TableCell className={FIGURE_CELL}>{money(s.employer, currency)}</TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -170,24 +177,22 @@ function TaxRegime({ code, regime: r, currency: c }: { code: string; regime: Rec
         {hra ? ` House rent allowance exempt: the least of the allowance, rent less ${text(hra.rentAboveSalaryPercent)}% of salary, and ${text(hra.metroPercent)}% of salary (four metro cities) or ${text(hra.otherPercent)}% elsewhere.` : ' No house rent allowance exemption.'}
         {text(r.employerNpsLimitPercent) ? ` Employer NPS contribution deductible up to ${text(r.employerNpsLimitPercent)}% of salary.` : ''}
       </p>
-      <div style={SCROLL}>
-        <table aria-label={`${name} slabs`}>
-          <thead>
-            <tr>
-              <th scope="col">Taxable income up to</th>
-              <th scope="col">Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {slabs.map((s, i) => (
-              <tr key={i}>
-                <td>{text(s.upTo) ? money(s.upTo, c) : 'No upper limit'}</td>
-                <td>{`${text(s.ratePercent) ?? '—'}%`}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Table aria-label={`${name} slabs`}>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Taxable income up to</TableHead>
+            <TableHead scope="col">Rate</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {slabs.map((s, i) => (
+            <TableRow key={i}>
+              <TableCell className={FIGURE_CELL}>{text(s.upTo) ? money(s.upTo, c) : 'No upper limit'}</TableCell>
+              <TableCell className={FIGURE_CELL}>{`${text(s.ratePercent) ?? '—'}%`}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -267,21 +272,17 @@ function StatutoryPacksScreen() {
   return (
     <>
       <h1>Statutory packs</h1>
-      <p className="hint">
+      <Hint>
         Gratuity, provident fund, employees’ state insurance and each state’s professional tax are valued in payroll and settlements from these packs only. Every rate,
         ceiling and slab is a value of a dated revision, and the revision in force for the period is the one used.
-      </p>
-      <p className="hint" role="note">
+      </Hint>
+      <Hint role="note">
         A revision is used only after one authorised person has validated it against the law in force and a second person, who neither wrote nor validated it, has
         activated it. Until then, payroll and settlements stop for any employee that statutory head applies to. The drafts supplied are starting points to check, not
         advice.
-      </p>
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
-      {list.isPending && <p className="hint loading">Loading the statutory packs…</p>}
+      </Hint>
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
+      {list.isPending && <LoadingLine>Loading the statutory packs…</LoadingLine>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view the statutory packs: that needs the statutory pack read duty." />
       {data && codes.length === 0 && <Empty>No statutory pack is known.</Empty>}
       {codes.map((code) => {
@@ -325,7 +326,7 @@ function PackItem({ p, name, onNotice }: { p: PackRevision; name: string; onNoti
   const titleId = `${useId()}-title`;
   return (
     <li aria-labelledby={titleId}>
-      <h4 id={titleId} style={H4}>
+      <h4 id={titleId} className={ITEM_HEADING}>
         {`Revision ${p.revision}, from ${formatDate(p.effectiveFrom)}`}
       </h4>
       <dl className="kv">
@@ -398,25 +399,21 @@ function ValidatePack({ p, name, onNotice }: { p: PackRevision; name: string; on
     validate.mutate({ sourceReference: s, validationReference: v, expectedVersion: p.version });
   };
   return (
-    <form className="stack" aria-label={`Validate revision ${p.revision} of ${name}`} onSubmit={submit}>
-      <label>
+    <form className="flex flex-col gap-3" aria-label={`Validate revision ${p.revision} of ${name}`} onSubmit={submit}>
+      <FormField className={READABLE_WIDTH}>
         Source reference: where the values were obtained (required)
-        <input value={source} maxLength={MAX_REFERENCE} disabled={validate.isPending} onChange={(e) => setSource(e.target.value)} />
-      </label>
-      <label>
+        <Input value={source} maxLength={MAX_REFERENCE} disabled={validate.isPending} onChange={(e) => setSource(e.target.value)} />
+      </FormField>
+      <FormField className={READABLE_WIDTH}>
         Validation reference: how they were checked against the law in force for the jurisdiction and period (required)
-        <input value={validation} maxLength={MAX_REFERENCE} disabled={validate.isPending} onChange={(e) => setValidation(e.target.value)} />
-      </label>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" disabled={validate.isPending}>
+        <Input value={validation} maxLength={MAX_REFERENCE} disabled={validate.isPending} onChange={(e) => setValidation(e.target.value)} />
+      </FormField>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" disabled={validate.isPending}>
           Record the validation
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={validate.error} words={VALIDATE_WORDS} noAnswer="No answer came back, so the validation may or may not have been recorded. Reload the page to check." />
     </form>
   );
@@ -440,17 +437,19 @@ function ActivatePack({ p, name, onNotice }: { p: PackRevision; name: string; on
     },
   });
   return (
-    <div className="stack">
-      {involved && (
-        <p className="hint" id={hintId}>
-          You wrote or validated this revision, so someone else activates it.
-        </p>
-      )}
-      <div className="row">
-        <button type="button" aria-label={`Activate revision ${p.revision} of ${name}`} disabled={activate.isPending || involved} aria-describedby={involved ? hintId : undefined} onClick={() => activate.mutate()}>
+    <div className="flex flex-col gap-3">
+      {involved && <Hint id={hintId}>You wrote or validated this revision, so someone else activates it.</Hint>}
+      <ButtonRow>
+        <Button
+          type="button"
+          aria-label={`Activate revision ${p.revision} of ${name}`}
+          disabled={activate.isPending || involved}
+          aria-describedby={involved ? hintId : undefined}
+          onClick={() => activate.mutate()}
+        >
           Activate
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={activate.error} words={ACTIVATE_WORDS} noAnswer="No answer came back, so the revision may or may not have been activated. Reload the page to check." />
     </div>
   );
@@ -485,21 +484,17 @@ function RetirePack({ p, name, onNotice }: { p: PackRevision; name: string; onNo
     retire.mutate({ reason: r, expectedVersion: p.version });
   };
   return (
-    <form className="stack" aria-label={`Retire revision ${p.revision} of ${name}`} onSubmit={submit}>
-      <label>
+    <form className="flex flex-col gap-3" aria-label={`Retire revision ${p.revision} of ${name}`} onSubmit={submit}>
+      <FormField className={READABLE_WIDTH}>
         Reason for retiring (required)
-        <input value={reason} maxLength={MAX_REFERENCE} disabled={retire.isPending} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" className="danger" aria-label={`Retire revision ${p.revision} of ${name}`} disabled={retire.isPending}>
+        <Input value={reason} maxLength={MAX_REFERENCE} disabled={retire.isPending} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" variant="danger" aria-label={`Retire revision ${p.revision} of ${name}`} disabled={retire.isPending}>
           Retire
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={retire.error} words={RETIRE_WORDS} noAnswer="No answer came back, so the revision may or may not have been retired. Reload the page to check." />
     </form>
   );

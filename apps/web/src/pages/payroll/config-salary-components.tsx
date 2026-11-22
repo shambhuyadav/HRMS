@@ -1,14 +1,25 @@
 // Payroll configuration: the salary components of an arrangement (FR-029).
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleAlertIcon } from 'lucide-react';
 import { type FormEvent, useId, useRef, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { FieldSet } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, type EmployeeHit, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Section } from '../../ui';
 import { AMOUNT_BASIS, type ArrangementComponents, Choice, COMPONENT_KIND, SALARY_MANAGE, SALARY_READ, type SalaryArrangementRow, usePayComponents } from './config';
 import { EmployeePicker, Missing, Note } from './pickers';
 import { Problem, REFUSALS } from './problems';
-import { Fact, GROUP, H3, label, MONEY, money, SCROLL, useKeys } from './shared';
+import { Fact, label, MONEY, money, useKeys } from './shared';
 
 // ---- Salary components of an arrangement (FR-029; salary master grants) ----
 
@@ -19,17 +30,17 @@ export function SalaryComponentsScreen() {
   if (!can(SALARY_READ)) {
     return (
       <Section title="Salary components">
-        <Empty>The selected role cannot see salary arrangements.</Empty>
+        <Empty refusal>The selected role cannot see salary arrangements.</Empty>
       </Section>
     );
   }
   return (
     <div className="stack">
       <Section title="Salary components">
-        <p className="hint">
+        <Hint>
           The pay components of an employee’s salary arrangement, exactly as recorded. They are set once, while the arrangement has none; a change is a new arrangement through
           the salary master. Nothing is added up or converted here.
-        </p>
+        </Hint>
         <EmployeePicker
           title="Employee"
           value={employee}
@@ -56,44 +67,44 @@ function ArrangementList({ employeeId, chosen, onChoose }: { employeeId: string;
   const withheld = history.data?.historyIncluded === false;
   return (
     <>
-      {history.isPending && <p className="hint loading">Loading the salary arrangements…</p>}
+      {history.isPending && <LoadingLine>Loading the salary arrangements…</LoadingLine>}
       {history.error && <Problem error={history.error} act="read" />}
       {history.data && history.data.items.length === 0 && <Empty>{withheld ? 'The employee has no salary arrangement in force today or later.' : 'The employee has no salary arrangement yet.'}</Empty>}
       {history.data && history.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Salary arrangements">
-            <thead>
-              <tr>
-                <th>From</th>
-                <th>To</th>
-                <th>Annual CTC</th>
-                <th>Monthly gross</th>
-                <th>Components</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.data.items.map((a) => (
-                <tr key={a.id}>
-                  <td>{formatDate(a.effectiveFrom)}</td>
-                  <td>{a.effectiveTo ? formatDate(a.effectiveTo) : 'Open'}</td>
-                  <td>{a.annualCtc !== undefined ? money(a.annualCtc, a.currency) : '—'}</td>
-                  <td>{a.monthlyGross !== undefined ? money(a.monthlyGross, a.currency) : '—'}</td>
-                  <td>
-                    {chosen === a.id ? (
-                      'Shown below'
-                    ) : (
-                      <button type="button" className="link" onClick={() => onChoose(a.id)} aria-label={`Show the components of the arrangement from ${formatDate(a.effectiveFrom)}`}>
+        <Table aria-label="Salary arrangements">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">From</TableHead>
+              <TableHead scope="col">To</TableHead>
+              <TableHead scope="col">Annual CTC</TableHead>
+              <TableHead scope="col">Monthly gross</TableHead>
+              <TableHead scope="col">Components</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {history.data.items.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell>{formatDate(a.effectiveFrom)}</TableCell>
+                <TableCell>{a.effectiveTo ? formatDate(a.effectiveTo) : 'Open'}</TableCell>
+                <TableCell>{a.annualCtc !== undefined ? money(a.annualCtc, a.currency) : '—'}</TableCell>
+                <TableCell>{a.monthlyGross !== undefined ? money(a.monthlyGross, a.currency) : '—'}</TableCell>
+                <RowActionsCell>
+                  {chosen === a.id ? (
+                    'Shown below'
+                  ) : (
+                    <RowActions>
+                      <Button type="button" variant="outline" size="sm" onClick={() => onChoose(a.id)} aria-label={`Show the components of the arrangement from ${formatDate(a.effectiveFrom)}`}>
                         Show components
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      </Button>
+                    </RowActions>
+                  )}
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      {withheld && <p className="hint">Earlier arrangements are not shown: the selected role has no salary history grant.</p>}
+      {withheld && <Hint>Earlier arrangements are not shown: the selected role has no salary history grant.</Hint>}
     </>
   );
 }
@@ -115,7 +126,7 @@ function ArrangementComponentsView({ arrangementId }: { arrangementId: string })
   const a = view.data;
   return (
     <Section title="Components of the arrangement">
-      {view.isPending && <p className="hint loading">Loading the components…</p>}
+      {view.isPending && <LoadingLine>Loading the components…</LoadingLine>}
       {view.error && <Problem error={view.error} act="salary-components" />}
       <Note text={note} />
       {a && (
@@ -128,52 +139,48 @@ function ArrangementComponentsView({ arrangementId }: { arrangementId: string })
           </dl>
           {a.components.length === 0 && <Empty>No salary components are set for this arrangement, so its payroll calculation is blocked until they are.</Empty>}
           {a.components.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label="Salary components">
-                <thead>
-                  <tr>
-                    <th>Component</th>
-                    <th>Kind</th>
-                    <th>Basis</th>
-                    <th>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {a.components.map((c) => (
-                    <tr key={c.componentCode}>
-                      <td>{`${c.componentCode} · ${c.componentName}`}</td>
-                      <td>{label(COMPONENT_KIND, c.componentKind)}</td>
-                      <td>{label(AMOUNT_BASIS, c.basis)}</td>
-                      <td>{money(c.amount, a.currencyCode)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Salary components">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Component</TableHead>
+                  <TableHead scope="col">Kind</TableHead>
+                  <TableHead scope="col">Basis</TableHead>
+                  <TableHead scope="col">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {a.components.map((c) => (
+                  <TableRow key={c.componentCode}>
+                    <TableCell>{`${c.componentCode} · ${c.componentName}`}</TableCell>
+                    <TableCell>{label(COMPONENT_KIND, c.componentKind)}</TableCell>
+                    <TableCell>{label(AMOUNT_BASIS, c.basis)}</TableCell>
+                    <TableCell>{money(c.amount, a.currencyCode)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
           {a.totals.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label="Component totals as returned">
-                <thead>
-                  <tr>
-                    <th>Basis</th>
-                    <th>Kind</th>
-                    <th>Total (as returned; no reconciliation rule is assumed)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {a.totals.map((t) => (
-                    <tr key={`${t.basis}-${t.componentKind}`}>
-                      <td>{label(AMOUNT_BASIS, t.basis)}</td>
-                      <td>{label(COMPONENT_KIND, t.componentKind)}</td>
-                      <td>{money(t.total, a.currencyCode)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Component totals as returned">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Basis</TableHead>
+                  <TableHead scope="col">Kind</TableHead>
+                  <TableHead scope="col">Total (as returned; no reconciliation rule is assumed)</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {a.totals.map((t) => (
+                  <TableRow key={`${t.basis}-${t.componentKind}`}>
+                    <TableCell>{label(AMOUNT_BASIS, t.basis)}</TableCell>
+                    <TableCell>{label(COMPONENT_KIND, t.componentKind)}</TableCell>
+                    <TableCell>{money(t.total, a.currencyCode)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
-          {a.components.length > 0 && <p className="hint">Set once: a change is a new salary arrangement through the salary master.</p>}
+          {a.components.length > 0 && <Hint>Set once: a change is a new salary arrangement through the salary master.</Hint>}
           {a.components.length === 0 && can(SALARY_MANAGE) && (
             <SalaryComponentsForm
               currency={a.currencyCode}
@@ -193,6 +200,21 @@ function ArrangementComponentsView({ arrangementId }: { arrangementId: string })
 
 interface ComponentLineDraft extends ComponentLineInput {
   key: number;
+}
+
+/**
+ * What the server would refuse about a line, said beside it before anything is sent: in the error colours, but a note, not an alert
+ * (nothing has failed yet, and the form keeps its one alert for what stops it being sent).
+ */
+function LineWarning({ text }: { text: string }) {
+  return (
+    <Alert asChild variant="destructive">
+      <p className="error" role="note">
+        <CircleAlertIcon aria-hidden="true" />
+        {text}
+      </p>
+    </Alert>
+  );
 }
 
 function SalaryComponentsForm({ currency, busy, onSend }: { currency: string; busy: boolean; onSend: (lines: ComponentLineInput[]) => Promise<unknown> }) {
@@ -219,11 +241,9 @@ function SalaryComponentsForm({ currency, busy, onSend }: { currency: string; bu
     );
   };
   return (
-    <form onSubmit={submit} aria-label="Set the salary components" className="grid-form" style={{ marginTop: '0.75rem' }}>
-      <h3 style={H3} className="wide">
-        Set the salary components
-      </h3>
-      <p className="hint wide">{`Amounts in ${currency}, exactly as written. ${REFUSALS.COMPONENT_BASIS_NOT_MONTHLY}`}</p>
+    <FormGrid onSubmit={submit} aria-label="Set the salary components">
+      <CardSubheading>Set the salary components</CardSubheading>
+      <Hint>{`Amounts in ${currency}, exactly as written. ${REFUSALS.COMPONENT_BASIS_NOT_MONTHLY}`}</Hint>
       <datalist id={listId}>
         {(components.data?.items ?? [])
           .filter((c) => c.active)
@@ -237,41 +257,40 @@ function SalaryComponentsForm({ currency, busy, onSend }: { currency: string; bu
         const head = byCode.get(l.componentCode.trim().toUpperCase())?.headInEffect;
         const annualFixed = l.basis === 'ANNUAL' && head?.inUse === true && head.calculationBasis === 'FIXED';
         return (
-          <fieldset key={l.key} className="wide grid-form" style={GROUP}>
-            <legend>{`Line ${i + 1}`}</legend>
-            <label>
-              {`Pay component code (line ${i + 1})`}
-              <input value={l.componentCode} onChange={(e) => patch(l.key, { componentCode: e.target.value })} list={listId} maxLength={40} autoComplete="off" />
-            </label>
-            <label>
-              {`Amount (line ${i + 1})`}
-              <input value={l.amount} onChange={(e) => patch(l.key, { amount: e.target.value })} inputMode="decimal" maxLength={20} autoComplete="off" />
-            </label>
-            <Choice label={`Amount basis (line ${i + 1})`} value={l.basis} onChange={(v) => patch(l.key, { basis: v })} options={AMOUNT_BASIS} />
-            {lines.length > 1 && (
-              <div className="row">
-                <button type="button" className="secondary" onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))} aria-label={`Remove line ${i + 1}`}>
-                  Remove
-                </button>
-              </div>
-            )}
-            {annualFixed && (
-              <p className="error wide" role="note">
-                {`Line ${i + 1}: the head in effect for ${l.componentCode.trim().toUpperCase()} is fixed. ${REFUSALS.COMPONENT_BASIS_NOT_MONTHLY}`}
-              </p>
-            )}
-          </fieldset>
+          // Each line is a grid of its own fields, as a form grid is (the old `fieldset.grid-form`).
+          <FormGrid key={l.key} asChild>
+            <FieldSet>
+              <legend>{`Line ${i + 1}`}</legend>
+              <FormField>
+                {`Pay component code (line ${i + 1})`}
+                <Input value={l.componentCode} onChange={(e) => patch(l.key, { componentCode: e.target.value })} list={listId} maxLength={40} autoComplete="off" />
+              </FormField>
+              <FormField>
+                {`Amount (line ${i + 1})`}
+                <Input value={l.amount} onChange={(e) => patch(l.key, { amount: e.target.value })} inputMode="decimal" maxLength={20} autoComplete="off" />
+              </FormField>
+              <Choice label={`Amount basis (line ${i + 1})`} value={l.basis} onChange={(v) => patch(l.key, { basis: v })} options={AMOUNT_BASIS} />
+              {lines.length > 1 && (
+                <ButtonRow>
+                  <Button type="button" variant="outline" onClick={() => setLines((prev) => prev.filter((x) => x.key !== l.key))} aria-label={`Remove line ${i + 1}`}>
+                    Remove
+                  </Button>
+                </ButtonRow>
+              )}
+              {annualFixed && <LineWarning text={`Line ${i + 1}: the head in effect for ${l.componentCode.trim().toUpperCase()} is fixed. ${REFUSALS.COMPONENT_BASIS_NOT_MONTHLY}`} />}
+            </FieldSet>
+          </FormGrid>
         );
       })}
-      <div className="row">
-        <button type="button" className="secondary" onClick={() => setLines((prev) => [...prev, blank()])} disabled={lines.length >= 100}>
+      <ButtonRow>
+        <Button type="button" variant="outline" onClick={() => setLines((prev) => [...prev, blank()])} disabled={lines.length >= 100}>
           Add a line
-        </button>
-        <button type="submit" disabled={busy}>
+        </Button>
+        <Button type="submit" disabled={busy}>
           {busy ? 'Saving…' : 'Set the components'}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Missing text={problem} />
-    </form>
+    </FormGrid>
   );
 }

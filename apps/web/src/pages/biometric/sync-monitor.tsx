@@ -2,6 +2,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CheckField, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, ErrorNote, LIST_PAGE_SIZE, pageParams, Pager, Section, StateBadge } from '../../ui';
@@ -35,8 +44,7 @@ function StartRun({ onChanged }: { onChanged: () => void }) {
   });
   return (
     <Section title="Fetch now">
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="Fetch now"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
@@ -44,21 +52,25 @@ function StartRun({ onChanged }: { onChanged: () => void }) {
         }}
       >
         <ProfilePicker value={profileId} onChange={setProfileId} anyLabel="Choose a profile…" />
-        <label>
+        <FormField>
           Window from
-          <input required type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label>
+          <Input required type="datetime-local" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </FormField>
+        <FormField>
           Window to
-          <input required type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        <button type="submit" disabled={start.isPending || !profileId}>
+          <Input required type="datetime-local" value={to} onChange={(e) => setTo(e.target.value)} />
+        </FormField>
+        <Button type="submit" disabled={start.isPending || !profileId}>
           Start run
-        </button>
-      </form>
-      <p className="hint">Repeating a window is safe: a punch already accepted is counted as a duplicate, never added twice.</p>
+        </Button>
+      </FormGrid>
+      <Hint>Repeating a window is safe: a punch already accepted is counted as a duplicate, never added twice.</Hint>
       <Refusal error={start.error} />
-      {start.data && <p role="status">{`Run ended ${start.data.state}: ${start.data.accepted} accepted, ${start.data.duplicates} duplicates, ${start.data.quarantined} quarantined, ${start.data.rejected} rejected.`}</p>}
+      {start.data && (
+        <StatusNote tone="info" role="status">
+          {`Run ended ${start.data.state}: ${start.data.accepted} accepted, ${start.data.duplicates} duplicates, ${start.data.quarantined} quarantined, ${start.data.rejected} rejected.`}
+        </StatusNote>
+      )}
     </Section>
   );
 }
@@ -74,10 +86,10 @@ function RunList({ profileId }: { profileId: string }) {
   useEffect(() => setPage(1), [profileId]);
   return (
     <Section title="Runs">
-      <div className="grid-form">
-        <label>
+      <FilterBar>
+        <FormField>
           State
-          <select
+          <NativeSelect
             value={state}
             onChange={(e) => {
               setState(e.target.value);
@@ -89,11 +101,11 @@ function RunList({ profileId }: { profileId: string }) {
             <option value="COMPLETED">Completed</option>
             <option value="PARTIAL">Partial</option>
             <option value="FAILED">Failed</option>
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Started from
-          <input
+          <Input
             type="date"
             value={from}
             onChange={(e) => {
@@ -101,10 +113,10 @@ function RunList({ profileId }: { profileId: string }) {
               setPage(1);
             }}
           />
-        </label>
-        <label>
+        </FormField>
+        <FormField>
           Started to
-          <input
+          <Input
             type="date"
             value={to}
             onChange={(e) => {
@@ -112,52 +124,52 @@ function RunList({ profileId }: { profileId: string }) {
               setPage(1);
             }}
           />
-        </label>
-      </div>
+        </FormField>
+      </FilterBar>
       <ErrorNote error={runs.error} />
       {runs.data?.items.length === 0 && <Empty>No runs match.</Empty>}
       {runs.data && runs.data.items.length > 0 && (
         <>
-          <table aria-label="Runs">
-            <thead>
-              <tr>
-                <th scope="col">Profile</th>
-                <th scope="col">Started</th>
-                <th scope="col">Window</th>
-                <th scope="col">State</th>
-                <th scope="col">Mapping</th>
-                <th scope="col">Pages</th>
-                <th scope="col">Received</th>
-                <th scope="col">Accepted</th>
-                <th scope="col">Duplicates</th>
-                <th scope="col">Quarantined</th>
-                <th scope="col">Rejected</th>
-                <th scope="col">Problem</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Runs">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Profile</TableHead>
+                <TableHead scope="col">Started</TableHead>
+                <TableHead scope="col">Window</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Mapping</TableHead>
+                <TableHead scope="col">Pages</TableHead>
+                <TableHead scope="col">Received</TableHead>
+                <TableHead scope="col">Accepted</TableHead>
+                <TableHead scope="col">Duplicates</TableHead>
+                <TableHead scope="col">Quarantined</TableHead>
+                <TableHead scope="col">Rejected</TableHead>
+                <TableHead scope="col">Problem</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {runs.data.items.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.profileCode}</td>
-                  <td>{formatInstant(r.startedAt)}</td>
-                  <td>{`${formatInstant(r.windowStart)} to ${formatInstant(r.windowEnd)}`}</td>
-                  <td>
+                <TableRow key={r.id}>
+                  <TableCell>{r.profileCode}</TableCell>
+                  <TableCell>{formatInstant(r.startedAt)}</TableCell>
+                  <TableCell>{`${formatInstant(r.windowStart)} to ${formatInstant(r.windowEnd)}`}</TableCell>
+                  <TableCell>
                     <StateBadge state={r.state} />
-                  </td>
-                  <td>Revision {r.mappingRevision}</td>
-                  <td>{r.pagesCommitted}</td>
-                  <td>{r.observations}</td>
-                  <td>{r.accepted}</td>
-                  <td>{r.duplicates}</td>
-                  <td>{r.quarantined}</td>
-                  <td>{r.rejected}</td>
-                  <td>{failureText(r.failureCode)}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>Revision {r.mappingRevision}</TableCell>
+                  <TableCell>{r.pagesCommitted}</TableCell>
+                  <TableCell>{r.observations}</TableCell>
+                  <TableCell>{r.accepted}</TableCell>
+                  <TableCell>{r.duplicates}</TableCell>
+                  <TableCell>{r.quarantined}</TableCell>
+                  <TableCell>{r.rejected}</TableCell>
+                  <TableCell>{failureText(r.failureCode)}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           <Pager page={runs.data.page} pageSize={LIST_PAGE_SIZE} total={runs.data.total} onPage={setPage} label="Run pages" noun="run" />
-          <p className="hint">A partial or failed run keeps its checkpoint at the last saved page, and missing punches never count as an absence because of it.</p>
+          <Hint>A partial or failed run keeps its checkpoint at the last saved page, and missing punches never count as an absence because of it.</Hint>
         </>
       )}
     </Section>
@@ -166,6 +178,7 @@ function RunList({ profileId }: { profileId: string }) {
 
 const evidenceText = (e: NonNullable<SyncException['evidence']>) => `${e.employeeKey} · ${e.instant ? formatInstant(e.instant) : `${e.localTime ?? 'no time'} (device time)`} · ${e.direction}`;
 
+/** A record's next step, as its row's last cell: what has happened to it, or the action a person may take. */
 function ExceptionActions({ row, onChanged }: { row: SyncException; onChanged: () => void }) {
   const { can } = useSession();
   const [open, setOpen] = useState(false);
@@ -173,56 +186,69 @@ function ExceptionActions({ row, onChanged }: { row: SyncException; onChanged: (
   const [reason, setReason] = useState('');
   const reprocess = useMutation({ mutationFn: () => api(`/v1/biometric/events/${row.eventId}/reprocess`, { method: 'POST' }), onSettled: onChanged });
   const correct = useMutation({ mutationFn: () => api(`/v1/biometric/events/${row.eventId}/correct`, { body: { normalisedTime: time.trim(), reason: reason.trim() } }), onSettled: onChanged });
-  if (row.nextStep === 'RESOLVED') return <Badge tone="good">Since accepted</Badge>;
-  if (row.failureCode === 'CONFLICTING_PAYLOAD') {
+  if (row.nextStep === 'RESOLVED') {
     return (
-      <span className="hint">
-        The kept event was not overwritten. To change the day, use <Link to="/attendance/control">attendance control</Link>.
-      </span>
+      <RowActionsCell>
+        <Badge tone="good">Since accepted</Badge>
+      </RowActionsCell>
     );
   }
-  if (!can(REPROCESS)) return null;
+  if (row.failureCode === 'CONFLICTING_PAYLOAD') {
+    // A sentence, not a button: the cell takes the width its words need.
+    return (
+      <TableCell>
+        <Hint as="span">
+          The kept event was not overwritten. To change the day, use <Link to="/attendance/control">attendance control</Link>.
+        </Hint>
+      </TableCell>
+    );
+  }
+  if (!can(REPROCESS)) return <RowActionsCell />;
   if (row.nextStep === 'REPROCESS') {
     return (
-      <>
-        <button type="button" className="link" disabled={reprocess.isPending} onClick={() => reprocess.mutate()}>
-          Reprocess {row.sourceEventKey}
-        </button>
+      <RowActionsCell expanded={!!reprocess.error}>
+        <RowActions>
+          <Button type="button" variant="outline" size="sm" disabled={reprocess.isPending} onClick={() => reprocess.mutate()}>
+            Reprocess {row.sourceEventKey}
+          </Button>
+        </RowActions>
         <Refusal error={reprocess.error} />
-      </>
+      </RowActionsCell>
     );
   }
-  if (row.nextStep !== 'CORRECT_TIME') return null;
+  if (row.nextStep !== 'CORRECT_TIME') return <RowActionsCell />;
   return (
-    <>
-      <button type="button" className="link" onClick={() => setOpen(!open)}>
-        Correct time of {row.sourceEventKey}
-      </button>
+    <RowActionsCell expanded={open}>
+      <RowActions>
+        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(!open)}>
+          Correct time of {row.sourceEventKey}
+        </Button>
+      </RowActions>
       {open && (
         <form
-          className="stack"
+          className="mt-3 flex flex-col items-start gap-3"
           aria-label={`Correct time of ${row.sourceEventKey}`}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             correct.mutate();
           }}
         >
-          <label>
+          <FormField>
             Time with its UTC offset
-            <input required maxLength={40} placeholder="YYYY-MM-DDThh:mm:ss±hh:mm" value={time} onChange={(e) => setTime(e.target.value)} />
-          </label>
-          <label>
+            <Input required maxLength={40} placeholder="YYYY-MM-DDThh:mm:ss±hh:mm" value={time} onChange={(e) => setTime(e.target.value)} />
+          </FormField>
+          <FormField>
             Reason
-            <textarea required maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-          </label>
-          <p className="hint">Confirm the reading on the device. The offset settles which of the two readings of a repeated hour this is. The record as received stays on file.</p>
-          <button type="submit" disabled={correct.isPending || !reason.trim()}>
+            <Textarea required maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </FormField>
+          <Hint>Confirm the reading on the device. The offset settles which of the two readings of a repeated hour this is. The record as received stays on file.</Hint>
+          <Button type="submit" disabled={correct.isPending || !reason.trim()}>
             Confirm correction
-          </button>
+          </Button>
           <Refusal error={correct.error} />
         </form>
       )}
-    </>
+    </RowActionsCell>
   );
 }
 
@@ -241,10 +267,10 @@ function ExceptionList({ profileId }: { profileId: string }) {
   useEffect(() => setPage(1), [profileId]);
   return (
     <Section title="Rejected and quarantined records">
-      <div className="grid-form">
-        <label>
+      <FilterBar>
+        <FormField>
           Outcome
-          <select
+          <NativeSelect
             value={outcome}
             onChange={(e) => {
               setOutcome(e.target.value);
@@ -254,9 +280,9 @@ function ExceptionList({ profileId }: { profileId: string }) {
             <option value="">Any</option>
             <option value="QUARANTINED">Quarantined</option>
             <option value="REJECTED">Rejected</option>
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <CheckField>
           <input
             type="checkbox"
             checked={openOnly}
@@ -266,44 +292,44 @@ function ExceptionList({ profileId }: { profileId: string }) {
             }}
           />{' '}
           Leave out those since accepted
-        </label>
-      </div>
+        </CheckField>
+      </FilterBar>
       <ErrorNote error={rows.error} />
       {rows.data?.items.length === 0 && <Empty>Nothing to show.</Empty>}
       {rows.data && rows.data.items.length > 0 && (
         <>
-          <table aria-label="Rejected and quarantined records">
-            <thead>
-              <tr>
-                <th scope="col">Profile</th>
-                <th scope="col">Received</th>
-                <th scope="col">Outcome</th>
-                <th scope="col">Why</th>
-                <th scope="col">Event key</th>
-                <th scope="col">Device said</th>
-                <th scope="col">Kept on record</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Rejected and quarantined records">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Profile</TableHead>
+                <TableHead scope="col">Received</TableHead>
+                <TableHead scope="col">Outcome</TableHead>
+                <TableHead scope="col">Why</TableHead>
+                <TableHead scope="col">Event key</TableHead>
+                <TableHead scope="col">Device said</TableHead>
+                <TableHead scope="col">Kept on record</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {rows.data.items.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.profileCode}</td>
-                  <td>{formatInstant(r.observedAt)}</td>
-                  <td>
+                <TableRow key={r.id}>
+                  <TableCell>{r.profileCode}</TableCell>
+                  <TableCell>{formatInstant(r.observedAt)}</TableCell>
+                  <TableCell>
                     <StateBadge state={r.outcome} />
-                  </td>
-                  <td>{failureText(r.failureCode)}</td>
-                  <td>{r.sourceEventKey ?? '—'}</td>
-                  <td>{r.evidence ? evidenceText(r.evidence) : '—'}</td>
-                  <td>{r.kept ? `${r.kept.employeeKey} · ${formatInstant(r.kept.instant)} · ${r.kept.direction}` : '—'}</td>
-                  <td>
-                    <ExceptionActions row={r} onChanged={refresh} />
-                  </td>
-                </tr>
+                  </TableCell>
+                  <TableCell>{failureText(r.failureCode)}</TableCell>
+                  <TableCell>{r.sourceEventKey ?? '—'}</TableCell>
+                  <TableCell>{r.evidence ? evidenceText(r.evidence) : '—'}</TableCell>
+                  <TableCell>{r.kept ? `${r.kept.employeeKey} · ${formatInstant(r.kept.instant)} · ${r.kept.direction}` : '—'}</TableCell>
+                  <ExceptionActions row={r} onChanged={refresh} />
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
           <Pager page={rows.data.page} pageSize={LIST_PAGE_SIZE} total={rows.data.total} onPage={setPage} label="Record pages" noun="record" />
         </>
       )}
@@ -322,7 +348,12 @@ export function BiometricSyncMonitorPage() {
   return (
     <>
       <Section title="Biometric sync monitor">
-        <ProfilePicker value={profileId} onChange={setProfileId} anyLabel="All profiles" />
+        {/* A grid of one field, so the choice takes a column's width rather than the whole card's. */}
+        <FormGrid asChild>
+          <div>
+            <ProfilePicker value={profileId} onChange={setProfileId} anyLabel="All profiles" />
+          </div>
+        </FormGrid>
       </Section>
       <RunList profileId={profileId} />
       <ExceptionList profileId={profileId} />

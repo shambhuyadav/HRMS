@@ -2,11 +2,17 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, ApiError, formatDate, localDateTime, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, LIST_PAGE_SIZE, Pager, Section, When } from '../../ui';
 import { Refusal } from './refusals';
-import { AbscondingMark, FIELDS, FLUSH, H3, Loading, MAX_NOTE, NOTE_KINDS, NOTE_READ, NOTE_WRITE, noteTypeText, Notice, type NoticeState, type Paged, pagedUrl, Problem, QueryProblem, ReasonField, shown, totalOf, useKeys, userText } from './shared';
+import { AbscondingMark, FIELDS, MAX_NOTE, NOTE_KINDS, NOTE_READ, NOTE_WRITE, noteTypeText, Notice, type NoticeState, type Paged, pagedUrl, Problem, QueryProblem, ReasonField, shown, totalOf, useKeys, userText } from './shared';
 import type { ExitCase, NoteBody, NoteItem, NoteKind, ProcessSummary } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -53,11 +59,11 @@ export function RestrictedNotes({ employeeId, own, processes, exits }: { employe
   };
   return (
     <Section title="Restricted HR notes">
-      <p className="hint">Notes, remarks and warnings visible only to authorised HR. They are never changed: a correction is a new note that supersedes the earlier one.</p>
+      <Hint>Notes, remarks and warnings visible only to authorised HR. They are never changed: a correction is a new note that supersedes the earlier one.</Hint>
       <Notice notice={notice} />
       {canRead && (
         <>
-          {notes.isPending && <Loading>Loading the notes…</Loading>}
+          {notes.isPending && <LoadingLine>Loading the notes…</LoadingLine>}
           <QueryProblem error={notes.error} forbidden="The selected role cannot read restricted notes." missing="This employee is not in the selected role’s scope." />
           {items && items.length === 0 && <Empty>No notes about this employee.</Empty>}
           {items && items.length > 0 && (
@@ -67,24 +73,24 @@ export function RestrictedNotes({ employeeId, own, processes, exits }: { employe
                   <div>
                     <Badge tone={n.kind === 'WARNING' ? 'bad' : 'neutral'}>{noteTypeText(n)}</Badge> <When at={n.createdAt} /> by {userText(n.createdBy, me?.userId ?? null)}
                   </div>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                  {(n.processId || n.exitCaseId) && <div className="hint">{linkText(n)}</div>}
-                  {n.supersedesNoteId && <div className="hint">Corrects an earlier note.</div>}
+                  <div className="whitespace-pre-wrap">{n.body}</div>
+                  {(n.processId || n.exitCaseId) && <HintLine>{linkText(n)}</HintLine>}
+                  {n.supersedesNoteId && <HintLine>Corrects an earlier note.</HintLine>}
                   {n.supersededByNoteId ? (
-                    <div className="hint">Corrected by a later note.</div>
+                    <HintLine>Corrected by a later note.</HintLine>
                   ) : (
                     canWrite && (
                       <div>
-                        <button
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="outline"
                           onClick={() => {
                             setCorrecting(n);
                             setFormKey((k) => k + 1);
                           }}
                         >
                           Correct this note
-                        </button>
+                        </Button>
                       </div>
                     )
                   )}
@@ -171,27 +177,27 @@ function NoteForm({
   };
   return (
     <form aria-label={correcting ? 'Correct a note' : 'Add a note'} className="stack" onSubmit={submit}>
-      <h3 style={H3}>{correcting ? 'Correct a note' : 'Add a note'}</h3>
+      <CardSubheading>{correcting ? 'Correct a note' : 'Add a note'}</CardSubheading>
       {correcting && (
-        <p className="hint" style={FLUSH}>
+        <Hint className="m-0">
           Correcting the {noteTypeText(correcting)} of {localDateTime(correcting.createdAt)}: the correction is saved as a new note and the earlier one stays.
-        </p>
+        </Hint>
       )}
-      <div style={FIELDS}>
-        <label>
+      <div className={FIELDS}>
+        <FormField>
           Kind
-          <select value={kind} onChange={(e) => setKind((NOTE_KINDS.find(([k]) => k === e.target.value)?.[0] ?? 'NOTE') as NoteKind)}>
+          <NativeSelect value={kind} onChange={(e) => setKind((NOTE_KINDS.find(([k]) => k === e.target.value)?.[0] ?? 'NOTE') as NoteKind)}>
             {NOTE_KINDS.map(([k, label]) => (
               <option key={k} value={k}>
                 {label}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         {kind === 'WARNING' && <AbscondingMark checked={absconding} onChange={setAbsconding} />}
-        <label>
+        <FormField>
           Linked to
-          <select value={link} onChange={(e) => setLink(e.target.value)}>
+          <NativeSelect value={link} onChange={(e) => setLink(e.target.value)}>
             <option value="">Not linked</option>
             {processes.map((p) => (
               <option key={p.id} value={`process:${p.id}`}>
@@ -203,21 +209,21 @@ function NoteForm({
                 {`Exit: resigned ${formatDate(x.requestDate)}`}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       </div>
       <ReasonField label="Note (restricted to authorised HR)" value={body} onChange={setBody} max={MAX_NOTE} />
       <Problem text={problem} />
-      <div className="row">
-        <button type="submit" disabled={save.isPending}>
+      <ButtonRow>
+        <Button type="submit" disabled={save.isPending}>
           {correcting ? 'Save correction' : 'Add note'}
-        </button>
+        </Button>
         {correcting && (
-          <button type="button" className="secondary" disabled={save.isPending} onClick={onCancel}>
+          <Button type="button" variant="outline" disabled={save.isPending} onClick={onCancel}>
             Cancel correction
-          </button>
+          </Button>
         )}
-      </div>
+      </ButtonRow>
       <Refusal error={save.error} action="note" />
     </form>
   );

@@ -1,11 +1,16 @@
 // Appraisal lookups: the cycle, department and employee pickers.
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, type EmployeeHit, personLabel, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, NotPermitted } from '../../ui';
 import { QueryProblem } from './refusals';
-import { type Cycle, CYCLE_READ, EMPLOYEE_LIST, FLUSH, type MasterItem, ORG_READ, shown, useKeys } from './shared';
+import { type Cycle, CYCLE_READ, EMPLOYEE_LIST, type MasterItem, ORG_READ, shown, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Lookups: cycles, departments, employees
@@ -39,17 +44,17 @@ export function CycleSelect({ label, value, onChange, openOnly, allLabel }: { la
   const items = (shown(cycles)?.items ?? []).filter((c) => !openOnly || c.state === 'OPEN');
   return (
     <>
-      <label>
+      <FormField>
         {label}
-        <select value={value} onChange={(e) => onChange(e.target.value)} required={!allLabel}>
+        <NativeSelect value={value} onChange={(e) => onChange(e.target.value)} required={!allLabel}>
           <option value="">{cycles.isLoading ? 'Loading…' : (allLabel ?? 'Choose…')}</option>
           {items.map((c) => (
             <option key={c.id} value={c.id}>
               {c.code}: {c.name} ({c.state === 'OPEN' ? 'open' : 'closed'})
             </option>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {cycles.error ? <QueryProblem error={cycles.error} forbidden="The selected role cannot list appraisal cycles." /> : null}
     </>
   );
@@ -60,19 +65,22 @@ export function DepartmentSelect({ value, onChange }: { value: string; onChange:
   const departments = useDepartments();
   if (!can(ORG_READ)) return null;
   return (
-    <label>
+    <FormField>
       Department
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">All in scope</option>
         {(shown(departments)?.items ?? []).map((d) => (
           <option key={d.id} value={d.id}>
             {d.name} ({d.code})
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
 }
+
+/** One matching employee as a full-width choice, its words wrapping, tinted red on hover (the old `.choices` button; as in the pilot). */
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
 
 /** Whom to enrol: an employee found by an employee search (the server checks row scope and refuses one's own record). */
 export function EmployeePicker({ value, onChange }: { value: EmployeeHit | null; onChange: (e: EmployeeHit | null) => void }) {
@@ -94,28 +102,30 @@ export function EmployeePicker({ value, onChange }: { value: EmployeeHit | null;
   if (!canSearch) return <NotPermitted>The selected role cannot search employees, so it cannot choose whom to enrol.</NotPermitted>;
   const found = term !== '' ? shown(hits) : undefined;
   return (
-    <div className="wide">
-      <p style={FLUSH}>
+    <div className="col-span-full flex flex-col gap-[0.6rem]">
+      <p className="m-0">
         Employee to appraise: <strong>{value ? personLabel(value) : 'none chosen yet'}</strong>{' '}
         {value && (
-          <button type="button" className="secondary" onClick={() => onChange(null)}>
+          <Button type="button" variant="outline" onClick={() => onChange(null)}>
             Clear
-          </button>
+          </Button>
         )}
       </p>
-      <label>
+      <FormField>
         Find the employee
-        <input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
-      </label>
-      {term !== '' && hits.isLoading && <p className="hint">Searching…</p>}
+        <Input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
+      </FormField>
+      {term !== '' && hits.isLoading && <Hint className="m-0">Searching…</Hint>}
       <QueryProblem error={hits.error} forbidden="The selected role cannot search employees." />
       {found && found.items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
       {found && found.items.length > 0 && (
-        <ul className="choices" aria-label="Matching employees">
+        <ul className="m-0 flex list-none flex-col gap-[0.6rem] p-0" aria-label="Matching employees">
           {found.items.map((e) => (
             <li key={e.id}>
-              <button
+              <Button
                 type="button"
+                variant="outline"
+                className={CHOICE_BUTTON}
                 aria-label={`Choose ${personLabel(e)}`}
                 onClick={() => {
                   onChange(e);
@@ -124,7 +134,7 @@ export function EmployeePicker({ value, onChange }: { value: EmployeeHit | null;
                 }}
               >
                 {personLabel(e)} · {readable(e.status).toLowerCase()}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

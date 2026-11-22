@@ -5,6 +5,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ComponentType, ReactNode } from 'react';
 import { Link, useInRouterContext } from 'react-router-dom';
+import { Hint } from '@/components/hint';
 import { api, formatDate } from '../api';
 import { useSession } from '../session';
 import { Empty, ErrorNote, scopeWords, Section } from '../ui';
@@ -59,9 +60,9 @@ function AccessGrantQueue() {
           return (
             <li key={g.id}>
               <strong>{`${roleName(g.roleCode)} for ${g.userAccountKey ?? 'an account'}`}</strong>
-              <span className="hint">{`${scopeWords(g.scopeKind)}, from ${formatDate(g.effectiveFrom)}${g.requestedByAccountKey ? `; requested by ${g.requestedByAccountKey}` : ''}`}</span>
+              <Hint as="span">{`${scopeWords(g.scopeKind)}, from ${formatDate(g.effectiveFrom)}${g.requestedByAccountKey ? `; requested by ${g.requestedByAccountKey}` : ''}`}</Hint>
               {mine ? (
-                <span className="hint">You asked for this grant or it is yours, so another administrator approves it.</span>
+                <Hint as="span">You asked for this grant or it is yours, so another administrator approves it.</Hint>
               ) : (
                 <Review to="/access">Review on User access</Review>
               )}
@@ -102,9 +103,9 @@ function DelegationQueue() {
           return (
             <li key={d.id}>
               <strong>{`${who(d.delegator)} to ${who(d.delegate)}`}</strong>
-              <span className="hint">{`${d.kinds.map(words).join(', ') || 'decisions'}; ${formatDate(d.effectiveFrom)} to ${formatDate(d.effectiveTo)}`}</span>
+              <Hint as="span">{`${d.kinds.map(words).join(', ') || 'decisions'}; ${formatDate(d.effectiveFrom)} to ${formatDate(d.effectiveTo)}`}</Hint>
               {mine ? (
-                <span className="hint">You are part of this delegation, so another administrator approves it.</span>
+                <Hint as="span">You are part of this delegation, so another administrator approves it.</Hint>
               ) : (
                 <Review to="/access/delegations">Review on Delegation approvals</Review>
               )}
@@ -144,9 +145,9 @@ function RoleChangeQueue() {
         {items?.map((c) => (
           <li key={c.id}>
             <strong>{`${CHANGE_WORDS[c.change]} ${c.permission} in ${words(c.roleCode)}`}</strong>
-            <span className="hint">{`Proposed by ${c.requestedByAccountKey}`}</span>
+            <Hint as="span">{`Proposed by ${c.requestedByAccountKey}`}</Hint>
             {me && c.requestedByAccountKey === me.accountKey ? (
-              <span className="hint">You proposed this change, so another administrator approves it.</span>
+              <Hint as="span">You proposed this change, so another administrator approves it.</Hint>
             ) : (
               <Review to="/access/role-permissions">Review on Role permissions</Review>
             )}

@@ -3,13 +3,45 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { ButtonRow, CheckField, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, type EmployeeHit, formatDate, personLabel, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, Notice, NotPermitted, Section, When } from '../../ui';
 import { EmployeeSearch, QuestionChoice, useChoices } from './lookups';
 import { AMOUNT, WHOLE } from './plans';
 import { Pager, Problem, QueryProblem, Refusal } from './refusals';
-import { COST_MANAGE, CostText, FEEDBACK_READ, FeedbackState, FLUSH, has, optional, PAGE_SIZE, PART_MANAGE, PART_READ, participantLabel, ParticipationState, PATHS, PLAN_MANAGE, PLAN_READ, SCROLL, shown, STATE_LABEL, STATES, TEXTAREA, type TransitionAction, TRANSITIONS, useKeys, useRefetchAll, ViewBadge } from './shared';
+import {
+  COST_MANAGE,
+  CostText,
+  FEEDBACK_READ,
+  FeedbackState,
+  has,
+  optional,
+  PAGE_SIZE,
+  PART_MANAGE,
+  PART_READ,
+  participantLabel,
+  ParticipationState,
+  PATHS,
+  PLAN_MANAGE,
+  PLAN_READ,
+  shown,
+  STATE_LABEL,
+  STATES,
+  type TransitionAction,
+  TRANSITIONS,
+  useKeys,
+  useRefetchAll,
+  ViewBadge,
+} from './shared';
 import type { Participant, ParticipantPage, PlanDetail } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -25,28 +57,38 @@ export function PlanScreen() {
   const plan = shown(detail);
   const active = plan?.state === 'ACTIVE';
   return (
-    <div className="stack">
-      <p style={FLUSH}>
-        <Link to={PATHS.plans}>Back to the training plans</Link>
-      </p>
-      {detail.isLoading && <p className="hint loading">Loading…</p>}
-      <QueryProblem error={detail.error} forbidden="The selected role cannot read this plan." />
-      {plan && (
-        <>
-          <PlanFacts plan={plan} />
-          {can(PLAN_MANAGE) && active && <EditPlanForm plan={plan} />}
-          {can(PLAN_MANAGE) && active && <CancelPlanForm plan={plan} />}
-          {can(PART_READ) ? <Participants plan={plan} /> : <NotPermitted>The selected role cannot read the participants.</NotPermitted>}
-        </>
-      )}
-    </div>
+    <>
+      {/* A direct child of the page, so the way back shows above the page's title; the cards keep their own spacing below. */}
+      <BackLink to={PATHS.plans}>Back to the training plans</BackLink>
+      <div className="stack">
+        {detail.isLoading && <LoadingLine>Loading…</LoadingLine>}
+        <QueryProblem error={detail.error} forbidden="The selected role cannot read this plan." />
+        {plan && (
+          <>
+            <PlanFacts plan={plan} />
+            {can(PLAN_MANAGE) && active && <EditPlanForm plan={plan} />}
+            {can(PLAN_MANAGE) && active && <CancelPlanForm plan={plan} />}
+            {can(PART_READ) ? <Participants plan={plan} /> : <NotPermitted>The selected role cannot read the participants.</NotPermitted>}
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
 function PlanFacts({ plan }: { plan: PlanDetail }) {
   const { can } = useSession();
   return (
-    <Section title={`${plan.title} (${plan.code})`} actions={can(FEEDBACK_READ) ? <Link to={PATHS.feedback(plan.id)}>Feedback summary</Link> : undefined}>
+    <Section
+      title={`${plan.title} (${plan.code})`}
+      actions={
+        can(FEEDBACK_READ) ? (
+          <Button asChild variant="outline" size="sm">
+            <Link to={PATHS.feedback(plan.id)}>Feedback summary</Link>
+          </Button>
+        ) : undefined
+      }
+    >
       <dl className="kv">
         <Item term="View">
           <ViewBadge view={plan.view} />
@@ -79,7 +121,7 @@ function PlanFacts({ plan }: { plan: PlanDetail }) {
           </Item>
         )}
       </dl>
-      {plan.state === 'CANCELLED' && <p className="hint">A cancelled plan is final: it takes no changes, nominations or attendance.</p>}
+      {plan.state === 'CANCELLED' && <Hint>A cancelled plan is final: it takes no changes, nominations or attendance.</Hint>}
     </Section>
   );
 }
@@ -162,65 +204,65 @@ function EditPlanForm({ plan }: { plan: PlanDetail }) {
   };
   return (
     <Section title="Change the plan">
-      <form className="grid-form" aria-label="Change the plan" onSubmit={submit} noValidate>
-        <label className="wide">
+      <FormGrid aria-label="Change the plan" onSubmit={submit} noValidate>
+        <FormField className="col-span-full">
           Course title
-          <input value={draft.title} maxLength={200} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-        </label>
-        <label>
+          <Input value={draft.title} maxLength={200} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+        </FormField>
+        <FormField>
           Start date
-          <input type="date" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} />
-        </label>
-        <label>
+          <Input type="date" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} />
+        </FormField>
+        <FormField>
           End date
-          <input type="date" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} />
-        </label>
-        <label>
+          <Input type="date" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} />
+        </FormField>
+        <FormField>
           Mode
-          <select value={draft.modeCode} onChange={(e) => setDraft({ ...draft, modeCode: e.target.value })}>
+          <NativeSelect value={draft.modeCode} onChange={(e) => setDraft({ ...draft, modeCode: e.target.value })}>
             {!(shown(modes)?.items ?? []).some((m) => m.code === original.modeCode) && <option value={original.modeCode}>{plan.mode.label}</option>}
             {(shown(modes)?.items ?? []).map((m) => (
               <option key={m.code} value={m.code}>
                 {m.label}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Venue
-          <input value={draft.venue} maxLength={300} onChange={(e) => setDraft({ ...draft, venue: e.target.value })} />
-        </label>
-        <label>
+          <Input value={draft.venue} maxLength={300} onChange={(e) => setDraft({ ...draft, venue: e.target.value })} />
+        </FormField>
+        <FormField>
           Trainer
-          <input value={draft.trainer} maxLength={200} onChange={(e) => setDraft({ ...draft, trainer: e.target.value })} />
-        </label>
-        <label>
+          <Input value={draft.trainer} maxLength={200} onChange={(e) => setDraft({ ...draft, trainer: e.target.value })} />
+        </FormField>
+        <FormField>
           Capacity (places)
-          <input inputMode="numeric" value={draft.capacity} maxLength={9} onChange={(e) => setDraft({ ...draft, capacity: e.target.value })} />
-        </label>
+          <Input inputMode="numeric" value={draft.capacity} maxLength={9} onChange={(e) => setDraft({ ...draft, capacity: e.target.value })} />
+        </FormField>
         {costEditable && (
           <>
-            <label>
+            <CheckField>
               <input type="checkbox" checked={draft.noCost} onChange={(e) => setDraft({ ...draft, noCost: e.target.checked })} /> No cost
-            </label>
+            </CheckField>
             {!draft.noCost && (
               <>
-                <label>
+                <FormField>
                   Cost
-                  <input inputMode="decimal" value={draft.costAmount} maxLength={18} onChange={(e) => setDraft({ ...draft, costAmount: e.target.value })} />
-                </label>
-                <label>
+                  <Input inputMode="decimal" value={draft.costAmount} maxLength={18} onChange={(e) => setDraft({ ...draft, costAmount: e.target.value })} />
+                </FormField>
+                <FormField>
                   Cost currency
-                  <input value={draft.costCurrency} maxLength={3} onChange={(e) => setDraft({ ...draft, costCurrency: e.target.value })} />
-                </label>
+                  <Input value={draft.costCurrency} maxLength={3} onChange={(e) => setDraft({ ...draft, costCurrency: e.target.value })} />
+                </FormField>
               </>
             )}
           </>
         )}
-        <label className="wide">
+        <CheckField className="col-span-full">
           <input type="checkbox" checked={draft.selfNomination} onChange={(e) => setDraft({ ...draft, selfNomination: e.target.checked })} /> Employees may nominate
           themselves
-        </label>
+        </CheckField>
         {!plan.feedbackRecorded && (
           <QuestionChoice
             legend="Feedback questions"
@@ -229,30 +271,24 @@ function EditPlanForm({ plan }: { plan: PlanDetail }) {
             onChange={(questionCodes) => setDraft({ ...draft, questionCodes })}
           />
         )}
-        <div className="wide">
-          <p style={FLUSH}>
+        <div className="col-span-full flex flex-col gap-[0.6rem]">
+          <p className="m-0">
             New owner: <strong>{owner ? owner.label : 'unchanged'}</strong>{' '}
             {owner && (
-              <button type="button" className="secondary" onClick={() => setOwner(null)}>
+              <Button type="button" variant="outline" onClick={() => setOwner(null)}>
                 Keep the current owner
-              </button>
+              </Button>
             )}
           </p>
           <EmployeeSearch label="Find a new owner" onPick={(e) => setOwner({ id: e.id, label: personLabel(e) })} exclude={[plan.owner.employeeId]} />
         </div>
-        <div className="wide">
-          <button type="submit" disabled={save.isPending}>
-            {save.isPending ? 'Saving…' : 'Save the changes'}
-          </button>
-        </div>
-      </form>
+        <Button type="submit" disabled={save.isPending}>
+          {save.isPending ? 'Saving…' : 'Save the changes'}
+        </Button>
+      </FormGrid>
       <Problem text={problem} />
       <Refusal error={save.error} action="update" />
-      {saved && (
-        <p role="status" className="ok">
-          The plan was saved.
-        </p>
-      )}
+      {saved && <Notice notice={{ text: 'The plan was saved.', ok: true }} />}
     </Section>
   );
 }
@@ -286,18 +322,16 @@ function CancelPlanForm({ plan }: { plan: PlanDetail }) {
   };
   return (
     <Section title="Cancel the plan">
-      <form className="grid-form" aria-label="Cancel the plan" onSubmit={submit} noValidate>
-        <label className="wide">
+      <FormGrid aria-label="Cancel the plan" onSubmit={submit} noValidate>
+        <FormField className="col-span-full">
           Reason for cancelling
-          <textarea style={TEXTAREA} rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-        </label>
-        <p className="hint wide">Cancelling is final. Nominations and confirmed places are cancelled with the plan; a plan with recorded attendance cannot be cancelled.</p>
-        <div className="wide">
-          <button type="submit" disabled={cancel.isPending}>
-            {cancel.isPending ? 'Cancelling…' : 'Cancel the plan'}
-          </button>
-        </div>
-      </form>
+          <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </FormField>
+        <Hint>Cancelling is final. Nominations and confirmed places are cancelled with the plan; a plan with recorded attendance cannot be cancelled.</Hint>
+        <Button type="submit" disabled={cancel.isPending}>
+          {cancel.isPending ? 'Cancelling…' : 'Cancel the plan'}
+        </Button>
+      </FormGrid>
       <Problem text={problem} />
       <Refusal error={cancel.error} action="cancel" />
       <Notice notice={notice} />
@@ -306,7 +340,7 @@ function CancelPlanForm({ plan }: { plan: PlanDetail }) {
 }
 
 function Participants({ plan }: { plan: PlanDetail }) {
-  const { can, me } = useSession();
+  const { can } = useSession();
   const keys = useKeys();
   const refetchAll = useRefetchAll();
   const [state, setState] = useState('');
@@ -348,97 +382,34 @@ function Participants({ plan }: { plan: PlanDetail }) {
   return (
     <>
       <Section title="Participants">
-        <form className="grid-form" aria-label="Filter the participants" onSubmit={(e) => e.preventDefault()}>
-          <label>
-            Participation state
-            <select
-              value={state}
-              onChange={(e) => {
-                setState(e.target.value);
-                setPage(1);
-                // A selection is only of the rows on screen: an action never reaches a participation no longer shown.
-                setSelected([]);
-              }}
-            >
-              <option value="">All states</option>
-              {STATES.map((s) => (
-                <option key={s} value={s}>
-                  {STATE_LABEL[s]}
-                </option>
-              ))}
-            </select>
-          </label>
-        </form>
-        {data && !data.scope.companyWide && <p className="hint">Only the participants in the selected role’s scope are listed.</p>}
-        {list.isLoading && <p className="hint loading">Loading…</p>}
+        <FilterBar asChild>
+          <form aria-label="Filter the participants" onSubmit={(e) => e.preventDefault()}>
+            <FormField>
+              Participation state
+              <NativeSelect
+                value={state}
+                onChange={(e) => {
+                  setState(e.target.value);
+                  setPage(1);
+                  // A selection is only of the rows on screen: an action never reaches a participation no longer shown.
+                  setSelected([]);
+                }}
+              >
+                <option value="">All states</option>
+                {STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATE_LABEL[s]}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FormField>
+          </form>
+        </FilterBar>
+        {data && !data.scope.companyWide && <Hint>Only the participants in the selected role’s scope are listed.</Hint>}
+        {list.isLoading && <LoadingLine>Loading…</LoadingLine>}
         <QueryProblem error={list.error} forbidden="The selected role cannot read the participants." />
         {data && data.items.length === 0 && <Empty>No participants{state ? ' in this state' : ' yet'}.</Empty>}
-        {data && data.items.length > 0 && (
-          <div style={SCROLL}>
-            <table aria-label="Participants">
-              <thead>
-                <tr>
-                  {manage && <th>Select</th>}
-                  <th>Employee</th>
-                  <th>State</th>
-                  <th>Nominated</th>
-                  <th>Confirmed</th>
-                  <th>Attendance recorded</th>
-                  <th>Completed</th>
-                  <th>Cancelled</th>
-                  <th>Feedback</th>
-                  {withReasons && <th>Cancellation reason</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((t) => {
-                  const own = me?.employeeId === t.employeeId;
-                  return (
-                    <tr key={t.id}>
-                      {manage && (
-                        <td>
-                          {own ? (
-                            <span className="hint">Your own: another coordinator records it</span>
-                          ) : (
-                            <input
-                              type="checkbox"
-                              aria-label={`Select ${participantLabel(t)}`}
-                              checked={selected.includes(t.id)}
-                              onChange={(e) => toggle(t.id, e.target.checked)}
-                            />
-                          )}
-                        </td>
-                      )}
-                      <td>{can(PART_READ) ? <Link to={PATHS.participant(t.id)}>{participantLabel(t)}</Link> : participantLabel(t)}</td>
-                      <td>
-                        <ParticipationState state={t.state} />
-                      </td>
-                      <td>
-                        <When at={t.nominatedAt} /> {t.selfNominated ? '(self-nominated)' : ''}
-                      </td>
-                      <td>
-                        <When at={t.confirmedAt} />
-                      </td>
-                      <td>
-                        <When at={t.attendanceRecordedAt} />
-                      </td>
-                      <td>
-                        <When at={t.completedAt} />
-                      </td>
-                      <td>
-                        <When at={t.cancelledAt} />
-                      </td>
-                      <td>
-                        <FeedbackState status={t.feedbackStatus} />
-                      </td>
-                      {withReasons && <td>{optional(t.cancellationReason)}</td>}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {data && data.items.length > 0 && <ParticipantsTable items={data.items} manage={manage} withReasons={withReasons} selected={selected} onToggle={toggle} />}
         {data && (
           <Pager
             page={data.page}
@@ -453,20 +424,20 @@ function Participants({ plan }: { plan: PlanDetail }) {
         )}
         {manage && data && data.items.length > 0 && (
           <div className="stack" role="group" aria-label="Participation actions">
-            <label>
+            <FormField>
               Reason (needed to cancel, or to correct recorded attendance)
-              <textarea style={TEXTAREA} rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-            </label>
-            <div className="row">
+              <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+            </FormField>
+            <ButtonRow>
               {TRANSITIONS.map(([action, label]) => (
-                <button key={action} type="button" className={action === 'CANCEL' ? 'secondary' : undefined} disabled={act.isPending} onClick={() => run(action)}>
+                <Button key={action} type="button" variant={action === 'CANCEL' ? 'outline' : 'default'} disabled={act.isPending} onClick={() => run(action)}>
                   {label}
-                </button>
+                </Button>
               ))}
-            </div>
-            <p className="hint" style={FLUSH}>
+            </ButtonRow>
+            <Hint className="m-0">
               {selected.length} selected. Confirmation is checked against the capacity; attendance is recorded from the start date and completion from the end date.
-            </p>
+            </Hint>
             <Problem text={problem} />
             <Refusal error={act.error} action="transition" nameOf={(id) => names.get(id)} />
             <Notice notice={notice} />
@@ -476,6 +447,78 @@ function Participants({ plan }: { plan: PlanDetail }) {
       {manage && <NominateForm plan={plan} />}
     </>
   );
+}
+
+/** The plan's participants on this page; with `manage`, each row other than one's own can be selected for an action. */
+function ParticipantsTable(props: { items: Participant[]; manage: boolean; withReasons: boolean; selected: string[]; onToggle: (id: string, on: boolean) => void }) {
+  const { items, manage, withReasons, selected, onToggle } = props;
+  const { can, me } = useSession();
+  return (
+    <Table aria-label="Participants">
+      <TableHeader>
+        <TableRow>
+          {manage && <TableHead scope="col">Select</TableHead>}
+          <TableHead scope="col">Employee</TableHead>
+          <TableHead scope="col">State</TableHead>
+          <TableHead scope="col">Nominated</TableHead>
+          <TableHead scope="col">Confirmed</TableHead>
+          <TableHead scope="col">Attendance recorded</TableHead>
+          <TableHead scope="col">Completed</TableHead>
+          <TableHead scope="col">Cancelled</TableHead>
+          <TableHead scope="col">Feedback</TableHead>
+          {withReasons && <TableHead scope="col">Cancellation reason</TableHead>}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((t) => {
+          const own = me?.employeeId === t.employeeId;
+          return (
+            <TableRow key={t.id}>
+              {manage && (
+                <TableCell>
+                  {own ? (
+                    <Hint as="span">Your own: another coordinator records it</Hint>
+                  ) : (
+                    <input type="checkbox" aria-label={`Select ${participantLabel(t)}`} checked={selected.includes(t.id)} onChange={(e) => onToggle(t.id, e.target.checked)} />
+                  )}
+                </TableCell>
+              )}
+              <TableCell>{can(PART_READ) ? <Link to={PATHS.participant(t.id)}>{participantLabel(t)}</Link> : participantLabel(t)}</TableCell>
+              <TableCell>
+                <ParticipationState state={t.state} />
+              </TableCell>
+              <TableCell>
+                <When at={t.nominatedAt} /> {t.selfNominated ? '(self-nominated)' : ''}
+              </TableCell>
+              <TableCell>
+                <When at={t.confirmedAt} />
+              </TableCell>
+              <TableCell>
+                <When at={t.attendanceRecordedAt} />
+              </TableCell>
+              <TableCell>
+                <When at={t.completedAt} />
+              </TableCell>
+              <TableCell>
+                <When at={t.cancelledAt} />
+              </TableCell>
+              <TableCell>
+                <FeedbackState status={t.feedbackStatus} />
+              </TableCell>
+              {withReasons && <TableCell>{optional(t.cancellationReason)}</TableCell>}
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+/** The nominate button's words: what it will do, or that it is doing it. */
+function nominateLabel(count: number, pending: boolean): string {
+  if (pending) return 'Nominating…';
+  if (count === 0) return 'Nominate';
+  return `Nominate ${count} employee${count === 1 ? '' : 's'}`;
 }
 
 function NominateForm({ plan }: { plan: PlanDetail }) {
@@ -502,23 +545,24 @@ function NominateForm({ plan }: { plan: PlanDetail }) {
           {chosen.map((e) => (
             <li key={e.id}>
               {personLabel(e)}{' '}
-              <button type="button" className="secondary" aria-label={`Remove ${personLabel(e)}`} onClick={() => setChosen(chosen.filter((x) => x.id !== e.id))}>
+              <Button type="button" variant="danger" size="sm" aria-label={`Remove ${personLabel(e)}`} onClick={() => setChosen(chosen.filter((x) => x.id !== e.id))}>
                 Remove
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
       )}
-      <button
+      <Button
         type="button"
+        className="mt-3"
         disabled={chosen.length === 0 || nominate.isPending}
         onClick={() => {
           setNotice(null);
           nominate.mutate({ employeeIds: chosen.map((e) => e.id) });
         }}
       >
-        {nominate.isPending ? 'Nominating…' : chosen.length === 0 ? 'Nominate' : `Nominate ${chosen.length} employee${chosen.length === 1 ? '' : 's'}`}
-      </button>
+        {nominateLabel(chosen.length, nominate.isPending)}
+      </Button>
       <Refusal error={nominate.error} action="nominate" nameOf={nameOf} />
       <Notice notice={notice} />
     </Section>

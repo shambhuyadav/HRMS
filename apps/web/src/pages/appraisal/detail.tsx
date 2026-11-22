@@ -2,13 +2,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, isNotFound, personLabel, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, Notice, NotPermitted, Section, StateBadge, When } from '../../ui';
 import { CompetenciesTable, CompetencyEntriesTable, RatingResults, SectionsTable, SectionTexts } from './competency-views';
 import { draftsOf, EntriesTable, type GoalDraft, goalsBody, GoalsEditor, GoalsTable } from './goals';
 import { QueryProblem, Refusal } from './refusals';
-import { type Appraisal, CANCEL, CYCLE_READ, decisionText, FLUSH, type GoalInput, GRANT_EXCEPTION, GROUP, H3, MANAGE, PATHS, periodText, READ, type Revision, SCROLL, shown, SOURCE_LABEL, SPACED, type Stage, STAGE_LABEL, stepText, taskStatusText, TEXTAREA, useKeys, userLabel, UUID, WINDOWS, windowText, yesNo } from './shared';
+import { type Appraisal, CANCEL, CYCLE_READ, decisionText, type GoalInput, GRANT_EXCEPTION, GROUP, MANAGE, PATHS, periodText, READ, type Revision, shown, SOURCE_LABEL, type Stage, STAGE_LABEL, stepText, taskStatusText, useKeys, userLabel, UUID, WINDOWS, windowText, yesNo } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: one appraisal (staff view): goals, windows, revisions, decision history, exceptions, cancellation
@@ -42,7 +51,7 @@ function AppraisalDetailView({ id }: { id: string }) {
   const query = useQuery({ queryKey: keys.appraisal(id), queryFn: () => api<Appraisal>(`/v1/appraisals/${id}`), retry: retryTransient });
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const a = shown(query);
-  if (query.isPending) return <Section title="Appraisal">{<p className="hint loading">Loading the appraisal…</p>}</Section>;
+  if (query.isPending) return <Section title="Appraisal">{<LoadingLine>Loading the appraisal…</LoadingLine>}</Section>;
   if (!a) {
     return (
       <Section title="Appraisal">
@@ -56,7 +65,14 @@ function AppraisalDetailView({ id }: { id: string }) {
   const showDecider = a.decisions.some((d) => d.decidedBy !== undefined);
   return (
     <div className="stack">
-      <Section title={`Appraisal of ${personLabel(a.employee)}`} actions={<Link to={PATHS.appraisals}>All appraisals</Link>}>
+      <Section
+        title={`Appraisal of ${personLabel(a.employee)}`}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={PATHS.appraisals}>All appraisals</Link>
+          </Button>
+        }
+      >
         <Notice notice={notice} />
         {own && <p role="note">This is your own appraisal: it is shown without ratings, decider identities or rating progress. Your self-entry is on My ESS in your Employee role.</p>}
         <dl className="kv">
@@ -99,7 +115,7 @@ function AppraisalDetailView({ id }: { id: string }) {
         <GoalsTable a={a} label="Goals" />
         {a.goalReview?.required && <GoalReviewBlock a={a} myUserId={myUserId} canReview={can(MANAGE) && !own} onNotice={setNotice} />}
         {can(MANAGE) && !own && a.state === 'DRAFT' && a.revision === 1 && <GoalsForm key={a.version} a={a} onNotice={setNotice} />}
-        {a.state !== 'DRAFT' && <p className="hint">Goals are fixed once the appraisal has been submitted.</p>}
+        {a.state !== 'DRAFT' && <Hint>Goals are fixed once the appraisal has been submitted.</Hint>}
       </Section>
 
       {a.competencies !== undefined && (
@@ -115,33 +131,31 @@ function AppraisalDetailView({ id }: { id: string }) {
       )}
 
       <Section title="Windows">
-        <div style={SCROLL}>
-          <table aria-label="Entry windows">
-            <thead>
-              <tr>
-                <th>Stage</th>
-                <th>Window</th>
-                <th>Open today</th>
-                <th>Exception through</th>
-                <th>Entries accepted today</th>
-              </tr>
-            </thead>
-            <tbody>
-              {WINDOWS.map((w) => {
-                const s = a.windows[w.key];
-                return (
-                  <tr key={w.key}>
-                    <td>{w.label}</td>
-                    <td>{windowText(s)}</td>
-                    <td>{s ? yesNo(s.openToday) : '—'}</td>
-                    <td>{s?.exceptionUntil ? formatDate(s.exceptionUntil) : '—'}</td>
-                    <td>{s ? yesNo(s.entryAllowed) : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Entry windows">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Stage</TableHead>
+              <TableHead scope="col">Window</TableHead>
+              <TableHead scope="col">Open today</TableHead>
+              <TableHead scope="col">Exception through</TableHead>
+              <TableHead scope="col">Entries accepted today</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {WINDOWS.map((w) => {
+              const s = a.windows[w.key];
+              return (
+                <TableRow key={w.key}>
+                  <TableCell>{w.label}</TableCell>
+                  <TableCell>{windowText(s)}</TableCell>
+                  <TableCell>{s ? yesNo(s.openToday) : '—'}</TableCell>
+                  <TableCell>{s?.exceptionUntil ? formatDate(s.exceptionUntil) : '—'}</TableCell>
+                  <TableCell>{s ? yesNo(s.entryAllowed) : '—'}</TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       </Section>
 
       <Section title="Revisions">
@@ -154,39 +168,37 @@ function AppraisalDetailView({ id }: { id: string }) {
         {a.decisions.length === 0 ? (
           <Empty>No decisions yet.</Empty>
         ) : (
-          <div style={SCROLL}>
-            <table aria-label="Decision history">
-              <thead>
-                <tr>
-                  <th>Revision</th>
-                  <th>Step</th>
-                  <th>Decision</th>
-                  {showDecider && <th>Decided by</th>}
-                  {showRemark && <th>Private remark</th>}
-                  <th>When</th>
-                </tr>
-              </thead>
-              <tbody>
-                {a.decisions.map((d, i) => (
-                  <tr key={`${d.revision}-${d.step}-${i}`}>
-                    <td>{d.revision}</td>
-                    <td>{stepText(d.stage, d.level)}</td>
-                    <td>{decisionText(d.decision, d.stage)}</td>
-                    {showDecider && (
-                      <td>
-                        {userLabel(d.decidedBy, myUserId)}
-                        {d.onBehalfOf && <span className="hint">{` on behalf of ${userLabel(d.onBehalfOf, myUserId)}`}</span>}
-                      </td>
-                    )}
-                    {showRemark && <td>{d.remark ?? '—'}</td>}
-                    <td>
-                      <When at={d.decidedAt} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Decision history">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">Step</TableHead>
+                <TableHead scope="col">Decision</TableHead>
+                {showDecider && <TableHead scope="col">Decided by</TableHead>}
+                {showRemark && <TableHead scope="col">Private remark</TableHead>}
+                <TableHead scope="col">When</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {a.decisions.map((d, i) => (
+                <TableRow key={`${d.revision}-${d.step}-${i}`}>
+                  <TableCell>{d.revision}</TableCell>
+                  <TableCell>{stepText(d.stage, d.level)}</TableCell>
+                  <TableCell>{decisionText(d.decision, d.stage)}</TableCell>
+                  {showDecider && (
+                    <TableCell>
+                      {userLabel(d.decidedBy, myUserId)}
+                      {d.onBehalfOf && <Hint as="span">{` on behalf of ${userLabel(d.onBehalfOf, myUserId)}`}</Hint>}
+                    </TableCell>
+                  )}
+                  {showRemark && <TableCell>{d.remark ?? '—'}</TableCell>}
+                  <TableCell>
+                    <When at={d.decidedAt} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
       </Section>
 
@@ -206,10 +218,10 @@ function AppraisalDetailView({ id }: { id: string }) {
 
 function RevisionBlock({ a, r }: { a: Appraisal; r: Revision }) {
   return (
-    <div style={GROUP} role="group" aria-label={`Revision ${r.revision}`}>
-      <h3 style={H3}>
+    <div className={GROUP} role="group" aria-label={`Revision ${r.revision}`}>
+      <CardSubheading>
         Revision {r.revision}: <StateBadge state={r.state} />
-      </h3>
+      </CardSubheading>
       <dl className="kv">
         <Item term="Submitted">
           <When at={r.submittedAt} />
@@ -227,10 +239,10 @@ function RevisionBlock({ a, r }: { a: Appraisal; r: Revision }) {
         </Item>
         {r.approvalLevels !== undefined && r.approvalLevels !== null && <Item term="Reviewer levels (pinned at submission)">{r.approvalLevels}</Item>}
       </dl>
-      {r.employeeMessage && <p style={FLUSH}>Message to the employee: {r.employeeMessage}</p>}
+      {r.employeeMessage && <p className="m-0">Message to the employee: {r.employeeMessage}</p>}
       {r.selfEntry && (
         <>
-          <h4 style={H3}>Self-entry</h4>
+          <CardSubheading level={4}>Self-entry</CardSubheading>
           <EntriesTable goals={a.goals} set={r.selfEntry} label={`Self-entry of revision ${r.revision}`} />
           <CompetencyEntriesTable items={a.competencies ?? []} entries={r.selfEntry.competencies ?? []} label={`Competency self-entry of revision ${r.revision}`} />
           <SectionTexts sections={a.sections ?? []} texts={r.selfEntry.sections} label={`Employee sections of revision ${r.revision}`} />
@@ -238,13 +250,13 @@ function RevisionBlock({ a, r }: { a: Appraisal; r: Revision }) {
       )}
       {r.managerRating && (
         <>
-          <h4 style={H3}>Manager rating</h4>
+          <CardSubheading level={4}>Manager rating</CardSubheading>
           <EntriesTable goals={a.goals} set={r.managerRating} label={`Manager rating of revision ${r.revision}`} />
           <CompetencyEntriesTable items={a.competencies ?? []} entries={r.managerRating.competencies ?? []} label={`Competency rating of revision ${r.revision}`} />
           <SectionTexts sections={a.sections ?? []} texts={r.managerRating.sections} label={`Manager sections of revision ${r.revision}`} />
           <RatingResults rating={r.managerRating} />
           {a.cycle.ratingMode === 'MANUAL' && (
-            <p style={FLUSH}>
+            <p className="m-0">
               Overall rating of the manager (the final rating in this cycle): <strong>{r.managerRating.overallRating ?? 'not entered yet'}</strong>
             </p>
           )}
@@ -252,8 +264,8 @@ function RevisionBlock({ a, r }: { a: Appraisal; r: Revision }) {
       )}
       {r.reviewerScores && r.reviewerScores.length > 0 && (
         <>
-          <h4 style={H3}>Reviewer scores</h4>
-          <ul aria-label={`Reviewer scores of revision ${r.revision}`} style={FLUSH}>
+          <CardSubheading level={4}>Reviewer scores</CardSubheading>
+          <ul aria-label={`Reviewer scores of revision ${r.revision}`} className="m-0">
             {r.reviewerScores.map((s) => (
               <li key={s.level}>
                 Level {s.level}: <strong>{s.score}</strong> (kept apart; the final rating is the manager’s)
@@ -297,7 +309,7 @@ function GoalReviewBlock({
     },
   });
   return (
-    <div role="group" aria-label="Goal review" style={GROUP}>
+    <div role="group" aria-label="Goal review" className={GROUP}>
       <dl className="kv">
         <Item term="Goal review">
           {review.reviewed ? (
@@ -313,12 +325,10 @@ function GoalReviewBlock({
       </dl>
       {canReview && reviewable && (
         mine ? (
-          <p className="hint" style={FLUSH}>
-            You set these goals, so someone else reviews them.
-          </p>
+          <Hint className="m-0">You set these goals, so someone else reviews them.</Hint>
         ) : (
-          <div className="row">
-            <button
+          <ButtonRow>
+            <Button
               type="button"
               disabled={submit.isPending}
               onClick={() => {
@@ -327,11 +337,11 @@ function GoalReviewBlock({
               }}
             >
               {submit.isPending ? 'Reviewing…' : 'Review the goals'}
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
         )
       )}
-      {canReview && !review.reviewed && a.goalWeightTotal !== 100 && <p className="hint" style={FLUSH}>Only a complete goal set (weights totalling 100) is reviewed.</p>}
+      {canReview && !review.reviewed && a.goalWeightTotal !== 100 && <Hint className="m-0">Only a complete goal set (weights totalling 100) is reviewed.</Hint>}
       <Refusal error={submit.error} action="goal-review" />
     </div>
   );
@@ -362,24 +372,20 @@ function GoalsForm({ a, onNotice }: { a: Appraisal; onNotice: (n: { text: string
     save.mutate(g.goals);
   };
   return (
-    <form className="grid-form" aria-label="Set the goals" onSubmit={submit} noValidate style={SPACED}>
-      <p className="hint wide" style={FLUSH}>
+    <FormGrid aria-label="Set the goals" onSubmit={submit} noValidate>
+      <Hint className="m-0">
         The goals are replaced as a set, inside the goal-setting window or an exception. They are fixed from the first submission.
         {a.goalReview?.required ? ' Where the cycle reviews goals, a changed set is yours and starts unreviewed.' : ''}
-      </p>
+      </Hint>
       <GoalsEditor drafts={drafts} onChange={setDrafts} />
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" disabled={save.isPending}>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" disabled={save.isPending}>
           {save.isPending ? 'Saving…' : 'Save the goals'}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={save.error} action="goals" />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -388,32 +394,30 @@ function ExceptionsTable({ a, myUserId }: { a: Appraisal; myUserId: string | nul
   const showBy = a.exceptions.some((x) => x.recordedBy !== undefined);
   const showReason = a.exceptions.some((x) => 'reason' in x);
   return (
-    <div style={SCROLL}>
-      <table aria-label="Window exceptions">
-        <thead>
-          <tr>
-            <th>Stage</th>
-            <th>Valid through</th>
-            {showBy && <th>Recorded by</th>}
-            {showReason && <th>Reason</th>}
-            <th>Recorded</th>
-          </tr>
-        </thead>
-        <tbody>
-          {a.exceptions.map((x, i) => (
-            <tr key={`${x.stage}-${x.recordedAt}-${i}`}>
-              <td>{STAGE_LABEL[x.stage] ?? readable(x.stage)}</td>
-              <td>{formatDate(x.validUntil)}</td>
-              {showBy && <td>{userLabel(x.recordedBy, myUserId)}</td>}
-              {showReason && <td>{x.reason ?? '—'}</td>}
-              <td>
-                <When at={x.recordedAt} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label="Window exceptions">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Stage</TableHead>
+          <TableHead scope="col">Valid through</TableHead>
+          {showBy && <TableHead scope="col">Recorded by</TableHead>}
+          {showReason && <TableHead scope="col">Reason</TableHead>}
+          <TableHead scope="col">Recorded</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {a.exceptions.map((x, i) => (
+          <TableRow key={`${x.stage}-${x.recordedAt}-${i}`}>
+            <TableCell>{STAGE_LABEL[x.stage] ?? readable(x.stage)}</TableCell>
+            <TableCell>{formatDate(x.validUntil)}</TableCell>
+            {showBy && <TableCell>{userLabel(x.recordedBy, myUserId)}</TableCell>}
+            {showReason && <TableCell>{x.reason ?? '—'}</TableCell>}
+            <TableCell>
+              <When at={x.recordedAt} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -445,41 +449,37 @@ function ExceptionForm({ a, onNotice }: { a: Appraisal; onNotice: (n: { text: st
     record.mutate({ stage, validUntil, reason: reason.trim() });
   };
   return (
-    <form className="grid-form" aria-label="Record a window exception" onSubmit={submit} noValidate style={SPACED}>
-      <p className="hint wide" style={FLUSH}>
+    <FormGrid aria-label="Record a window exception" onSubmit={submit} noValidate>
+      <Hint className="m-0">
         Admits entries at one stage of this appraisal outside its window, through the date given (inclusive). The reason is confidential. Exceptions are kept; they are never changed or removed.
-      </p>
-      <label>
+      </Hint>
+      <FormField>
         Stage
-        <select value={stage} onChange={(e) => setStage(e.target.value as Stage | '')}>
+        <NativeSelect value={stage} onChange={(e) => setStage(e.target.value as Stage | '')}>
           <option value="">Choose…</option>
           {WINDOWS.map((w) => (
             <option key={w.stage} value={w.stage}>
               {w.label}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Valid through
-        <input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
-      </label>
-      <label className="wide">
+        <Input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+      </FormField>
+      <FormField className="col-span-full">
         Reason (confidential)
-        <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" disabled={record.isPending}>
+        <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" disabled={record.isPending}>
           {record.isPending ? 'Recording…' : 'Record the exception'}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={record.error} action="exception" />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -509,25 +509,21 @@ function CancelForm({ a, onNotice }: { a: Appraisal; onNotice: (n: { text: strin
     cancel.mutate(reason.trim());
   };
   return (
-    <form className="grid-form" aria-label="Cancel the appraisal" onSubmit={submit} noValidate>
-      <p className="hint wide" style={FLUSH}>
+    <FormGrid aria-label="Cancel the appraisal" onSubmit={submit} noValidate>
+      <Hint className="m-0">
         An unfinished appraisal can be cancelled with a confidential reason; any open rating or review task closes. A cancelled appraisal no longer blocks a new one.
-      </p>
-      <label className="wide">
+      </Hint>
+      <FormField className="col-span-full">
         Reason for cancelling (confidential)
-        <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" className="danger" disabled={cancel.isPending}>
+        <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" variant="danger" disabled={cancel.isPending}>
           {cancel.isPending ? 'Cancelling…' : 'Cancel the appraisal'}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={cancel.error} action="cancel" />
-    </form>
+    </FormGrid>
   );
 }

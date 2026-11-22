@@ -1,5 +1,7 @@
 // Shared by the biometric screens: permission keys, the API's shapes, time helpers, and the profile list and picker.
 import { useQuery } from '@tanstack/react-query';
+import { FormField } from '@/components/form-field';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api } from '../../api';
 import { ErrorNote } from '../../ui';
 
@@ -103,18 +105,19 @@ export const useProfiles = () => useQuery({ queryKey: ['biometric', 'profiles'],
 
 export function ProfilePicker({ value, onChange, anyLabel }: { value: string; onChange: (id: string) => void; anyLabel: string }) {
   const profiles = useProfiles();
+  // The list's failure stays inside the field's label, under the choice it would have filled, as it always was.
   return (
-    <label>
+    <FormField>
       Profile
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">{anyLabel}</option>
         {profiles.data?.items.map((p) => (
           <option key={p.id} value={p.id}>
             {p.code} · {p.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
       <ErrorNote error={profiles.error} />
-    </label>
+    </FormField>
   );
 }

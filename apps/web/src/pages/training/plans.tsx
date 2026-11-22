@@ -3,12 +3,20 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CheckField, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, download, formatDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, NotPermitted, Section } from '../../ui';
 import { OwnerPicker, QuestionChoice, useChoices } from './lookups';
 import { Pager, Problem, QueryProblem, Refusal } from './refusals';
-import { COST_MANAGE, CostText, has, optional, PAGE_SIZE, PATHS, PLAN_EXPORT, PLAN_MANAGE, PLAN_READ, SCROLL, shown, useKeys, useRefetchAll, VIEW_LABEL, ViewBadge, VIEWS } from './shared';
+import { COST_MANAGE, CostText, has, optional, PAGE_SIZE, PATHS, PLAN_EXPORT, PLAN_MANAGE, PLAN_READ, shown, useKeys, useRefetchAll, VIEW_LABEL, ViewBadge, VIEWS } from './shared';
 import type { PlanDetail, PlanPage } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -53,103 +61,100 @@ export function PlansScreen() {
         title="Training plans"
         actions={
           can(PLAN_EXPORT) ? (
-            <button type="button" className="secondary" disabled={exporter.isPending} onClick={() => exporter.mutate()}>
+            <Button type="button" variant="outline" disabled={exporter.isPending} onClick={() => exporter.mutate()}>
               {exporter.isPending ? 'Exporting…' : 'Export (CSV)'}
-            </button>
+            </Button>
           ) : undefined
         }
       >
-        <form
-          className="grid-form"
-          aria-label="Filter the plans"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setFilters({ ...filters, search: typed, page: 1 });
-          }}
-        >
-          <label>
-            View
-            <select value={filters.view} onChange={(e) => setFilters({ ...filters, view: e.target.value, page: 1 })}>
-              <option value="">All views</option>
-              {VIEWS.map((v) => (
-                <option key={v} value={v}>
-                  {VIEW_LABEL[v]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Search
-            <input type="search" value={typed} maxLength={100} placeholder="Code, title, trainer or venue" onChange={(e) => setTyped(e.target.value)} />
-          </label>
-          <label>
-            From
-            <input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value, page: 1 })} />
-          </label>
-          <label>
-            To
-            <input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value, page: 1 })} />
-          </label>
-          <div>
-            <button type="submit">Search</button>
-          </div>
-        </form>
-        <p className="hint">
+        <FilterBar asChild>
+          <form
+            aria-label="Filter the plans"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setFilters({ ...filters, search: typed, page: 1 });
+            }}
+          >
+            <FormField>
+              View
+              <NativeSelect value={filters.view} onChange={(e) => setFilters({ ...filters, view: e.target.value, page: 1 })}>
+                <option value="">All views</option>
+                {VIEWS.map((v) => (
+                  <option key={v} value={v}>
+                    {VIEW_LABEL[v]}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FormField>
+            <FormField>
+              Search
+              <Input type="search" value={typed} maxLength={100} placeholder="Code, title, trainer or venue" onChange={(e) => setTyped(e.target.value)} />
+            </FormField>
+            <FormField>
+              From
+              <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value, page: 1 })} />
+            </FormField>
+            <FormField>
+              To
+              <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value, page: 1 })} />
+            </FormField>
+            <Button type="submit">Search</Button>
+          </form>
+        </FilterBar>
+        <Hint>
           The view is worked out from the company’s business date{data ? ` (${formatDate(data.businessDate)})` : ''}: future before the start date, current from the start
           to the end date, past after it. A cancelled plan is shown as cancelled whatever its dates.
-        </p>
+        </Hint>
         <Refusal error={exporter.error} action="export" />
-        {list.isLoading && <p className="hint loading">Loading…</p>}
+        {list.isLoading && <LoadingLine>Loading…</LoadingLine>}
         <QueryProblem error={list.error} forbidden="The selected role cannot read training plans." />
         {data && data.items.length === 0 && <Empty>No training plans match.</Empty>}
         {data && data.items.length > 0 && (
-          <div style={SCROLL}>
-            <table aria-label="Training plans">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Title</th>
-                  <th>Dates</th>
-                  <th>View</th>
-                  <th>Mode and venue</th>
-                  <th>Trainer</th>
-                  <th>Places</th>
-                  <th>Owner</th>
-                  {withCost && <th>Cost</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <Link to={PATHS.plan(p.id)}>{p.code}</Link>
-                    </td>
-                    <td>{p.title}</td>
-                    <td>
-                      {formatDate(p.startDate)} to {formatDate(p.endDate)}
-                    </td>
-                    <td>
-                      <ViewBadge view={p.view} />
-                    </td>
-                    <td>
-                      {p.mode.label}
-                      {p.venue ? ` · ${p.venue}` : ''}
-                    </td>
-                    <td>{optional(p.trainer)}</td>
-                    <td>
-                      {p.seatsTaken} of {p.capacity} taken · {p.nominationsPending} waiting for confirmation
-                    </td>
-                    <td>{p.owner.name}</td>
-                    {withCost && (
-                      <td>
-                        <CostText plan={p} />
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Training plans">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Code</TableHead>
+                <TableHead scope="col">Title</TableHead>
+                <TableHead scope="col">Dates</TableHead>
+                <TableHead scope="col">View</TableHead>
+                <TableHead scope="col">Mode and venue</TableHead>
+                <TableHead scope="col">Trainer</TableHead>
+                <TableHead scope="col">Places</TableHead>
+                <TableHead scope="col">Owner</TableHead>
+                {withCost && <TableHead scope="col">Cost</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <Link to={PATHS.plan(p.id)}>{p.code}</Link>
+                  </TableCell>
+                  <TableCell>{p.title}</TableCell>
+                  <TableCell>
+                    {formatDate(p.startDate)} to {formatDate(p.endDate)}
+                  </TableCell>
+                  <TableCell>
+                    <ViewBadge view={p.view} />
+                  </TableCell>
+                  <TableCell>
+                    {p.mode.label}
+                    {p.venue ? ` · ${p.venue}` : ''}
+                  </TableCell>
+                  <TableCell>{optional(p.trainer)}</TableCell>
+                  <TableCell>
+                    {p.seatsTaken} of {p.capacity} taken · {p.nominationsPending} waiting for confirmation
+                  </TableCell>
+                  <TableCell>{p.owner.name}</TableCell>
+                  {withCost && (
+                    <TableCell>
+                      <CostText plan={p} />
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
         {data && <Pager page={data.page} pageSize={data.pageSize} total={data.total} label="Plan pages" onPage={(page) => setFilters({ ...filters, page })} />}
       </Section>
@@ -252,62 +257,62 @@ function CreatePlanForm() {
   };
   return (
     <Section title="New training plan">
-      <form className="grid-form" aria-label="New training plan" onSubmit={submit} noValidate>
-        <label>
+      <FormGrid aria-label="New training plan" onSubmit={submit} noValidate>
+        <FormField>
           Plan code
-          <input value={draft.code} maxLength={40} onChange={(e) => setDraft({ ...draft, code: e.target.value })} />
-        </label>
-        <label className="wide">
+          <Input value={draft.code} maxLength={40} onChange={(e) => setDraft({ ...draft, code: e.target.value })} />
+        </FormField>
+        <FormField className="col-span-full">
           Course title
-          <input value={draft.title} maxLength={200} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-        </label>
-        <label>
+          <Input value={draft.title} maxLength={200} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+        </FormField>
+        <FormField>
           Start date
-          <input type="date" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} />
-        </label>
-        <label>
+          <Input type="date" value={draft.startDate} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} />
+        </FormField>
+        <FormField>
           End date
-          <input type="date" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} />
-        </label>
-        <label>
+          <Input type="date" value={draft.endDate} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} />
+        </FormField>
+        <FormField>
           Mode
-          <select value={draft.modeCode} onChange={(e) => setDraft({ ...draft, modeCode: e.target.value })}>
+          <NativeSelect value={draft.modeCode} onChange={(e) => setDraft({ ...draft, modeCode: e.target.value })}>
             <option value="">Choose a mode</option>
             {(shown(modes)?.items ?? []).map((m) => (
               <option key={m.code} value={m.code}>
                 {m.label}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Venue (optional)
-          <input value={draft.venue} maxLength={300} onChange={(e) => setDraft({ ...draft, venue: e.target.value })} />
-        </label>
-        <label>
+          <Input value={draft.venue} maxLength={300} onChange={(e) => setDraft({ ...draft, venue: e.target.value })} />
+        </FormField>
+        <FormField>
           Trainer (optional)
-          <input value={draft.trainer} maxLength={200} onChange={(e) => setDraft({ ...draft, trainer: e.target.value })} />
-        </label>
-        <label>
+          <Input value={draft.trainer} maxLength={200} onChange={(e) => setDraft({ ...draft, trainer: e.target.value })} />
+        </FormField>
+        <FormField>
           Capacity (places)
-          <input inputMode="numeric" value={draft.capacity} maxLength={9} onChange={(e) => setDraft({ ...draft, capacity: e.target.value })} />
-        </label>
+          <Input inputMode="numeric" value={draft.capacity} maxLength={9} onChange={(e) => setDraft({ ...draft, capacity: e.target.value })} />
+        </FormField>
         {withCost && (
           <>
-            <label>
+            <FormField>
               Cost (optional, company spend)
-              <input inputMode="decimal" value={draft.costAmount} maxLength={18} placeholder="e.g. 1500.00" onChange={(e) => setDraft({ ...draft, costAmount: e.target.value })} />
-            </label>
-            <label>
+              <Input inputMode="decimal" value={draft.costAmount} maxLength={18} placeholder="e.g. 1500.00" onChange={(e) => setDraft({ ...draft, costAmount: e.target.value })} />
+            </FormField>
+            <FormField>
               Cost currency
-              <input value={draft.costCurrency} maxLength={3} onChange={(e) => setDraft({ ...draft, costCurrency: e.target.value })} />
-            </label>
+              <Input value={draft.costCurrency} maxLength={3} onChange={(e) => setDraft({ ...draft, costCurrency: e.target.value })} />
+            </FormField>
           </>
         )}
-        <label className="wide">
+        <CheckField className="col-span-full">
           <input type="checkbox" checked={draft.selfNomination} onChange={(e) => setDraft({ ...draft, selfNomination: e.target.checked })} /> Employees may nominate
           themselves
-        </label>
+        </CheckField>
         <QuestionChoice
           legend="Feedback questions (when none is chosen, every active question is used)"
           questions={shown(questions)?.items}
@@ -315,20 +320,18 @@ function CreatePlanForm() {
           onChange={(questionCodes) => setDraft({ ...draft, questionCodes })}
         />
         <OwnerPicker value={draft.owner} onChange={(owner) => setDraft({ ...draft, owner })} />
-        <p className="hint wide">The plan code is permanent and never reused. A cost left empty means no cost; 0 is recorded as a zero cost.</p>
-        <div className="wide">
-          <button type="submit" disabled={create.isPending}>
-            {create.isPending ? 'Saving…' : 'Create the plan'}
-          </button>
-        </div>
-      </form>
+        <Hint>The plan code is permanent and never reused. A cost left empty means no cost; 0 is recorded as a zero cost.</Hint>
+        <Button type="submit" disabled={create.isPending}>
+          {create.isPending ? 'Saving…' : 'Create the plan'}
+        </Button>
+      </FormGrid>
       <Problem text={problem} />
       <Refusal error={create.error} action="create" />
       <QueryProblem error={modes.error} forbidden="The selected role cannot read the training modes." />
       {created && (
-        <p role="status" className="ok">
+        <StatusNote tone="success" role="status">
           The plan <Link to={PATHS.plan(created.id)}>{created.code}</Link> was created ({VIEW_LABEL[created.view] ?? readable(created.view)}).
-        </p>
+        </StatusNote>
       )}
     </Section>
   );

@@ -1,5 +1,6 @@
-// Shared by the requisition and budget screens: permission keys, paths and limits, the API shapes, query keys, styles and helpers.
-import { type CSSProperties, useMemo } from 'react';
+// Shared by the requisition and budget screens: permission keys, paths and limits, the API shapes, query keys, layout classes and
+// helpers.
+import { useMemo } from 'react';
 import { formatDate, isForbidden, isNotFound, readable } from '../../api';
 import { useSession } from '../../session';
 
@@ -340,22 +341,6 @@ export function useKeys() {
   }, [context]);
 }
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const FLUSH: CSSProperties = { margin: 0 };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.5rem 0 0' };
-export const SPACED: CSSProperties = { marginTop: '0.75rem' };
-export const GROUP: CSSProperties = { border: 'none', margin: 0, padding: 0, minWidth: 0 };
-export const TEXTAREA: CSSProperties = {
-  font: 'inherit',
-  padding: '0.4rem 0.5rem',
-  border: '1px solid var(--line)',
-  borderRadius: 6,
-  color: 'var(--text)',
-  background: 'var(--surface)',
-  resize: 'vertical',
-};
-export const SR_ONLY: CSSProperties = { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 };
-
 /** The latest answer, unless the server has since refused it (403/404): what the role may no longer see is not kept. */
 export function shown<T>(query: { data: T | undefined; error: unknown }): T | undefined {
   return isForbidden(query.error) || isNotFound(query.error) ? undefined : query.data;
@@ -383,7 +368,10 @@ export function userLabel(u: UserRef, myUserId: string | null): string {
 export const userInSentence = (u: UserRef, myUserId: string | null) => (myUserId !== null && u.userId === myUserId ? 'you' : userLabel(u, null).replace(/^A user/, 'a user'));
 
 /** Budget revisions name their preparer and decider by user id only: the signed-in user or another one. */
-export const byWhom = (userId: string | null, myUserId: string | null) => (userId === null ? '—' : myUserId !== null && userId === myUserId ? 'You' : 'Another user');
+export function byWhom(userId: string | null, myUserId: string | null): string {
+  if (userId === null) return '—';
+  return myUserId !== null && userId === myUserId ? 'You' : 'Another user';
+}
 
 export function parseSkills(text: string): string[] {
   return text

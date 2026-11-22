@@ -2,12 +2,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, idempotencyKey, isForbidden, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, Item, NotPermitted, Section, When } from '../../ui';
+import { Empty, ErrorNote, Item, Notice, NotPermitted, Section, When } from '../../ui';
 import { DelegatedBadge } from '../delegations';
 import { Refusal, refusalText } from './refusals';
-import { BUDGET_APPROVE, BUDGET_READ, type BudgetDecided, type BudgetTask, FLUSH, H3, lineLabel, PATHS, periodText, shown, TEXTAREA, useKeys } from './shared';
+import { BUDGET_APPROVE, BUDGET_READ, type BudgetDecided, type BudgetTask, lineLabel, PATHS, periodText, shown, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Decision queue: manpower budget revisions (FR-011: an independent HR Administrator approves or rejects)
@@ -38,14 +44,10 @@ function BudgetQueue() {
   return (
     <div ref={region} role="region" aria-label="Manpower budget approvals" tabIndex={-1}>
       <Section title={`Manpower budget approvals${data ? ` (${items.length})` : ''}`}>
-        <p className="hint">Budget revisions prepared by other HR users wait here. Approving puts the revision’s headcount in force; rejecting is final and needs a reason.</p>
-        {tasks.isPending && <p className="hint loading">Loading the revisions waiting for you…</p>}
+        <Hint>Budget revisions prepared by other HR users wait here. Approving puts the revision’s headcount in force; rejecting is final and needs a reason.</Hint>
+        {tasks.isPending && <LoadingLine>Loading the revisions waiting for you…</LoadingLine>}
         {isForbidden(tasks.error) ? <NotPermitted>The selected role cannot decide manpower budgets.</NotPermitted> : <ErrorNote error={tasks.error} />}
-        {notice && (
-          <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
-            {notice.text}
-          </p>
-        )}
+        <Notice notice={notice} />
         {data && items.length === 0 && <Empty>No budget revisions are waiting for your decision.</Empty>}
         {items.length > 0 && (
           <ul className="tasks" aria-label="Budget revisions waiting for your decision">
@@ -57,6 +59,13 @@ function BudgetQueue() {
       </Section>
     </div>
   );
+}
+
+/** What a recorded decision did, in words; `revision` is the one the queue showed, when it showed one. */
+function budgetDecidedText(subject: string, revision: BudgetTask['revision'], result: BudgetDecided): string {
+  if (result.replayed) return `Your earlier decision on ${subject} had already been recorded, so nothing was applied twice.`;
+  if (result.state !== 'APPROVED') return `Rejected ${subject}; the headcount in force is unchanged.`;
+  return revision ? `Approved ${subject}: headcount ${revision.headcount} is now in force.` : `Approved ${subject}.`;
 }
 
 function BudgetTaskItem({ task: t, onFinished }: { task: BudgetTask; onFinished: (t: BudgetTask, text: string, ok: boolean) => void }) {
@@ -74,14 +83,7 @@ function BudgetTaskItem({ task: t, onFinished }: { task: BudgetTask; onFinished:
       api<BudgetDecided>(`/v1/hiring/budget-tasks/${encodeURIComponent(t.taskId)}/decision`, { body }),
     onSuccess: (result) => {
       attempt.current = null;
-      const text = result.replayed
-        ? `Your earlier decision on ${subject} had already been recorded, so nothing was applied twice.`
-        : result.state === 'APPROVED'
-          ? v
-            ? `Approved ${subject}: headcount ${v.headcount} is now in force.`
-            : `Approved ${subject}.`
-          : `Rejected ${subject}; the headcount in force is unchanged.`;
-      onFinished(t, text, true);
+      onFinished(t, budgetDecidedText(subject, v, result), true);
     },
     onError: (error) => {
       if (!(error instanceof ApiError)) return;
@@ -109,13 +111,11 @@ function BudgetTaskItem({ task: t, onFinished }: { task: BudgetTask; onFinished:
   const titleId = `${id}-title`;
   return (
     <li aria-labelledby={titleId}>
-      <h3 id={titleId} style={H3}>
-        {v ? `Revision ${v.revision}: ${lineLabel(v)}` : 'Budget revision'}
-      </h3>
+      <CardSubheading id={titleId}>{v ? `Revision ${v.revision}: ${lineLabel(v)}` : 'Budget revision'}</CardSubheading>
       <DelegatedBadge taskId={t.taskId} />
-      <p className="hint" style={FLUSH}>
+      <Hint className="m-0">
         Assigned <When at={t.assignedAt} />
-      </p>
+      </Hint>
       {v ? (
         <>
           <dl className="kv">
@@ -133,23 +133,19 @@ function BudgetTaskItem({ task: t, onFinished }: { task: BudgetTask; onFinished:
               <Link to={PATHS.budget(v.id)}>Open the budget line</Link>
             </div>
           )}
-          <label>
+          <FormField>
             Decision reason (required to reject)
-            <textarea maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-          </label>
-          {problem && (
-            <p role="alert" className="error">
-              {problem}
-            </p>
-          )}
-          <div className="row">
-            <button type="button" disabled={busy} onClick={() => send('APPROVE')}>
+            <Textarea maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+          </FormField>
+          {problem && <Notice notice={{ text: problem, ok: false }} />}
+          <ButtonRow>
+            <Button type="button" disabled={busy} onClick={() => send('APPROVE')}>
               Approve
-            </button>
-            <button type="button" className="danger" disabled={busy} onClick={() => send('REJECT')}>
+            </Button>
+            <Button type="button" variant="danger" disabled={busy} onClick={() => send('REJECT')}>
               Reject
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Refusal error={decide.error} action="budget-decide" />
         </>
       ) : (

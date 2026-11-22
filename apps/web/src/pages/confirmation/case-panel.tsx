@@ -2,11 +2,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, ChoiceRow, FormField, FormGrid, LabelledFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, isForbidden, isNotFound, localDateTime, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, Item, NotPermitted, Section, StateBadge } from '../../ui';
+import { Empty, ErrorNote, Item, NotPermitted, Notice, Section, StateBadge, WarningNote } from '../../ui';
 import { CaseExceptions } from './case-exceptions';
-import { type CaseAction, type CaseDetail, DECIDE, GROUP, H3, MANAGE, MONTHS, outcomeLabel, RECOMMEND, type RecommendationBody, SCROLL, TEXTAREA, TimingBadge, useKeys } from './shared';
+import { type CaseAction, type CaseDetail, DECIDE, MANAGE, MONTHS, outcomeLabel, RECOMMEND, type RecommendationBody, TimingBadge, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // One case: dates, state, decision history (CI17) and the direct manager's recommendation (FR-081, DF11).
@@ -60,21 +69,15 @@ export function CasePanel({ id, focusRequest, onClose }: { id: string; focusRequ
       <Section
         title={title}
         actions={
-          <button type="button" className="secondary" onClick={onClose}>
+          <Button type="button" variant="outline" onClick={onClose}>
             Close
-          </button>
+          </Button>
         }
       >
-        {detail.isPending && <p className="hint loading">Loading the case…</p>}
-        {isForbidden(detail.error) ? (
-          <NotPermitted>The selected role cannot open this confirmation case.</NotPermitted>
-        ) : isNotFound(detail.error) ? (
-          <Empty>This case is not available in the selected role’s scope.</Empty>
-        ) : (
-          <ErrorNote error={detail.error} />
-        )}
+        {detail.isPending && <LoadingLine>Loading the case…</LoadingLine>}
+        <CaseProblem error={detail.error} />
         {c && (
-          <div className="stack">
+          <div className="flex flex-col gap-3">
             <dl className="kv">
               <Item term="Start date">{formatDate(c.startDate)}</Item>
               <Item term="Initial due date">{formatDate(c.initialDueDate)}</Item>
@@ -91,10 +94,10 @@ export function CasePanel({ id, focusRequest, onClose }: { id: string; focusRequ
               {c.state === 'CANCELLED' && typeof c.cancelReason === 'string' && <Item term="Reason for cancelling">{c.cancelReason}</Item>}
             </dl>
             {c.view === 'NOT_ON_PROBATION' && (
-              <p role="note">
-                <Badge tone="warn">not on probation</Badge> This employee is no longer on probation, so the review cannot be recommended or decided, and no reminders are sent.
+              <WarningNote badge="not on probation">
+                This employee is no longer on probation, so the review cannot be recommended or decided, and no reminders are sent.
                 {can(MANAGE) && ' Cancel it below to close it.'}
-              </p>
+              </WarningNote>
             )}
             {c.state === 'REVIEW_PENDING' && c.view !== 'NOT_ON_PROBATION' && (
               <p>
@@ -107,29 +110,15 @@ export function CasePanel({ id, focusRequest, onClose }: { id: string; focusRequ
                 )}
               </p>
             )}
-            {c.state === 'OPEN' && !can(RECOMMEND) && c.view !== 'NOT_ON_PROBATION' && <p className="hint">Waiting for a recommendation from the employee’s direct manager.</p>}
+            {c.state === 'OPEN' && !can(RECOMMEND) && c.view !== 'NOT_ON_PROBATION' && <Hint>Waiting for a recommendation from the employee’s direct manager.</Hint>}
 
-            <h3 style={H3}>History</h3>
-            {c.historyIncluded === false ? (
-              <p className="hint">Earlier decisions are not shown: the selected role has no confirmation history grant.</p>
-            ) : c.actions.length === 0 ? (
-              <Empty>No decisions recorded yet.</Empty>
-            ) : (
-              <HistoryTable actions={c.actions} withReasons={withReasons} />
-            )}
+            <CardSubheading>History</CardSubheading>
+            <CaseHistory kase={c} withReasons={withReasons} />
 
-            {justSent && (
-              <p className="ok" role="status">
-                Recommendation sent for HR review.
-              </p>
-            )}
+            {justSent && <Notice notice={{ text: 'Recommendation sent for HR review.', ok: true }} />}
             {showForm && <RecommendationForm version={c.version} busy={recommend.isPending || reloading} onSubmit={(body) => recommend.mutate(body)} />}
             <ErrorNote error={recommend.error} />
-            {conflict && showForm && (
-              <p className="hint" role="status">
-                {reloading ? 'Reloading the case…' : 'The case has been reloaded with its latest details; check them and send again.'}
-              </p>
-            )}
+            {conflict && showForm && <Hint role="status">{reloading ? 'Reloading the case…' : 'The case has been reloaded with its latest details; check them and send again.'}</Hint>}
 
             <CaseExceptions kase={c} onCaseChanged={refresh} />
             {can(MANAGE) && (c.state === 'OPEN' || c.state === 'REVIEW_PENDING') && <CancelCaseForm kase={c} reloading={reloading} onChanged={refresh} />}
@@ -138,6 +127,20 @@ export function CasePanel({ id, focusRequest, onClose }: { id: string; focusRequ
       </Section>
     </div>
   );
+}
+
+/** A case the server would not read: refused, out of scope (or gone), or any other failure. */
+function CaseProblem({ error }: { error: unknown }) {
+  if (isForbidden(error)) return <NotPermitted>The selected role cannot open this confirmation case.</NotPermitted>;
+  if (isNotFound(error)) return <Empty>This case is not available in the selected role’s scope.</Empty>;
+  return <ErrorNote error={error} />;
+}
+
+/** The decisions so far: withheld without the history grant (said so), none yet, or the table. */
+function CaseHistory({ kase, withReasons }: { kase: CaseDetail; withReasons: boolean }) {
+  if (kase.historyIncluded === false) return <Hint>Earlier decisions are not shown: the selected role has no confirmation history grant.</Hint>;
+  if (kase.actions.length === 0) return <Empty>No decisions recorded yet.</Empty>;
+  return <HistoryTable actions={kase.actions} withReasons={withReasons} />;
 }
 
 /** FR-082, DF11: HR closes a live review with a reason; its pending decision task closes with it. */
@@ -154,7 +157,7 @@ function CancelCaseForm({ kase, reloading, onChanged }: { kase: CaseDetail; relo
       if (error instanceof ApiError && error.status === 409) onChanged();
     },
   });
-  if (me?.employeeId && me.employeeId === kase.employeeId) return <p className="hint">You cannot cancel your own confirmation review.</p>;
+  if (me?.employeeId && me.employeeId === kase.employeeId) return <Hint>You cannot cancel your own confirmation review.</Hint>;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const text = reason.trim();
@@ -163,28 +166,22 @@ function CancelCaseForm({ kase, reloading, onChanged }: { kase: CaseDetail; relo
   };
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Cancel this review
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit}>
-        <label className="wide">
+      <CardSubheading id={`${id}-title`}>Cancel this review</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit}>
+        <FormField className="col-span-full">
           Reason (required)
-          <textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
-        <p className="hint wide">
+          <Textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className="resize-y" />
+        </FormField>
+        <Hint>
           The reason is confidential. Any decision waiting in the Decision inbox closes with the review and no more reminders are sent; the case and its history are kept. The employee’s status does not change.
-        </p>
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
-        <div className="wide row">
-          <button type="submit" className="secondary" disabled={cancel.isPending || reloading}>
+        </Hint>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <ButtonRow className="col-span-full">
+          <Button type="submit" variant="outline" disabled={cancel.isPending || reloading}>
             Cancel review
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
       <PlainRefusal error={cancel.error} />
     </>
   );
@@ -194,44 +191,47 @@ function CancelCaseForm({ kase, reloading, onChanged }: { kase: CaseDetail; relo
 export function PlainRefusal({ error }: { error: unknown }) {
   if (!error) return null;
   if (!(error instanceof ApiError) || error.status >= 500) return <ErrorNote error={error} />;
-  return (
-    <p role="alert" className="error">
-      {error.message}
-    </p>
-  );
+  return <Notice notice={{ text: error.message, ok: false }} />;
 }
 
 function HistoryTable({ actions, withReasons }: { actions: CaseAction[]; withReasons: boolean }) {
   return (
-    <div style={SCROLL}>
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Action</th>
-            <th scope="col">Prior due date</th>
-            <th scope="col">New due date</th>
-            <th scope="col">Actual confirmation date</th>
-            <th scope="col">Occurred at</th>
-            {withReasons && <th scope="col">Reason</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {actions.map((a, index) => (
-            <tr key={`${a.occurredAt}-${index}`}>
-              <td>{outcomeLabel(a.action)}</td>
-              <td>{formatDate(a.priorDueDate)}</td>
-              <td>{formatDate(a.newDueDate)}</td>
-              <td>{formatDate(a.actualConfirmationDate)}</td>
-              <td>
-                <time dateTime={a.occurredAt}>{localDateTime(a.occurredAt)}</time>
-              </td>
-              {withReasons && <td>{a.reason}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Action</TableHead>
+          <TableHead scope="col">Prior due date</TableHead>
+          <TableHead scope="col">New due date</TableHead>
+          <TableHead scope="col">Actual confirmation date</TableHead>
+          <TableHead scope="col">Occurred at</TableHead>
+          {withReasons && <TableHead scope="col">Reason</TableHead>}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {actions.map((a, index) => (
+          <TableRow key={`${a.occurredAt}-${index}`}>
+            <TableCell>{outcomeLabel(a.action)}</TableCell>
+            <TableCell>{formatDate(a.priorDueDate)}</TableCell>
+            <TableCell>{formatDate(a.newDueDate)}</TableCell>
+            <TableCell>{formatDate(a.actualConfirmationDate)}</TableCell>
+            <TableCell>
+              <time dateTime={a.occurredAt}>{localDateTime(a.occurredAt)}</time>
+            </TableCell>
+            {withReasons && <TableCell>{a.reason}</TableCell>}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
+}
+
+/** What is missing before a recommendation can be sent, or null; every business rule is the server's. */
+function missingRecommendation(kind: '' | 'CONFIRM' | 'EXTEND', effectiveDate: string, months: string, reason: string): string | null {
+  if (kind === '') return 'Choose whether to recommend confirmation or an extension.';
+  if (kind === 'CONFIRM' && !effectiveDate) return 'Enter the effective date of the confirmation.';
+  if (kind === 'EXTEND' && !months) return 'Choose how many months to extend the probation by.';
+  if (!reason) return 'Enter a reason.';
+  return null;
 }
 
 /** `busy`: sending, or the case is reloading (its version is about to change), so nothing is sent meanwhile. */
@@ -247,16 +247,7 @@ function RecommendationForm({ version, busy, onSubmit }: { version: number; busy
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const text = reason.trim();
-    const missing =
-      kind === ''
-        ? 'Choose whether to recommend confirmation or an extension.'
-        : kind === 'CONFIRM' && !effectiveDate
-          ? 'Enter the effective date of the confirmation.'
-          : kind === 'EXTEND' && !months
-            ? 'Choose how many months to extend the probation by.'
-            : !text
-              ? 'Enter a reason.'
-              : null;
+    const missing = missingRecommendation(kind, effectiveDate, months, text);
     setProblem(missing);
     // The disabled button already blocks sending while busy; this guard keeps a version that is being replaced unsent.
     if (missing !== null || kind === '' || busy) return;
@@ -269,56 +260,49 @@ function RecommendationForm({ version, busy, onSubmit }: { version: number; busy
 
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Your recommendation
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit}>
-        <fieldset className="wide" style={GROUP}>
-          <legend>Recommendation</legend>
-          <div className="row">
-            <label className="check">
+      <CardSubheading id={`${id}-title`}>Your recommendation</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit}>
+        <LabelledFieldset legend="Recommendation">
+          <ChoiceRow>
+            <CheckField>
               <input type="radio" name={`${id}-kind`} value="CONFIRM" required checked={kind === 'CONFIRM'} onChange={() => setKind('CONFIRM')} /> Confirm
-            </label>
-            <label className="check">
+            </CheckField>
+            <CheckField>
               <input type="radio" name={`${id}-kind`} value="EXTEND" required checked={kind === 'EXTEND'} onChange={() => setKind('EXTEND')} /> Extend probation
-            </label>
-          </div>
-        </fieldset>
+            </CheckField>
+          </ChoiceRow>
+        </LabelledFieldset>
         {kind === 'CONFIRM' && (
-          <label>
+          <FormField>
             Effective date
-            <input type="date" required value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-          </label>
+            <Input type="date" required value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+          </FormField>
         )}
         {kind === 'EXTEND' && (
-          <label>
+          <FormField>
             Extend by (months)
-            <select required value={months} onChange={(e) => setMonths(e.target.value)}>
+            <NativeSelect required value={months} onChange={(e) => setMonths(e.target.value)}>
               <option value="">Choose…</option>
               {MONTHS.map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
         )}
-        <label className="wide">
+        <FormField className="col-span-full">
           Reason (required)
-          <textarea required maxLength={1000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
-        <p className="hint wide">The reason is confidential. An HR reviewer decides the recommendation; the employee record changes only if it is approved.</p>
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
-        <div className="wide row">
-          <button type="submit" disabled={busy}>
+          <Textarea required maxLength={1000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} className="resize-y" />
+        </FormField>
+        <Hint>The reason is confidential. An HR reviewer decides the recommendation; the employee record changes only if it is approved.</Hint>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={busy}>
             Send recommendation
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
     </>
   );
 }

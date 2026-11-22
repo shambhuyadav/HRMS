@@ -3,13 +3,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, type EmployeeHit, fileToBase64, formatDate, idempotencyKey, pinSession, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, Section } from '../../ui';
+import { Badge, Empty, Notice, Section } from '../../ui';
 import { HeldBatchCheck, ImportBatches, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useBatchFollowUp } from '../records';
 import { byPrefix, EmployeePicker, type EvidenceDocument, evidenceState, usableEvidence } from './pickers';
 import { type Act, Problem } from './problems';
-import { DOCUMENT_READ, LOAN_REQUEST, PATHS, SCROLL, STOP_PROPOSE, useKeys } from './shared';
+import { DOCUMENT_READ, LOAN_REQUEST, PATHS, STOP_PROPOSE, useKeys } from './shared';
+
+/** The file field and its Validate button side by side, their bottoms lined up (the old `div.inline`). */
+const FIELD_ROW = 'flex flex-wrap items-end gap-x-4 gap-y-3';
 
 // ---------------------------------------------------------------------------------------------------------
 // FR-034 "entry and upload": the LOAN_REQUESTS_V1 upload (payroll-outputs/loan-import.ts) through the shared batch
@@ -186,20 +195,21 @@ function TemplateUpload({
   return (
     <>
       <Section title={title}>
-        <form onSubmit={submit} aria-label={form} className="stack">
-          <p className="hint">
-            CSV with exactly the header <code>{t.columns}</code> (template {t.code}). {t.note} {pending} until you commit a preview, and a batch is applied all or nothing:
+        <form onSubmit={submit} aria-label={form} className="flex flex-col gap-3">
+          <Hint>
+            {/* The header is one long word of comma-joined column names: it may break anywhere, or it runs out of the card on a phone. */}
+            CSV with exactly the header <code className="break-all">{t.columns}</code> (template {t.code}). {t.note} {pending} until you commit a preview, and a batch is applied all or nothing:
             one row with a problem rejects the whole batch. {link}
-          </p>
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               {fileLabel}
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         <Problem error={upload.error ?? resume.error} act={problemAct} />
@@ -207,11 +217,7 @@ function TemplateUpload({
       {job && (
         <>
           <ImportJobView job={job} template={t} pending={act.isPending} onAction={(action) => act.mutate({ id: job.id, action })} error={act.error} />
-          {job.state === 'COMMITTED' && (
-            <p role="status" className="ok">
-              {committed}
-            </p>
-          )}
+          {job.state === 'COMMITTED' && <Notice notice={{ text: committed, ok: true }} />}
           <HeldBatchCheck job={job} busy={busy} onCheck={() => resume.mutate(job.id)} checked={resume.isPending ? undefined : resume.data} watch={watch} />
         </>
       )}
@@ -306,39 +312,39 @@ function EvidenceIdLookup() {
   return (
     <Section title="Evidence document ids">
       {!can(DOCUMENT_READ) ? (
-        <p className="hint">The selected role cannot list employees’ documents, so it cannot look the evidence document ids up here.</p>
+        <Hint>The selected role cannot list employees’ documents, so it cannot look the evidence document ids up here.</Hint>
       ) : (
-        <div className="stack">
-          <p className="hint">Choose an employee to see their documents and ids. Only a document released by the malware scan and verified can be evidence.</p>
-          <div className="grid-form">
-            <EmployeePicker title="Employee" value={employee} onChange={setEmployee} />
-          </div>
-          {employee && docs.isPending && <p className="hint loading">Loading the employee’s documents…</p>}
+        <div className="flex flex-col gap-3">
+          <Hint>Choose an employee to see their documents and ids. Only a document released by the malware scan and verified can be evidence.</Hint>
+          <FormGrid asChild>
+            <div>
+              <EmployeePicker title="Employee" value={employee} onChange={setEmployee} />
+            </div>
+          </FormGrid>
+          {employee && docs.isPending && <LoadingLine>Loading the employee’s documents…</LoadingLine>}
           {docs.error && <Problem error={docs.error} act="read" />}
           {employee && docs.data && docs.data.items.length === 0 && <Empty>The employee has no documents yet.</Empty>}
           {employee && docs.data && docs.data.items.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label="Evidence documents and their ids">
-                <thead>
-                  <tr>
-                    <th>Document</th>
-                    <th>Uploaded</th>
-                    <th>State</th>
-                    <th>Document id</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {docs.data.items.map((d) => (
-                    <tr key={d.id}>
-                      <td>{`${readable(d.documentType)}${d.fileName ? ` · ${d.fileName}` : ''}`}</td>
-                      <td>{formatDate(d.uploadedAt)}</td>
-                      <td>{usableEvidence(d) ? <Badge tone="good">usable</Badge> : evidenceState(d)}</td>
-                      <td>{usableEvidence(d) ? <code>{d.id}</code> : <span className="hint">not usable</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Evidence documents and their ids">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Document</TableHead>
+                  <TableHead scope="col">Uploaded</TableHead>
+                  <TableHead scope="col">State</TableHead>
+                  <TableHead scope="col">Document id</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {docs.data.items.map((d) => (
+                  <TableRow key={d.id}>
+                    <TableCell>{`${readable(d.documentType)}${d.fileName ? ` · ${d.fileName}` : ''}`}</TableCell>
+                    <TableCell>{formatDate(d.uploadedAt)}</TableCell>
+                    <TableCell>{usableEvidence(d) ? <Badge tone="good">usable</Badge> : evidenceState(d)}</TableCell>
+                    <TableCell>{usableEvidence(d) ? <code>{d.id}</code> : <Hint as="span">not usable</Hint>}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </div>
       )}

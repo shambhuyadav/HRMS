@@ -2,13 +2,21 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Section } from '../../ui';
 import { ActivateControl, ATTENDANCE_BASIS, Choice, CONFIG_ACTIVATE, CONFIG_MANAGE, CONFIG_STATE, ISO_DAY, type PaidDayPolicy, UNITS } from './config';
 import { Missing, Note } from './pickers';
 import { Problem } from './problems';
-import { H3, label, SCROLL, Status, useKeys } from './shared';
+import { label, Status, useKeys } from './shared';
 
 // ---- Paid-day policy (FR-032; BR-049) ----
 
@@ -26,41 +34,41 @@ export function PaidDayPolicySection() {
   const activator = can(CONFIG_ACTIVATE);
   return (
     <Section title="Paid-day policy">
-      <p className="hint">
+      <Hint>
         None exists by default. Until a policy is active, attendance never reduces paid days: absences are paid and reported for a documented resolution. Late flags and missing
         timesheets never reduce pay.
-      </p>
-      {policies.isPending && <p className="hint loading">Loading paid-day policies…</p>}
+      </Hint>
+      {policies.isPending && <LoadingLine>Loading paid-day policies…</LoadingLine>}
       {policies.error && <Problem error={policies.error} act="read" />}
       <Note text={note} />
       {policies.data && policies.data.items.length === 0 && <Empty>No paid-day policy is defined.</Empty>}
       {policies.data && policies.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Paid-day policies">
-            <thead>
-              <tr>
-                <th>Revision</th>
-                <th>Effective from</th>
-                <th>Reduces paid days for</th>
-                <th>Unpaid part of an absent day</th>
-                <th>Unpaid part of a half day</th>
-                <th>State</th>
-                {activator && <th>Activation</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {policies.data.items.map((p) => (
-                <tr key={p.id}>
-                  <td>{p.revision}</td>
-                  <td>{formatDate(p.effectiveFrom)}</td>
-                  <td>{label(ATTENDANCE_BASIS, p.attendanceBasis)}</td>
-                  <td>{p.absentUnpaidUnits ?? '—'}</td>
-                  <td>{p.halfDayUnpaidUnits ?? '—'}</td>
-                  <td>
-                    <Status map={CONFIG_STATE} code={p.state} />
-                  </td>
-                  {activator && (
-                    <td>
+        <Table aria-label="Paid-day policies">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Revision</TableHead>
+              <TableHead scope="col">Effective from</TableHead>
+              <TableHead scope="col">Reduces paid days for</TableHead>
+              <TableHead scope="col">Unpaid part of an absent day</TableHead>
+              <TableHead scope="col">Unpaid part of a half day</TableHead>
+              <TableHead scope="col">State</TableHead>
+              {activator && <TableHead scope="col">Activation</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {policies.data.items.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell>{p.revision}</TableCell>
+                <TableCell>{formatDate(p.effectiveFrom)}</TableCell>
+                <TableCell>{label(ATTENDANCE_BASIS, p.attendanceBasis)}</TableCell>
+                <TableCell>{p.absentUnpaidUnits ?? '—'}</TableCell>
+                <TableCell>{p.halfDayUnpaidUnits ?? '—'}</TableCell>
+                <TableCell>
+                  <Status map={CONFIG_STATE} code={p.state} />
+                </TableCell>
+                {activator && (
+                  <RowActionsCell>
+                    <RowActions>
                       <ActivateControl
                         state={p.state}
                         createdBy={p.createdBy}
@@ -71,13 +79,13 @@ export function PaidDayPolicySection() {
                           activate.mutate(p);
                         }}
                       />
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </RowActions>
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       <Problem error={activate.error} act="policy-activate" />
       {can(CONFIG_MANAGE) && <PolicyForm />}
@@ -120,37 +128,35 @@ function PolicyForm() {
     });
   };
   return (
-    <form onSubmit={submit} aria-label="Define a paid-day policy" className="grid-form" style={{ marginTop: '0.75rem' }}>
-      <h3 style={H3} className="wide">
-        Define a paid-day policy
-      </h3>
-      <label>
+    <FormGrid onSubmit={submit} aria-label="Define a paid-day policy">
+      <CardSubheading>Define a paid-day policy</CardSubheading>
+      <FormField>
         Effective from
-        <input type="date" value={f.effectiveFrom} onChange={(e) => set({ effectiveFrom: e.target.value })} />
-      </label>
+        <Input type="date" value={f.effectiveFrom} onChange={(e) => set({ effectiveFrom: e.target.value })} />
+      </FormField>
       <Choice label="Reduces paid days for" value={f.attendanceBasis} onChange={(v) => set({ attendanceBasis: v })} options={ATTENDANCE_BASIS} />
       {reviewed && (
         <>
-          <label>
+          <FormField>
             Unpaid part of a reviewed absent day (0 to 1)
-            <input value={f.absentUnpaidUnits} onChange={(e) => set({ absentUnpaidUnits: e.target.value })} inputMode="decimal" maxLength={4} autoComplete="off" />
-          </label>
-          <label>
+            <Input value={f.absentUnpaidUnits} onChange={(e) => set({ absentUnpaidUnits: e.target.value })} inputMode="decimal" maxLength={4} autoComplete="off" />
+          </FormField>
+          <FormField>
             Unpaid part of a reviewed half day (0 to 1)
-            <input value={f.halfDayUnpaidUnits} onChange={(e) => set({ halfDayUnpaidUnits: e.target.value })} inputMode="decimal" maxLength={4} autoComplete="off" />
-          </label>
+            <Input value={f.halfDayUnpaidUnits} onChange={(e) => set({ halfDayUnpaidUnits: e.target.value })} inputMode="decimal" maxLength={4} autoComplete="off" />
+          </FormField>
         </>
       )}
-      <div className="row">
-        <button type="submit" disabled={create.isPending}>
+      <ButtonRow>
+        <Button type="submit" disabled={create.isPending}>
           {create.isPending ? 'Saving…' : 'Save the policy as a draft'}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Missing text={problem} />
-      <div className="wide">
+      <div className="col-span-full">
         <Note text={note} />
         <Problem error={create.error} act="policy" />
       </div>
-    </form>
+    </FormGrid>
   );
 }

@@ -1,12 +1,34 @@
 // Bulk document mapping (FR-010, DF09, I-13): stage files, then map them with a DOCUMENT_MAPPING_V1 batch.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { SegmentedChoice, SegmentedOption } from '@/components/tab-list';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, fileToBase64, formatDate, idempotencyKey, isForbidden, pinSession, plural, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, NotPermitted, Pager, Section } from '../../ui';
+import { Badge, Empty, ErrorNote, NotPermitted, Notice, Pager, Section } from '../../ui';
 import { HeldBatchCheck, type ImportJob, ImportJobView, type ImportTemplate, TemplateDownload, useHeldBatchWatch } from '../records';
 import { Refusal, UPLOAD_WORDS, type Words, wordsFor } from './refusals';
-import { BATCHES_PAGE_SIZE, DOCUMENT_UPLOAD, EMPLOYEE_IMPORT, FILE_ACCEPT, type MappingBatchPage, SCROLL, SR_ONLY, STAGED_PAGE_SIZE, type StagedFile, type StagedPage, type StagedState, useKeys } from './shared';
+import {
+  BATCHES_PAGE_SIZE,
+  DOCUMENT_UPLOAD,
+  EMPLOYEE_IMPORT,
+  FIELD_ROW,
+  FILE_ACCEPT,
+  type MappingBatchPage,
+  STAGED_PAGE_SIZE,
+  type StagedFile,
+  type StagedPage,
+  type StagedState,
+  useKeys,
+} from './shared';
 import { ScanBadge } from './shared-views';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -156,31 +178,31 @@ function StageDocuments() {
   return (
     <Section title="Stage documents">
       <form
-        className="inline"
+        className={FIELD_ROW}
         aria-label="Stage documents"
         onSubmit={(e) => {
           e.preventDefault();
           if (files.length > 0 && !stage.isPending) stage.mutate(files);
         }}
       >
-        <label>
+        <FormField className="w-auto">
           Documents to stage
-          <input key={inputKey} type="file" multiple accept={FILE_ACCEPT} disabled={stage.isPending} onChange={(e) => setFiles([...(e.target.files ?? [])])} />
-        </label>
-        <button type="submit" disabled={files.length === 0 || stage.isPending}>
+          <Input key={inputKey} type="file" multiple accept={FILE_ACCEPT} disabled={stage.isPending} onChange={(e) => setFiles([...(e.target.files ?? [])])} />
+        </FormField>
+        <Button type="submit" disabled={files.length === 0 || stage.isPending}>
           {files.length > 1 ? `Stage ${files.length} files` : 'Stage file'}
-        </button>
+        </Button>
       </form>
-      <p className="hint">
+      <Hint>
         PDF, JPEG or PNG up to 10 MB each. A staged file waits, unassigned, under its file name until a mapping file assigns it to an employee. Every file goes through
         a safety check first.
-      </p>
-      {stage.isPending && <p className="hint">Staging…</p>}
+      </Hint>
+      {stage.isPending && <Hint>Staging…</Hint>}
       {results.length > 0 && (
         <>
-          <p role="status">
+          <StatusNote tone="info" role="status">
             {plural(staged, 'file', 'files')} staged{results.length > staged ? `, ${plural(results.length - staged, 'file', 'files')} not staged` : ''}.
-          </p>
+          </StatusNote>
           <ul aria-label="Staging results">
             {results.map((r, i) => (
               <li key={`${r.fileName}-${i}`}>
@@ -231,81 +253,106 @@ function StagedFiles() {
     <Section
       title="Your staged files"
       actions={
-        <div className="row toggle-group">
+        <SegmentedChoice>
           {STAGED_TABS.map((t) => (
-            <button key={t.state} type="button" aria-pressed={state === t.state} className={state === t.state ? '' : 'secondary'} onClick={() => show(t.state)}>
+            <SegmentedOption key={t.state} pressed={state === t.state} onClick={() => show(t.state)}>
               {t.label}
-            </button>
+            </SegmentedOption>
           ))}
-        </div>
+        </SegmentedChoice>
       }
     >
-      <p className="hint">
+      <Hint>
         Only you see the files you staged. A mapped file is now an employee document and cannot be changed. You can discard a file still waiting to be mapped (for example
         one that failed the safety check or was staged by mistake); it stays on record, and you can stage a file with the same name again.
-      </p>
-      {discarded && (
-        <p className="ok" role="status">
-          {discarded} was discarded. It stays on record under Discarded and can never be mapped.
-        </p>
-      )}
+      </Hint>
+      {discarded && <Notice notice={{ text: `${discarded} was discarded. It stays on record under Discarded and can never be mapped.`, ok: true }} />}
       <Refusal error={discard.error} words={DISCARD_WORDS} />
-      {list.isPending && <p className="hint loading">Loading staged files…</p>}
+      {list.isPending && <LoadingLine>Loading staged files…</LoadingLine>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot list staged documents.</NotPermitted> : <ErrorNote error={list.error} />}
       {list.data && items.length === 0 && <Empty>{page === 1 ? tab.empty : 'No staged files on this page.'}</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label={tab.table}>
-            <thead>
-              <tr>
-                <th scope="col">File</th>
-                <th scope="col">Staged</th>
-                <th scope="col">Safety check</th>
-                {state === 'MAPPED' && <th scope="col">Mapped</th>}
-                {state === 'DISCARDED' && <th scope="col">Discarded</th>}
+        <Table aria-label={tab.table}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">File</TableHead>
+              <TableHead scope="col">Staged</TableHead>
+              <TableHead scope="col">Safety check</TableHead>
+              {state === 'MAPPED' && <TableHead scope="col">Mapped</TableHead>}
+              {state === 'DISCARDED' && <TableHead scope="col">Discarded</TableHead>}
+              {state === 'UNMAPPED' && (
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((f) => (
+              <TableRow key={f.id}>
+                <TableCell>{f.fileName}</TableCell>
+                <TableCell>{formatDate(f.uploadedAt)}</TableCell>
+                <TableCell>
+                  <ScanBadge state={f.scanState} />
+                </TableCell>
+                {state === 'MAPPED' && <TableCell>{formatDate(f.mappedAt)}</TableCell>}
+                {state === 'DISCARDED' && <TableCell>{formatDate(f.discardedAt)}</TableCell>}
                 {state === 'UNMAPPED' && (
-                  <th scope="col">
-                    <span style={SR_ONLY}>Actions</span>
-                  </th>
+                  <RowActionsCell>
+                    <DiscardActions
+                      file={f}
+                      confirming={confirming === f.id}
+                      busy={discard.isPending}
+                      onAsk={() => setConfirming(f.id)}
+                      onConfirm={() => discard.mutate(f)}
+                      onKeep={() => setConfirming(null)}
+                    />
+                  </RowActionsCell>
                 )}
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((f) => (
-                <tr key={f.id}>
-                  <td>{f.fileName}</td>
-                  <td>{formatDate(f.uploadedAt)}</td>
-                  <td>
-                    <ScanBadge state={f.scanState} />
-                  </td>
-                  {state === 'MAPPED' && <td>{formatDate(f.mappedAt)}</td>}
-                  {state === 'DISCARDED' && <td>{formatDate(f.discardedAt)}</td>}
-                  {state === 'UNMAPPED' && (
-                    <td>
-                      {confirming === f.id ? (
-                        <div className="row">
-                          <button type="button" disabled={discard.isPending} aria-label={`Confirm discarding ${f.fileName}`} onClick={() => discard.mutate(f)}>
-                            Yes, discard
-                          </button>
-                          <button type="button" className="secondary" disabled={discard.isPending} onClick={() => setConfirming(null)}>
-                            Keep
-                          </button>
-                        </div>
-                      ) : (
-                        <button type="button" className="secondary" disabled={discard.isPending} aria-label={`Discard ${f.fileName}`} onClick={() => setConfirming(f.id)}>
-                          Discard
-                        </button>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {list.data && <Pager page={page} pageSize={STAGED_PAGE_SIZE} total={list.data.total} onPage={turn} label="Staged file pages" noun="staged file" />}
     </Section>
+  );
+}
+
+/** A staged file's discard: the first click only asks, the second (Yes, discard) sends; Keep backs out with nothing sent. */
+function DiscardActions({
+  file,
+  confirming,
+  busy,
+  onAsk,
+  onConfirm,
+  onKeep,
+}: {
+  file: StagedFile;
+  confirming: boolean;
+  busy: boolean;
+  onAsk: () => void;
+  onConfirm: () => void;
+  onKeep: () => void;
+}) {
+  if (!confirming) {
+    return (
+      <RowActions>
+        <Button type="button" variant="danger" size="sm" disabled={busy} aria-label={`Discard ${file.fileName}`} onClick={onAsk}>
+          Discard
+        </Button>
+      </RowActions>
+    );
+  }
+  return (
+    <RowActions>
+      <Button type="button" size="sm" disabled={busy} aria-label={`Confirm discarding ${file.fileName}`} onClick={onConfirm}>
+        Yes, discard
+      </Button>
+      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onKeep}>
+        Keep
+      </Button>
+    </RowActions>
   );
 }
 
@@ -412,20 +459,20 @@ function MappingImport() {
   return (
     <>
       <Section title="Mapping file">
-        <form onSubmit={submit} className="stack">
-          <p className="hint">
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <Hint>
             CSV with exactly the header <code>{t.columns}</code> (template {t.code}). {t.note} Nothing is mapped until you commit a preview, and a batch is applied all or
             nothing: one row with a problem, such as an unknown employee code, rejects the whole batch and assigns nothing.
-          </p>
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               Mapping CSV file
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         <Refusal error={upload.error ?? resume.error ?? watch.error} words={MAPPING_UPLOAD_WORDS} />
@@ -441,6 +488,12 @@ function MappingImport() {
   );
 }
 
+/** A batch's rows in words: how many were mapped once committed, otherwise how many the file has (a dash before it is read). */
+function batchRowsText(b: MappingBatchPage['items'][number]): string {
+  if (b.state === 'COMMITTED') return `${b.acceptedCount} mapped`;
+  return b.rowCount === null ? '—' : String(b.rowCount);
+}
+
 /** The user's own mapping batches, newest first, a page at a time (GET /v1/documents/mapping-imports). */
 function MappingBatches({ openedId, busy, onOpen, error }: { openedId: string | null; busy: boolean; onOpen: (id: string) => void; error: unknown }) {
   const keys = useKeys();
@@ -454,73 +507,72 @@ function MappingBatches({ openedId, busy, onOpen, error }: { openedId: string | 
   const pages = Math.max(1, Math.ceil((list.data?.total ?? 0) / BATCHES_PAGE_SIZE));
   return (
     <Section title="Your mapping batches">
-      <p className="hint">
+      <Hint>
         Only you see the mapping files you uploaded. Open a batch to see its rows; one still waiting for its scan can be checked again and then committed or cancelled.
-      </p>
-      {list.isPending && <p className="hint loading">Loading your mapping batches…</p>}
+      </Hint>
+      {list.isPending && <LoadingLine>Loading your mapping batches…</LoadingLine>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot list mapping batches.</NotPermitted> : <ErrorNote error={list.error} />}
       <Refusal error={error} words={{ NOT_FOUND: 'This batch is not available to the selected role.' }} />
       {list.data && items.length === 0 && <Empty>{page === 1 ? 'You have not uploaded a mapping file yet.' : 'No batches on this page.'}</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Your mapping batches">
-            <thead>
-              <tr>
-                <th scope="col">Mapping file</th>
-                <th scope="col">Uploaded</th>
-                <th scope="col">Status</th>
-                <th scope="col">Safety check</th>
-                <th scope="col">Rows</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((b) => {
-                const state = BATCH_STATES[b.state];
-                const name = b.fileName ?? 'mapping file';
-                return (
-                  <tr key={b.id}>
-                    <td>{name}</td>
-                    <td>{formatDate(b.createdAt)}</td>
-                    <td>
-                      <Badge tone={state?.tone ?? 'neutral'}>{state?.label ?? b.state}</Badge>
-                    </td>
-                    <td>
-                      <ScanBadge state={b.scanState} />
-                    </td>
-                    <td>{b.state === 'COMMITTED' ? `${b.acceptedCount} mapped` : b.rowCount === null ? '—' : String(b.rowCount)}</td>
-                    <td>
-                      {b.id === openedId ? (
-                        <span className="hint">open above</span>
-                      ) : (
-                        <button type="button" className="secondary" disabled={busy} aria-label={`Open ${name} uploaded ${formatDate(b.createdAt)}`} onClick={() => onOpen(b.id)}>
+        <Table aria-label="Your mapping batches">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Mapping file</TableHead>
+              <TableHead scope="col">Uploaded</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Safety check</TableHead>
+              <TableHead scope="col">Rows</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((b) => {
+              const state = BATCH_STATES[b.state];
+              const name = b.fileName ?? 'mapping file';
+              return (
+                <TableRow key={b.id}>
+                  <TableCell>{name}</TableCell>
+                  <TableCell>{formatDate(b.createdAt)}</TableCell>
+                  <TableCell>
+                    <Badge tone={state?.tone ?? 'neutral'}>{state?.label ?? b.state}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <ScanBadge state={b.scanState} />
+                  </TableCell>
+                  <TableCell>{batchRowsText(b)}</TableCell>
+                  <RowActionsCell>
+                    {b.id === openedId ? (
+                      <Hint as="span">open above</Hint>
+                    ) : (
+                      <RowActions>
+                        <Button type="button" variant="outline" size="sm" disabled={busy} aria-label={`Open ${name} uploaded ${formatDate(b.createdAt)}`} onClick={() => onOpen(b.id)}>
                           Open
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                        </Button>
+                      </RowActions>
+                    )}
+                  </RowActionsCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
       {pages > 1 && (
-        <div className="row">
-          <button type="button" className="secondary" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+        <PagerRow>
+          <PagerButton disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
             Newer batches
-          </button>
-          <span className="hint">
+          </PagerButton>
+          <PagerCount>
             Page {page} of {pages}
-          </span>
-          <button type="button" className="secondary" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+          </PagerCount>
+          <PagerButton disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
             Older batches
-          </button>
-        </div>
+          </PagerButton>
+        </PagerRow>
       )}
     </Section>
   );
 }
-

@@ -2,13 +2,19 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, idempotencyKey, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, NotPermitted, Section } from '../../ui';
+import { Badge, Empty, Notice, NotPermitted, Section } from '../../ui';
 import { DelegatedBadge } from '../delegations';
 import { DECISION_WORDS, Refusal, refusalText } from './refusals';
 import { LineTable } from './settlement-views';
-import { CALCULATION_LABEL, enc, H3, Item, labelOf, LoadProblem, MAX_REASON, Money, PATHS, SETTLEMENT_APPROVE, SETTLEMENT_READ, SETTLEMENT_REVIEW, settlementLabel, SettlementState, TEXTAREA, useKeys, UserRef, useSettlementRefresh, when } from './shared';
+import { CALCULATION_LABEL, enc, Item, labelOf, LoadProblem, MAX_REASON, Money, PATHS, SETTLEMENT_APPROVE, SETTLEMENT_READ, SETTLEMENT_REVIEW, settlementLabel, SettlementState, useKeys, UserRef, useSettlementRefresh, when } from './shared';
 import type { Decision, DecisionBody, QueueKind, SettlementDecided, SettlementDetail, SettlementTask } from './types';
 
 // =========================================================================================================
@@ -90,14 +96,10 @@ function SettlementQueueList({ kind }: { kind: QueueKind }) {
   return (
     <div ref={region} role="region" aria-label={q.title} tabIndex={-1}>
       <Section title={`${q.title}${tasks.data ? ` (${items.length})` : ''}`}>
-        <p className="hint">{q.intro}</p>
-        {tasks.isPending && <p className="hint loading">Loading the settlements waiting for you…</p>}
+        <Hint>{q.intro}</Hint>
+        {tasks.isPending && <LoadingLine>Loading the settlements waiting for you…</LoadingLine>}
         <LoadProblem error={tasks.error} forbidden="The selected role cannot list settlement tasks." />
-        {notice && (
-          <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
-            {notice.text}
-          </p>
-        )}
+        <Notice notice={notice} />
         {tasks.data && items.length === 0 && <Empty>{q.empty}</Empty>}
         {items.length > 0 && (
           <ul className="tasks" aria-label={q.listLabel}>
@@ -159,10 +161,8 @@ function SettlementTaskItem({ task: t, kind, onFinished }: { task: SettlementTas
   if (!s) {
     return (
       <li aria-labelledby={titleId}>
-        <h3 id={titleId} style={H3}>
-          A settlement outside the selected role’s scope
-        </h3>
-        <p className="hint">This task’s settlement is not in the selected role’s scope, so it cannot be decided here.</p>
+        <CardSubheading id={titleId}>A settlement outside the selected role’s scope</CardSubheading>
+        <Hint>This task’s settlement is not in the selected role’s scope, so it cannot be decided here.</Hint>
       </li>
     );
   }
@@ -190,9 +190,9 @@ function SettlementTaskItem({ task: t, kind, onFinished }: { task: SettlementTas
   const describedBy = blocked === null ? titleId : `${titleId} ${blockedId}`;
   return (
     <li aria-labelledby={titleId}>
-      <h3 id={titleId} style={H3}>
+      <CardSubheading id={titleId}>
         {q.step}: settlement of {who}, revision {s.revision}
-      </h3>
+      </CardSubheading>
       <DelegatedBadge taskId={t.taskId} />
       <dl className="kv">
         <Item term="State">
@@ -224,31 +224,25 @@ function SettlementTaskItem({ task: t, kind, onFinished }: { task: SettlementTas
         </div>
       )}
       {blocked === null ? (
-        <label>
+        <FormField>
           Reason (required to return or reject)
-          <textarea maxLength={MAX_REASON} rows={2} value={reason} disabled={decide.isPending} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
+          <Textarea maxLength={MAX_REASON} rows={2} value={reason} disabled={decide.isPending} onChange={(e) => setReason(e.target.value)} className="resize-y" />
+        </FormField>
       ) : (
-        <p className="hint" id={blockedId}>
-          {blocked}
-        </p>
+        <Hint id={blockedId}>{blocked}</Hint>
       )}
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="button" disabled={blocked !== null || decide.isPending} aria-describedby={describedBy} onClick={() => send('APPROVE')}>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="button" disabled={blocked !== null || decide.isPending} aria-describedby={describedBy} onClick={() => send('APPROVE')}>
           {kind === 'settlement' ? 'Approve the review' : 'Approve'}
-        </button>
-        <button type="button" className="secondary" disabled={blocked !== null || decide.isPending} aria-describedby={describedBy} onClick={() => send('RETURN')}>
+        </Button>
+        <Button type="button" variant="outline" disabled={blocked !== null || decide.isPending} aria-describedby={describedBy} onClick={() => send('RETURN')}>
           Return for correction
-        </button>
-        <button type="button" className="danger" disabled={blocked !== null || decide.isPending} aria-describedby={describedBy} onClick={() => send('REJECT')}>
+        </Button>
+        <Button type="button" variant="danger" disabled={blocked !== null || decide.isPending} aria-describedby={describedBy} onClick={() => send('REJECT')}>
           Reject
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal
         error={decide.error}
         words={DECISION_WORDS}

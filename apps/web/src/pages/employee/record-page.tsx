@@ -3,11 +3,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../../api';
 import { placeFact, type ProfileFact, ProfileHeader, profileSubtitle } from '../../profile-header';
 import { type BarSection, SectionBar } from '../../section-bar';
 import { useSession } from '../../session';
-import { Empty, Section } from '../../ui';
+import { Empty, Notice, Section } from '../../ui';
 import { ActivationPanel, Changes, changeDuties } from './changes';
 import { Fact, PrivateDetails, privateDetailsOffered, RecordFacts } from './record';
 import { RECORD_SECTIONS_TITLE, RecordSectionsPanel, recordSectionsOffered } from './record-sections';
@@ -58,26 +61,26 @@ function HistorySection({ employeeId }: { employeeId: string }) {
           {h.shifts.length === 0 ? (
             <Empty>Nothing recorded yet.</Empty>
           ) : (
-            <table aria-label="Shifts">
-              <thead>
-                <tr>
-                  <th scope="col">From</th>
-                  <th scope="col">Until</th>
-                  <th scope="col">Shift</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="Shifts">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">From</TableHead>
+                  <TableHead scope="col">Until</TableHead>
+                  <TableHead scope="col">Shift</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {h.shifts.map((s, i) => (
-                  <tr key={i}>
-                    <td>{formatDate(s.effectiveFrom)}</td>
-                    <td>{s.effectiveTo ? formatDate(s.effectiveTo) : 'Open'}</td>
-                    <td>
+                  <TableRow key={i}>
+                    <TableCell>{formatDate(s.effectiveFrom)}</TableCell>
+                    <TableCell>{s.effectiveTo ? formatDate(s.effectiveTo) : 'Open'}</TableCell>
+                    <TableCell>
                       {s.shiftCode} {s.shiftName}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </>
       )}
@@ -116,7 +119,7 @@ function EmployeeRecordView({ id }: { id: string }) {
     : [];
   return (
     <>
-      {can(EMPLOYEE_LIST) && <Link className="back-link" to="/employees">← Employees</Link>}
+      {can(EMPLOYEE_LIST) && <BackLink to="/employees">← Employees</BackLink>}
       {record.error ? <ReadProblem error={record.error} /> : null}
       {employee && (
         <>
@@ -127,8 +130,17 @@ function EmployeeRecordView({ id }: { id: string }) {
             facts={headerFacts(employee)}
           />
           <SectionBar sections={sections} />
-          <Section title={title} actions={documents ? <Link to={`/employees/${employee.id}/documents`}>Documents</Link> : undefined}>
-            {notice && <p role="status">{notice}</p>}
+          <Section
+            title={title}
+            actions={
+              documents ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link to={`/employees/${employee.id}/documents`}>Documents</Link>
+                </Button>
+              ) : undefined
+            }
+          >
+            {notice && <Notice notice={{ text: notice, ok: true }} />}
             <RecordFacts employee={employee} />
           </Section>
           {employee.status === 'DRAFT' && can(EMPLOYEE_ACTIVATE) && <ActivationPanel employee={employee} onSaved={onSaved} onConflict={reload} />}

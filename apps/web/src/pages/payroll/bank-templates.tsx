@@ -2,13 +2,23 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, FormField, FormGrid, FormStep } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { FieldSet } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, readable, retryTransient } from '../../api';
 import { FormProgress } from '../../form-progress';
 import { useSession } from '../../session';
 import { Badge, Empty, Section } from '../../ui';
 import { Missing, Note } from './pickers';
 import { type Act, Problem, ReasonForm, ROW_TEXT } from './problems';
-import { Fact, FLUSH, GROUP, H3, label, SCROLL, Status, TEMPLATE_ACTIVATE, TEMPLATE_MANAGE, TEMPLATE_READ, TEMPLATE_VALIDATE, useKeys } from './shared';
+import { Fact, label, Status, TEMPLATE_ACTIVATE, TEMPLATE_MANAGE, TEMPLATE_READ, TEMPLATE_VALIDATE, useKeys } from './shared';
 import type { BankRowError, BankTemplate } from './types';
 
 // =========================================================================================================
@@ -76,6 +86,11 @@ const SOURCE_LABEL: Record<string, string> = {
 const DELIMITER_LABEL: Record<string, string> = { COMMA: 'Comma (,)', SEMICOLON: 'Semicolon (;)', PIPE: 'Pipe (|)', TAB: 'Tab' };
 const DATE_FORMATS = ['YYYY-MM-DD', 'YYYYMMDD', 'DD-MM-YYYY', 'DDMMYYYY', 'DD/MM/YYYY'];
 
+/** The sample file exactly as generated: its lines kept whole in a quiet box that scrolls sideways when a line is long. */
+const SAMPLE_FILE = 'overflow-x-auto rounded-md border border-border bg-muted p-3 text-[0.8rem]';
+/** One field of a record being edited: its choices side by side with its move and remove buttons, their bottoms lined up. */
+const FIELD_ROW = 'flex flex-wrap items-end gap-2';
+
 const fieldText = (f: FieldSpecRow) => `${label(SOURCE_LABEL, f.source)}${f.source === 'LITERAL' ? ` “${f.value ?? ''}”` : ''}${f.maxLength ? ` (at most ${f.maxLength} characters)` : ''}`;
 
 export function TemplatesScreen() {
@@ -85,7 +100,7 @@ export function TemplatesScreen() {
   if (!can(TEMPLATE_READ)) {
     return (
       <Section title="Bank file templates">
-        <Empty>The selected role cannot see bank file templates.</Empty>
+        <Empty refusal>The selected role cannot see bank file templates.</Empty>
       </Section>
     );
   }
@@ -103,47 +118,47 @@ function TemplateList({ openId, onOpen }: { openId: string | null; onOpen: (id: 
   const templates = useQuery({ queryKey: keys.templates, queryFn: () => api<{ items: TemplateFull[] }>('/v1/payroll-outputs/bank-templates'), retry: retryTransient });
   return (
     <Section title="Bank file templates">
-      <p className="hint">
+      <Hint>
         A template is the company’s transcription of the bank’s accepted file specification as a delimited field mapping; no bank format is presumed. Its system-generated sample is validated, and the template activated, by people other than its author.
-      </p>
-      {templates.isPending && <p className="hint loading">Loading templates…</p>}
+      </Hint>
+      {templates.isPending && <LoadingLine>Loading templates…</LoadingLine>}
       {templates.error && <Problem error={templates.error} act="read" />}
       {templates.data && templates.data.items.length === 0 && <Empty>No bank file template yet.</Empty>}
       {templates.data && templates.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Bank file templates">
-            <thead>
-              <tr>
-                <th>Template</th>
-                <th>Name</th>
-                <th>Currency</th>
-                <th>Use</th>
-                <th>State</th>
-                <th>Sample validated</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {templates.data.items.map((t) => (
-                <tr key={t.id}>
-                  <td>{`${t.templateCode} version ${t.templateVersion}`}</td>
-                  <td>{t.name}</td>
-                  <td>{t.currencyCode}</td>
-                  <td>{t.testOnly ? <Badge tone="warn">Test only: never for real payments</Badge> : 'Production'}</td>
-                  <td>
-                    <Status map={TEMPLATE_STATE} code={t.state} />
-                  </td>
-                  <td>{t.sampleHash ? formatDate(t.sampleValidatedAt) : 'Not yet'}</td>
-                  <td>
-                    <button type="button" className="link" onClick={() => onOpen(openId === t.id ? null : t.id)} aria-label={`Details of template ${t.templateCode} version ${t.templateVersion}`}>
+        <Table aria-label="Bank file templates">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Template</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Currency</TableHead>
+              <TableHead scope="col">Use</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Sample validated</TableHead>
+              <TableHead scope="col">Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {templates.data.items.map((t) => (
+              <TableRow key={t.id}>
+                <TableCell>{`${t.templateCode} version ${t.templateVersion}`}</TableCell>
+                <TableCell>{t.name}</TableCell>
+                <TableCell>{t.currencyCode}</TableCell>
+                <TableCell>{t.testOnly ? <Badge tone="warn">Test only: never for real payments</Badge> : 'Production'}</TableCell>
+                <TableCell>
+                  <Status map={TEMPLATE_STATE} code={t.state} />
+                </TableCell>
+                <TableCell>{t.sampleHash ? formatDate(t.sampleValidatedAt) : 'Not yet'}</TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button type="button" variant="outline" size="sm" onClick={() => onOpen(openId === t.id ? null : t.id)} aria-label={`Details of template ${t.templateCode} version ${t.templateVersion}`}>
                       {openId === t.id ? 'Hide' : 'Details'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
@@ -153,7 +168,7 @@ function FieldList({ part, fields }: { part: string; fields: FieldSpecRow[] | un
   if (!fields || fields.length === 0) return null;
   return (
     <>
-      <h3 style={H3}>{`${part} record`}</h3>
+      <CardSubheading>{`${part} record`}</CardSubheading>
       <ol aria-label={`${part} record fields`}>
         {fields.map((f, i) => (
           <li key={i}>{fieldText(f)}</li>
@@ -164,6 +179,12 @@ function FieldList({ part, fields }: { part: string; fields: FieldSpecRow[] | un
 }
 
 type TemplateAction = 'sample-validation' | 'activate' | 'retire';
+
+/** Which refusals explain a failed template action: the sample validation and the activation have their own. */
+function failedAct(action: TemplateAction | undefined): Act {
+  if (action === 'sample-validation') return 'template-validate';
+  return action === 'activate' ? 'template-activate' : 'template';
+}
 
 function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFull) => void }) {
   const { can, me } = useSession();
@@ -192,12 +213,11 @@ function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFul
     onSettled: () => qc.invalidateQueries({ queryKey: keys.templates }),
   });
   const t = template.data;
-  if (template.isPending) return <p className="hint loading">Loading the template…</p>;
+  if (template.isPending) return <LoadingLine>Loading the template…</LoadingLine>;
   if (!t) return <Problem error={template.error} act="read" />;
   const author = t.createdBy === me?.userId;
   const def = t.formatDefinition;
   const s = sample.data;
-  const failedAct: Act = act.variables?.action === 'sample-validation' ? 'template-validate' : act.variables?.action === 'activate' ? 'template-activate' : 'template';
   const validate = (e: FormEvent) => {
     e.preventDefault();
     if (act.isPending || !s || author) return;
@@ -221,11 +241,7 @@ function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFul
         <Fact term="Activated">{formatDate(t.activatedAt)}</Fact>
         {t.closeReason && <Fact term="Closed">{`${formatDate(t.closedAt)}: ${t.closeReason}`}</Fact>}
       </dl>
-      {t.testOnly && (
-        <p role="note" className="hint">
-          This is a test-only template: it is refused in production, so it is never used for real payments.
-        </p>
-      )}
+      {t.testOnly && <Hint role="note">This is a test-only template: it is refused in production, so it is never used for real payments.</Hint>}
       <dl className="kv" aria-label="Layout">
         <Fact term="Layout">Delimited</Fact>
         <Fact term="Delimiter">{label(DELIMITER_LABEL, def.delimiter)}</Fact>
@@ -238,25 +254,25 @@ function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFul
       <FieldList part="Header" fields={def.header} />
       <FieldList part="Detail" fields={def.detail} />
       <FieldList part="Trailer" fields={def.trailer} />
-      <div className="row">
-        <button type="button" className="secondary" onClick={() => setShowSample(!showSample)}>
+      <ButtonRow>
+        <Button type="button" variant="outline" onClick={() => setShowSample(!showSample)}>
           {showSample ? 'Hide the sample file' : 'Show the sample file'}
-        </button>
+        </Button>
         {onRevise && (
-          <button type="button" className="secondary" onClick={() => onRevise(t)}>
+          <Button type="button" variant="outline" onClick={() => onRevise(t)}>
             Start a new version from this one
-          </button>
+          </Button>
         )}
-      </div>
-      {showSample && sample.isPending && <p className="hint">Generating the sample…</p>}
+      </ButtonRow>
+      {showSample && sample.isPending && <Hint>Generating the sample…</Hint>}
       {showSample && sample.error && <Problem error={sample.error} act="read" />}
       {showSample && s && (
         <div role="region" aria-label="Sample file">
-          <p style={FLUSH}>
+          <p className="my-1">
             <Badge tone="warn">{s.label === 'SAMPLE_NOT_PAYABLE' ? 'Sample: not payable' : readable(s.label)}</Badge> {s.fileName}
           </p>
-          <pre style={SCROLL}>{s.content}</pre>
-          <p className="hint">{`Sample fingerprint (SHA-256): ${s.sampleHash}`}</p>
+          <pre className={SAMPLE_FILE}>{s.content}</pre>
+          <Hint>{`Sample fingerprint (SHA-256): ${s.sampleHash}`}</Hint>
           {s.errors.length > 0 && (
             <ul aria-label="Sample problems">
               {s.errors.map((x, i) => (
@@ -267,27 +283,24 @@ function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFul
         </div>
       )}
       {can(TEMPLATE_VALIDATE) && t.state === 'DRAFT' && !t.sampleHash && (
-        <form onSubmit={validate} aria-label="Validate the sample" className="grid-form" style={{ marginTop: '0.5rem' }}>
-          {author ? (
-            <p className="hint wide">You wrote this template, so someone else validates its sample.</p>
-          ) : !s ? (
-            <p className="hint wide">Show the sample file first and compare it with the bank’s specification.</p>
-          ) : null}
-          <label>
+        <FormGrid onSubmit={validate} aria-label="Validate the sample">
+          {author && <Hint>You wrote this template, so someone else validates its sample.</Hint>}
+          {!author && !s && <Hint>Show the sample file first and compare it with the bank’s specification.</Hint>}
+          <FormField>
             Validation reference
-            <input value={validationReference} onChange={(e) => setValidationReference(e.target.value)} maxLength={500} autoComplete="off" />
-          </label>
-          <div className="row">
-            <button type="submit" disabled={act.isPending || author || !s || s.errors.length > 0}>
+            <Input value={validationReference} onChange={(e) => setValidationReference(e.target.value)} maxLength={500} autoComplete="off" />
+          </FormField>
+          <ButtonRow>
+            <Button type="submit" disabled={act.isPending || author || !s || s.errors.length > 0}>
               Record the sample as validated
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Missing text={problem} />
-        </form>
+        </FormGrid>
       )}
       {can(TEMPLATE_ACTIVATE) && t.state === 'DRAFT' && (
-        <div style={{ marginTop: '0.5rem' }}>
-          <button
+        <div className="mt-2">
+          <Button
             type="button"
             disabled={act.isPending || author || !t.sampleHash}
             onClick={() => {
@@ -297,9 +310,9 @@ function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFul
             }}
           >
             Activate this template
-          </button>
-          {!t.sampleHash && <p className="hint">A template is activated only after an independent sample validation.</p>}
-          {author && <p className="hint">You wrote this template, so someone else activates it.</p>}
+          </Button>
+          {!t.sampleHash && <Hint>A template is activated only after an independent sample validation.</Hint>}
+          {author && <Hint>You wrote this template, so someone else activates it.</Hint>}
         </div>
       )}
       {can(TEMPLATE_MANAGE) && (t.state === 'ACTIVE' || t.state === 'DRAFT') && (
@@ -316,7 +329,7 @@ function TemplateView({ id, onRevise }: { id: string; onRevise?: (t: TemplateFul
         />
       )}
       <Note text={note} />
-      <Problem error={act.error} act={failedAct} />
+      <Problem error={act.error} act={failedAct(act.variables?.action)} />
     </Section>
   );
 }
@@ -337,46 +350,47 @@ function FieldListEditor({ part, sources, fields, onChange, newKey }: { part: st
     onChange(next);
   };
   return (
-    <fieldset style={GROUP} className="wide">
+    <FieldSet className="gap-[0.55rem]">
       <legend>{`${part} record: fields in file order`}</legend>
-      {fields.length === 0 && <p className="hint">No fields yet.</p>}
+      {fields.length === 0 && <Hint>No fields yet.</Hint>}
       {fields.map((f, i) => (
-        <div key={f.key} className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <label>
+        <div key={f.key} className={FIELD_ROW}>
+          <FormField className="w-auto">
             {`${part} field ${i + 1}`}
-            <select value={f.source} onChange={(e) => set(i, { source: e.target.value })}>
+            <NativeSelect value={f.source} onChange={(e) => set(i, { source: e.target.value })}>
               {sources.map((s) => (
                 <option key={s} value={s}>
                   {label(SOURCE_LABEL, s)}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
           {f.source === 'LITERAL' && (
-            <label>
+            <FormField className="w-auto">
               {`${part} field ${i + 1} text`}
-              <input value={f.value} onChange={(e) => set(i, { value: e.target.value })} maxLength={100} autoComplete="off" />
-            </label>
+              <Input value={f.value} onChange={(e) => set(i, { value: e.target.value })} maxLength={100} autoComplete="off" />
+            </FormField>
           )}
-          <label>
+          <FormField className="w-auto">
             {`${part} field ${i + 1} maximum length`}
-            <input value={f.maxLength} onChange={(e) => set(i, { maxLength: e.target.value })} inputMode="numeric" maxLength={3} />
-          </label>
-          <button type="button" className="secondary" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${part.toLowerCase()} field ${i + 1} up`}>
+            <Input value={f.maxLength} onChange={(e) => set(i, { maxLength: e.target.value })} inputMode="numeric" maxLength={3} />
+          </FormField>
+          <Button type="button" variant="outline" disabled={i === 0} onClick={() => move(i, -1)} aria-label={`Move ${part.toLowerCase()} field ${i + 1} up`}>
             Up
-          </button>
-          <button type="button" className="secondary" disabled={i === fields.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${part.toLowerCase()} field ${i + 1} down`}>
+          </Button>
+          <Button type="button" variant="outline" disabled={i === fields.length - 1} onClick={() => move(i, 1)} aria-label={`Move ${part.toLowerCase()} field ${i + 1} down`}>
             Down
-          </button>
-          <button type="button" className="secondary" onClick={() => onChange(fields.filter((_, j) => j !== i))} aria-label={`Remove ${part.toLowerCase()} field ${i + 1}`}>
+          </Button>
+          <Button type="button" variant="outline" onClick={() => onChange(fields.filter((_, j) => j !== i))} aria-label={`Remove ${part.toLowerCase()} field ${i + 1}`}>
             Remove
-          </button>
+          </Button>
         </div>
       ))}
-      <button type="button" className="secondary" onClick={() => onChange([...fields, { key: newKey(), source: sources[0] ?? 'LITERAL', value: '', maxLength: '' }])}>
+      {/* The group stacks its rows full width: the add button keeps its own width at the start. */}
+      <Button type="button" variant="outline" className="self-start" onClick={() => onChange([...fields, { key: newKey(), source: sources[0] ?? 'LITERAL', value: '', maxLength: '' }])}>
         {`Add a ${part.toLowerCase()} field`}
-      </button>
-    </fieldset>
+      </Button>
+    </FieldSet>
   );
 }
 
@@ -469,112 +483,109 @@ function TemplateForm({ basis, onClearBasis }: { basis: TemplateFull | null; onC
     <>
       <FormProgress form={formRef} label="Bank file template" required={TEMPLATE_REQUIRED} />
       <Section title={basis ? `New version of ${basis.templateCode}` : 'New bank file template'}>
-        <p className="hint">Saving the same template code again creates its next version. Transcribe the bank’s accepted specification exactly: values are never shortened or changed to fit, and a row that does not fit stops the whole file.</p>
+        <Hint>Saving the same template code again creates its next version. Transcribe the bank’s accepted specification exactly: values are never shortened or changed to fit, and a row that does not fit stops the whole file.</Hint>
         {basis && (
-          <button type="button" className="secondary" onClick={onClearBasis}>
+          <Button type="button" variant="outline" onClick={onClearBasis}>
             Start from an empty template instead
-          </button>
+          </Button>
         )}
-        <form ref={formRef} onSubmit={submit} aria-label="Bank file template" className="grid-form">
-          <fieldset className="form-step">
-            <legend>The template</legend>
-            <label>
+        <FormGrid ref={formRef} onSubmit={submit} aria-label="Bank file template">
+          <FormStep legend="The template">
+            <FormField>
               Template code
-              <input value={f.templateCode} onChange={(e) => set({ templateCode: e.target.value })} maxLength={40} autoComplete="off" />
-            </label>
-            <label>
+              <Input value={f.templateCode} onChange={(e) => set({ templateCode: e.target.value })} maxLength={40} autoComplete="off" />
+            </FormField>
+            <FormField>
               Template name
-              <input value={f.name} onChange={(e) => set({ name: e.target.value })} maxLength={200} autoComplete="off" />
-            </label>
-            <label>
+              <Input value={f.name} onChange={(e) => set({ name: e.target.value })} maxLength={200} autoComplete="off" />
+            </FormField>
+            <FormField>
               Currency
-              <input value={f.currencyCode} onChange={(e) => set({ currencyCode: e.target.value })} maxLength={3} autoComplete="off" />
-            </label>
-            <label>
+              <Input value={f.currencyCode} onChange={(e) => set({ currencyCode: e.target.value })} maxLength={3} autoComplete="off" />
+            </FormField>
+            <FormField>
               Bank specification reference
-              <input value={f.spec} onChange={(e) => set({ spec: e.target.value })} maxLength={500} autoComplete="off" />
-            </label>
-            <label className="check wide">
+              <Input value={f.spec} onChange={(e) => set({ spec: e.target.value })} maxLength={500} autoComplete="off" />
+            </FormField>
+            <CheckField className="col-span-full">
               <input type="checkbox" checked={f.testOnly} onChange={(e) => set({ testOnly: e.target.checked })} /> Test only (synthetic; refused in production)
-            </label>
-          </fieldset>
-          <fieldset className="form-step">
-            <legend>File format</legend>
-            <label>
+            </CheckField>
+          </FormStep>
+          <FormStep legend="File format">
+            <FormField>
               Delimiter
-              <select value={f.delimiter} onChange={(e) => set({ delimiter: e.target.value })}>
+              <NativeSelect value={f.delimiter} onChange={(e) => set({ delimiter: e.target.value })}>
                 {Object.entries(DELIMITER_LABEL).map(([k, v]) => (
                   <option key={k} value={k}>
                     {v}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Line ending
-              <select value={f.lineEnding} onChange={(e) => set({ lineEnding: e.target.value })}>
+              <NativeSelect value={f.lineEnding} onChange={(e) => set({ lineEnding: e.target.value })}>
                 <option value="CRLF">CRLF</option>
                 <option value="LF">LF</option>
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Amount decimals
-              <select value={f.decimals} onChange={(e) => set({ decimals: e.target.value })}>
+              <NativeSelect value={f.decimals} onChange={(e) => set({ decimals: e.target.value })}>
                 {['0', '1', '2', '3', '4'].map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Decimal separator
-              <select value={f.separator} onChange={(e) => set({ separator: e.target.value })}>
+              <NativeSelect value={f.separator} onChange={(e) => set({ separator: e.target.value })}>
                 <option value=".">Point (.)</option>
                 <option value=",">Comma (,)</option>
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Date format
-              <select value={f.dateFormat} onChange={(e) => set({ dateFormat: e.target.value })}>
+              <NativeSelect value={f.dateFormat} onChange={(e) => set({ dateFormat: e.target.value })}>
                 {DATE_FORMATS.map((d) => (
                   <option key={d} value={d}>
                     {d}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               File extension
-              <select value={f.extension} onChange={(e) => set({ extension: e.target.value })}>
+              <NativeSelect value={f.extension} onChange={(e) => set({ extension: e.target.value })}>
                 <option value="csv">csv</option>
                 <option value="txt">txt</option>
-              </select>
-            </label>
-          </fieldset>
-          <fieldset className="form-step">
-            <legend>Records and their fields</legend>
-            <label className="check wide">
+              </NativeSelect>
+            </FormField>
+          </FormStep>
+          <FormStep legend="Records and their fields">
+            <CheckField className="col-span-full">
               <input type="checkbox" checked={f.header !== null} onChange={(e) => set({ header: e.target.checked ? (f.header ?? []) : null })} /> Header record
-            </label>
+            </CheckField>
             {f.header !== null && <FieldListEditor part="Header" sources={CONTROL_SOURCES} fields={f.header} onChange={(header) => set({ header })} newKey={newKey} />}
             <FieldListEditor part="Detail" sources={DETAIL_SOURCES} fields={f.detail} onChange={(detail) => set({ detail })} newKey={newKey} />
-            <label className="check wide">
+            <CheckField className="col-span-full">
               <input type="checkbox" checked={f.trailer !== null} onChange={(e) => set({ trailer: e.target.checked ? (f.trailer ?? []) : null })} /> Trailer record
-            </label>
+            </CheckField>
             {f.trailer !== null && <FieldListEditor part="Trailer" sources={CONTROL_SOURCES} fields={f.trailer} onChange={(trailer) => set({ trailer })} newKey={newKey} />}
-          </fieldset>
-          <div className="row">
-            <button type="submit" disabled={create.isPending}>
+          </FormStep>
+          <ButtonRow>
+            <Button type="submit" disabled={create.isPending}>
               {create.isPending ? 'Saving…' : 'Save as a draft version'}
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Missing text={problem} />
-          <div className="wide">
+          <div className="col-span-full">
             <Note text={note} />
             <Problem error={create.error} act="template" />
           </div>
-        </form>
+        </FormGrid>
       </Section>
     </>
   );

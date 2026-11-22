@@ -2,13 +2,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, NotPermitted, Section, StateBadge } from '../../ui';
+import { Badge, Empty, Notice, NotPermitted, Section, StateBadge } from '../../ui';
 import { placeholderLabelMap, placeholderName, usePlaceholders } from './letter-templates';
 import { OutputDownload } from './letters';
 import { listOf, Refusal, type Words } from './refusals';
-import { CODE, DELIVERY_LABEL, enc, H3, Item, labelOf, LETTER, LETTER_GENERATE, LETTER_READ, LoadProblem, PATHS, PROCESS_READ, TEMPLATE_READ, useKeys, UserRef, UUID, when } from './shared';
+import { CODE, DELIVERY_LABEL, enc, Item, labelOf, LETTER, LETTER_GENERATE, LETTER_READ, LINK_ROW, LoadProblem, PATHS, PROCESS_READ, TEMPLATE_READ, useKeys, UserRef, UUID, when } from './shared';
 import type { LetterOutput, LetterPreview, ProcessDetail, TemplateSummary } from './types';
 
 // =========================================================================================================
@@ -43,17 +51,17 @@ function ProcessLetters({ processId }: { processId: string }) {
     <>
       <h1>{p ? `Letters for ${p.employeeName} (${p.employeeCode})` : 'Process letters'}</h1>
       <Section title="Process">
-        {!canRead && <p className="hint">The selected role cannot open this process, so its details are not shown here; the server checks every letter request.</p>}
-        {canRead && process.isPending && <p className="hint loading">Loading the process…</p>}
+        {!canRead && <Hint>The selected role cannot open this process, so its details are not shown here; the server checks every letter request.</Hint>}
+        {canRead && process.isPending && <LoadingLine>Loading the process…</LoadingLine>}
         <LoadProblem error={process.error} forbidden="The selected role cannot open this process." missing="This process is not available in the selected role’s scope." />
         {p && (
           <>
             <dl className="kv">
               <Item term="Employee">
-                {p.employeeName} <span className="hint">{p.employeeCode}</span>
+                {p.employeeName} <Hint as="span">{p.employeeCode}</Hint>
               </Item>
               <Item term="Process">
-                {p.processName} <span className="hint">{p.processCode}</span>
+                {p.processName} <Hint as="span">{p.processCode}</Hint>
               </Item>
               <Item term="State">
                 <StateBadge state={p.state} />
@@ -63,30 +71,45 @@ function ProcessLetters({ processId }: { processId: string }) {
                 {p.exitCaseId ? 'Yes: exit placeholders use this exit once it is approved' : 'None: exit placeholders use the employee’s approved exit, if there is one'}
               </Item>
             </dl>
-            <p className="row">
+            <p className={LINK_ROW}>
               <Link to={PATHS.process(p.id)}>Open the process</Link>
               {can(LETTER_READ) && <Link to={PATHS.employeeLetters(p.employeeId)}>Stored letters of {p.employeeName}</Link>}
             </p>
           </>
         )}
       </Section>
-      {!can(LETTER_GENERATE) ? (
-        <Section title="Prepare a letter">
-          <NotPermitted>The selected role cannot prepare letters: previews and final letters need the confidential letter grant.</NotPermitted>
-        </Section>
-      ) : canRead && !p ? null /* the process is loading, or did not load (said above): nothing to prepare yet */ : own ? (
-        <Section title="Prepare a letter">
-          <Empty>This process is about your own record, so you cannot prepare letters for it in this role.</Empty>
-        </Section>
-      ) : p?.state === 'CANCELLED' ? (
-        <Section title="Prepare a letter">
-          <Empty>This process was cancelled, so no letter can be generated for it.</Empty>
-        </Section>
-      ) : (
-        <LetterComposer processId={processId} employeeId={p?.employeeId ?? null} />
-      )}
+      <PrepareLetter processId={processId} process={p} canRead={canRead} own={own} />
     </>
   );
+}
+
+/** The "Prepare a letter" card, or what stands in its place: the role's refusal, one's own record, a cancelled process. */
+function PrepareLetter({ processId, process: p, canRead, own }: { processId: string; process: ProcessDetail | undefined; canRead: boolean; own: boolean }) {
+  const { can } = useSession();
+  if (!can(LETTER_GENERATE)) {
+    return (
+      <Section title="Prepare a letter">
+        <NotPermitted>The selected role cannot prepare letters: previews and final letters need the confidential letter grant.</NotPermitted>
+      </Section>
+    );
+  }
+  // The process is loading, or did not load (said above): nothing to prepare yet.
+  if (canRead && !p) return null;
+  if (own) {
+    return (
+      <Section title="Prepare a letter">
+        <Empty>This process is about your own record, so you cannot prepare letters for it in this role.</Empty>
+      </Section>
+    );
+  }
+  if (p?.state === 'CANCELLED') {
+    return (
+      <Section title="Prepare a letter">
+        <Empty>This process was cancelled, so no letter can be generated for it.</Empty>
+      </Section>
+    );
+  }
+  return <LetterComposer processId={processId} employeeId={p?.employeeId ?? null} />;
 }
 
 /**
@@ -184,69 +207,65 @@ function LetterComposer({ processId, employeeId }: { processId: string; employee
   const blockedId = `${id}-blocked`;
   return (
     <Section title="Prepare a letter">
-      <form className="row" aria-label="Choose a letter template" onSubmit={runPreview}>
+      <FormGrid aria-label="Choose a letter template" onSubmit={runPreview}>
         {canTemplates ? (
-          <label className="inline">
+          <FormField>
             Letter template{' '}
-            <select value={code} disabled={busy} onChange={(e) => choose(e.target.value)}>
+            <NativeSelect value={code} disabled={busy} onChange={(e) => choose(e.target.value)}>
               <option value="">Choose…</option>
               {usable.map((t) => (
                 <option key={t.id} value={t.code}>
                   {t.name} ({t.code}, revision {t.publishedRevision})
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
         ) : (
-          <label className="inline">
+          <FormField>
             Letter template code{' '}
-            <input value={code} maxLength={40} disabled={busy} onChange={(e) => choose(e.target.value.toUpperCase())} />
-          </label>
+            <Input value={code} maxLength={40} disabled={busy} onChange={(e) => choose(e.target.value.toUpperCase())} />
+          </FormField>
         )}
-        <button type="submit" disabled={busy}>
+        <Button type="submit" disabled={busy}>
           Preview letter
-        </button>
-      </form>
-      {canTemplates && templates.data && usable.length === 0 && <p className="hint">No letter template is active with a published revision yet.</p>}
+        </Button>
+      </FormGrid>
+      {canTemplates && templates.data && usable.length === 0 && <Hint>No letter template is active with a published revision yet.</Hint>}
       <LoadProblem error={templates.error} forbidden="The selected role cannot list letter templates." />
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
       <Refusal error={preview.error} words={words} />
-      {preview.isPending && <p className="hint">Preparing the preview…</p>}
+      {preview.isPending && <Hint>Preparing the preview…</Hint>}
 
       {current && (
-        <div role="region" aria-label="Letter preview">
-          <h3 style={H3}>
+        <div role="region" aria-label="Letter preview" className="flex flex-col gap-3">
+          <CardSubheading>
             Preview of {current.templateCode}, revision {current.templateRevision}
-          </h3>
-          <p>
+          </CardSubheading>
+          <p className="m-0">
             <Badge tone="warn">preview only</Badge> This preview is not stored and nothing is sent to anyone.
           </p>
           {current.missing.length > 0 ? (
-            <p id={blockedId} role="alert" className="error">
+            <StatusNote tone="error" role="alert" id={blockedId}>
               The final letter cannot be generated until these mandatory values are recorded: {current.missing.map(name).join(', ')}.
-            </p>
+            </StatusNote>
           ) : (
-            <p className="ok">Every mandatory value is present.</p>
+            <StatusNote tone="success">Every mandatory value is present.</StatusNote>
           )}
-          <pre style={LETTER}>{current.text}</pre>
+          <pre className={LETTER}>{current.text}</pre>
         </div>
       )}
 
-      <div className="stack">
-        <p className="hint">
+      <div className="flex flex-col gap-3">
+        <Hint>
           Generating stores the final letter as a confidential file with its template revision and your name as generator. It is not sent; download it for manual
           delivery. Each generation stores a new letter.
-        </p>
-        {current === null && !generated && <p className="hint">Preview the letter first: the final letter is offered once a preview has every mandatory value.</p>}
-        <div className="row">
-          <button type="button" disabled={busy || !canGenerate} aria-describedby={current && !canGenerate ? blockedId : undefined} onClick={generateFinal}>
+        </Hint>
+        {current === null && !generated && <Hint>Preview the letter first: the final letter is offered once a preview has every mandatory value.</Hint>}
+        <ButtonRow>
+          <Button type="button" disabled={busy || !canGenerate} aria-describedby={current && !canGenerate ? blockedId : undefined} onClick={generateFinal}>
             Generate the final letter
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Refusal
           error={generate.error}
           words={words}
@@ -255,10 +274,10 @@ function LetterComposer({ processId, employeeId }: { processId: string; employee
       </div>
 
       {generated && (
-        <div className="stack">
-          <p className="ok" role="status">
-            Final letter stored: {generated.templateCode}, revision {generated.templateRevision}, letter number {generated.outputNumber}.
-          </p>
+        <div className="flex flex-col gap-3">
+          <Notice
+            notice={{ text: `Final letter stored: ${generated.templateCode}, revision ${generated.templateRevision}, letter number ${generated.outputNumber}.`, ok: true }}
+          />
           <dl className="kv">
             <Item term="Template">{generated.templateCode}</Item>
             <Item term="Template revision">{generated.templateRevision}</Item>
@@ -273,11 +292,11 @@ function LetterComposer({ processId, employeeId }: { processId: string; employee
             <Item term="Delivery">{labelOf(DELIVERY_LABEL, generated.deliveryState)}: sending letters is not available</Item>
           </dl>
           {can(LETTER_READ) ? (
-            <div className="row">
+            <ButtonRow>
               <OutputDownload output={generated} />
-            </div>
+            </ButtonRow>
           ) : (
-            <p className="hint">Downloading the stored letter needs the letter read grant.</p>
+            <Hint>Downloading the stored letter needs the letter read grant.</Hint>
           )}
         </div>
       )}

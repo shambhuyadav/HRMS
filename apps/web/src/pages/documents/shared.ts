@@ -1,5 +1,5 @@
-// Shared by the document screens: permission keys, screen paths and limits, the API's shapes and query keys.
-import { type CSSProperties, useMemo } from 'react';
+// Shared by the document screens: permission keys, screen paths and limits, the API's shapes, query keys and layout pieces.
+import { useMemo } from 'react';
 import { ApiError } from '../../api';
 import { useSession } from '../../session';
 
@@ -34,8 +34,10 @@ export const BATCHES_PAGE_SIZE = 25;
 export const FILE_ACCEPT = 'application/pdf,image/jpeg,image/png';
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const SR_ONLY: CSSProperties = { position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 };
+// The module's own layout piece, as utility classes (shadcn/ui move, 20 Nov 2026). The shared helpers (FormField, Hint, Table …)
+// cover fields, hints and tables; this covers what this module has and they do not.
+/** A short form on one line (the old `form.inline`, `div.inline`): its file field and button side by side, bottoms aligned. */
+export const FIELD_ROW = 'mb-3 flex flex-wrap items-end gap-x-4 gap-y-3';
 
 // ---------------------------------------------------------------------------------------------------------
 // Types: exactly what the API returns (modules/documents/policies.ts and mapping.ts)

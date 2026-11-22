@@ -1,6 +1,6 @@
 // Shared parts of the payroll screens: keys, routes, query keys, styles, labels and the salary hold and stop shapes.
 
-import { type CSSProperties, type ReactNode, useMemo, useRef } from 'react';
+import { type ReactNode, useMemo, useRef } from 'react';
 import { ApiError, formatAmount, idempotencyKey, readable } from '../../api';
 import { type MeContext, useSession } from '../../session';
 import { Badge } from '../../ui';
@@ -161,12 +161,8 @@ export function useIntentKey(prefix: string) {
   );
 }
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const H3: CSSProperties = { fontSize: '1rem', margin: '0.75rem 0 0.25rem' };
-export const FLUSH: CSSProperties = { margin: '0.25rem 0' };
-export const PLAIN_LIST: CSSProperties = { listStyle: 'none', padding: 0, margin: 0 };
-export const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
-export const GROUP: CSSProperties = { border: 'none', margin: 0, padding: 0, minWidth: 0 };
+/** A textarea keeps a readable width in a one-column form, as the old `.stack > label > textarea` rule had it. */
+export const READABLE_WIDTH = 'max-w-[560px]';
 
 export const canReadRuns = (can: (p: string) => boolean) => can(RUN_READ_STATUS) || can(RUN_READ_AMOUNT);
 export const ownContext = (me: MeContext | null) => me !== null && me.scopeKind === 'OWN' && me.employeeId !== null;

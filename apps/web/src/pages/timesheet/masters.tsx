@@ -3,18 +3,31 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useEffect, useId, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { CheckField, ChoiceRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { api, ApiError, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, Notice, NotPermitted, Section } from '../../ui';
 import { EmployeeField } from './fields';
 import { ReadProblem, Refusal } from './refusals';
-import { activeText, CODE, H3, MASTER_MANAGE, MASTER_READ, PATHS, periodText, Problem, SCROLL, shown, SPACED, useKeys } from './shared';
+import { activeText, CODE, FIELD_ROW, FORM_END, MASTER_MANAGE, MASTER_READ, PATHS, periodText, Problem, shown, useKeys } from './shared';
 import type { Activity, Job, Master, MasterKind, Project, ProjectDetail } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: masters (projects and the activity catalogue), and the project, job and activity details
 // ---------------------------------------------------------------------------------------------------------
 const MASTER_NOUN: Record<MasterKind, string> = { project: 'project', job: 'job', activity: 'activity' };
+
+/** The question at the start of a ChoiceRow of radio buttons, in a field's words' size and weight, like the fields above it. */
+const CHOICE_QUESTION = 'text-[0.83rem] font-medium text-[var(--body)]';
 
 export function MastersScreen() {
   const { can } = useSession();
@@ -29,14 +42,14 @@ export function MastersScreen() {
 
 function ActiveFilter({ value, onChange, noun }: { value: string; onChange: (v: string) => void; noun: string }) {
   return (
-    <label>
+    <FormField>
       Show {noun}
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">All</option>
         <option value="true">Active only</option>
         <option value="false">Inactive only</option>
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
 }
 
@@ -52,45 +65,43 @@ function ProjectList() {
   const data = shown(list);
   return (
     <Section title="Projects">
-      <div className="row">
+      <FilterBar>
         <ActiveFilter value={active} onChange={setActive} noun="projects" />
-      </div>
+      </FilterBar>
       <ReadProblem error={list.error} what="projects" />
-      {list.isPending && <p className="hint loading">Loading projects…</p>}
+      {list.isPending && <LoadingLine>Loading projects…</LoadingLine>}
       {data && data.items.length === 0 && (
         <Empty>{can(MASTER_MANAGE) ? 'No projects yet. Add the first one below.' : 'No projects yet. Your timesheet administrator sets them up.'}</Empty>
       )}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Projects">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Owner</th>
-                <th>Valid</th>
-                <th>Status</th>
-                <th>Jobs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    <Link to={PATHS.project(p.id)}>{p.code}</Link>
-                  </td>
-                  <td>{p.name}</td>
-                  <td>
-                    {p.ownerName} ({p.ownerEmployeeCode})
-                  </td>
-                  <td>{periodText(p)}</td>
-                  <td>{activeText(p.active)}</td>
-                  <td>{p.jobCount ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Projects">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Owner</TableHead>
+              <TableHead scope="col">Valid</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Jobs</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((p) => (
+              <TableRow key={p.id}>
+                <TableCell>
+                  <Link to={PATHS.project(p.id)}>{p.code}</Link>
+                </TableCell>
+                <TableCell>{p.name}</TableCell>
+                <TableCell>
+                  {p.ownerName} ({p.ownerEmployeeCode})
+                </TableCell>
+                <TableCell>{periodText(p)}</TableCell>
+                <TableCell>{activeText(p.active)}</TableCell>
+                <TableCell>{p.jobCount ?? '—'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {can(MASTER_MANAGE) && <NewMasterForm kind="project" />}
     </Section>
@@ -109,46 +120,44 @@ function ActivityList() {
   const data = shown(list);
   return (
     <Section title="Activity catalogue">
-      <p className="hint">Each job lists the activities people can book time to. Changing whether an activity is productive does not change timesheets already filled in.</p>
-      <div className="row">
+      <Hint>Each job lists the activities people can book time to. Changing whether an activity is productive does not change timesheets already filled in.</Hint>
+      <FilterBar>
         <ActiveFilter value={active} onChange={setActive} noun="activities" />
-      </div>
+      </FilterBar>
       <ReadProblem error={list.error} what="activities" />
-      {list.isPending && <p className="hint loading">Loading activities…</p>}
+      {list.isPending && <LoadingLine>Loading activities…</LoadingLine>}
       {data && data.items.length === 0 && (
         <Empty>{can(MASTER_MANAGE) ? 'No activities yet. Add the first one below.' : 'No activities yet. Your timesheet administrator sets them up.'}</Empty>
       )}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Activities">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Productive</th>
-                <th>Owner</th>
-                <th>Valid</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <Link to={PATHS.activity(a.id)}>{a.code}</Link>
-                  </td>
-                  <td>{a.name}</td>
-                  <td>{a.productive ? 'Productive' : 'Not productive'}</td>
-                  <td>
-                    {a.ownerName} ({a.ownerEmployeeCode})
-                  </td>
-                  <td>{periodText(a)}</td>
-                  <td>{activeText(a.active)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Activities">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Productive</TableHead>
+              <TableHead scope="col">Owner</TableHead>
+              <TableHead scope="col">Valid</TableHead>
+              <TableHead scope="col">Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell>
+                  <Link to={PATHS.activity(a.id)}>{a.code}</Link>
+                </TableCell>
+                <TableCell>{a.name}</TableCell>
+                <TableCell>{a.productive ? 'Productive' : 'Not productive'}</TableCell>
+                <TableCell>
+                  {a.ownerName} ({a.ownerEmployeeCode})
+                </TableCell>
+                <TableCell>{periodText(a)}</TableCell>
+                <TableCell>{activeText(a.active)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {can(MASTER_MANAGE) && <NewMasterForm kind="activity" />}
     </Section>
@@ -164,6 +173,13 @@ interface MasterBody {
   productive?: boolean;
 }
 
+/** Where a new master is created: a job always under its project. */
+function createPath(kind: MasterKind, projectId: string | undefined): string {
+  if (kind === 'project') return '/v1/timesheet/projects';
+  if (kind === 'job') return `/v1/timesheet/projects/${encodeURIComponent(projectId ?? '')}/jobs`;
+  return '/v1/timesheet/activities';
+}
+
 /** A new project, a new job in a project (fixed at creation) or a new activity (productive chosen explicitly). */
 function NewMasterForm({ kind, projectId }: { kind: MasterKind; projectId?: string }) {
   const keys = useKeys();
@@ -175,7 +191,7 @@ function NewMasterForm({ kind, projectId }: { kind: MasterKind; projectId?: stri
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null);
   const set = (k: keyof typeof empty) => (v: string) => setF((prev) => ({ ...prev, [k]: v }));
-  const path = kind === 'project' ? '/v1/timesheet/projects' : kind === 'job' ? `/v1/timesheet/projects/${encodeURIComponent(projectId ?? '')}/jobs` : '/v1/timesheet/activities';
+  const path = createPath(kind, projectId);
   const create = useMutation({
     mutationFn: (body: MasterBody) => api<Master>(path, { body }),
     onSuccess: (m) => {
@@ -198,48 +214,48 @@ function NewMasterForm({ kind, projectId }: { kind: MasterKind; projectId?: stri
     create.mutate({ code: f.code.trim(), name: f.name.trim(), ownerEmployeeId: f.owner, startDate: f.start, endDate: f.end || null, ...(kind === 'activity' ? { productive: f.productive === 'yes' } : {}) });
   };
   return (
-    <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate style={SPACED}>
-      <h3 id={`${id}-title`} className="wide" style={H3}>
-        New {noun}
-      </h3>
-      <label>
+    <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+      <CardSubheading id={`${id}-title`}>New {noun}</CardSubheading>
+      <FormField>
         Code
-        <input value={f.code} maxLength={40} onChange={(e) => set('code')(e.target.value)} />
-      </label>
-      <label>
+        <Input value={f.code} maxLength={40} onChange={(e) => set('code')(e.target.value)} />
+      </FormField>
+      <FormField>
         Name
-        <input value={f.name} maxLength={200} onChange={(e) => set('name')(e.target.value)} />
-      </label>
+        <Input value={f.name} maxLength={200} onChange={(e) => set('name')(e.target.value)} />
+      </FormField>
       <EmployeeField label="Owner" value={f.owner} onChange={set('owner')} />
-      <label>
+      <FormField>
         Valid from
-        <input type="date" value={f.start} onChange={(e) => set('start')(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" value={f.start} onChange={(e) => set('start')(e.target.value)} />
+      </FormField>
+      <FormField>
         Valid to (optional)
-        <input type="date" value={f.end} onChange={(e) => set('end')(e.target.value)} />
-      </label>
+        <Input type="date" value={f.end} onChange={(e) => set('end')(e.target.value)} />
+      </FormField>
       {kind === 'activity' && (
         // One line, two inline choices; neither is chosen for you (the server takes no default).
-        <div className="row wide" role="radiogroup" aria-labelledby={`${id}-productive`}>
-          <span id={`${id}-productive`}>Counts as productive time</span>
-          <label className="check">
+        <ChoiceRow className="col-span-full" role="radiogroup" aria-labelledby={`${id}-productive`}>
+          <span id={`${id}-productive`} className={CHOICE_QUESTION}>
+            Counts as productive time
+          </span>
+          <CheckField>
             <input type="radio" name={`${id}-productive`} checked={f.productive === 'yes'} onChange={() => set('productive')('yes')} /> Yes
-          </label>
-          <label className="check">
+          </CheckField>
+          <CheckField>
             <input type="radio" name={`${id}-productive`} checked={f.productive === 'no'} onChange={() => set('productive')('no')} /> No
-          </label>
-        </div>
+          </CheckField>
+        </ChoiceRow>
       )}
-      <div className="wide">
+      <div className={FORM_END}>
         <Problem text={problem} />
         <Refusal error={create.error} act="master" />
         <Notice notice={notice} />
-        <button type="submit" disabled={create.isPending}>
+        <Button type="submit" className="self-start" disabled={create.isPending}>
           Create {noun}
-        </button>
+        </Button>
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -300,40 +316,40 @@ function MasterEdit({ kind, m, path, onSaved }: { kind: MasterKind; m: Master & 
     save.mutate(body);
   };
   return (
-    <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate style={SPACED}>
-      <h3 id={`${id}-title`} className="wide" style={H3}>
+    <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+      <CardSubheading id={`${id}-title`}>
         Change {MASTER_NOUN[kind]} {m.code}
-      </h3>
-      <label>
+      </CardSubheading>
+      <FormField>
         Name
-        <input value={f.name} maxLength={200} onChange={(e) => setF({ ...f, name: e.target.value })} />
-      </label>
+        <Input value={f.name} maxLength={200} onChange={(e) => setF({ ...f, name: e.target.value })} />
+      </FormField>
       <EmployeeField label="Owner" value={f.owner} current={{ id: m.ownerEmployeeId, label: `${m.ownerName} (${m.ownerEmployeeCode})` }} onChange={(owner) => setF((p) => ({ ...p, owner }))} />
-      <label>
+      <FormField>
         Valid from
-        <input type="date" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
-      </label>
-      <label>
+        <Input type="date" value={f.start} onChange={(e) => setF({ ...f, start: e.target.value })} />
+      </FormField>
+      <FormField>
         Valid to (empty for open-ended)
-        <input type="date" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
-      </label>
-      <label className="check">
+        <Input type="date" value={f.end} onChange={(e) => setF({ ...f, end: e.target.value })} />
+      </FormField>
+      <CheckField>
         <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> Active
-      </label>
+      </CheckField>
       {kind === 'activity' && (
-        <label className="check">
+        <CheckField>
           <input type="checkbox" checked={f.productive === true} onChange={(e) => setF({ ...f, productive: e.target.checked })} /> Productive
-        </label>
+        </CheckField>
       )}
-      <div className="wide">
+      <div className={FORM_END}>
         <Problem text={problem} />
         <Refusal error={save.error} act="master" />
         <Notice notice={notice} />
-        <button type="submit" disabled={save.isPending}>
+        <Button type="submit" className="self-start" disabled={save.isPending}>
           Save changes
-        </button>
+        </Button>
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -351,47 +367,45 @@ export function ProjectScreen() {
         <Link to={PATHS.masters}>All projects and activities</Link>
       </p>
       <Section title={p ? `Project ${p.code}: ${p.name}` : 'Project'}>
-        {detail.isPending && <p className="hint loading">Loading the project…</p>}
+        {detail.isPending && <LoadingLine>Loading the project…</LoadingLine>}
         <ReadProblem error={detail.error} what="this project" />
         {p && <MasterFacts m={p} />}
         {p && can(MASTER_MANAGE) && <MasterEdit kind="project" m={p} path={`/v1/timesheet/projects/${encodeURIComponent(p.id)}`} onSaved={() => void qc.invalidateQueries({ queryKey: keys.masters })} />}
       </Section>
       {p && (
         <Section title="Jobs">
-          <p className="hint">A job belongs to exactly this project; that never changes.</p>
+          <Hint>A job belongs to exactly this project; that never changes.</Hint>
           {p.jobs.length === 0 ? (
             <Empty>No jobs in this project yet.</Empty>
           ) : (
-            <div style={SCROLL}>
-              <table aria-label="Jobs">
-                <thead>
-                  <tr>
-                    <th>Code</th>
-                    <th>Name</th>
-                    <th>Owner</th>
-                    <th>Valid</th>
-                    <th>Status</th>
-                    <th>Approved activities</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {p.jobs.map((j) => (
-                    <tr key={j.id}>
-                      <td>
-                        <Link to={PATHS.job(j.id)}>{j.code}</Link>
-                      </td>
-                      <td>{j.name}</td>
-                      <td>
-                        {j.ownerName} ({j.ownerEmployeeCode})
-                      </td>
-                      <td>{periodText(j)}</td>
-                      <td>{activeText(j.active)}</td>
-                      <td>{j.activities.filter((a) => a.linkActive).map((a) => a.code).join(', ') || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label="Jobs">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Code</TableHead>
+                  <TableHead scope="col">Name</TableHead>
+                  <TableHead scope="col">Owner</TableHead>
+                  <TableHead scope="col">Valid</TableHead>
+                  <TableHead scope="col">Status</TableHead>
+                  <TableHead scope="col">Approved activities</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {p.jobs.map((j) => (
+                  <TableRow key={j.id}>
+                    <TableCell>
+                      <Link to={PATHS.job(j.id)}>{j.code}</Link>
+                    </TableCell>
+                    <TableCell>{j.name}</TableCell>
+                    <TableCell>
+                      {j.ownerName} ({j.ownerEmployeeCode})
+                    </TableCell>
+                    <TableCell>{periodText(j)}</TableCell>
+                    <TableCell>{activeText(j.active)}</TableCell>
+                    <TableCell>{j.activities.filter((a) => a.linkActive).map((a) => a.code).join(', ') || '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
           {can(MASTER_MANAGE) && <NewMasterForm kind="job" projectId={p.id} />}
         </Section>
@@ -418,7 +432,7 @@ export function JobScreen() {
         </p>
       )}
       <Section title={j ? `Job ${j.code}: ${j.name}` : 'Job'}>
-        {detail.isPending && <p className="hint loading">Loading the job…</p>}
+        {detail.isPending && <LoadingLine>Loading the job…</LoadingLine>}
         <ReadProblem error={detail.error} what="this job" />
         {j && <MasterFacts m={j} extra={<Item term="Project">{`${j.projectCode ?? ''}: ${j.projectName ?? ''}`}</Item>} />}
         {j && can(MASTER_MANAGE) && <MasterEdit kind="job" m={j} path={`/v1/timesheet/jobs/${encodeURIComponent(j.id)}`} onSaved={() => void qc.invalidateQueries({ queryKey: keys.masters })} />}
@@ -452,55 +466,61 @@ function JobActivities({ job }: { job: Job }) {
       {job.activities.length === 0 ? (
         <Empty>No activity is linked to this job yet.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label="Job activities">
-            <thead>
-              <tr>
-                <th>Activity</th>
-                <th>Productive</th>
-                <th>Activity status</th>
-                <th>Link</th>
-                {manage && <th>Change</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {job.activities.map((a) => (
-                <tr key={a.activityId}>
-                  <td>
-                    {a.code}: {a.name}
-                  </td>
-                  <td>{a.productive ? 'Productive' : 'Not productive'}</td>
-                  <td>{activeText(a.activityActive)}</td>
-                  <td>{a.linkActive ? 'Approved' : 'Deactivated'}</td>
-                  {manage && (
-                    <td>
-                      <button type="button" className={a.linkActive ? 'danger' : 'secondary'} disabled={link.isPending} onClick={() => link.mutate({ activityId: a.activityId, active: !a.linkActive })}>
+        <Table aria-label="Job activities">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Activity</TableHead>
+              <TableHead scope="col">Productive</TableHead>
+              <TableHead scope="col">Activity status</TableHead>
+              <TableHead scope="col">Link</TableHead>
+              {manage && <TableHead scope="col">Change</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {job.activities.map((a) => (
+              <TableRow key={a.activityId}>
+                <TableCell>
+                  {a.code}: {a.name}
+                </TableCell>
+                <TableCell>{a.productive ? 'Productive' : 'Not productive'}</TableCell>
+                <TableCell>{activeText(a.activityActive)}</TableCell>
+                <TableCell>{a.linkActive ? 'Approved' : 'Deactivated'}</TableCell>
+                {manage && (
+                  <RowActionsCell>
+                    <RowActions>
+                      <Button
+                        type="button"
+                        variant={a.linkActive ? 'danger' : 'outline'}
+                        size="sm"
+                        disabled={link.isPending}
+                        onClick={() => link.mutate({ activityId: a.activityId, active: !a.linkActive })}
+                      >
                         {a.linkActive ? `Deactivate ${a.code}` : `Reactivate ${a.code}`}
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                      </Button>
+                    </RowActions>
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {manage && (
-        <div className="row" style={SPACED}>
-          <label>
+        <div className={cn('mt-3', FIELD_ROW)}>
+          <FormField className="w-auto">
             Activity to approve for this job
-            <select value={adding} onChange={(e) => setAdding(e.target.value)}>
+            <NativeSelect value={adding} onChange={(e) => setAdding(e.target.value)}>
               <option value="">Choose…</option>
               {offer.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.code}: {a.name}
                 </option>
               ))}
-            </select>
-          </label>
-          <button type="button" disabled={!adding || link.isPending} onClick={() => link.mutate({ activityId: adding, active: true })}>
+            </NativeSelect>
+          </FormField>
+          <Button type="button" disabled={!adding || link.isPending} onClick={() => link.mutate({ activityId: adding, active: true })}>
             Approve activity
-          </button>
+          </Button>
         </div>
       )}
       <Refusal error={link.error} act="master" />
@@ -523,7 +543,7 @@ export function ActivityScreen() {
         <Link to={PATHS.masters}>All projects and activities</Link>
       </p>
       <Section title={a ? `Activity ${a.code}: ${a.name}` : 'Activity'}>
-        {detail.isPending && <p className="hint loading">Loading the activity…</p>}
+        {detail.isPending && <LoadingLine>Loading the activity…</LoadingLine>}
         <ReadProblem error={detail.error} what="this activity" />
         {a && <MasterFacts m={a} extra={<Item term="Productive">{a.productive ? 'Productive' : 'Not productive'}</Item>} />}
         {a && can(MASTER_MANAGE) && <MasterEdit kind="activity" m={a} path={`/v1/timesheet/activities/${encodeURIComponent(a.id)}`} onSaved={() => void qc.invalidateQueries({ queryKey: keys.masters })} />}

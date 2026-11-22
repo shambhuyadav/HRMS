@@ -2,6 +2,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, idempotencyKey, personLabel, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, Notice, NotPermitted, Section, When } from '../../ui';
@@ -10,7 +17,7 @@ import { CompetenciesTable, CompetencyEntriesTable, RatingResults, SectionTexts 
 import { EntriesTable, GoalsTable } from './goals';
 import { QueryProblem, Refusal, refusalText } from './refusals';
 import { ScoreForm } from './score-form';
-import { type Appraisal, type AppraisalTask, CONFIRM, type DecisionResult, type EntryChanges, FLUSH, H3, PATHS, RATE, READ, READ_RATING, SCORES, shown, SPACED, stepText, TEXTAREA, useKeys } from './shared';
+import { type Appraisal, type AppraisalTask, CONFIRM, type DecisionResult, type EntryChanges, PATHS, RATE, READ, READ_RATING, SCORES, shown, stepText, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Decision queues (FR-043): the manager's rating, then the independent reviewer confirmation
@@ -73,8 +80,8 @@ function AppraisalQueue({ kind }: { kind: QueueKind }) {
   return (
     <div ref={region} role="region" aria-label={queue.title} tabIndex={-1}>
       <Section title={`${queue.title}${data ? ` (${items.length})` : ''}`}>
-        <p className="hint">{queue.hint}</p>
-        {tasks.isPending && <p className="hint loading">Loading the appraisals waiting for you…</p>}
+        <Hint>{queue.hint}</Hint>
+        {tasks.isPending && <LoadingLine>Loading the appraisals waiting for you…</LoadingLine>}
         <QueryProblem error={tasks.error} forbidden={queue.forbidden} />
         <Notice notice={notice} />
         {data && items.length === 0 && <Empty>{queue.empty}</Empty>}
@@ -191,15 +198,13 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
   const titleId = `${id}-title`;
   return (
     <li aria-labelledby={titleId}>
-      <h3 id={titleId} style={H3}>
-        {a ? `${personLabel(a.employee)} · ${a.cycle.code}` : 'Appraisal'}
-      </h3>
+      <CardSubheading id={titleId}>{a ? `${personLabel(a.employee)} · ${a.cycle.code}` : 'Appraisal'}</CardSubheading>
       <DelegatedBadge taskId={t.taskId} />
-      <p className="hint" style={FLUSH}>
+      <Hint className="m-0">
         {stepText(t.stage, t.level)} · assigned <When at={t.assignedAt} />
         {t.dueOn ? ` · due ${formatDate(t.dueOn)}` : ' · no due date'}
         {a ? ` · revision ${a.revision}` : ''}
-      </p>
+      </Hint>
       {t.overdue && <Badge tone="warn">overdue</Badge>}
       {!a ? (
         <Empty>This appraisal is not available in the selected role’s scope.</Empty>
@@ -209,30 +214,30 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
           {a.competencies !== undefined && a.competencies.length > 0 && <CompetenciesTable a={a} label={`Competencies of ${name}`} />}
           {working?.selfEntry ? (
             <>
-              <h4 style={H3}>The employee’s self-entry</h4>
+              <CardSubheading level={4}>The employee’s self-entry</CardSubheading>
               <EntriesTable goals={a.goals} set={working.selfEntry} label={`Self-entry of ${name}`} />
               <CompetencyEntriesTable items={a.competencies ?? []} entries={working.selfEntry.competencies ?? []} label={`Competency self-entry of ${name}`} />
               <SectionTexts sections={a.sections ?? []} texts={working.selfEntry.sections} label={`Sections filled by ${name}`} />
             </>
           ) : (
-            <p className="hint">The self-entry is confidential and not shown to the selected role.</p>
+            <Hint>The self-entry is confidential and not shown to the selected role.</Hint>
           )}
           {!rating && working?.managerRating && (
             <>
-              <h4 style={H3}>The manager’s rating</h4>
+              <CardSubheading level={4}>The manager’s rating</CardSubheading>
               <EntriesTable goals={a.goals} set={working.managerRating} label={`Manager rating of ${name}`} />
               <CompetencyEntriesTable items={a.competencies ?? []} entries={working.managerRating.competencies ?? []} label={`Competency rating of ${name}`} />
               <SectionTexts sections={a.sections ?? []} texts={working.managerRating.sections} label={`Manager sections of ${name}`} />
               <RatingResults rating={working.managerRating} />
               {a.cycle.ratingMode === 'MANUAL' && (
-                <p style={FLUSH}>
+                <p className="m-0">
                   Overall rating of the manager (the final rating in this cycle): <strong>{working.managerRating.overallRating ?? '—'}</strong>
                 </p>
               )}
             </>
           )}
-          {!rating && !working?.managerRating && <p className="hint">The manager’s rating is confidential and not shown to the selected role.</p>}
-          <p style={FLUSH}>
+          {!rating && !working?.managerRating && <Hint>The manager’s rating is confidential and not shown to the selected role.</Hint>}
+          <p className="m-0">
             <Link to={PATHS.appraisal(a.id)}>Open the appraisal</Link>
           </p>
         </>
@@ -258,54 +263,46 @@ function TaskItem({ task: t, onFinished }: { task: AppraisalTask; onFinished: (t
                   save.mutate({ ...changes, expectedVersion: a.version });
                 }}
               >
-                {savedNote && !dirty && (
-                  <p className="ok" role="status">
-                    {savedNote}
-                  </p>
-                )}
+                {savedNote && !dirty && <Notice notice={{ text: savedNote, ok: true }} />}
                 <Refusal error={save.error} action="rating" />
               </ScoreForm>
             )}
-            <div style={SPACED}>
+            <div className="mt-3 flex flex-col gap-3">
               {!rating && (
-                <label>
+                <FormField>
                   Your overall score (1 to 5; required to confirm, kept apart from the manager’s rating)
-                  <select value={reviewerScore} onChange={(e) => setReviewerScore(e.target.value)}>
+                  <NativeSelect value={reviewerScore} onChange={(e) => setReviewerScore(e.target.value)}>
                     <option value="">Not scored</option>
                     {SCORES.map((s) => (
                       <option key={s} value={s}>
                         {s}
                       </option>
                     ))}
-                  </select>
-                </label>
+                  </NativeSelect>
+                </FormField>
               )}
-              <label>
+              <FormField>
                 Private remark (optional; never shown to the employee)
-                <textarea rows={2} maxLength={1000} value={remark} onChange={(e) => setRemark(e.target.value)} style={TEXTAREA} />
-              </label>
-              <label>
+                <Textarea rows={2} maxLength={1000} value={remark} onChange={(e) => setRemark(e.target.value)} />
+              </FormField>
+              <FormField>
                 Message to the employee (required to return)
-                <textarea rows={2} maxLength={2000} value={message} onChange={(e) => setMessage(e.target.value)} style={TEXTAREA} />
-              </label>
-              {problem && (
-                <p role="alert" className="error">
-                  {problem}
-                </p>
-              )}
-              <div className="row">
-                <button type="button" disabled={busy} onClick={() => send('APPROVE')}>
+                <Textarea rows={2} maxLength={2000} value={message} onChange={(e) => setMessage(e.target.value)} />
+              </FormField>
+              {problem && <Notice notice={{ text: problem, ok: false }} />}
+              <ButtonRow>
+                <Button type="button" disabled={busy} onClick={() => send('APPROVE')}>
                   {rating ? 'Submit the rating' : 'Confirm the rating'}
-                </button>
-                <button type="button" className="secondary" disabled={busy} onClick={() => send('RETURN')}>
+                </Button>
+                <Button type="button" variant="outline" disabled={busy} onClick={() => send('RETURN')}>
                   Return to the employee
-                </button>
-              </div>
+                </Button>
+              </ButtonRow>
               <Refusal error={decide.error} action="decide" />
             </div>
           </>
         ) : (
-          <p className="hint">{QUEUES[rating ? 'MANAGER_RATING' : 'REVIEW'].forbidden}</p>
+          <Hint>{QUEUES[rating ? 'MANAGER_RATING' : 'REVIEW'].forbidden}</Hint>
         ))}
     </li>
   );

@@ -2,7 +2,12 @@
 // an annual CTC into monthly components for a grade, from a start date: one person drafts it and another activates it. The server
 // derives and checks every amount; this screen shows the rules as returned and never calculates.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { type ComponentPropsWithoutRef, useState } from 'react';
+import { FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -37,6 +42,20 @@ interface Category {
   code: string;
   name: string;
   active: boolean;
+}
+
+// The screen's own layout pieces, as utility classes and small components (shadcn/ui move, 20 Nov 2026).
+/** A small action after the words of a list item (Activate, Retire), set apart from them and from each other. */
+const ITEM_BUTTON = 'ml-2';
+/** A list item that ends in actions: a little room above and below, so its buttons do not crowd the next item. */
+const ITEM_WITH_ACTIONS = 'py-1';
+
+/**
+ * One structure: a card inside the list's card. It keeps the `card` marker class, so whatever it holds is drawn as a card's own, as
+ * it was before the move to shadcn/ui.
+ */
+function StructureCard(props: ComponentPropsWithoutRef<'div'>) {
+  return <div className="card rounded-xl border border-border bg-card px-5 py-4 shadow-xs not-last:mb-3" {...props} />;
 }
 
 /** How one line reads: "GS_HRA: 50% of GS_BASIC". */
@@ -77,39 +96,38 @@ function StructureForm({ onDone }: { onDone: () => void }) {
   });
   const ready = gradeCode.trim() && effectiveFrom && currencyCode.trim() && lines.trim();
   return (
-    <form
-      className="stack"
+    <FormGrid
       aria-label="New grade salary structure"
       onSubmit={(e) => {
         e.preventDefault();
         if (ready && !create.isPending) create.mutate();
       }}
     >
-      <p className="hint">
+      <Hint>
         One line per component, in order: CODE PCT 40 (percent of the monthly CTC), CODE PCT_OF BASE 50 (percent of an earlier line), CODE FIXED 1600 (a fixed monthly amount) or CODE BALANCE (exactly one earning that
         takes what is left). Lines are earnings, reimbursements or employer contributions on fixed heads.
-      </p>
-      <label>
+      </Hint>
+      <FormField>
         Grade code
-        <input value={gradeCode} onChange={(e) => setGradeCode(e.target.value)} />
-      </label>
-      <label>
+        <Input value={gradeCode} onChange={(e) => setGradeCode(e.target.value)} />
+      </FormField>
+      <FormField>
         Effective from
-        <input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </FormField>
+      <FormField>
         Currency
-        <input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value.toUpperCase())} />
-      </label>
-      <label>
+        <Input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value.toUpperCase())} />
+      </FormField>
+      <FormField className="col-span-full">
         Lines
-        <textarea rows={6} value={lines} onChange={(e) => setLines(e.target.value)} />
-      </label>
+        <Textarea rows={6} value={lines} onChange={(e) => setLines(e.target.value)} />
+      </FormField>
       <ErrorNote error={create.error} />
-      <button type="submit" disabled={!ready || create.isPending}>
+      <Button type="submit" disabled={!ready || create.isPending}>
         Save as draft
-      </button>
-    </form>
+      </Button>
+    </FormGrid>
   );
 }
 
@@ -118,27 +136,26 @@ function CategoryForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState('');
   const create = useMutation({ mutationFn: () => api<Category>('/v1/payroll/ctc-categories', { body: { code: code.trim(), name: name.trim() } }), onSuccess: () => onDone() });
   return (
-    <form
-      className="row"
+    <FormGrid
       aria-label="New CTC category"
       onSubmit={(e) => {
         e.preventDefault();
         if (code.trim() && name.trim() && !create.isPending) create.mutate();
       }}
     >
-      <label>
+      <FormField>
         Code
-        <input value={code} onChange={(e) => setCode(e.target.value)} />
-      </label>
-      <label>
+        <Input value={code} onChange={(e) => setCode(e.target.value)} />
+      </FormField>
+      <FormField>
         Name
-        <input value={name} onChange={(e) => setName(e.target.value)} />
-      </label>
+        <Input value={name} onChange={(e) => setName(e.target.value)} />
+      </FormField>
       <ErrorNote error={create.error} />
-      <button type="submit" disabled={!code.trim() || !name.trim() || create.isPending}>
+      <Button type="submit" disabled={!code.trim() || !name.trim() || create.isPending}>
         Add category
-      </button>
-    </form>
+      </Button>
+    </FormGrid>
   );
 }
 
@@ -152,16 +169,16 @@ function GradeStructuresScreen() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['grade-structures'] }),
   });
   return (
-    <div className="stack">
+    <div className="flex flex-col gap-3">
       <Section title="Grade salary structures">
-        <p className="hint">
+        <Hint>
           The active structure in force for an employee's grade on a salary's start date sets that salary's components from its annual CTC; the salary is refused if its components or monthly gross differ.
           Monthly gross is the earnings and reimbursements; employer contributions are part of CTC but not of gross.
-        </p>
+        </Hint>
         <ErrorNote error={structures.error ?? activate.error} />
         {structures.data?.items.length === 0 && <Empty>No grade salary structure yet: salary components are entered as they are.</Empty>}
         {structures.data?.items.map((s) => (
-          <div className="card" key={s.id} aria-label={`Structure ${s.gradeCode} revision ${s.revision}`}>
+          <StructureCard key={s.id} aria-label={`Structure ${s.gradeCode} revision ${s.revision}`}>
             <strong>{`${s.gradeName} (${s.gradeCode}), revision ${s.revision}, from ${formatDate(s.effectiveFrom)}, ${s.currencyCode} `}</strong>
             <StateBadge state={s.state} />
             <ol>
@@ -170,11 +187,11 @@ function GradeStructuresScreen() {
               ))}
             </ol>
             {s.state === 'DRAFT' && can(CONFIG_ACTIVATE) && s.createdBy !== me?.userId && (
-              <button type="button" className="secondary" onClick={() => activate.mutate(s)} disabled={activate.isPending}>
+              <Button type="button" variant="outline" onClick={() => activate.mutate(s)} disabled={activate.isPending}>
                 Activate
-              </button>
+              </Button>
             )}
-          </div>
+          </StructureCard>
         ))}
       </Section>
       {can(CONFIG_MANAGE) && (
@@ -183,7 +200,7 @@ function GradeStructuresScreen() {
         </Section>
       )}
       <Section title="CTC categories">
-        <p className="hint">A name for a kind of CTC, recorded on a salary when it is made and used to filter the salary master. It changes no amount.</p>
+        <Hint>A name for a kind of CTC, recorded on a salary when it is made and used to filter the salary master. It changes no amount.</Hint>
         <ErrorNote error={categories.error} />
         {categories.data?.items.length === 0 && <Empty>No CTC category yet.</Empty>}
         {categories.data && categories.data.items.length > 0 && (
@@ -227,42 +244,41 @@ function ExternalDeductionsSection() {
   const add = useMutation({ mutationFn: () => api('/v1/payroll/external-deductions', { body: form }), onSuccess: refresh });
   const ready = Object.values(form).every((v) => v.trim() !== '');
   const field = (key: keyof typeof form, label: string, type = 'text') => (
-    <label>
+    <FormField>
       {label}
-      <input type={type} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
-    </label>
+      <Input type={type} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} />
+    </FormField>
   );
   return (
     <Section title="External deduction codes">
-      <p className="hint">
+      <Hint>
         An outside party's code (canteen, society, insurance) maps to a deduction from a date. Payroll inputs may name the code instead of the component; an unknown, unmapped or retired code is refused, never
         defaulted.
-      </p>
+      </Hint>
       <ErrorNote error={list.error ?? decide.error ?? add.error} />
       {list.data?.items.length === 0 && <Empty>No external deduction code yet.</Empty>}
       {list.data && list.data.items.length > 0 && (
         <ul aria-label="External deduction codes">
           {list.data.items.map((m) => (
-            <li key={m.id}>
+            <li key={m.id} className={ITEM_WITH_ACTIONS}>
               {`${m.externalCode} (${m.name}) → ${m.componentCode} from ${formatDate(m.effectiveFrom)} `}
               <StateBadge state={m.state} />
               {can(CONFIG_ACTIVATE) && m.state === 'DRAFT' && m.createdBy !== me?.userId && (
-                <button type="button" className="secondary" onClick={() => decide.mutate({ m, action: 'ACTIVATE' })} disabled={decide.isPending}>
+                <Button type="button" variant="outline" size="sm" className={ITEM_BUTTON} onClick={() => decide.mutate({ m, action: 'ACTIVATE' })} disabled={decide.isPending}>
                   Activate
-                </button>
+                </Button>
               )}
               {can(CONFIG_ACTIVATE) && m.state === 'ACTIVE' && (
-                <button type="button" className="secondary" onClick={() => decide.mutate({ m, action: 'RETIRE' })} disabled={decide.isPending}>
+                <Button type="button" variant="danger" size="sm" className={ITEM_BUTTON} onClick={() => decide.mutate({ m, action: 'RETIRE' })} disabled={decide.isPending}>
                   Retire
-                </button>
+                </Button>
               )}
             </li>
           ))}
         </ul>
       )}
       {can(CONFIG_MANAGE) && (
-        <form
-          className="stack"
+        <FormGrid
           aria-label="Map an external deduction code"
           onSubmit={(e) => {
             e.preventDefault();
@@ -274,10 +290,10 @@ function ExternalDeductionsSection() {
           {field('componentCode', 'Deduction component code')}
           {field('effectiveFrom', 'Effective from', 'date')}
           {field('reason', 'Reason')}
-          <button type="submit" disabled={!ready || add.isPending}>
+          <Button type="submit" disabled={!ready || add.isPending}>
             Save as draft
-          </button>
-        </form>
+          </Button>
+        </FormGrid>
       )}
     </Section>
   );

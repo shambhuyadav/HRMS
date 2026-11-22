@@ -1,4 +1,6 @@
-// The base stylesheet comes first, so the stylesheets of individual screens (imported by their components, under styles/) build on it.
+// tailwind.css comes first: it sets the cascade-layer order every stylesheet follows (shadcn/ui over the HRMS stylesheets). Then the
+// base stylesheet, so the stylesheets of individual screens (imported by their components, under styles/) build on it.
+import './tailwind.css';
 import './styles.css';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';

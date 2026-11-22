@@ -1,5 +1,6 @@
 // Shared parts of the home pages: code words, a flattened row and the simple table with its value format.
 
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDate } from '../../api';
 
 export const words = (code: string) => code.replace(/_/g, ' ').toLowerCase();
@@ -17,24 +18,26 @@ export function flatRow(row: Record<string, unknown>): Record<string, unknown> {
 export function SimpleTable({ rows }: { rows: Record<string, unknown>[] }) {
   const columns = Object.keys(rows[0] ?? {});
   return (
-    <table>
-      <thead>
-        <tr>
+    <Table>
+      <TableHeader>
+        <TableRow>
           {columns.map((c) => (
-            <th key={c}>{c}</th>
+            <TableHead key={c} scope="col">
+              {c}
+            </TableHead>
           ))}
-        </tr>
-      </thead>
-      <tbody>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {rows.map((r, i) => (
-          <tr key={i}>
+          <TableRow key={i}>
             {columns.map((c) => (
-              <td key={c}>{format(r[c])}</td>
+              <TableCell key={c}>{format(r[c])}</TableCell>
             ))}
-          </tr>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 

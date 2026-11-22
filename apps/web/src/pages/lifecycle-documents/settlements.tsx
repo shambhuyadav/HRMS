@@ -2,15 +2,27 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ButtonRow, FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, download, fileToBase64, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, LIST_PAGE_SIZE, nextSort, NotPermitted, Pager, Section, SortHeader, sortParams, type SortState } from '../../ui';
+import { Empty, ErrorNote, LIST_PAGE_SIZE, nextSort, Notice, NotPermitted, Pager, Section, SortHeader, sortParams, type SortState } from '../../ui';
 import { TemplateDownload } from '../records';
 import { archiveWords, Refusal } from './refusals';
 import { SettlementBulkUpload } from './settlement-bulk-upload';
 import { SettlementApprovalQueue, SettlementReviewQueue } from './settlement-queues';
-import { CalculationNote, EXIT_READ, EXIT_STATE_LABEL, EXPORT_FORMATS, EXPORTABLE_STATES, type ExportFormat, labelOf, LoadProblem, MAX_ARCHIVE, MAX_EMPLOYEE_CODE, Money, MONTH, type Paged, pagedUrl, PATHS, SCROLL, SETTLEMENT_APPROVE, SETTLEMENT_EXPORT, SETTLEMENT_PREPARE, SETTLEMENT_READ, SETTLEMENT_REVIEW, SETTLEMENT_STATES, settlementLabel, SettlementState, SR_ONLY, totalOf, useKeys } from './shared';
+import { CalculationNote, EXIT_READ, EXIT_STATE_LABEL, EXPORT_FORMATS, EXPORTABLE_STATES, type ExportFormat, FIELD_ROW, labelOf, LoadProblem, MAX_ARCHIVE, MAX_EMPLOYEE_CODE, Money, MONTH, type Paged, pagedUrl, PATHS, SETTLEMENT_APPROVE, SETTLEMENT_EXPORT, SETTLEMENT_PREPARE, SETTLEMENT_READ, SETTLEMENT_REVIEW, SETTLEMENT_STATES, settlementLabel, SettlementState, totalOf, useKeys, WRAPPING_BUTTON } from './shared';
 import type { Calculation, ExitCase, SettlementSummary } from './types';
+
+/** A part of the register's card after the list (the ZIP download, the uploaded-list selection), set apart from what is above by a hairline. */
+const CARD_PART = 'mt-5 flex flex-col gap-3 border-t border-border pt-5';
 
 // =========================================================================================================
 // Settlements (FR-052 to FR-054, BR-016): the register, the decision queues and preparation from an approved exit
@@ -117,104 +129,100 @@ function SettlementRegister() {
   return (
     <Section title="Settlements">
       <CalculationNote calculation={list.data?.calculation} />
-      <form className="grid-form" aria-label="Filter settlements" onSubmit={apply}>
-        <label>
-          State
-          <select value={state} onChange={(e) => setState(e.target.value)}>
-            <option value="">All states</option>
-            {SETTLEMENT_STATES.map((s) => (
-              <option key={s} value={s}>
-                {settlementLabel(s)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Employee code contains
-          <input value={employeeCode} maxLength={MAX_EMPLOYEE_CODE} onChange={(e) => setEmployeeCode(e.target.value)} />
-        </label>
-        <label title="The month of the approved last working date">
-          Last working month
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-        </label>
-        <label title="The month of the recorded payment date">
-          Paid in month
-          <input type="month" value={disbursement} onChange={(e) => setDisbursement(e.target.value)} />
-        </label>
-        <div className="row filter-actions">
-          <button type="submit">Show settlements</button>
-          <button type="button" className="secondary" onClick={clear}>
-            Clear filters
-          </button>
-        </div>
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
-      </form>
-      {list.isPending && <p className="hint loading">Loading the settlements…</p>}
+      <FilterBar asChild>
+        <form aria-label="Filter settlements" onSubmit={apply}>
+          <FormField>
+            State
+            <NativeSelect value={state} onChange={(e) => setState(e.target.value)}>
+              <option value="">All states</option>
+              {SETTLEMENT_STATES.map((s) => (
+                <option key={s} value={s}>
+                  {settlementLabel(s)}
+                </option>
+              ))}
+            </NativeSelect>
+          </FormField>
+          <FormField>
+            Employee code contains
+            <Input value={employeeCode} maxLength={MAX_EMPLOYEE_CODE} onChange={(e) => setEmployeeCode(e.target.value)} />
+          </FormField>
+          <FormField title="The month of the approved last working date">
+            Last working month
+            <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </FormField>
+          <FormField title="The month of the recorded payment date">
+            Paid in month
+            <Input type="month" value={disbursement} onChange={(e) => setDisbursement(e.target.value)} />
+          </FormField>
+          <ButtonRow>
+            <Button type="submit">Show settlements</Button>
+            <Button type="button" variant="outline" onClick={clear}>
+              Clear filters
+            </Button>
+          </ButtonRow>
+          {problem && <Notice notice={{ text: problem, ok: false }} />}
+        </form>
+      </FilterBar>
+      {list.isPending && <LoadingLine>Loading the settlements…</LoadingLine>}
       <LoadProblem error={list.error} forbidden="The selected role cannot view settlements." />
       {list.data && items.length === 0 && <Empty>{query ? 'No settlements match these filters.' : 'No settlements in the selected role’s scope yet.'}</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Settlements">
-            <thead>
-              <tr>
-                {selectable && <th scope="col">Select</th>}
-                <SortHeader column="employeeName" label="Employee" sort={sort} onSort={onSort} />
-                <SortHeader column="revision" label="Revision" sort={sort} onSort={onSort} />
-                <SortHeader column="state" label="State" sort={sort} onSort={onSort} />
-                <th scope="col">Currency</th>
-                {withAmounts && <th scope="col">Net amount</th>}
-                <th scope="col">
-                  <span style={SR_ONLY}>Settlement</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((s) => (
-                <tr key={s.id}>
-                  {selectable && (
-                    <td>
-                      {EXPORTABLE_STATES.has(s.state) ? (
-                        <input
-                          type="checkbox"
-                          aria-label={`Select revision ${s.revision} of ${s.employeeName} (${s.employeeCode}) for the ZIP download`}
-                          checked={isSelected(s.id)}
-                          disabled={!isSelected(s.id) && selected.length >= MAX_ARCHIVE}
-                          onChange={(e) => toggle(s, e.target.checked)}
-                        />
-                      ) : (
-                        <span className="hint" title="Only an approved settlement, or one eligible for release, is exported">
-                          —
-                        </span>
-                      )}
-                    </td>
-                  )}
-                  <td>
-                    {s.employeeName} <span className="hint">{s.employeeCode}</span>
-                  </td>
-                  <td>{s.revision}</td>
-                  <td>
-                    <SettlementState state={s.state} />
-                  </td>
-                  <td>{s.currencyCode}</td>
-                  {withAmounts && (
-                    <td>
-                      <Money value={s.netAmount} currency={s.currencyCode} />
-                    </td>
-                  )}
-                  <td>
-                    <Link to={PATHS.settlement(s.id)} aria-label={`Open revision ${s.revision} of ${s.employeeName} (${s.employeeCode})`}>
-                      Open
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Settlements">
+          <TableHeader>
+            <TableRow>
+              {selectable && <TableHead scope="col">Select</TableHead>}
+              <SortHeader column="employeeName" label="Employee" sort={sort} onSort={onSort} />
+              <SortHeader column="revision" label="Revision" sort={sort} onSort={onSort} />
+              <SortHeader column="state" label="State" sort={sort} onSort={onSort} />
+              <TableHead scope="col">Currency</TableHead>
+              {withAmounts && <TableHead scope="col">Net amount</TableHead>}
+              <TableHead scope="col">
+                <span className="sr-only">Settlement</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((s) => (
+              <TableRow key={s.id}>
+                {selectable && (
+                  <TableCell>
+                    {EXPORTABLE_STATES.has(s.state) ? (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select revision ${s.revision} of ${s.employeeName} (${s.employeeCode}) for the ZIP download`}
+                        checked={isSelected(s.id)}
+                        disabled={!isSelected(s.id) && selected.length >= MAX_ARCHIVE}
+                        onChange={(e) => toggle(s, e.target.checked)}
+                      />
+                    ) : (
+                      <Hint as="span" title="Only an approved settlement, or one eligible for release, is exported">
+                        —
+                      </Hint>
+                    )}
+                  </TableCell>
+                )}
+                <TableCell>
+                  {s.employeeName} <Hint as="span">{s.employeeCode}</Hint>
+                </TableCell>
+                <TableCell>{s.revision}</TableCell>
+                <TableCell>
+                  <SettlementState state={s.state} />
+                </TableCell>
+                <TableCell>{s.currencyCode}</TableCell>
+                {withAmounts && (
+                  <TableCell>
+                    <Money value={s.netAmount} currency={s.currencyCode} />
+                  </TableCell>
+                )}
+                <RowActionsCell>
+                  <Link to={PATHS.settlement(s.id)} aria-label={`Open revision ${s.revision} of ${s.employeeName} (${s.employeeCode})`}>
+                    Open
+                  </Link>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {list.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(list.data)} onPage={setPage} label="Settlement pages" noun="settlement" />}
       {selectable && <ArchiveDownload selected={selected} canSelectPage={exportable.some((s) => !isSelected(s.id))} onSelectPage={selectPage} onClear={() => setSelected([])} />}
@@ -265,43 +273,46 @@ function UploadedListSelection({ filters, onMatched }: { filters: Record<string,
     onSuccess: (result) => onMatched(result.items),
   });
   return (
-    <div className="stack" role="group" aria-label="Select settlements from an uploaded list">
-      <p className="hint">
+    <div className={CARD_PART} role="group" aria-label="Select settlements from an uploaded list">
+      <Hint>
         Or select from a list: a CSV file with the single column <code>employee_code</code> (template SETTLEMENT_SELECTION_V1). Codes match exactly; the settlements
         of the matched employees that can be exported join the ZIP selection.
-      </p>
+      </Hint>
       <TemplateDownload base="/v1/settlements/selection" code="SETTLEMENT_SELECTION_V1" />
-      <div className="row">
-        <label>
+      <div className={FIELD_ROW}>
+        <FormField className="w-auto">
           Employee list file
-          <input type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        </label>
-        <button type="button" disabled={!file || select.isPending} onClick={() => file && select.mutate(file)}>
+          <Input type="file" accept=".csv,text/csv" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </FormField>
+        <Button type="button" disabled={!file || select.isPending} onClick={() => file && select.mutate(file)}>
           Select from the list
-        </button>
+        </Button>
       </div>
       <ErrorNote error={select.error} />
       {select.data && (
         <>
-          <p role="status">{`${select.data.matched} of ${select.data.total} rows matched; ${select.data.items.length} settlements found.`}</p>
-          <table aria-label="Uploaded list rows">
-            <thead>
-              <tr>
-                <th scope="col">Row</th>
-                <th scope="col">Employee code</th>
-                <th scope="col">Outcome</th>
-              </tr>
-            </thead>
-            <tbody>
+          {/* Information, not a success: none of the rows may have matched. */}
+          <StatusNote tone="info" role="status">
+            {`${select.data.matched} of ${select.data.total} rows matched; ${select.data.items.length} settlements found.`}
+          </StatusNote>
+          <Table aria-label="Uploaded list rows">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Row</TableHead>
+                <TableHead scope="col">Employee code</TableHead>
+                <TableHead scope="col">Outcome</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {select.data.rows.map((r) => (
-                <tr key={r.row}>
-                  <td>{r.row}</td>
-                  <td>{r.employeeCode ?? '—'}</td>
-                  <td>{`${labelOf(SELECTION_OUTCOME_LABEL, r.outcome)}${r.outcome === 'MATCHED' ? ` (${r.settlements})` : ''}`}</td>
-                </tr>
+                <TableRow key={r.row}>
+                  <TableCell>{r.row}</TableCell>
+                  <TableCell>{r.employeeCode ?? '—'}</TableCell>
+                  <TableCell>{`${labelOf(SELECTION_OUTCOME_LABEL, r.outcome)}${r.outcome === 'MATCHED' ? ` (${r.settlements})` : ''}`}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </>
       )}
     </div>
@@ -320,34 +331,36 @@ function ArchiveDownload({ selected, canSelectPage, onSelectPage, onClear }: { s
   });
   const names = new Map(selected.map((s) => [s.id, s.name]));
   return (
-    <div className="stack" role="group" aria-label="ZIP download of the selected settlements">
-      <p className="hint">
+    <div className={CARD_PART} role="group" aria-label="ZIP download of the selected settlements">
+      <Hint>
         Select approved settlements, or ones eligible for release, on any page of the list (at most {MAX_ARCHIVE}) and download one ZIP holding each one’s export in
         the chosen format. It is built when you download it; it is not stored and nothing is sent.
-      </p>
-      <div className="row">
-        <span role="status">{selected.length === 0 ? 'No settlement selected.' : `${selected.length} of at most ${MAX_ARCHIVE} selected.`}</span>
-        <button type="button" className="secondary" disabled={!canSelectPage || selected.length >= MAX_ARCHIVE} onClick={onSelectPage}>
+      </Hint>
+      <ButtonRow>
+        <span role="status" className="text-sm font-medium">
+          {selected.length === 0 ? 'No settlement selected.' : `${selected.length} of at most ${MAX_ARCHIVE} selected.`}
+        </span>
+        <Button type="button" variant="outline" className={WRAPPING_BUTTON} disabled={!canSelectPage || selected.length >= MAX_ARCHIVE} onClick={onSelectPage}>
           Select the exportable settlements on this page
-        </button>
-        <button type="button" className="secondary" disabled={selected.length === 0} onClick={onClear}>
+        </Button>
+        <Button type="button" variant="outline" disabled={selected.length === 0} onClick={onClear}>
           Clear the selection
-        </button>
-      </div>
-      <div className="row">
-        <label>
+        </Button>
+      </ButtonRow>
+      <div className={FIELD_ROW}>
+        <FormField className="w-auto">
           File format in the ZIP
-          <select value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
+          <NativeSelect value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
             {EXPORT_FORMATS.map(([f, label]) => (
               <option key={f} value={f}>
                 {label}
               </option>
             ))}
-          </select>
-        </label>
-        <button type="button" disabled={selected.length === 0 || zip.isPending} onClick={() => zip.mutate({ ids: selected.map((s) => s.id), format })}>
+          </NativeSelect>
+        </FormField>
+        <Button type="button" className={WRAPPING_BUTTON} disabled={selected.length === 0 || zip.isPending} onClick={() => zip.mutate({ ids: selected.map((s) => s.id), format })}>
           Download the ZIP of the selected settlements
-        </button>
+        </Button>
       </div>
       <Refusal error={zip.error} words={archiveWords(names)} />
     </div>
@@ -360,7 +373,7 @@ function PrepareFromExit() {
   if (!can(EXIT_READ)) {
     return (
       <Section title="Prepare a settlement">
-        <p className="hint">A settlement is prepared for an approved exit. The selected role cannot list exits; open the exit’s settlements from the exit case.</p>
+        <Hint>A settlement is prepared for an approved exit. The selected role cannot list exits; open the exit’s settlements from the exit case.</Hint>
       </Section>
     );
   }
@@ -379,58 +392,58 @@ function ApprovedExits() {
   const items = exits.data?.items ?? [];
   return (
     <Section title="Prepare a settlement">
-      <p className="hint">A settlement is prepared for an approved exit. Open the exit’s settlements to prepare a revision or to see the revisions so far.</p>
-      <label className="inline">
-        Exit state{' '}
-        <select
-          value={state}
-          onChange={(e) => {
-            setState(e.target.value === 'SEPARATED' ? 'SEPARATED' : 'APPROVED');
-            setPage(1);
-          }}
-        >
-          <option value="APPROVED">Approved</option>
-          <option value="SEPARATED">Separated</option>
-        </select>
-      </label>
-      {exits.isPending && <p className="hint loading">Loading the exits…</p>}
+      <Hint>A settlement is prepared for an approved exit. Open the exit’s settlements to prepare a revision or to see the revisions so far.</Hint>
+      <FilterBar>
+        <FormField>
+          Exit state{' '}
+          <NativeSelect
+            value={state}
+            onChange={(e) => {
+              setState(e.target.value === 'SEPARATED' ? 'SEPARATED' : 'APPROVED');
+              setPage(1);
+            }}
+          >
+            <option value="APPROVED">Approved</option>
+            <option value="SEPARATED">Separated</option>
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {exits.isPending && <LoadingLine>Loading the exits…</LoadingLine>}
       <LoadProblem error={exits.error} forbidden="The selected role cannot list exits." />
       {exits.data && items.length === 0 && <Empty>{state === 'APPROVED' ? 'No approved exits in the selected role’s scope.' : 'No separated exits in the selected role’s scope.'}</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Exits">
-            <thead>
-              <tr>
-                <th scope="col">Employee</th>
-                <th scope="col">Exit</th>
-                <th scope="col">Approved last working date</th>
-                <th scope="col">Notice period</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Settlements</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((x) => (
-                <tr key={x.id}>
-                  <td>
-                    {x.employeeName} <span className="hint">{x.employeeCode}</span>
-                  </td>
-                  <td>{labelOf(EXIT_STATE_LABEL, x.state)}</td>
-                  <td>{formatDate(x.approvedLastWorkingDate)}</td>
-                  <td>
-                    <NoticePeriod notice={x.noticePeriod} />
-                  </td>
-                  <td>
-                    <Link to={PATHS.exitSettlements(x.id)} aria-label={`Settlements of ${x.employeeName} (${x.employeeCode})`}>
-                      Settlements
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Exits">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Exit</TableHead>
+              <TableHead scope="col">Approved last working date</TableHead>
+              <TableHead scope="col">Notice period</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Settlements</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((x) => (
+              <TableRow key={x.id}>
+                <TableCell>
+                  {x.employeeName} <Hint as="span">{x.employeeCode}</Hint>
+                </TableCell>
+                <TableCell>{labelOf(EXIT_STATE_LABEL, x.state)}</TableCell>
+                <TableCell>{formatDate(x.approvedLastWorkingDate)}</TableCell>
+                <TableCell>
+                  <NoticePeriod notice={x.noticePeriod} />
+                </TableCell>
+                <RowActionsCell>
+                  <Link to={PATHS.exitSettlements(x.id)} aria-label={`Settlements of ${x.employeeName} (${x.employeeCode})`}>
+                    Settlements
+                  </Link>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {exits.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={totalOf(exits.data)} onPage={setPage} label="Exit pages" noun="exit" />}
     </Section>

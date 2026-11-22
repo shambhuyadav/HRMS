@@ -1,6 +1,9 @@
 // Shared parts of the payroll configuration screens: keys, shapes, labels, the choice and activation controls, data hooks.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { FormField } from '@/components/form-field';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { CONFIG_READ, useKeys } from './shared';
@@ -114,29 +117,32 @@ export const NOT_CONFIG = 'The selected role cannot see the payroll configuratio
 /** A choice the user must make: it starts empty, because no default exists. */
 export function Choice({ label: text, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Record<string, string> }) {
   return (
-    <label>
+    <FormField>
       {text}
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Choose…</option>
         {Object.entries(options).map(([k, v]) => (
           <option key={k} value={k}>
             {v}
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
 }
 
-/** Independent activation of a draft: never offered to its author (the server refuses that too). */
+/**
+ * Independent activation of a draft: never offered to its author (the server refuses that too). It is a row action in the lists of
+ * drafts, and the calendar's own page uses the same small button.
+ */
 export function ActivateControl({ state, createdBy, name, busy, onActivate }: { state: string; createdBy: string | null; name: string; busy: boolean; onActivate: () => void }) {
   const { me } = useSession();
   if (state !== 'DRAFT') return <>—</>;
   if (createdBy !== null && createdBy === me?.userId) return <>You wrote it: someone else activates it</>;
   return (
-    <button type="button" className="link" disabled={busy} onClick={onActivate} aria-label={`Activate ${name}`}>
+    <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onActivate} aria-label={`Activate ${name}`}>
       Activate
-    </button>
+    </Button>
   );
 }
 

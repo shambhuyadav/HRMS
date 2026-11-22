@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { api, formatDate } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, Section, StateBadge } from '../../ui';
@@ -109,9 +110,9 @@ export function PrivateDetails({ employeeId }: { employeeId: string }) {
     <Section
       title="Private details"
       actions={
-        <button type="button" className="secondary" aria-expanded={shown} onClick={() => setShown(!shown)}>
+        <Button type="button" variant="outline" aria-expanded={shown} onClick={() => setShown(!shown)}>
           {shown ? 'Hide private details' : 'Show private details'}
-        </button>
+        </Button>
       }
     >
       {shown && (

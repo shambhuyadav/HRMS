@@ -4,13 +4,14 @@
    tokens (a series colour never colours text), and the status tints pair with their own text colour as the badges do.
    Selectors are scoped under the dashboard's own classes: this sheet may load before styles.css. */
 
+/* In the "legacy" cascade layer with styles.css (order set in tailwind.css). */
+@layer legacy {
+
 /* ---- The charts row: after the figures and quick actions, before pending tasks; it takes no room when no chart applies. ---- */
 .dash-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr)); gap: 1.25rem; align-items: start; }
 .dash-charts:empty { display: none; }
 .dash-charts > .card { min-width: 0; }
-.dash-charts .card-header > button.dash-chart-toggle { font-size: 0.82rem; white-space: nowrap; }
-.dash-charts .dash-chart-foot { display: inline-block; margin-top: 1rem; font-size: 0.8rem; font-weight: 600; }
-/* Quiet notes and captions, in the muted text (not the boxed hint a card gives a p.hint). */
+/* Quiet notes and captions, in the muted text (plain paragraphs, not the boxed note a Hint becomes in a card). */
 .dash-charts .dash-chart-note { margin: 0.75rem 0 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
 .dash-charts .dash-chart-caption { margin: 0 0 0.65rem; color: var(--muted); font-size: 0.82rem; }
 .dash-charts .dash-chart-caption + .dash-chart-note { margin: 0 0 0.65rem; }
@@ -19,8 +20,8 @@
 
 /* ---- Fills, by meaning ----------------------------------------------------------------------------------------------------------- */
 .dash-charts .dash-fill-series1 { background: var(--series-1); }
-/* Pending: a lighter step of the same hue as taken. */
-.dash-charts .dash-fill-series1-soft { background: var(--series-1); opacity: 0.42; }
+/* Pending: a lighter step of the same hue as taken, edged in that hue so it stays visible on the card (3:1). */
+.dash-charts .dash-fill-series1-soft { background: color-mix(in srgb, var(--series-1) 42%, var(--surface)); box-shadow: inset 0 0 0 1px var(--series-1); }
 .dash-charts .dash-fill-track { background: var(--chart-track); }
 .dash-charts .dash-fill-good { background: var(--good); }
 .dash-charts .dash-fill-warn { background: var(--warn); }
@@ -88,7 +89,7 @@
 .dash-charts .dash-cal-frame { position: relative; max-width: 440px; }
 .dash-charts .dash-cal { display: flex; flex-direction: column; gap: 4px; }
 .dash-charts .dash-cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
-.dash-charts .dash-cal-head { padding-bottom: 2px; text-align: center; font-size: 0.7rem; font-weight: 600; color: var(--muted); }
+.dash-charts .dash-cal-head { padding-bottom: 2px; text-align: center; font-size: 0.74rem; font-weight: 600; color: var(--muted); }
 .dash-charts .dash-day {
   display: flex;
   flex-direction: column;
@@ -101,7 +102,7 @@
   background: var(--surface);
   cursor: default;
 }
-.dash-charts .dash-day-num { font-size: 0.68rem; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dash-charts .dash-day-num { font-size: 0.72rem; line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
 .dash-charts .dash-day-code { align-self: center; font-size: 0.74rem; font-weight: 700; line-height: 1.1; color: var(--muted); }
 /* The legend's chip: a small day tile with the code, so the legend reads like the calendar (tinted by the rules below). */
 .dash-charts .dash-day-chip {
@@ -113,7 +114,7 @@
   padding: 0 3px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 700;
   line-height: 1;
   color: var(--muted);
@@ -152,3 +153,5 @@
 @media (forced-colors: active) {
   .dash-charts .dash-bar-part > i, .dash-charts .dash-swatch, .dash-charts .dash-tip-key { forced-color-adjust: none; }
 }
+
+} /* end of @layer legacy */

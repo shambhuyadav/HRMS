@@ -1,12 +1,20 @@
 // The bell curve (CL-132): the rating distribution chart and table, and HR's rating bands and target shares.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
+import { ButtonRow, FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Notice, NotPermitted, Section, When } from '../../ui';
 import { CycleSelect, DepartmentSelect } from './lookups';
 import { QueryProblem } from './refusals';
-import { CYCLE_READ, type MasterItem, ORG_READ, periodText, REPORT_RATING, SCROLL, shown, useKeys } from './shared';
+import { CYCLE_READ, type MasterItem, ORG_READ, periodText, REPORT_RATING, shown, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: the bell curve (CL-132; FR-044 "proposed distribution charts must report selected population and period"; migration
@@ -57,6 +65,12 @@ interface CurveBar {
 
 const pct = (v: string | null | undefined) => (v === null || v === undefined ? 0 : Number(v));
 const pctText = (v: string | null | undefined) => (v === null || v === undefined ? '—' : `${v}%`);
+/** A band's actual share against its target, in points, signed when above it. */
+function differenceText(points: string | null): string {
+  if (points === null) return '—';
+  const sign = pct(points) > 0 ? '+' : '';
+  return `${sign}${points} points`;
+}
 
 function curveBars(c: BellCurve): CurveBar[] {
   if (c.bands) {
@@ -99,25 +113,25 @@ function BellCurveChart({ curve }: { curve: BellCurve }) {
   const withTargets = bars.some((b) => b.target !== null);
   const summary = bars.map((b) => `${b.label}${b.range ? ` (${b.range})` : ''} ${b.percent}%${b.target !== null ? ` against ${b.target}%` : ''}`).join('; ');
   return (
-    <figure style={{ margin: 0 }}>
+    <figure className="m-0">
       {withTargets && (
-        <div className="row" aria-hidden="true" style={{ gap: '1rem', fontSize: '0.85rem', color: 'var(--body)' }}>
+        <div className="flex flex-wrap items-center gap-4 text-[0.85rem] text-[var(--body)]" aria-hidden="true">
           <span>
-            <svg width="14" height="10" style={{ verticalAlign: 'middle' }}>
+            <svg width="14" height="10" className="align-middle">
               <rect width="14" height="10" rx="2" fill="var(--info)" />
             </svg>{' '}
             Actual share
           </span>
           <span>
-            <svg width="18" height="10" style={{ verticalAlign: 'middle' }}>
+            <svg width="18" height="10" className="align-middle">
               <line x1="0" y1="5" x2="18" y2="5" stroke="var(--text)" strokeWidth="2" strokeDasharray="4 3" />
             </svg>{' '}
             Target share
           </span>
         </div>
       )}
-      <div style={SCROLL}>
-        <svg viewBox={`0 0 ${width} ${height}`} width="100%" style={{ maxWidth: width, minWidth: 320, display: 'block' }} role="img" aria-labelledby={titleId}>
+      <div className="overflow-x-auto">
+        <svg viewBox={`0 0 ${width} ${height}`} width="100%" className="block max-w-[640px] min-w-[320px]" role="img" aria-labelledby={titleId}>
           <title id={titleId}>{`Share of the ${curve.population} completed appraisals by ${curve.bands ? 'rating band' : 'final rating'}: ${summary}`}</title>
           {ticks.map((t) => (
             <g key={t}>
@@ -152,7 +166,7 @@ function BellCurveChart({ curve }: { curve: BellCurve }) {
           <line x1={m.left} x2={width - m.right} y1={y(0)} y2={y(0)} stroke="var(--line-strong)" strokeWidth="1" />
         </svg>
       </div>
-      <figcaption className="hint">{curve.bands ? 'Share of the population per rating band; the dashed line is the band’s target share.' : 'Share of the population per final rating.'} Hover a bar for its numbers; the table below has them all.</figcaption>
+      <figcaption className="text-[0.84rem] text-muted-foreground">{curve.bands ? 'Share of the population per rating band; the dashed line is the band’s target share.' : 'Share of the population per final rating.'} Hover a bar for its numbers; the table below has them all.</figcaption>
     </figure>
   );
 }
@@ -163,17 +177,17 @@ function GradeSelect({ value, onChange }: { value: string; onChange: (id: string
   const grades = useQuery({ queryKey: keys.grades, queryFn: () => api<{ items: MasterItem[] }>('/v1/org/grades'), enabled: can(ORG_READ), retry: retryTransient, staleTime: 5 * 60_000 });
   if (!can(ORG_READ)) return null;
   return (
-    <label>
+    <FormField>
       Grade
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">All grades</option>
         {(shown(grades)?.items ?? []).map((g) => (
           <option key={g.id} value={g.id}>
             {g.name} ({g.code})
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
 }
 
@@ -193,15 +207,15 @@ export function BellCurveScreen() {
     <div className="stack">
       <Section title="Bell curve">
         {can(CYCLE_READ) ? (
-          <div className="row">
+          <FilterBar>
             <CycleSelect label="Cycle" value={cycleId} onChange={setCycleId} />
             <DepartmentSelect value={departmentId} onChange={setDepartmentId} />
             <GradeSelect value={gradeId} onChange={setGradeId} />
-          </div>
+          </FilterBar>
         ) : (
           <NotPermitted>The selected role cannot list appraisal cycles, so it cannot choose one.</NotPermitted>
         )}
-        {!cycleId && can(CYCLE_READ) && <p className="hint">Choose a cycle to see the distribution of its final ratings.</p>}
+        {!cycleId && can(CYCLE_READ) && <Hint>Choose a cycle to see the distribution of its final ratings.</Hint>}
       </Section>
       {cycleId && <BellCurveView key={cycleId} cycleId={cycleId} departmentId={departmentId} gradeId={gradeId} />}
     </div>
@@ -222,7 +236,7 @@ function BellCurveView({ cycleId, departmentId, gradeId }: { cycleId: string; de
   return (
     <>
       <Section title="Rating distribution">
-        {curve.isPending && <p className="hint loading">Loading the distribution…</p>}
+        {curve.isPending && <LoadingLine>Loading the distribution…</LoadingLine>}
         <QueryProblem error={curve.error} forbidden="The selected role cannot view appraisal ratings." />
         {data && (
           <>
@@ -230,14 +244,14 @@ function BellCurveView({ cycleId, departmentId, gradeId }: { cycleId: string; de
               {data.cycle.code}: {data.cycle.name} ({periodText(data.period.from ? { startDate: data.period.from, endDate: data.period.to } : data.cycle)}). Population: <strong>{data.population}</strong>{' '}
               completed appraisal{data.population === 1 ? '' : 's'} in the selected role’s scope ({readable(data.scope).toLowerCase()}; {narrowed}). Generated <When at={data.generatedAt} />.
             </p>
-            {data.ownAppraisalExcluded && <p className="hint">Your own appraisal is never included.</p>}
+            {data.ownAppraisalExcluded && <Hint>Your own appraisal is never included.</Hint>}
             {data.target ? (
-              <p className="hint">
+              <Hint>
                 {`Bands and targets: ${data.target.source === 'CYCLE' ? 'this cycle’s own' : 'the company default'}, revision ${data.target.revision} (${data.target.reason}). `}
                 The target is a reference to compare against: no rating is changed or limited by it.
-              </p>
+              </Hint>
             ) : (
-              <p className="hint">No rating bands or target shares are set for this cycle or the company, so the exact final ratings are shown.</p>
+              <Hint>No rating bands or target shares are set for this cycle or the company, so the exact final ratings are shown.</Hint>
             )}
             {data.population === 0 ? (
               <Empty>No completed appraisals in this population yet.</Empty>
@@ -258,76 +272,72 @@ function BellCurveView({ cycleId, departmentId, gradeId }: { cycleId: string; de
 function BellCurveTable({ curve }: { curve: BellCurve }) {
   if (!curve.bands) {
     return (
-      <div style={SCROLL}>
-        <table aria-label="Final rating distribution">
-          <thead>
-            <tr>
-              <th scope="col">Final rating</th>
-              <th scope="col">Appraisals</th>
-              <th scope="col">Share</th>
-            </tr>
-          </thead>
-          <tbody>
-            {curve.distribution.map((d) => (
-              <tr key={d.rating}>
-                <td>{d.rating}</td>
-                <td>{d.count}</td>
-                <td>{pctText(d.percent)}</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th scope="row">Total</th>
-              <td>{curve.population}</td>
-              <td>{curve.population > 0 ? '100%' : '—'}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+      <Table aria-label="Final rating distribution">
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Final rating</TableHead>
+            <TableHead scope="col">Appraisals</TableHead>
+            <TableHead scope="col">Share</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {curve.distribution.map((d) => (
+            <TableRow key={d.rating}>
+              <TableCell>{d.rating}</TableCell>
+              <TableCell>{d.count}</TableCell>
+              <TableCell>{pctText(d.percent)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+        <TableFooter>
+          <TableRow>
+            <TableHead scope="row">Total</TableHead>
+            <TableCell>{curve.population}</TableCell>
+            <TableCell>{curve.population > 0 ? '100%' : '—'}</TableCell>
+          </TableRow>
+        </TableFooter>
+      </Table>
     );
   }
   return (
-    <div style={SCROLL}>
-      <table aria-label="Rating bands against targets">
-        <thead>
-          <tr>
-            <th scope="col">Band</th>
-            <th scope="col">Ratings</th>
-            <th scope="col">Appraisals</th>
-            <th scope="col">Actual share</th>
-            <th scope="col">Target share</th>
-            <th scope="col">Target count</th>
-            <th scope="col">Difference</th>
-          </tr>
-        </thead>
-        <tbody>
-          {curve.bands.map((b) => (
-            <tr key={b.code}>
-              <td>{b.label}</td>
-              <td>{`${b.minRating} to ${b.maxRating}`}</td>
-              <td>{b.actualCount}</td>
-              <td>{pctText(b.actualPercent)}</td>
-              <td>{pctText(b.targetPercent)}</td>
-              <td>{b.targetCount}</td>
-              <td>{b.differencePercent === null ? '—' : `${pct(b.differencePercent) > 0 ? '+' : ''}${b.differencePercent} points`}</td>
-            </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr>
-            <th scope="row" colSpan={2}>
-              Total
-            </th>
-            <td>{curve.bands.reduce((s, b) => s + b.actualCount, 0)}</td>
-            <td>{curve.population > 0 ? '100%' : '—'}</td>
-            <td>100%</td>
-            <td>{curve.population}</td>
-            <td />
-          </tr>
-        </tfoot>
-      </table>
-    </div>
+    <Table aria-label="Rating bands against targets">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Band</TableHead>
+          <TableHead scope="col">Ratings</TableHead>
+          <TableHead scope="col">Appraisals</TableHead>
+          <TableHead scope="col">Actual share</TableHead>
+          <TableHead scope="col">Target share</TableHead>
+          <TableHead scope="col">Target count</TableHead>
+          <TableHead scope="col">Difference</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {curve.bands.map((b) => (
+          <TableRow key={b.code}>
+            <TableCell>{b.label}</TableCell>
+            <TableCell>{`${b.minRating} to ${b.maxRating}`}</TableCell>
+            <TableCell>{b.actualCount}</TableCell>
+            <TableCell>{pctText(b.actualPercent)}</TableCell>
+            <TableCell>{pctText(b.targetPercent)}</TableCell>
+            <TableCell>{b.targetCount}</TableCell>
+            <TableCell>{differenceText(b.differencePercent)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+      <TableFooter>
+        <TableRow>
+          <TableHead scope="row" colSpan={2}>
+            Total
+          </TableHead>
+          <TableCell>{curve.bands.reduce((s, b) => s + b.actualCount, 0)}</TableCell>
+          <TableCell>{curve.population > 0 ? '100%' : '—'}</TableCell>
+          <TableCell>100%</TableCell>
+          <TableCell>{curve.population}</TableCell>
+          <TableCell />
+        </TableRow>
+      </TableFooter>
+    </Table>
   );
 }
 
@@ -406,82 +416,80 @@ function DistributionForm({ cycleId, curve }: { cycleId: string; curve: BellCurv
     if (!p) save.mutate();
   };
   const refusal = save.error instanceof ApiError ? (DISTRIBUTION_WORDS[save.error.code] ?? null) : null;
+  const problemText = problem ?? refusal;
   return (
     <Section title="Rating bands and target shares">
-      <p className="hint">
+      <Hint>
         Bands group final ratings from 1.00 to 5.00, from the lowest up; each target share is what HR expects for comparison, and the shares add up to 100. Saving records a new revision (earlier
         ones stay); it never changes, limits or normalises any rating.
-      </p>
-      <form aria-label="Rating bands and targets" className="stack" onSubmit={submit} noValidate>
-        <label>
+      </Hint>
+      {/* Its fields keep a readable width, as the old `.stack` form gave them: a 560px select of two choices is wide enough. */}
+      <form aria-label="Rating bands and targets" className="flex flex-col gap-3" onSubmit={submit} noValidate>
+        <FormField className="max-w-[560px]">
           Applies to
-          <select value={scope} onChange={(e) => setScope(e.target.value === 'COMPANY' ? 'COMPANY' : 'CYCLE')}>
+          <NativeSelect value={scope} onChange={(e) => setScope(e.target.value === 'COMPANY' ? 'COMPANY' : 'CYCLE')}>
             <option value="CYCLE">This cycle only</option>
             <option value="COMPANY">The company default (cycles without their own)</option>
-          </select>
-        </label>
-        <div style={SCROLL}>
-          <table aria-label="Bands">
-            <thead>
-              <tr>
-                <th scope="col">Code</th>
-                <th scope="col">Label</th>
-                <th scope="col">From rating</th>
-                <th scope="col">To rating</th>
-                <th scope="col">Target %</th>
-                <th scope="col">
-                  <span className="hint">Remove</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={i}>
-                  <td>
-                    <input aria-label={`Band ${i + 1} code`} value={r.code} maxLength={20} onChange={(e) => edit(i, 'code', e.target.value)} />
-                  </td>
-                  <td>
-                    <input aria-label={`Band ${i + 1} label`} value={r.label} maxLength={100} onChange={(e) => edit(i, 'label', e.target.value)} />
-                  </td>
-                  <td>
-                    <input aria-label={`Band ${i + 1} from rating`} value={r.minRating} inputMode="decimal" size={5} onChange={(e) => edit(i, 'minRating', e.target.value)} />
-                  </td>
-                  <td>
-                    <input aria-label={`Band ${i + 1} to rating`} value={r.maxRating} inputMode="decimal" size={5} onChange={(e) => edit(i, 'maxRating', e.target.value)} />
-                  </td>
-                  <td>
-                    <input aria-label={`Band ${i + 1} target share`} value={r.targetPercent} inputMode="decimal" size={6} onChange={(e) => edit(i, 'targetPercent', e.target.value)} />
-                  </td>
-                  <td>
-                    <button type="button" className="secondary" aria-label={`Remove band ${i + 1}`} disabled={rows.length === 1} onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>
+          </NativeSelect>
+        </FormField>
+        <Table aria-label="Bands">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Label</TableHead>
+              <TableHead scope="col">From rating</TableHead>
+              <TableHead scope="col">To rating</TableHead>
+              <TableHead scope="col">Target %</TableHead>
+              <TableHead scope="col">
+                <Hint as="span">Remove</Hint>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((r, i) => (
+              <TableRow key={i}>
+                <TableCell>
+                  <Input aria-label={`Band ${i + 1} code`} value={r.code} maxLength={20} onChange={(e) => edit(i, 'code', e.target.value)} />
+                </TableCell>
+                <TableCell>
+                  <Input aria-label={`Band ${i + 1} label`} value={r.label} maxLength={100} onChange={(e) => edit(i, 'label', e.target.value)} />
+                </TableCell>
+                <TableCell>
+                  <Input aria-label={`Band ${i + 1} from rating`} value={r.minRating} inputMode="decimal" size={5} className="w-auto" onChange={(e) => edit(i, 'minRating', e.target.value)} />
+                </TableCell>
+                <TableCell>
+                  <Input aria-label={`Band ${i + 1} to rating`} value={r.maxRating} inputMode="decimal" size={5} className="w-auto" onChange={(e) => edit(i, 'maxRating', e.target.value)} />
+                </TableCell>
+                <TableCell>
+                  <Input aria-label={`Band ${i + 1} target share`} value={r.targetPercent} inputMode="decimal" size={6} className="w-auto" onChange={(e) => edit(i, 'targetPercent', e.target.value)} />
+                </TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button type="button" variant="danger" size="sm" aria-label={`Remove band ${i + 1}`} disabled={rows.length === 1} onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))}>
                       Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="row">
-          <button type="button" className="secondary" disabled={rows.length >= 20} onClick={() => setRows((rs) => [...rs, { code: '', label: '', minRating: '', maxRating: '', targetPercent: '' }])}>
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <ButtonRow>
+          <Button type="button" variant="outline" disabled={rows.length >= 20} onClick={() => setRows((rs) => [...rs, { code: '', label: '', minRating: '', maxRating: '', targetPercent: '' }])}>
             Add a band
-          </button>
-        </div>
-        <label>
+          </Button>
+        </ButtonRow>
+        <FormField className="max-w-[560px]">
           Reason
-          <input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
-        </label>
-        {(problem ?? refusal) && (
-          <p role="alert" className="error">
-            {problem ?? refusal}
-          </p>
-        )}
+          <Input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+        </FormField>
+        {problemText && <Notice notice={{ text: problemText, ok: false }} />}
         {!refusal && save.error ? <ErrorNote error={save.error} /> : null}
-        <div className="row">
-          <button type="submit" disabled={save.isPending}>
+        <ButtonRow>
+          <Button type="submit" disabled={save.isPending}>
             Save the bands and targets
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Notice notice={notice} />
       </form>
     </Section>

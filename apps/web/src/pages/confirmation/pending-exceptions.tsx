@@ -1,11 +1,17 @@
 // DF11/C4 exception proposals waiting for a decision in the selected role's scope, oldest first.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, idempotencyKey, isForbidden, localDateTime, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, Item, NotPermitted, Section } from '../../ui';
+import { Empty, ErrorNote, Item, NotPermitted, Notice, Section } from '../../ui';
 import { Refusal, refusalText } from './refusals';
-import { decidedText, type DecisionBody, type ExceptionDecided, type ExceptionDecision, H3, kindLabel, PENDING_LIMIT, type PendingException, PROPOSE_EXCEPTION, TEXTAREA, useKeys } from './shared';
+import { decidedText, type DecisionBody, type ExceptionDecided, type ExceptionDecision, kindLabel, PENDING_LIMIT, type PendingException, PROPOSE_EXCEPTION, useKeys } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // DF11/C4: exception proposals waiting for a decision in the selected role's scope, oldest first. Each decision needs
@@ -46,14 +52,10 @@ export function PendingExceptions({ onOpenCase }: { onOpenCase: ((caseId: string
   return (
     <div ref={region} role="region" aria-label="Pending exceptions" tabIndex={-1}>
       <Section title="Pending exceptions">
-        <p className="hint">Due date overrides and extra extensions proposed by HR wait here for a decision by another HR user. Each decision needs a reason.</p>
-        {list.isPending && <p className="hint loading">Loading the waiting proposals…</p>}
+        <Hint>Due date overrides and extra extensions proposed by HR wait here for a decision by another HR user. Each decision needs a reason.</Hint>
+        {list.isPending && <LoadingLine>Loading the waiting proposals…</LoadingLine>}
         {isForbidden(list.error) ? <NotPermitted>The selected role cannot decide confirmation exceptions.</NotPermitted> : <ErrorNote error={list.error} />}
-        {notice && (
-          <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
-            {notice.text}
-          </p>
-        )}
+        <Notice notice={notice} />
         {list.data && items.length === 0 && <Empty>No exceptions are waiting for a decision.</Empty>}
         {items.length > 0 && (
           <ul className="tasks" aria-label="Exceptions waiting for a decision">
@@ -70,10 +72,17 @@ export function PendingExceptions({ onOpenCase }: { onOpenCase: ((caseId: string
             ))}
           </ul>
         )}
-        {list.data && list.data.items.length >= PENDING_LIMIT && <p className="hint">Showing the oldest {PENDING_LIMIT} waiting proposals; newer ones appear as these are decided.</p>}
+        {list.data && list.data.items.length >= PENDING_LIMIT && <Hint>Showing the oldest {PENDING_LIMIT} waiting proposals; newer ones appear as these are decided.</Hint>}
       </Section>
     </div>
   );
+}
+
+/** Why the caller cannot decide this proposal (C4: never the proposer, never the employee concerned), or null when they can. */
+function blockedReason(ownProposal: boolean, ownCase: boolean): string | null {
+  if (ownProposal) return 'You proposed this exception, so another HR user has to decide it.';
+  if (ownCase) return 'This exception is for your own confirmation, so another HR user has to decide it.';
+  return null;
 }
 
 function PendingItem({
@@ -128,12 +137,7 @@ function PendingItem({
     },
   });
   const busy = decide.isPending || withdraw.isPending;
-  // C4: never by the proposer, never by the employee concerned (the server refuses both as well).
-  const blocked = x.ownProposal
-    ? 'You proposed this exception, so another HR user has to decide it.'
-    : ownCase
-      ? 'This exception is for your own confirmation, so another HR user has to decide it.'
-      : null;
+  const blocked = blockedReason(x.ownProposal, ownCase);
 
   const send = (decision: ExceptionDecision) => {
     if (blocked !== null || busy) return;
@@ -155,9 +159,9 @@ function PendingItem({
   const describedBy = blocked === null ? titleId : `${titleId} ${blockedId}`;
   return (
     <li aria-labelledby={titleId}>
-      <h3 id={titleId} style={H3}>
+      <CardSubheading id={titleId}>
         {kindLabel(x.kind)}: {who}
-      </h3>
+      </CardSubheading>
       <dl className="kv">
         {x.kind === 'DUE_DATE_OVERRIDE' ? <Item term="Proposed due date">{formatDate(x.proposedDueDate)}</Item> : <Item term="Effect">One extension beyond the policy limit</Item>}
         <Item term="Proposed at">
@@ -167,39 +171,33 @@ function PendingItem({
       </dl>
       {onOpenCase && (
         <div>
-          <button type="button" className="link" onClick={() => onOpenCase(x.confirmationId)}>
+          <Button type="button" variant="link" size="inline" onClick={() => onOpenCase(x.confirmationId)}>
             Open the case of {who}
-          </button>
+          </Button>
         </div>
       )}
       {blocked === null ? (
-        <label>
+        <FormField>
           Decision reason (required)
-          <textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
+          <Textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} className="resize-y" />
+        </FormField>
       ) : (
-        <p className="hint" id={blockedId}>
-          {blocked}
-        </p>
+        <Hint id={blockedId}>{blocked}</Hint>
       )}
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="button" disabled={blocked !== null || busy} aria-describedby={describedBy} onClick={() => send('APPROVE')}>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="button" disabled={blocked !== null || busy} aria-describedby={describedBy} onClick={() => send('APPROVE')}>
           Approve
-        </button>
-        <button type="button" className="danger" disabled={blocked !== null || busy} aria-describedby={describedBy} onClick={() => send('REJECT')}>
+        </Button>
+        <Button type="button" variant="danger" disabled={blocked !== null || busy} aria-describedby={describedBy} onClick={() => send('REJECT')}>
           Reject
-        </button>
+        </Button>
         {x.ownProposal && canWithdraw && (
-          <button type="button" className="secondary" disabled={busy} onClick={() => withdraw.mutate()}>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => withdraw.mutate()}>
             Withdraw proposal
-          </button>
+          </Button>
         )}
-      </div>
+      </ButtonRow>
       <Refusal error={decide.error} action="decide" />
       <Refusal error={withdraw.error} action="withdraw" />
     </li>

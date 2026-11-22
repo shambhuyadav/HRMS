@@ -1,11 +1,20 @@
 // DF11 exceptions of one case (I-19): their history, the proposer's withdrawal, and a new proposal.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useRef, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, ChoiceRow, FormField, FormGrid, LabelledFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, isForbidden, localDateTime, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, NotPermitted, StateBadge } from '../../ui';
+import { Empty, ErrorNote, NotPermitted, Notice, StateBadge } from '../../ui';
 import { Refusal } from './refusals';
-import { APPROVE_EXCEPTION, type CaseDetail, type CaseException, type ExceptionBody, type ExceptionKind, GROUP, H3, kindLabel, PROPOSE_EXCEPTION, SCROLL, SR_ONLY, TEXTAREA, useKeys, useUserId } from './shared';
+import { APPROVE_EXCEPTION, type CaseDetail, type CaseException, type ExceptionBody, type ExceptionKind, kindLabel, PROPOSE_EXCEPTION, useKeys, useUserId } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // DF11 exceptions of one case (I-19): their history, the proposer's withdrawal, and a new proposal.
@@ -53,11 +62,11 @@ export function CaseExceptions({ kase, onCaseChanged }: { kase: CaseDetail; onCa
 
   return (
     <>
-      <h3 id={headingId} ref={heading} tabIndex={-1} style={H3}>
+      <CardSubheading id={headingId} ref={heading} tabIndex={-1}>
         Exceptions
-      </h3>
-      <p className="hint">An approved due date override replaces the case’s due date; an approved extra extension allows one extension beyond the policy limit.</p>
-      {list.isPending && <p className="hint loading">Loading exceptions…</p>}
+      </CardSubheading>
+      <Hint>An approved due date override replaces the case’s due date; an approved extra extension allows one extension beyond the policy limit.</Hint>
+      {list.isPending && <LoadingLine>Loading exceptions…</LoadingLine>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot view this case’s exceptions.</NotPermitted> : <ErrorNote error={list.error} />}
       {list.data && items.length === 0 && <Empty>No exceptions have been proposed for this case.</Empty>}
       {items.length > 0 && (
@@ -65,17 +74,13 @@ export function CaseExceptions({ kase, onCaseChanged }: { kase: CaseDetail; onCa
           <ExceptionTable items={items} labelledBy={headingId} mayWithdraw={mayWithdraw} busy={withdrawing} onWithdraw={(x) => withdraw.mutate(x)} />
         </div>
       )}
-      {withdraw.isSuccess && (
-        <p className="ok" role="status">
-          Proposal withdrawn.
-        </p>
-      )}
+      {withdraw.isSuccess && <Notice notice={{ text: 'Proposal withdrawn.', ok: true }} />}
       <Refusal error={withdraw.error} action="withdraw" />
-      {can(APPROVE_EXCEPTION) && items.some((x) => x.state === 'PROPOSED') && <p className="hint">Waiting proposals are decided under Pending exceptions on this page.</p>}
+      {can(APPROVE_EXCEPTION) && items.some((x) => x.state === 'PROPOSED') && <Hint>Waiting proposals are decided under Pending exceptions on this page.</Hint>}
       {canPropose &&
         canStillChange &&
         (ownCase ? (
-          <p className="hint">You cannot propose an exception for your own confirmation.</p>
+          <Hint>You cannot propose an exception for your own confirmation.</Hint>
         ) : (
           <ProposeExceptionForm
             kase={kase}
@@ -107,53 +112,68 @@ function ExceptionTable({
   const withReasons = items.some((x) => typeof x.reason === 'string');
   const withAction = items.some(mayWithdraw);
   return (
-    <div style={SCROLL}>
-      <table aria-labelledby={labelledBy}>
-        <thead>
-          <tr>
-            <th scope="col">Exception</th>
-            <th scope="col">Proposed due date</th>
-            <th scope="col">State</th>
-            <th scope="col">Proposed at</th>
-            <th scope="col">Decided at</th>
-            {withReasons && <th scope="col">Reason</th>}
-            {withReasons && <th scope="col">Decision reason</th>}
+    <Table aria-labelledby={labelledBy}>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Exception</TableHead>
+          <TableHead scope="col">Proposed due date</TableHead>
+          <TableHead scope="col">State</TableHead>
+          <TableHead scope="col">Proposed at</TableHead>
+          <TableHead scope="col">Decided at</TableHead>
+          {withReasons && <TableHead scope="col">Reason</TableHead>}
+          {withReasons && <TableHead scope="col">Decision reason</TableHead>}
+          {withAction && (
+            <TableHead scope="col">
+              <span className="sr-only">Action</span>
+            </TableHead>
+          )}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((x) => (
+          <TableRow key={x.id}>
+            <TableCell>{kindLabel(x.kind)}</TableCell>
+            <TableCell>{formatDate(x.proposedDueDate)}</TableCell>
+            <TableCell>
+              <StateBadge state={x.state} />
+            </TableCell>
+            <TableCell>
+              <time dateTime={x.proposedAt}>{localDateTime(x.proposedAt)}</time>
+            </TableCell>
+            <TableCell>{x.decidedAt ? <time dateTime={x.decidedAt}>{localDateTime(x.decidedAt)}</time> : '—'}</TableCell>
+            {withReasons && <TableCell>{x.reason}</TableCell>}
+            {withReasons && <TableCell>{x.decisionReason ?? '—'}</TableCell>}
             {withAction && (
-              <th scope="col">
-                <span style={SR_ONLY}>Action</span>
-              </th>
-            )}
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((x) => (
-            <tr key={x.id}>
-              <td>{kindLabel(x.kind)}</td>
-              <td>{formatDate(x.proposedDueDate)}</td>
-              <td>
-                <StateBadge state={x.state} />
-              </td>
-              <td>
-                <time dateTime={x.proposedAt}>{localDateTime(x.proposedAt)}</time>
-              </td>
-              <td>{x.decidedAt ? <time dateTime={x.decidedAt}>{localDateTime(x.decidedAt)}</time> : '—'}</td>
-              {withReasons && <td>{x.reason}</td>}
-              {withReasons && <td>{x.decisionReason ?? '—'}</td>}
-              {withAction && (
-                <td>
-                  {mayWithdraw(x) && (
-                    <button type="button" className="link" disabled={busy} aria-label={`Withdraw your ${kindLabel(x.kind).toLowerCase()} proposal`} onClick={() => onWithdraw(x)}>
+              <RowActionsCell>
+                {mayWithdraw(x) && (
+                  <RowActions>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      aria-label={`Withdraw your ${kindLabel(x.kind).toLowerCase()} proposal`}
+                      onClick={() => onWithdraw(x)}
+                    >
                       Withdraw
-                    </button>
-                  )}
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                    </Button>
+                  </RowActions>
+                )}
+              </RowActionsCell>
+            )}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
+}
+
+/** What is missing before an exception can be proposed, or null; whether the case allows it is the server's call. */
+function missingException(chosen: '' | ExceptionKind, dueDate: string, reason: string): string | null {
+  if (chosen === '') return 'Choose the kind of exception.';
+  if (chosen === 'DUE_DATE_OVERRIDE' && !dueDate) return 'Enter the new due date.';
+  if (!reason) return 'Enter a reason.';
+  return null;
 }
 
 /**
@@ -188,8 +208,7 @@ function ProposeExceptionForm({ kase, onProposed, onConflict }: { kase: CaseDeta
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const text = reason.trim();
-    const missing =
-      chosen === '' ? 'Choose the kind of exception.' : chosen === 'DUE_DATE_OVERRIDE' && !dueDate ? 'Enter the new due date.' : !text ? 'Enter a reason.' : null;
+    const missing = missingException(chosen, dueDate, text);
     setProblem(missing);
     if (missing !== null) {
       propose.reset();
@@ -202,14 +221,11 @@ function ProposeExceptionForm({ kase, onProposed, onConflict }: { kase: CaseDeta
   const overrideHint = `${id}-override`;
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Propose an exception
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit}>
-        <fieldset className="wide" style={GROUP}>
-          <legend>Exception</legend>
-          <div className="row">
-            <label className="check">
+      <CardSubheading id={`${id}-title`}>Propose an exception</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit}>
+        <LabelledFieldset legend="Exception">
+          <ChoiceRow>
+            <CheckField>
               <input
                 type="radio"
                 name={`${id}-kind`}
@@ -221,50 +237,42 @@ function ProposeExceptionForm({ kase, onProposed, onConflict }: { kase: CaseDeta
                 onChange={() => setKind('DUE_DATE_OVERRIDE')}
               />{' '}
               Due date override
-            </label>
-            <label className="check">
+            </CheckField>
+            <CheckField>
               <input type="radio" name={`${id}-kind`} value="EXTRA_EXTENSION" required checked={chosen === 'EXTRA_EXTENSION'} onChange={() => setKind('EXTRA_EXTENSION')} />{' '}
               Extra extension
-            </label>
-          </div>
+            </CheckField>
+          </ChoiceRow>
           {!overrideOpen && (
-            <p className="hint" id={overrideHint}>
+            <Hint className="m-0" id={overrideHint}>
               The due date cannot change while a recommendation is under review.
-            </p>
+            </Hint>
           )}
-        </fieldset>
+        </LabelledFieldset>
         {chosen === 'DUE_DATE_OVERRIDE' && (
-          <label>
+          <FormField>
             New due date
-            <input type="date" required value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-          </label>
+            <Input type="date" required value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </FormField>
         )}
-        <label className="wide">
+        <FormField className="col-span-full">
           Reason (required)
-          <textarea required maxLength={1000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
-        <p className="hint wide">The reason is confidential. Another HR user decides the exception; the case changes only if it is approved.</p>
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
+          <Textarea required maxLength={1000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} className="resize-y" />
+        </FormField>
+        <Hint>The reason is confidential. Another HR user decides the exception; the case changes only if it is approved.</Hint>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
         {propose.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={propose.error} action="propose" sent={{ kind: propose.variables?.kind, startDate: kase.startDate }} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={propose.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={propose.isPending}>
             Propose exception
-          </button>
-        </div>
-        {propose.isSuccess && (
-          <p className="ok wide" role="status">
-            Exception proposed. Another HR user decides it; the case changes only if it is approved.
-          </p>
-        )}
-      </form>
+          </Button>
+        </ButtonRow>
+        {propose.isSuccess && <Notice notice={{ text: 'Exception proposed. Another HR user decides it; the case changes only if it is approved.', ok: true }} />}
+      </FormGrid>
     </>
   );
 }

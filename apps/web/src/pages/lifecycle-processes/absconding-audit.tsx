@@ -1,6 +1,9 @@
 // The absconding audit report (CL-052): the screen that requests it under its own export right.
 
 import { useState } from 'react';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Input } from '@/components/ui/input';
 import { localDate } from '../../api';
 import { useSession } from '../../session';
 import { NotPermitted, Section } from '../../ui';
@@ -27,23 +30,25 @@ export function AbscondingAuditScreen() {
       <RoleReady>
         {can(NOTE_EXPORT) ? (
           <Section title="Absconding warnings issued">
-            <p className="hint">
+            <Hint>
               Lists every absconding warning about the employees in the selected role’s scope{me?.companyName ? ` at ${me.companyName}` : ''}, dated on or after the day chosen: the employee,
               the warning’s date, its number among the employee’s warnings in force, whether it was corrected or voided, and who issued it. The text of a warning is never in the
               report. A warning counts as an absconding warning when it was marked so when written (a warning without the mark is not counted). Generated as a file in the
               background, then downloaded here or from Reports.
-            </p>
-            <form className="grid-form" aria-label="Absconding audit filters" onSubmit={keepOnPage}>
-              <label>
-                Warning issued from
-                <input type="date" required value={from} max={localDate()} onChange={(e) => setFrom(e.target.value)} />
-              </label>
-              <label>
-                Up to (blank: today)
-                <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-              </label>
-            </form>
-            {!from && <p className="hint">Choose the date the warnings were issued from.</p>}
+            </Hint>
+            <FilterBar asChild>
+              <form aria-label="Absconding audit filters" onSubmit={keepOnPage}>
+                <FormField>
+                  Warning issued from
+                  <Input type="date" required value={from} max={localDate()} onChange={(e) => setFrom(e.target.value)} />
+                </FormField>
+                <FormField>
+                  Up to (blank: today)
+                  <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                </FormField>
+              </form>
+            </FilterBar>
+            {!from && <Hint>Choose the date the warnings were issued from.</Hint>}
             {reversed && <Problem text="The end is before the start." />}
             {from && !reversed && <ReportExport reportCode="ABSCONDING_AUDIT" filters={filters} label="Generate the absconding audit" />}
           </Section>

@@ -1,14 +1,55 @@
 // The requisition form (FR-011 fields): a new draft, or the requester's draft being changed.
 import { type FormEvent, type RefObject, useId, useState } from 'react';
-import { ErrorNote } from '../../ui';
-// The form's groups (fieldset.form-step) are laid out there, wherever the form is shown.
-import '../../styles/form-progress.css';
+import { ButtonRow, CheckField, FormField, FormGrid, FormStep } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { FieldSet } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { ErrorNote, Notice } from '../../ui';
 import { HiringManagerField, MasterSelect, useMasterOptions } from './lookups';
-import { EMPLOYMENT_TYPE_CODE, EMPLOYMENT_TYPE_SUGGESTIONS, GROUP, H3, parseSkills, type RequisitionDetail, type RequisitionInput, SPACED, TEXTAREA, wholeNumber } from './shared';
+import { EMPLOYMENT_TYPE_CODE, EMPLOYMENT_TYPE_SUGGESTIONS, parseSkills, type RequisitionDetail, type RequisitionInput, wholeNumber } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // The requisition form (FR-011 fields): a new draft, or the requester's draft being changed
 // ---------------------------------------------------------------------------------------------------------
+
+/** The legend of a group of choices inside a step ("New or replacement"), in the old legend's size, weight and colour. */
+const CHOICE_LEGEND = 'px-[0.35rem] text-[0.82rem] font-semibold text-foreground';
+/** Radio buttons side by side, wrapping on a narrow screen. */
+const OPTION_ROW = 'flex flex-wrap items-center gap-2';
+
+/** What the form holds when it is sent, as its own checks read it (the code upper-cased, the skills split). */
+interface TypedRequisition {
+  title: string;
+  departmentId: string;
+  locationId: string;
+  designationId: string;
+  employmentTypeCode: string;
+  vacancyCount: string;
+  reasonType: '' | 'NEW' | 'REPLACEMENT';
+  reason: string;
+  skillList: string[];
+  targetDate: string;
+  hiringManagerId: string;
+}
+
+/** The first required field missing or malformed, in words; null when the form can be sent. */
+function firstProblem(typed: TypedRequisition): string | null {
+  if (!typed.title.trim()) return 'Enter the position title.';
+  if (!typed.departmentId) return 'Choose the department.';
+  if (!typed.locationId) return 'Choose the location.';
+  if (!typed.designationId) return 'Choose the designation.';
+  if (!EMPLOYMENT_TYPE_CODE.test(typed.employmentTypeCode)) return 'Enter the employment type code, for example PERMANENT.';
+  if (!wholeNumber(typed.vacancyCount, 1)) return 'Enter the number of vacancies as a whole number of at least 1.';
+  if (typed.reasonType === '') return 'Choose whether the position is new or a replacement.';
+  if (!typed.reason.trim()) return 'Enter the reason for the requisition.';
+  if (typed.skillList.length > 50) return 'List at most 50 skills.';
+  if (typed.skillList.some((s) => s.length > 100)) return 'A skill is at most 100 characters.';
+  if (!typed.targetDate) return 'Enter the target date.';
+  if (!typed.hiringManagerId) return 'Choose the hiring manager.';
+  return null;
+}
 
 export function RequisitionForm({
   initial,
@@ -51,31 +92,19 @@ export function RequisitionForm({
     const code = employmentType.trim().toUpperCase();
     const count = vacancies.trim();
     const list = parseSkills(skills);
-    const missing = !title.trim()
-      ? 'Enter the position title.'
-      : !departmentId
-        ? 'Choose the department.'
-        : !locationId
-          ? 'Choose the location.'
-          : !designationId
-            ? 'Choose the designation.'
-            : !EMPLOYMENT_TYPE_CODE.test(code)
-              ? 'Enter the employment type code, for example PERMANENT.'
-              : !wholeNumber(count, 1)
-                ? 'Enter the number of vacancies as a whole number of at least 1.'
-                : reasonType === ''
-                  ? 'Choose whether the position is new or a replacement.'
-                  : !reason.trim()
-                    ? 'Enter the reason for the requisition.'
-                    : list.length > 50
-                      ? 'List at most 50 skills.'
-                      : list.some((s) => s.length > 100)
-                        ? 'A skill is at most 100 characters.'
-                        : !targetDate
-                          ? 'Enter the target date.'
-                          : !hiringManagerId
-                            ? 'Choose the hiring manager.'
-                            : null;
+    const missing = firstProblem({
+      title,
+      departmentId,
+      locationId,
+      designationId,
+      employmentTypeCode: code,
+      vacancyCount: count,
+      reasonType,
+      reason,
+      skillList: list,
+      targetDate,
+      hiringManagerId,
+    });
     setProblem(missing);
     if (missing !== null || reasonType === '' || busy) return;
     onSubmit({
@@ -98,30 +127,27 @@ export function RequisitionForm({
   const exceptionHint = `${id}-exception`;
   // The fields keep their order, labels and checks; they are only grouped, so a page can show the groups as steps (form-progress.tsx).
   return (
-    <form ref={formRef} className="grid-form" aria-label={initial ? `Edit draft ${initial.code}` : 'New requisition'} onSubmit={submit} noValidate>
-      <fieldset className="form-step">
-        <legend>The position</legend>
-        <label className="wide">
+    <FormGrid ref={formRef} aria-label={initial ? `Edit draft ${initial.code}` : 'New requisition'} onSubmit={submit} noValidate>
+      <FormStep legend="The position">
+        <FormField className="col-span-full">
           Position title
-          <input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-        </label>
+          <Input required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
+        </FormField>
         {!masters.fromOrg && (
-          <p className="hint wide">
-            The selected role cannot list the company’s departments, locations and designations, so the choices come from your team and the requisitions you can see.
-          </p>
+          <Hint>The selected role cannot list the company’s departments, locations and designations, so the choices come from your team and the requisitions you can see.</Hint>
         )}
         <MasterSelect label="Department" value={departmentId} options={masters.options.departments} loading={masters.loading} onChange={setDepartmentId} />
         <MasterSelect label="Location" value={locationId} options={masters.options.locations} loading={masters.loading} onChange={setLocationId} />
         <MasterSelect label="Designation" value={designationId} options={masters.options.designations} loading={masters.loading} onChange={setDesignationId} />
         {masters.error ? (
-          <div className="wide">
+          <div className="col-span-full">
             <ErrorNote error={masters.error} />
           </div>
         ) : null}
-        <label>
+        <FormField>
           Employment type
-          <input required list={typesId} maxLength={60} value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} />
-        </label>
+          <Input required list={typesId} maxLength={60} value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} />
+        </FormField>
         {/* Outside the label, so the suggestions do not become part of the field's name. */}
         <datalist id={typesId}>
           {EMPLOYMENT_TYPE_SUGGESTIONS.map(([code, label]) => (
@@ -130,67 +156,61 @@ export function RequisitionForm({
             </option>
           ))}
         </datalist>
-        <label>
+        <FormField>
           Vacancies
-          <input type="number" required min={1} step={1} inputMode="numeric" value={vacancies} onChange={(e) => setVacancies(e.target.value)} />
-        </label>
-        <label>
+          <Input type="number" required min={1} step={1} inputMode="numeric" value={vacancies} onChange={(e) => setVacancies(e.target.value)} />
+        </FormField>
+        <FormField>
           Target date
-          <input type="date" required value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
-        </label>
-      </fieldset>
-      <fieldset className="form-step">
-        <legend>Why it is needed</legend>
-        <fieldset className="wide" style={GROUP}>
-          <legend>New or replacement</legend>
-          <div className="row">
-            <label className="check">
+          <Input type="date" required value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
+        </FormField>
+      </FormStep>
+      <FormStep legend="Why it is needed">
+        <FieldSet className="col-span-full gap-[0.55rem]">
+          <legend className={CHOICE_LEGEND}>New or replacement</legend>
+          <div className={OPTION_ROW}>
+            <CheckField>
               <input type="radio" name={`${id}-reason-type`} value="NEW" required checked={reasonType === 'NEW'} onChange={() => setReasonType('NEW')} /> New position
-            </label>
-            <label className="check">
+            </CheckField>
+            <CheckField>
               <input type="radio" name={`${id}-reason-type`} value="REPLACEMENT" required checked={reasonType === 'REPLACEMENT'} onChange={() => setReasonType('REPLACEMENT')} />{' '}
               Replacement
-            </label>
+            </CheckField>
           </div>
-        </fieldset>
-        <label className="wide">
+        </FieldSet>
+        <FormField className="col-span-full">
           Reason for the requisition
-          <textarea required maxLength={2000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
-        <label className="wide">
+          <Textarea required maxLength={2000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </FormField>
+        <FormField className="col-span-full">
           Skills (one per line, or separated by commas)
-          <textarea maxLength={5200} rows={3} value={skills} onChange={(e) => setSkills(e.target.value)} style={TEXTAREA} />
-        </label>
-      </fieldset>
-      <fieldset className="form-step">
-        <legend>Hiring manager and budget</legend>
+          <Textarea maxLength={5200} rows={3} value={skills} onChange={(e) => setSkills(e.target.value)} />
+        </FormField>
+      </FormStep>
+      <FormStep legend="Hiring manager and budget">
         <HiringManagerField value={hiringManagerId} current={initial?.hiringManager ?? null} onChange={setHiringManagerId} />
-        <label className="wide">
+        <FormField className="col-span-full">
           Budget exception reason
-          <textarea maxLength={2000} rows={2} value={exception} aria-describedby={exceptionHint} onChange={(e) => setException(e.target.value)} style={TEXTAREA} />
-        </label>
-        <p className="hint wide" id={exceptionHint}>
+          <Textarea maxLength={2000} rows={2} value={exception} aria-describedby={exceptionHint} onChange={(e) => setException(e.target.value)} />
+        </FormField>
+        <Hint id={exceptionHint}>
           {exceeds
             ? 'Required to submit: this requisition exceeds its approved budget or has none. The HR approver approves the exception explicitly.'
             : 'Needed only when the requisition exceeds its approved budget or no budget covers it; the budget check is shown once the draft is saved.'}
-        </p>
-      </fieldset>
-      {problem && (
-        <p role="alert" className="error wide">
-          {problem}
-        </p>
-      )}
-      <div className="wide row">
-        <button type="submit" disabled={busy}>
+        </Hint>
+      </FormStep>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={busy}>
           {submitLabel}
-        </button>
+        </Button>
         {onCancel && (
-          <button type="button" className="secondary" disabled={busy} onClick={onCancel}>
+          <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
             Cancel
-          </button>
+          </Button>
         )}
-      </div>
-    </form>
+      </ButtonRow>
+    </FormGrid>
   );
 }
 
@@ -223,29 +243,24 @@ export function ReasonForm({
     onSubmit(text);
   };
   return (
-    <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate style={SPACED}>
-      <h3 id={`${id}-title`} className="wide" style={H3}>
+    <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+      <h3 id={`${id}-title`} className="text-[1rem]">
         {title}
       </h3>
-      <label className="wide">
+      <FormField className="col-span-full">
         {label}
-        <textarea required maxLength={1000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
-      <p className="hint wide">{hint}</p>
-      {problem && (
-        <p role="alert" className="error wide">
-          {problem}
-        </p>
-      )}
-      <div className="wide row">
-        <button type="submit" className="danger" disabled={busy}>
+        <Textarea required maxLength={1000} rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <Hint>{hint}</Hint>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow className="col-span-full">
+        <Button type="submit" variant="danger" disabled={busy}>
           {submitLabel}
-        </button>
-        <button type="button" className="secondary" disabled={busy} onClick={onCancel}>
+        </Button>
+        <Button type="button" variant="outline" disabled={busy} onClick={onCancel}>
           Cancel
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ButtonRow>
+    </FormGrid>
   );
 }
-

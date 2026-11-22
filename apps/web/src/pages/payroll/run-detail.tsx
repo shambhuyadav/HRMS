@@ -3,16 +3,48 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { CardSubheading } from '@/components/card-subheading';
+import { CheckField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerRow } from '@/components/pager';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, Section } from '../../ui';
+import { Empty, Notice, Section } from '../../ui';
 import { statutoryNote } from './ess';
 import { RecordHoldPanel } from './hold-proposals';
 import { LoanRecoveries } from './loans';
 import { Problem, ReasonForm } from './problems';
 import { MemberExclusion, RunVerify } from './run-extras';
 import { RunBank, RunPayslips } from './run-outputs';
-import { BANK_READ, canReadRuns, Fact, FLUSH, H3, HEAD_TYPE, HOLD_PROPOSE, HOLD_READ, involvement, label, LOAN_RECOVER, money, OUTPUT_PUBLISH, OUTPUT_READ, PATHS, PLAIN_LIST, REPORT_READ, RUN_APPROVE, RUN_CANCEL, RUN_PREPARE, RUN_PROCESS, RUN_READ_AMOUNT, RUN_STATE, SCROLL, Status, useKeys } from './shared';
+import {
+  BANK_READ,
+  canReadRuns,
+  Fact,
+  HEAD_TYPE,
+  HOLD_PROPOSE,
+  HOLD_READ,
+  involvement,
+  label,
+  LOAN_RECOVER,
+  money,
+  OUTPUT_PUBLISH,
+  OUTPUT_READ,
+  PATHS,
+  REPORT_READ,
+  RUN_APPROVE,
+  RUN_CANCEL,
+  RUN_PREPARE,
+  RUN_PROCESS,
+  RUN_READ_AMOUNT,
+  RUN_STATE,
+  Status,
+  useKeys,
+} from './shared';
 import type { RunComponents, RunDetail, RunException, RunRecord, RunTotals } from './types';
 
 // =========================================================================================================
@@ -25,11 +57,25 @@ export function RunScreen() {
   if (!canReadRuns(can)) {
     return (
       <Section title="Payroll run">
-        <Empty>The selected role cannot see payroll runs.</Empty>
+        <Empty refusal>The selected role cannot see payroll runs.</Empty>
       </Section>
     );
   }
   return <RunView key={id} id={id} />;
+}
+
+/** What the reader's own part in a revision rules out for them (independence of the run's steps). */
+function involvementText(mine: string[]): string {
+  let ruledOut = 'you do not give its covering approvals';
+  if (mine.includes('created') || mine.includes('calculated')) ruledOut = 'you do not review, approve or process it';
+  else if (mine.includes('reviewed')) ruledOut = 'you do not approve it or give its covering approvals';
+  return `You ${mine.join(' and ')} this revision, so ${ruledOut}, and you never authorise its bank release or record its payment outcomes.`;
+}
+
+/** A step's progress in words: complete, under way or not started. */
+function progressText(complete: boolean, started: boolean, done: string, going: string): string {
+  if (complete) return done;
+  return started ? going : 'Not started';
 }
 
 function RunView({ id }: { id: string }) {
@@ -37,19 +83,31 @@ function RunView({ id }: { id: string }) {
   const keys = useKeys();
   const run = useQuery({ queryKey: keys.run(id), queryFn: () => api<RunDetail>(`/v1/payroll/runs/${encodeURIComponent(id)}`), retry: retryTransient });
   const r = run.data;
-  if (run.isPending) return <p className="hint loading">Loading the payroll run…</p>;
+  if (run.isPending) return <LoadingLine>Loading the payroll run…</LoadingLine>;
   if (!r) {
     return (
       <Section title="Payroll run">
         <Problem error={run.error} act="read" />
-        <Link to={PATHS.runs}>Back to payroll runs</Link>
+        {/* Here the way back sits in the card under the refusal, not above the page title, so it keeps its place. */}
+        <BackLink className="order-none mb-0" to={PATHS.runs}>
+          Back to payroll runs
+        </BackLink>
       </Section>
     );
   }
   const mine = involvement(r, me?.userId);
+  const calculation = r.progress.calculation;
+  const processing = r.progress.processing;
   return (
     <div className="stack">
-      <Section title={`Payroll run ${r.period.periodCode} · revision ${r.revision}`} actions={<Link to={PATHS.runs}>All runs</Link>}>
+      <Section
+        title={`Payroll run ${r.period.periodCode} · revision ${r.revision}`}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={PATHS.runs}>All runs</Link>
+          </Button>
+        }
+      >
         <dl className="kv">
           <Fact term="State">
             <Status map={RUN_STATE} code={r.state} />
@@ -61,18 +119,10 @@ function RunView({ id }: { id: string }) {
           <Fact term="Members">{`${r.members.included} included, ${r.members.excluded} left out`}</Fact>
           <Fact term="Exceptions">{`${r.exceptions.unresolved} unresolved of ${r.exceptions.blocking} blocking; ${r.exceptions.warnings} warnings`}</Fact>
           <Fact term="Calculation">
-            {r.progress.calculation.complete
-              ? `Complete: ${r.progress.calculation.calculated} records`
-              : r.progress.calculation.started
-                ? `In progress: ${r.progress.calculation.calculated} of ${r.progress.calculation.members}`
-                : 'Not started'}
+            {progressText(calculation.complete, calculation.started, `Complete: ${calculation.calculated} records`, `In progress: ${calculation.calculated} of ${calculation.members}`)}
           </Fact>
           <Fact term="Processing">
-            {r.progress.processing.complete
-              ? `Locked: ${r.progress.processing.frozen} records frozen`
-              : r.progress.processing.started
-                ? `In progress: ${r.progress.processing.frozen} of ${r.progress.processing.records} frozen`
-                : 'Not started'}
+            {progressText(processing.complete, processing.started, `Locked: ${processing.frozen} records frozen`, `In progress: ${processing.frozen} of ${processing.records} frozen`)}
           </Fact>
           {Object.keys(r.records).length > 0 && (
             <Fact term="Records">
@@ -88,36 +138,26 @@ function RunView({ id }: { id: string }) {
           {r.lockVersion !== null && <Fact term="Lock version">{r.lockVersion}</Fact>}
           {r.closeReason && <Fact term="Close reason">{r.closeReason}</Fact>}
         </dl>
-        {r.paymentStatus === 'NOT_TRACKED_HERE' && <p className="hint">Payment is not tracked on the run: it comes only from the outcomes recorded on its bank manifests.</p>}
+        {r.paymentStatus === 'NOT_TRACKED_HERE' && <Hint>Payment is not tracked on the run: it comes only from the outcomes recorded on its bank manifests.</Hint>}
         {r.supersedesRunId && (
-          <p style={FLUSH}>
+          <p className="my-1">
             <Link to={PATHS.run(r.supersedesRunId)}>Previous revision</Link>
           </p>
         )}
         {r.successorRunId && (
-          <p style={FLUSH}>
+          <p className="my-1">
             <Link to={PATHS.run(r.successorRunId)}>Next revision</Link>
           </p>
         )}
         {can(REPORT_READ) && (
-          <p style={FLUSH}>
+          <p className="my-1">
             <Link to={PATHS.reports(r.id)}>Reports of this run</Link>
           </p>
         )}
-        {mine.length > 0 && (
-          <p role="note" className="hint">
-            {`You ${mine.join(' and ')} this revision, so ${
-              mine.includes('created') || mine.includes('calculated')
-                ? 'you do not review, approve or process it'
-                : mine.includes('reviewed')
-                  ? 'you do not approve it or give its covering approvals'
-                  : 'you do not give its covering approvals'
-            }, and you never authorise its bank release or record its payment outcomes.`}
-          </p>
-        )}
+        {mine.length > 0 && <Hint role="note">{involvementText(mine)}</Hint>}
         {r.decisions.length > 0 && (
           <>
-            <h3 style={H3}>Decisions</h3>
+            <CardSubheading>Decisions</CardSubheading>
             <ul>
               {r.decisions.map((d, i) => (
                 <li key={i}>{`${readable(d.action)}: ${readable(d.decision)} on ${formatDate(d.decidedAt)}`}</li>
@@ -140,6 +180,23 @@ function RunView({ id }: { id: string }) {
 
 type RunAction = 'calculate' | 'submit' | 'process' | 'revise' | 'return' | 'cancel';
 
+/** What a run action that worked leaves to do next, in words; null after a new revision opened (the screen moves to it). */
+function actionNote(action: RunAction, result: RunDetail): string | null {
+  if (action === 'calculate') {
+    const c = result.progress.calculation;
+    return c.complete ? `Calculated: ${c.calculated} records. Check the exceptions and totals, then submit it for review.` : `Calculation continues: ${c.calculated} of ${c.members} members calculated. Continue the calculation.`;
+  }
+  if (action === 'process') {
+    const p = result.progress.processing;
+    return result.state === 'PROCESSED_LOCKED'
+      ? 'Processed and locked. Payslips and bank files can now be prepared; nothing has been paid.'
+      : `Processing continues: ${p.frozen} of ${p.records} records frozen. Continue processing.`;
+  }
+  if (action === 'submit') return 'Submitted for an independent review.';
+  if (action === 'cancel') return 'This revision was cancelled.';
+  return null;
+}
+
 function RunActions({ run }: { run: RunDetail }) {
   const { can, me } = useSession();
   const keys = useKeys();
@@ -150,22 +207,9 @@ function RunActions({ run }: { run: RunDetail }) {
     mutationFn: ({ action, body }: { action: RunAction; body: Record<string, unknown> }) =>
       api<RunDetail & { replayed?: boolean }>(`/v1/payroll/runs/${encodeURIComponent(run.id)}/${action}`, { body: { ...body, expectedVersion: run.version } }),
     onSuccess: (result, { action }) => {
-      if (action === 'calculate') {
-        const c = result.progress.calculation;
-        setNote(c.complete ? `Calculated: ${c.calculated} records. Check the exceptions and totals, then submit it for review.` : `Calculation continues: ${c.calculated} of ${c.members} members calculated. Continue the calculation.`);
-      } else if (action === 'process') {
-        const p = result.progress.processing;
-        setNote(
-          result.state === 'PROCESSED_LOCKED'
-            ? 'Processed and locked. Payslips and bank files can now be prepared; nothing has been paid.'
-            : `Processing continues: ${p.frozen} of ${p.records} records frozen. Continue processing.`,
-        );
-      } else if (action === 'submit') setNote('Submitted for an independent review.');
-      else if (action === 'cancel') setNote('This revision was cancelled.');
-      else {
-        setNote(null);
-        navigate(PATHS.run(result.id));
-      }
+      const text = actionNote(action, result);
+      setNote(text);
+      if (text === null) navigate(PATHS.run(result.id));
     },
     onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: keys.runAll }), qc.invalidateQueries({ queryKey: keys.runsAll })]),
   });
@@ -184,10 +228,10 @@ function RunActions({ run }: { run: RunDetail }) {
   if (run.state === 'DRAFT' && can(RUN_PREPARE)) {
     controls.push(
       <div key="calculate">
-        <button type="button" disabled={busy || (calcStarted && notCalculator)} onClick={() => void send('calculate').catch(() => undefined)}>
+        <Button type="button" disabled={busy || (calcStarted && notCalculator)} onClick={() => void send('calculate').catch(() => undefined)}>
           {calcStarted ? 'Continue the calculation' : 'Calculate'}
-        </button>
-        {calcStarted && notCalculator && <p className="hint">The preparer who started this calculation continues it.</p>}
+        </Button>
+        {calcStarted && notCalculator && <Hint>The preparer who started this calculation continues it.</Hint>}
       </div>,
     );
     if (!calcStarted) controls.push(<MemberExclusion key="exclude" run={run} />);
@@ -195,10 +239,10 @@ function RunActions({ run }: { run: RunDetail }) {
   if (run.state === 'CALCULATED' && can(RUN_PREPARE)) {
     controls.push(
       <div key="submit">
-        <button type="button" disabled={busy || notCalculator} onClick={() => void send('submit').catch(() => undefined)}>
+        <Button type="button" disabled={busy || notCalculator} onClick={() => void send('submit').catch(() => undefined)}>
           Submit for review
-        </button>
-        {notCalculator && <p className="hint">Only the preparer who calculated this revision submits it.</p>}
+        </Button>
+        {notCalculator && <Hint>Only the preparer who calculated this revision submits it.</Hint>}
       </div>,
       <ReasonForm
         key="revise"
@@ -212,18 +256,18 @@ function RunActions({ run }: { run: RunDetail }) {
   }
   if (run.state === 'IN_REVIEW') {
     controls.push(
-      <p key="review" className="hint">
+      <Hint key="review">
         Waiting for the independent review and approval: <Link to={PATHS.decisions}>Run decisions</Link>.
-      </p>,
+      </Hint>,
     );
   }
   if (run.state === 'APPROVED' && can(RUN_PROCESS)) {
     controls.push(
       <div key="process">
-        <button type="button" disabled={busy || runActor} onClick={() => void send('process').catch(() => undefined)}>
+        <Button type="button" disabled={busy || runActor} onClick={() => void send('process').catch(() => undefined)}>
           {run.processingStartedAt ? 'Continue processing' : 'Process and lock'}
-        </button>
-        {runActor && <p className="hint">You created or calculated this run, so someone else processes it.</p>}
+        </Button>
+        {runActor && <Hint>You created or calculated this run, so someone else processes it.</Hint>}
       </div>,
     );
     if (!run.processingStartedAt) {
@@ -243,14 +287,10 @@ function RunActions({ run }: { run: RunDetail }) {
     controls.push(<ReasonForm key="cancel" name="Cancel this revision" field="Reason for cancelling" button="Cancel this revision" busy={busy} danger onSend={(reason) => send('cancel', { reason })} />);
   }
   return (
-    <div style={{ marginTop: '0.75rem' }}>
-      <h3 style={H3}>Actions</h3>
-      {controls.length === 0 ? <p className="hint">No action on this revision is available to the selected role.</p> : <div className="stack">{controls}</div>}
-      {note && (
-        <p role="status" className="ok">
-          {note}
-        </p>
-      )}
+    <div className="mt-3">
+      <CardSubheading>Actions</CardSubheading>
+      {controls.length === 0 ? <Hint>No action on this revision is available to the selected role.</Hint> : <div className="flex flex-col gap-3">{controls}</div>}
+      <Notice notice={note ? { text: note, ok: true } : null} />
       <Problem error={act.error} act={act.variables?.action === 'process' ? 'process' : 'run'} />
     </div>
   );
@@ -259,53 +299,43 @@ function RunActions({ run }: { run: RunDetail }) {
 function RunTotalsSection({ run, totals }: { run: RunDetail; totals: RunTotals[] }) {
   return (
     <Section title="Run totals">
-      {run.scopeComplete === false && <p className="hint">Your scope covers part of this run: these totals are of the records in your scope only.</p>}
+      {run.scopeComplete === false && <Hint>Your scope covers part of this run: these totals are of the records in your scope only.</Hint>}
       {totals.length === 0 ? (
         <Empty>No records are calculated yet.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label="Run totals">
-            <thead>
-              <tr>
-                <th>Currency</th>
-                <th>Records</th>
-                <th>Paid units</th>
-                <th>Earnings</th>
-                <th>Reimbursements</th>
-                <th>Gross</th>
-                <th>Deductions</th>
-                <th>Net</th>
-                <th>Employer contributions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {totals.map((t) => (
-                <tr key={t.currencyCode}>
-                  <td>{t.currencyCode}</td>
-                  <td>{t.records}</td>
-                  <td>{t.paidUnits ?? '—'}</td>
-                  <td>{money(t.earnings, t.currencyCode)}</td>
-                  <td>{money(t.reimbursements, t.currencyCode)}</td>
-                  <td>{money(t.gross, t.currencyCode)}</td>
-                  <td>{money(t.deductions, t.currencyCode)}</td>
-                  <td>{money(t.net, t.currencyCode)}</td>
-                  <td>{money(t.employerContributions, t.currencyCode)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Run totals">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Currency</TableHead>
+              <TableHead scope="col">Records</TableHead>
+              <TableHead scope="col">Paid units</TableHead>
+              <TableHead scope="col">Earnings</TableHead>
+              <TableHead scope="col">Reimbursements</TableHead>
+              <TableHead scope="col">Gross</TableHead>
+              <TableHead scope="col">Deductions</TableHead>
+              <TableHead scope="col">Net</TableHead>
+              <TableHead scope="col">Employer contributions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {totals.map((t) => (
+              <TableRow key={t.currencyCode}>
+                <TableCell>{t.currencyCode}</TableCell>
+                <TableCell>{t.records}</TableCell>
+                <TableCell>{t.paidUnits ?? '—'}</TableCell>
+                <TableCell>{money(t.earnings, t.currencyCode)}</TableCell>
+                <TableCell>{money(t.reimbursements, t.currencyCode)}</TableCell>
+                <TableCell>{money(t.gross, t.currencyCode)}</TableCell>
+                <TableCell>{money(t.deductions, t.currencyCode)}</TableCell>
+                <TableCell>{money(t.net, t.currencyCode)}</TableCell>
+                <TableCell>{money(t.employerContributions, t.currencyCode)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
-}
-
-function exceptionDetail(detail: unknown): string {
-  if (!detail || typeof detail !== 'object') return '';
-  return Object.entries(detail as Record<string, unknown>)
-    .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
-    .map(([k, v]) => `${k}: ${String(v)}`)
-    .join(', ');
 }
 
 interface RecordDetailView {
@@ -334,110 +364,138 @@ function RecordDetailPanel({ runId, record, onClose }: { runId: string; record: 
   const name = (code: string) => d?.lines.find((l) => l.componentCode === code)?.componentName ?? code;
   return (
     <Section title={`Record of ${record.employeeCode} ${record.employeeName}`}>
-      <button type="button" className="secondary" onClick={onClose}>
+      <Button type="button" variant="outline" onClick={onClose}>
         Close
-      </button>
-      {detail.isPending && <p className="hint loading">Loading the record…</p>}
+      </Button>
+      {detail.isPending && <LoadingLine>Loading the record…</LoadingLine>}
       {detail.error && <Problem error={detail.error} act="read" />}
       {d && (
         <>
           {d.segments.length > 0 && (
-            <table aria-label="Paid days">
-              <thead>
-                <tr>
-                  <th>From</th>
-                  <th>To</th>
-                  <th>Calendar days</th>
-                  <th>Unpaid leave</th>
-                  <th>Attendance loss of pay</th>
-                  <th>Paid days</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="Paid days">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">From</TableHead>
+                  <TableHead scope="col">To</TableHead>
+                  <TableHead scope="col">Calendar days</TableHead>
+                  <TableHead scope="col">Unpaid leave</TableHead>
+                  <TableHead scope="col">Attendance loss of pay</TableHead>
+                  <TableHead scope="col">Paid days</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {d.segments.map((g) => (
-                  <tr key={g.segmentStart}>
-                    <td>{formatDate(g.segmentStart)}</td>
-                    <td>{formatDate(g.segmentEnd)}</td>
-                    <td>{g.calendarDays}</td>
-                    <td>{g.leaveLopUnits}</td>
-                    <td>{g.attendanceLopUnits}</td>
-                    <td>{g.paidDays}</td>
-                  </tr>
+                  <TableRow key={g.segmentStart}>
+                    <TableCell>{formatDate(g.segmentStart)}</TableCell>
+                    <TableCell>{formatDate(g.segmentEnd)}</TableCell>
+                    <TableCell>{g.calendarDays}</TableCell>
+                    <TableCell>{g.leaveLopUnits}</TableCell>
+                    <TableCell>{g.attendanceLopUnits}</TableCell>
+                    <TableCell>{g.paidDays}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
           {d.lines.length === 0 ? (
             <Empty>{`No lines: the record is ${readable(d.calculationStatus).toLowerCase()}.`}</Empty>
           ) : (
-            <table aria-label="Record lines">
-              <thead>
-                <tr>
-                  <th>Component</th>
-                  <th>Kind</th>
-                  <th>Basis</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="Record lines">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Component</TableHead>
+                  <TableHead scope="col">Kind</TableHead>
+                  <TableHead scope="col">Basis</TableHead>
+                  <TableHead scope="col">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {d.lines.map((l) => (
-                  <tr key={l.componentCode}>
-                    <td>{l.componentName}</td>
-                    <td>{readable(l.headType)}</td>
-                    <td>{readable(l.calculationBasis)}</td>
-                    <td>{money(l.amount, cur)}</td>
-                  </tr>
+                  <TableRow key={l.componentCode}>
+                    <TableCell>{l.componentName}</TableCell>
+                    <TableCell>{readable(l.headType)}</TableCell>
+                    <TableCell>{readable(l.calculationBasis)}</TableCell>
+                    <TableCell>{money(l.amount, cur)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
           {d.inputs.length > 0 && (
-            <table aria-label="Approved inputs">
-              <thead>
-                <tr>
-                  <th>Component</th>
-                  <th>Reference</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="Approved inputs">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Component</TableHead>
+                  <TableHead scope="col">Reference</TableHead>
+                  <TableHead scope="col">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {d.inputs.map((i) => (
-                  <tr key={i.inputId}>
-                    <td>{i.componentCode}</td>
-                    <td>{i.reference}</td>
-                    <td>{money(i.amount, cur)}</td>
-                  </tr>
+                  <TableRow key={i.inputId}>
+                    <TableCell>{i.componentCode}</TableCell>
+                    <TableCell>{i.reference}</TableCell>
+                    <TableCell>{money(i.amount, cur)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
           {d.statutory.length > 0 && (
-            <table aria-label="Statutory workings">
-              <thead>
-                <tr>
-                  <th>Component</th>
-                  <th>Pack</th>
-                  <th>Amount</th>
-                  <th>How it was worked out</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table aria-label="Statutory workings">
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Component</TableHead>
+                  <TableHead scope="col">Pack</TableHead>
+                  <TableHead scope="col">Amount</TableHead>
+                  <TableHead scope="col">How it was worked out</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {d.statutory.map((s) => (
-                  <tr key={s.componentCode}>
-                    <td>{name(s.componentCode)}</td>
-                    <td>{`${String(s.workings.packCode ?? '—')}${s.workings.packRevision ? ` revision ${String(s.workings.packRevision)}` : ''}`}</td>
-                    <td>{s.amount === null ? '—' : money(s.amount, cur)}</td>
-                    <td>{statutoryNote({ componentCode: s.componentCode, componentName: name(s.componentCode), status: s.status, amount: s.amount, workings: s.workings }, cur)}</td>
-                  </tr>
+                  <TableRow key={s.componentCode}>
+                    <TableCell>{name(s.componentCode)}</TableCell>
+                    <TableCell>{`${String(s.workings.packCode ?? '—')}${s.workings.packRevision ? ` revision ${String(s.workings.packRevision)}` : ''}`}</TableCell>
+                    <TableCell>{s.amount === null ? '—' : money(s.amount, cur)}</TableCell>
+                    <TableCell>
+                      {statutoryNote({ componentCode: s.componentCode, componentName: name(s.componentCode), status: s.status, amount: s.amount, workings: s.workings }, cur)}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </>
       )}
     </Section>
   );
 }
+
+function exceptionDetail(detail: unknown): string {
+  if (!detail || typeof detail !== 'object') return '';
+  return Object.entries(detail as Record<string, unknown>)
+    .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
+    .map(([k, v]) => `${k}: ${String(v)}`)
+    .join(', ');
+}
+
+/** An exception in words: its code, how serious it is and, for a blocking one, whether it is resolved. */
+function exceptionText(x: RunException): string {
+  const open = x.severity === 'BLOCKING' && !x.resolvedAt;
+  let state = '';
+  if (x.resolvedAt) state = `, resolved ${formatDate(x.resolvedAt)}`;
+  else if (open) state = ', unresolved';
+  return `${readable(x.code)} (${x.severity === 'BLOCKING' ? 'blocking' : 'warning'}${state})`;
+}
+
+/** The label of a member's hold button: hiding the open panel, or what the panel offers the role. */
+function holdButtonText(shown: boolean, canPropose: boolean): string {
+  if (shown) return 'Hide';
+  return canPropose ? 'Balance and hold' : 'Balance';
+}
+
+/** A member's name that opens their record: drawn as a table's name links are, in their weight; on a phone card it may wrap. */
+const NAME_BUTTON = 'font-normal phone:whitespace-normal';
 
 function RunRecords({ run }: { run: RunDetail }) {
   const { can } = useSession();
@@ -480,124 +538,121 @@ function RunRecords({ run }: { run: RunDetail }) {
   };
   return (
     <Section title="Members and exceptions">
-      <label className="check">
+      <CheckField>
         <input type="checkbox" checked={onlyExceptions} onChange={(e) => reset(e.target.checked)} /> Only members with exceptions
-      </label>
-      {records.isPending && <p className="hint loading">Loading the members…</p>}
+      </CheckField>
+      {records.isPending && <LoadingLine>Loading the members…</LoadingLine>}
       {records.error && <Problem error={records.error} act="read" />}
       {records.data && records.data.items.length === 0 && <Empty>{run.progress.calculation.started ? 'No member records to show.' : 'Member records appear once the run is calculated.'}</Empty>}
       {records.data && records.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Run members">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Calculation</th>
-                <th>Paid units</th>
-                <th>Gross</th>
-                <th>Deductions</th>
-                <th>Net</th>
-                <th>Prior net</th>
-                <th>Salary stop</th>
-                <th>Bank</th>
-                <th>Exceptions</th>
-                {holdColumn && <th>Salary hold</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {records.data.items.map((rec) => (
-                <tr key={rec.id}>
-                  <td>
-                    <button type="button" className="link" onClick={() => setDetail(rec)} aria-label={`Details of ${rec.employeeCode}`}>
-                      {`${rec.employeeCode} ${rec.employeeName}`}
-                    </button>
-                  </td>
-                  <td>{readable(rec.calculationStatus)}</td>
-                  <td>{rec.paidUnits ?? '—'}</td>
-                  <td>{money(rec.gross, rec.currencyCode)}</td>
-                  <td>{money(rec.deductions, rec.currencyCode)}</td>
-                  <td>{money(rec.net, rec.currencyCode)}</td>
-                  <td>{money(rec.priorNet, rec.currencyCode)}</td>
-                  <td>{rec.salaryStopMode ? readable(rec.salaryStopMode) : '—'}</td>
-                  <td>{rec.bankStatus ? readable(rec.bankStatus) : '—'}</td>
-                  <td>
-                    {rec.exceptions.length === 0 ? (
-                      'None'
-                    ) : (
-                      <ul style={PLAIN_LIST}>
-                        {rec.exceptions.map((x) => {
-                          const open = x.severity === 'BLOCKING' && !x.resolvedAt;
-                          const extra = exceptionDetail(x.detail);
-                          return (
-                            <li key={x.id}>
-                              {`${readable(x.code)} (${x.severity === 'BLOCKING' ? 'blocking' : 'warning'}${x.resolvedAt ? `, resolved ${formatDate(x.resolvedAt)}` : open ? ', unresolved' : ''})`}
-                              {extra && <span className="hint">{` ${extra}`}</span>}
-                              {open && !x.resolvable && <span className="hint"> Needs corrected data and a new revision, or the employee left out.</span>}
-                              {open && x.resolvable && canResolve && (
-                                <>
-                                  {' '}
-                                  <button
-                                    type="button"
-                                    className="link"
-                                    disabled={resolve.isPending}
-                                    onClick={() => {
-                                      resolve.reset();
-                                      setNote(null);
-                                      setResolving({ exception: x, employee: rec.employeeCode });
-                                    }}
-                                    aria-label={`Resolve ${readable(x.code)} of ${rec.employeeCode}`}
-                                  >
-                                    Resolve
-                                  </button>
-                                </>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </td>
-                  {holdColumn && (
-                    <td>
-                      <button type="button" className="link" onClick={() => setHolding(holding?.id === rec.id ? null : rec)} aria-label={`Salary hold of ${rec.employeeCode}`}>
-                        {holding?.id === rec.id ? 'Hide' : can(HOLD_PROPOSE) ? 'Balance and hold' : 'Balance'}
-                      </button>
-                    </td>
+        <Table aria-label="Run members">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Calculation</TableHead>
+              <TableHead scope="col">Paid units</TableHead>
+              <TableHead scope="col">Gross</TableHead>
+              <TableHead scope="col">Deductions</TableHead>
+              <TableHead scope="col">Net</TableHead>
+              <TableHead scope="col">Prior net</TableHead>
+              <TableHead scope="col">Salary stop</TableHead>
+              <TableHead scope="col">Bank</TableHead>
+              <TableHead scope="col">Exceptions</TableHead>
+              {holdColumn && <TableHead scope="col">Salary hold</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {records.data.items.map((rec) => (
+              <TableRow key={rec.id}>
+                <TableCell>
+                  <Button type="button" variant="link" size="inline" className={NAME_BUTTON} onClick={() => setDetail(rec)} aria-label={`Details of ${rec.employeeCode}`}>
+                    {`${rec.employeeCode} ${rec.employeeName}`}
+                  </Button>
+                </TableCell>
+                <TableCell>{readable(rec.calculationStatus)}</TableCell>
+                <TableCell>{rec.paidUnits ?? '—'}</TableCell>
+                <TableCell>{money(rec.gross, rec.currencyCode)}</TableCell>
+                <TableCell>{money(rec.deductions, rec.currencyCode)}</TableCell>
+                <TableCell>{money(rec.net, rec.currencyCode)}</TableCell>
+                <TableCell>{money(rec.priorNet, rec.currencyCode)}</TableCell>
+                <TableCell>{rec.salaryStopMode ? readable(rec.salaryStopMode) : '—'}</TableCell>
+                <TableCell>{rec.bankStatus ? readable(rec.bankStatus) : '—'}</TableCell>
+                <TableCell>
+                  {rec.exceptions.length === 0 ? (
+                    'None'
+                  ) : (
+                    <ul className="m-0 list-none p-0">
+                      {rec.exceptions.map((x) => {
+                        const open = x.severity === 'BLOCKING' && !x.resolvedAt;
+                        const extra = exceptionDetail(x.detail);
+                        return (
+                          <li key={x.id}>
+                            {exceptionText(x)}
+                            {extra && <Hint as="span">{` ${extra}`}</Hint>}
+                            {open && !x.resolvable && <Hint as="span"> Needs corrected data and a new revision, or the employee left out.</Hint>}
+                            {open && x.resolvable && canResolve && (
+                              <>
+                                {' '}
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={resolve.isPending}
+                                  onClick={() => {
+                                    resolve.reset();
+                                    setNote(null);
+                                    setResolving({ exception: x, employee: rec.employeeCode });
+                                  }}
+                                  aria-label={`Resolve ${readable(x.code)} of ${rec.employeeCode}`}
+                                >
+                                  Resolve
+                                </Button>
+                              </>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                </TableCell>
+                {holdColumn && (
+                  <RowActionsCell>
+                    <RowActions>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setHolding(holding?.id === rec.id ? null : rec)} aria-label={`Salary hold of ${rec.employeeCode}`}>
+                        {holdButtonText(holding?.id === rec.id, can(HOLD_PROPOSE))}
+                      </Button>
+                    </RowActions>
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {holding && <RecordHoldPanel key={holding.id} record={holding} />}
       {detail && <RecordDetailPanel key={detail.id} runId={run.id} record={detail} onClose={() => setDetail(null)} />}
-      <div className="row" style={{ marginTop: '0.5rem' }}>
+      <PagerRow>
         {previous.length > 0 && (
-          <button
-            type="button"
-            className="secondary"
+          <PagerButton
             onClick={() => {
               setAfter(previous[previous.length - 1] ?? null);
               setPrevious(previous.slice(0, -1));
             }}
           >
             Previous page
-          </button>
+          </PagerButton>
         )}
         {records.data?.nextAfter && (
-          <button
-            type="button"
-            className="secondary"
+          <PagerButton
             onClick={() => {
               setPrevious([...previous, after]);
               setAfter(records.data?.nextAfter ?? null);
             }}
           >
             Next page
-          </button>
+          </PagerButton>
         )}
-      </div>
+      </PagerRow>
       {resolving && (
         <ReasonForm
           key={resolving.exception.id}
@@ -609,11 +664,7 @@ function RunRecords({ run }: { run: RunDetail }) {
         />
       )}
       <Problem error={resolve.error} act="resolve" />
-      {note && (
-        <p role="status" className="ok">
-          {note}
-        </p>
-      )}
+      <Notice notice={note ? { text: note, ok: true } : null} />
     </Section>
   );
 }
@@ -628,10 +679,10 @@ function RunComponentsSection({ run }: { run: RunDetail }) {
   const c = data.data;
   return (
     <Section title="Component totals and prior period">
-      {data.isPending && <p className="hint loading">Loading the component totals…</p>}
+      {data.isPending && <LoadingLine>Loading the component totals…</LoadingLine>}
       {data.error && <Problem error={data.error} act="read" />}
-      {c?.basis === 'SCOPE' && <p className="hint">Your scope covers part of this run: the records in your scope are compared with the same employees’ latest earlier processed records.</p>}
-      {c?.basis === 'RUN' && !c.priorPeriodCode && <p className="hint">No earlier processed run of this calendar and scope to compare with.</p>}
+      {c?.basis === 'SCOPE' && <Hint>Your scope covers part of this run: the records in your scope are compared with the same employees’ latest earlier processed records.</Hint>}
+      {c?.basis === 'RUN' && !c.priorPeriodCode && <Hint>No earlier processed run of this calendar and scope to compare with.</Hint>}
       {c && <ComponentTable c={c} currency={run.currencyCode} name="Component totals" />}
     </Section>
   );
@@ -643,30 +694,28 @@ export function ComponentTable({ c, currency, name }: { c: RunComponents; curren
     <>
       {c.items.length === 0 && <Empty>No component totals yet.</Empty>}
       {c.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label={name}>
-            <thead>
-              <tr>
-                <th>Component</th>
-                <th>Type</th>
-                <th>This run</th>
-                <th>{c.priorPeriodCode ? `Prior period (${c.priorPeriodCode})` : 'Prior period'}</th>
-                <th>Difference</th>
-              </tr>
-            </thead>
-            <tbody>
-              {c.items.map((i) => (
-                <tr key={`${i.componentCode}:${i.headType}`}>
-                  <td>{i.componentCode}</td>
-                  <td>{label(HEAD_TYPE, i.headType)}</td>
-                  <td>{money(i.current, currency)}</td>
-                  <td>{money(i.prior, currency)}</td>
-                  <td>{money(i.difference, currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label={name}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Component</TableHead>
+              <TableHead scope="col">Type</TableHead>
+              <TableHead scope="col">This run</TableHead>
+              <TableHead scope="col">{c.priorPeriodCode ? `Prior period (${c.priorPeriodCode})` : 'Prior period'}</TableHead>
+              <TableHead scope="col">Difference</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {c.items.map((i) => (
+              <TableRow key={`${i.componentCode}:${i.headType}`}>
+                <TableCell>{i.componentCode}</TableCell>
+                <TableCell>{label(HEAD_TYPE, i.headType)}</TableCell>
+                <TableCell>{money(i.current, currency)}</TableCell>
+                <TableCell>{money(i.prior, currency)}</TableCell>
+                <TableCell>{money(i.difference, currency)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </>
   );

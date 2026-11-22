@@ -1,7 +1,14 @@
 // Changes to one employee: edits, activation, manager, transfer, shift, joining date and closing a draft.
 
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { type FormEvent, type ReactNode, useState } from 'react';
+import { type FormEvent, useState } from 'react';
+import { Action, ActionBar } from '@/components/action-bar';
+import { CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { NothingChanged } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, ApiError, type EmployeeHit } from '../../api';
 import { useSession } from '../../session';
 import { ErrorNote, Section } from '../../ui';
@@ -24,19 +31,6 @@ interface FormProps {
 const reloadOnConflict = (onConflict: () => void) => (err: unknown) => {
   if (err instanceof ApiError && (err.code === 'STALE_VERSION' || err.code === 'INVALID_STATE')) onConflict();
 };
-
-/** An action behind a button. Open forms stay open while others are used, so a form left half-filled keeps its values. */
-export function Action({ label, children }: { label: string; children: (close: () => void) => ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div>
-      <button type="button" className="secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {label}
-      </button>
-      {open && children(() => setOpen(false))}
-    </div>
-  );
-}
 
 function EditForm({ employee, onSaved, onConflict, close }: FormProps & { close: () => void }) {
   const { can } = useSession();
@@ -71,8 +65,7 @@ function EditForm({ employee, onSaved, onConflict, close }: FormProps & { close:
     ...(anniversary && form.serviceAnniversaryDate !== (employee.serviceAnniversaryDate ?? '') ? { serviceAnniversaryDate: form.serviceAnniversaryDate || null } : {}),
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label="Edit details"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
@@ -85,42 +78,42 @@ function EditForm({ employee, onSaved, onConflict, close }: FormProps & { close:
     >
       {operational && (
         <>
-          <label>
+          <FormField>
             Name
-            <input required maxLength={200} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
-          </label>
-          <label>
+            <Input required maxLength={200} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} />
+          </FormField>
+          <FormField>
             Work email
-            <input type="email" maxLength={254} value={form.workEmail} onChange={(e) => setForm({ ...form, workEmail: e.target.value })} />
-          </label>
+            <Input type="email" maxLength={254} value={form.workEmail} onChange={(e) => setForm({ ...form, workEmail: e.target.value })} />
+          </FormField>
           {extension && (
-            <label>
+            <FormField>
               Work phone extension
-              <input inputMode="numeric" maxLength={20} value={form.workPhoneExtension} onChange={(e) => setForm({ ...form, workPhoneExtension: e.target.value })} />
-            </label>
+              <Input inputMode="numeric" maxLength={20} value={form.workPhoneExtension} onChange={(e) => setForm({ ...form, workPhoneExtension: e.target.value })} />
+            </FormField>
           )}
         </>
       )}
       {birthDate && (
-        <label>
+        <FormField>
           Date of birth
-          <input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} />
-        </label>
+          <Input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} />
+        </FormField>
       )}
       {anniversary && (
-        <label>
+        <FormField>
           Service anniversary base date
-          <input type="date" value={form.serviceAnniversaryDate} onChange={(e) => setForm({ ...form, serviceAnniversaryDate: e.target.value })} />
-        </label>
+          <Input type="date" value={form.serviceAnniversaryDate} onChange={(e) => setForm({ ...form, serviceAnniversaryDate: e.target.value })} />
+        </FormField>
       )}
-      <button type="submit" disabled={save.isPending}>
+      <Button type="submit" disabled={save.isPending}>
         Save details
-      </button>
-      <div className="wide">
-        {unchanged && <p role="status">Nothing changed.</p>}
+      </Button>
+      <div className="col-span-full">
+        {unchanged && <NothingChanged />}
         <Refusal error={save.error} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -137,25 +130,24 @@ export function ActivationPanel({ employee, onSaved, onConflict }: FormProps) {
   });
   return (
     <Section title="Activation">
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="Activate"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           activate.mutate();
         }}
       >
-        <label className="wide">
+        <FormField className="col-span-full">
           Reason for having no manager (only if there is none on the check date)
-          <input maxLength={500} value={noManagerReason} onChange={(e) => setNoManagerReason(e.target.value)} />
-        </label>
-        <button type="submit" disabled={activate.isPending}>
+          <Input maxLength={500} value={noManagerReason} onChange={(e) => setNoManagerReason(e.target.value)} />
+        </FormField>
+        <Button type="submit" disabled={activate.isPending}>
           Activate
-        </button>
-        <div className="wide">
+        </Button>
+        <div className="col-span-full">
           <Refusal error={activate.error} />
         </div>
-      </form>
+      </FormGrid>
     </Section>
   );
 }
@@ -176,8 +168,7 @@ function ManagerForm({ employee, onSaved, close }: FormProps & { close: () => vo
     },
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label="Change manager"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
@@ -185,25 +176,25 @@ function ManagerForm({ employee, onSaved, close }: FormProps & { close: () => vo
       }}
     >
       {!remove && <EmployeePicker label="New manager" value={manager} onChange={setManager} filter={{ statusGroup: 'ACTIVE' }} />}
-      <label className="check wide">
+      <CheckField className="col-span-full">
         <input type="checkbox" checked={remove} onChange={(e) => setRemove(e.target.checked)} /> No manager from this date
-      </label>
-      <label>
+      </CheckField>
+      <FormField>
         Effective from
-        <input type="date" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </FormField>
+      <FormField>
         Reason
-        <input maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <button type="submit" disabled={change.isPending || (!remove && !manager)}>
+        <Input maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <Button type="submit" disabled={change.isPending || (!remove && !manager)}>
         Save manager change
-      </button>
-      <p className="hint wide">Open approval tasks stay with the manager who holds them.</p>
-      <div className="wide">
+      </Button>
+      <Hint>Open approval tasks stay with the manager who holds them.</Hint>
+      <div className="col-span-full">
         <Refusal error={change.error} rule="This would break a rule: the new manager may already report to this employee, directly or through others." />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -228,33 +219,32 @@ function TransferForm({ employee, onSaved, close }: FormProps & { close: () => v
     },
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label="Transfer"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         change.mutate();
       }}
     >
-      <label>
+      <FormField>
         Effective from
-        <input type="date" required value={form.effectiveFrom} onChange={(e) => setForm({ ...form, effectiveFrom: e.target.value })} />
-      </label>
+        <Input type="date" required value={form.effectiveFrom} onChange={(e) => setForm({ ...form, effectiveFrom: e.target.value })} />
+      </FormField>
       <MasterSelect kind="departments" label="Department" required value={form.departmentId} known={current?.departmentName} validOn={form.effectiveFrom} onChange={(departmentId) => setForm({ ...form, departmentId })} />
       <MasterSelect kind="locations" label="Location" required value={form.locationId} known={current?.locationName} validOn={form.effectiveFrom} onChange={(locationId) => setForm({ ...form, locationId })} />
       <MasterSelect kind="designations" label="Designation" required value={form.designationId} known={current?.designationName} validOn={form.effectiveFrom} onChange={(designationId) => setForm({ ...form, designationId })} />
       <MasterSelect kind="grades" label="Grade" value={form.gradeId} validOn={form.effectiveFrom} onChange={(gradeId) => setForm({ ...form, gradeId })} />
-      <label className="wide">
+      <FormField className="col-span-full">
         Reason
-        <input maxLength={500} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
-      </label>
-      <button type="submit" disabled={change.isPending}>
+        <Input maxLength={500} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+      </FormField>
+      <Button type="submit" disabled={change.isPending}>
         Save transfer
-      </button>
-      <div className="wide">
+      </Button>
+      <div className="col-span-full">
         <Refusal error={change.error} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -270,19 +260,18 @@ function ShiftForm({ employee, onSaved, close }: FormProps & { close: () => void
       onSaved(`Shift change saved, effective ${effectiveFrom}. Earlier periods stay in the history.`);
     },
   });
-  if (!can(SHIFT_READ)) return <p className="hint">Your role cannot read the shift master, so it cannot choose a shift here.</p>;
+  if (!can(SHIFT_READ)) return <Hint>Your role cannot read the shift master, so it cannot choose a shift here.</Hint>;
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label="Change shift"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         change.mutate();
       }}
     >
-      <label>
+      <FormField>
         Shift
-        <select required value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
+        <NativeSelect required value={shiftId} onChange={(e) => setShiftId(e.target.value)}>
           <option value="">Choose a shift</option>
           {shifts.data?.items
             .filter((s) => s.active)
@@ -291,20 +280,20 @@ function ShiftForm({ employee, onSaved, close }: FormProps & { close: () => void
                 {s.code} {s.name} ({s.inTime}-{s.outTime})
               </option>
             ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Effective from
-        <input type="date" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
-      </label>
-      <button type="submit" disabled={change.isPending}>
+        <Input type="date" required value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </FormField>
+      <Button type="submit" disabled={change.isPending}>
         Save shift change
-      </button>
-      <div className="wide">
+      </Button>
+      <div className="col-span-full">
         <ErrorNote error={shifts.error} />
         <Refusal error={change.error} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -320,29 +309,28 @@ function JoiningDateForm({ employee, onSaved, onConflict, close }: FormProps & {
     onError: reloadOnConflict(onConflict),
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label="Correct joining date"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         correct.mutate();
       }}
     >
-      <label>
+      <FormField>
         Joining date
-        <input type="date" required value={joiningDate} onChange={(e) => setJoiningDate(e.target.value)} />
-      </label>
-      <label className="wide">
+        <Input type="date" required value={joiningDate} onChange={(e) => setJoiningDate(e.target.value)} />
+      </FormField>
+      <FormField className="col-span-full">
         Reason
-        <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <button type="submit" disabled={correct.isPending}>
+        <Input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <Button type="submit" disabled={correct.isPending}>
         Save joining date
-      </button>
-      <div className="wide">
+      </Button>
+      <div className="col-span-full">
         <Refusal error={correct.error} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -357,26 +345,25 @@ function CloseDraftForm({ employee, onSaved, onConflict, close }: FormProps & { 
     onError: reloadOnConflict(onConflict),
   });
   return (
-    <form
-      className="grid-form"
+    <FormGrid
       aria-label="Close draft"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         closeDraft.mutate();
       }}
     >
-      <label className="wide">
+      <FormField className="col-span-full">
         Reason
-        <input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <button type="submit" disabled={closeDraft.isPending}>
+        <Input required maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <Button type="submit" disabled={closeDraft.isPending}>
         Confirm closing the draft
-      </button>
-      <p className="hint wide">For someone who never joined. The record stays on file as archived.</p>
-      <div className="wide">
+      </Button>
+      <Hint>For someone who never joined. The record stays on file as archived.</Hint>
+      <div className="col-span-full">
         <Refusal error={closeDraft.error} />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -397,15 +384,15 @@ export function Changes(props: FormProps) {
   if (!offered) return null;
   return (
     <Section title="Change this record">
-      <div className="action-bar">
+      <ActionBar>
         {edit && <Action label="Edit details">{(close) => <EditForm {...props} close={close} />}</Action>}
         {update && <Action label="Change manager">{(close) => <ManagerForm {...props} close={close} />}</Action>}
         {update && <Action label="Transfer">{(close) => <TransferForm {...props} close={close} />}</Action>}
         {assign && <Action label="Change shift">{(close) => <ShiftForm {...props} close={close} />}</Action>}
         {draft && update && <Action label="Correct joining date">{(close) => <JoiningDateForm {...props} close={close} />}</Action>}
         {closeDraft && <Action label="Close draft">{(close) => <CloseDraftForm {...props} close={close} />}</Action>}
-      </div>
-      {(update || assign) && <p className="hint">Manager, transfer and shift changes are dated: the current period closes on that date, and a new change must start after the latest one.</p>}
+      </ActionBar>
+      {(update || assign) && <Hint>Manager, transfer and shift changes are dated: the current period closes on that date, and a new change must start after the latest one.</Hint>}
     </Section>
   );
 }

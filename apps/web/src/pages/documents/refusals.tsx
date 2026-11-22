@@ -1,4 +1,6 @@
 // The documents API's refusals in plain words; any other error is shown as the API sent it.
+import { CircleAlertIcon } from 'lucide-react';
+import { Alert, AlertTitle } from '@/components/ui/alert';
 import { ApiError } from '../../api';
 import { ErrorNote } from '../../ui';
 import { scanStateOf } from './shared';
@@ -11,18 +13,26 @@ export type Words = Record<string, string | ((e: ApiError) => string)>;
 export function wordsFor(error: unknown, words: Words): string | null {
   if (!(error instanceof ApiError)) return null;
   const w = words[error.code];
-  return w === undefined ? null : typeof w === 'function' ? w(error) : w;
+  if (w === undefined) return null;
+  return typeof w === 'function' ? w(error) : w;
 }
+
+/**
+ * The refusal's code on a line under its words, small and muted, for support (the old `.error > .hint`). A plain paragraph, not an
+ * AlertDescription: the destructive alert sets its descriptions in the text colour.
+ */
+const REFUSAL_CODE = 'col-start-2 m-0 text-xs font-semibold tracking-wide text-muted-foreground';
 
 export function Refusal({ error, words }: { error: unknown; words: Words }) {
   if (!error) return null;
   const text = wordsFor(error, words);
   if (text === null) return <ErrorNote error={error} />;
   return (
-    <div role="alert" className="error">
-      {text}
-      <div className="hint">{(error as ApiError).code}</div>
-    </div>
+    <Alert variant="destructive">
+      <CircleAlertIcon aria-hidden="true" />
+      <AlertTitle>{text}</AlertTitle>
+      <p className={REFUSAL_CODE}>{(error as ApiError).code}</p>
+    </Alert>
   );
 }
 
@@ -64,4 +74,3 @@ export const CHANGE_WORDS: Words = {
     'The selected role cannot make this change. Changing a policy needs the policy duty in an unrestricted company-scope assignment; making a policy confidential, or a confidential one operational, also needs the confidential policy grant.',
   INVALID_REQUEST: 'A title has 1 to 200 characters and cannot be blank.',
 };
-

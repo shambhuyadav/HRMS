@@ -2,13 +2,30 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, idempotencyKey, isForbidden, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, ErrorNote, NotPermitted, Section, When } from '../../ui';
+import { Empty, ErrorNote, Notice, NotPermitted, Section, When } from '../../ui';
 import { DelegatedBadge } from '../delegations';
 import { Refusal, refusalText } from './refusals';
 import { BudgetCheckText, RequisitionFacts } from './requisition-views';
-import { FLUSH, H3, PATHS, REQ_APPROVE, REQ_READ, REQ_VALIDATE, type RequisitionDecided, type RequisitionDecisionBody, type RequisitionTask, shown, stepText, TEXTAREA, useKeys } from './shared';
+import {
+  PATHS,
+  REQ_APPROVE,
+  REQ_READ,
+  REQ_VALIDATE,
+  type RequisitionDecided,
+  type RequisitionDecisionBody,
+  type RequisitionTask,
+  shown,
+  stepText,
+  useKeys,
+} from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Decision queue: requisitions (F1: validation, then HR budget and headcount approval)
@@ -71,14 +88,10 @@ function RequisitionQueue({ step }: { step: RequisitionStep }) {
   return (
     <div ref={region} role="region" aria-label={queue.title} tabIndex={-1}>
       <Section title={`${queue.title}${data ? ` (${items.length})` : ''}`}>
-        <p className="hint">{queue.hint}</p>
-        {tasks.isPending && <p className="hint loading">Loading the requisitions waiting for you…</p>}
+        <Hint>{queue.hint}</Hint>
+        {tasks.isPending && <LoadingLine>Loading the requisitions waiting for you…</LoadingLine>}
         {isForbidden(tasks.error) ? <NotPermitted>The selected role cannot decide requisitions.</NotPermitted> : <ErrorNote error={tasks.error} />}
-        {notice && (
-          <p className={notice.ok ? 'ok' : 'error'} role={notice.ok ? 'status' : 'alert'}>
-            {notice.text}
-          </p>
-        )}
+        <Notice notice={notice} />
         {data && items.length === 0 && <Empty>{queue.empty}</Empty>}
         {items.length > 0 && (
           <ul className="tasks" aria-label={queue.list}>
@@ -109,7 +122,8 @@ function RequisitionTaskItem({ task: t, onFinished }: { task: RequisitionTask; o
   const r = t.requisition;
   const validating = t.stepAction === 'validate';
   const approving = t.stepAction === 'approve';
-  const permitted = validating ? can(REQ_VALIDATE) : approving ? can(REQ_APPROVE) : false;
+  // A step this screen does not know is never decided here.
+  const permitted = (validating && can(REQ_VALIDATE)) || (approving && can(REQ_APPROVE));
   const [reason, setReason] = useState('');
   const [exceptionApproved, setExceptionApproved] = useState(false);
   /** The server asked for an explicit exception decision (the budget moved since this queue was loaded). */
@@ -167,18 +181,16 @@ function RequisitionTaskItem({ task: t, onFinished }: { task: RequisitionTask; o
   const titleId = `${id}-title`;
   return (
     <li aria-labelledby={titleId}>
-      <h3 id={titleId} style={H3}>
-        {r ? `${r.code}: ${r.title}` : 'Requisition'}
-      </h3>
+      <CardSubheading id={titleId}>{r ? `${r.code}: ${r.title}` : 'Requisition'}</CardSubheading>
       <DelegatedBadge taskId={t.taskId} />
-      <p className="hint" style={FLUSH}>
+      <Hint className="m-0">
         {stepText(t.step, t.stepAction)} · assigned <When at={t.assignedAt} />
-      </p>
+      </Hint>
       {r ? (
         <>
           <RequisitionFacts r={r} />
           {r.budgetCheck && <BudgetCheckText check={r.budgetCheck} state={r.state} exceptionReason={r.budgetExceptionReason} />}
-          {r.budgetExceptionReason && <p style={FLUSH}>Budget exception reason: {r.budgetExceptionReason}</p>}
+          {r.budgetExceptionReason && <p className="m-0">Budget exception reason: {r.budgetExceptionReason}</p>}
           <div>
             <Link to={PATHS.requisition(r.id)}>Open {r.code}</Link>
           </div>
@@ -189,35 +201,31 @@ function RequisitionTaskItem({ task: t, onFinished }: { task: RequisitionTask; o
       {r &&
         (permitted ? (
           <>
-            <label>
+            <FormField>
               Decision reason (required to return or reject)
-              <textarea maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-            </label>
+              <Textarea maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+            </FormField>
             {showException && (
-              <label className="check">
+              <CheckField>
                 <input type="checkbox" checked={exceptionApproved} onChange={(e) => setExceptionApproved(e.target.checked)} /> Approve the budget exception
-              </label>
+              </CheckField>
             )}
-            {problem && (
-              <p role="alert" className="error">
-                {problem}
-              </p>
-            )}
-            <div className="row">
-              <button type="button" disabled={busy} onClick={() => send('APPROVE')}>
+            {problem && <Notice notice={{ text: problem, ok: false }} />}
+            <ButtonRow>
+              <Button type="button" disabled={busy} onClick={() => send('APPROVE')}>
                 {validating ? 'Validate' : 'Approve'}
-              </button>
-              <button type="button" className="secondary" disabled={busy} onClick={() => send('RETURN')}>
+              </Button>
+              <Button type="button" variant="outline" disabled={busy} onClick={() => send('RETURN')}>
                 Return for changes
-              </button>
-              <button type="button" className="danger" disabled={busy} onClick={() => send('REJECT')}>
+              </Button>
+              <Button type="button" variant="danger" disabled={busy} onClick={() => send('REJECT')}>
                 Reject
-              </button>
-            </div>
+              </Button>
+            </ButtonRow>
             <Refusal error={decide.error} action="decide" />
           </>
         ) : (
-          <p className="hint">The selected role cannot {validating ? 'validate requisitions' : 'approve requisition budgets and headcount'}.</p>
+          <Hint>The selected role cannot {validating ? 'validate requisitions' : 'approve requisition budgets and headcount'}.</Hint>
         ))}
     </li>
   );

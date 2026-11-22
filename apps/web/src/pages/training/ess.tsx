@@ -2,12 +2,33 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useMemo, useState } from 'react';
+import { FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Notice, NotPermitted, Section, When } from '../../ui';
 import { ParticipationList } from './participants';
 import { Problem, QueryProblem, Refusal } from './refusals';
-import { COMMENT_SUBMIT, FEEDBACK_READ, FEEDBACK_SUBMIT, FeedbackState, FLUSH, inOwnContext, PART_ENROL, PART_READ, ParticipationState, SCORES, SCROLL, shown, TEXTAREA, useKeys, useRefetchAll, ViewBadge } from './shared';
+import {
+  COMMENT_SUBMIT,
+  FEEDBACK_READ,
+  FEEDBACK_SUBMIT,
+  FeedbackState,
+  inOwnContext,
+  PART_ENROL,
+  PART_READ,
+  ParticipationState,
+  SCORES,
+  shown,
+  useKeys,
+  useRefetchAll,
+  ViewBadge,
+} from './shared';
 import type { OpenPlan, OwnFeedback, Participant } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -20,7 +41,7 @@ export function MyTrainingPanel() {
     <div className="stack">
       <Section title="My training">
         {can(PART_READ) ? <ParticipationList employeeId={me!.employeeId!} own /> : <NotPermitted>Your Employee role cannot read your training.</NotPermitted>}
-        <p className="hint">Attendance and completion are recorded by the training coordinator, never by you.</p>
+        <Hint>Attendance and completion are recorded by the training coordinator, never by you.</Hint>
       </Section>
       {can(PART_ENROL) && <OpenPlans />}
       {can(FEEDBACK_READ) && <MyFeedback />}
@@ -43,59 +64,59 @@ function OpenPlans() {
   const data = shown(list);
   return (
     <Section title="Training open for self-nomination">
-      {list.isLoading && <p className="hint loading">Loading…</p>}
+      {list.isLoading && <LoadingLine>Loading…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="Your Employee role cannot see the training open for self-nomination." action="enrol" />
       {data && data.items.length === 0 && <Empty>No training is open for self-nomination at the moment.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Open training">
-            <thead>
-              <tr>
-                <th>Training</th>
-                <th>Dates</th>
-                <th>Mode, venue and trainer</th>
-                <th>My participation</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((p) => {
-                const mine = p.myParticipation;
-                const canEnrol = mine === null || mine.state === 'CANCELLED';
-                return (
-                  <tr key={p.id}>
-                    <td>
-                      {p.title} ({p.code}){p.ownerName ? <div className="hint">Owner: {p.ownerName}</div> : null}
-                    </td>
-                    <td>
-                      {formatDate(p.startDate)} to {formatDate(p.endDate)} <ViewBadge view={p.view} />
-                    </td>
-                    <td>
-                      {p.mode.label}
-                      {p.venue ? ` · ${p.venue}` : ''}
-                      {p.trainer ? ` · ${p.trainer}` : ''}
-                    </td>
-                    <td>
-                      {mine && <ParticipationState state={mine.state} />}{' '}
-                      {canEnrol && (
-                        <button
-                          type="button"
-                          disabled={enrol.isPending}
-                          aria-label={`Nominate myself for ${p.title}`}
-                          onClick={() => {
-                            setNotice(null);
-                            enrol.mutate(p);
-                          }}
-                        >
-                          {mine ? 'Nominate myself again' : 'Nominate myself'}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Open training">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Training</TableHead>
+              <TableHead scope="col">Dates</TableHead>
+              <TableHead scope="col">Mode, venue and trainer</TableHead>
+              <TableHead scope="col">My participation</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((p) => {
+              const mine = p.myParticipation;
+              const canEnrol = mine === null || mine.state === 'CANCELLED';
+              return (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    {p.title} ({p.code})
+                    {p.ownerName ? <HintLine>Owner: {p.ownerName}</HintLine> : null}
+                  </TableCell>
+                  <TableCell>
+                    {formatDate(p.startDate)} to {formatDate(p.endDate)} <ViewBadge view={p.view} />
+                  </TableCell>
+                  <TableCell>
+                    {p.mode.label}
+                    {p.venue ? ` · ${p.venue}` : ''}
+                    {p.trainer ? ` · ${p.trainer}` : ''}
+                  </TableCell>
+                  <TableCell>
+                    {mine && <ParticipationState state={mine.state} />}{' '}
+                    {canEnrol && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={enrol.isPending}
+                        aria-label={`Nominate myself for ${p.title}`}
+                        onClick={() => {
+                          setNotice(null);
+                          enrol.mutate(p);
+                        }}
+                      >
+                        {mine ? 'Nominate myself again' : 'Nominate myself'}
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
       )}
       <Refusal error={enrol.error} action="enrol" />
       <Notice notice={notice} />
@@ -111,17 +132,17 @@ function MyFeedback() {
   const data = shown(list);
   return (
     <Section title="My training feedback">
-      <p className="hint">Feedback opens once your completion is recorded. It is given once and cannot be changed afterwards. Your comment is confidential.</p>
-      {list.isLoading && <p className="hint loading">Loading…</p>}
+      <Hint>Feedback opens once your completion is recorded. It is given once and cannot be changed afterwards. Your comment is confidential.</Hint>
+      {list.isLoading && <LoadingLine>Loading…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="Your Employee role cannot read your training feedback." action="feedback" />
       {data && data.items.length === 0 && <Empty>No completed training waits for feedback.</Empty>}
       <Notice notice={notice} />
       {data?.items.map((f) => (
         <article key={f.participantId} aria-label={`Feedback for ${f.plan.title}`} className="stack">
-          <h3 style={FLUSH}>
+          <h3 className="m-0">
             {f.plan.title} ({f.plan.code})
           </h3>
-          <p style={FLUSH}>
+          <p className="m-0">
             Completed on <When at={f.completedAt} />. <FeedbackState status={f.status} />
             {f.submittedAt ? (
               <>
@@ -187,36 +208,33 @@ function FeedbackForm({ item, onDone }: { item: OwnFeedback; onDone: (text: stri
   const set = (code: string, patch: Partial<{ score: string; comment: string }>) =>
     setDraft({ ...draft, [code]: { ...(draft[code] ?? { score: '', comment: '' }), ...patch } });
   return (
-    <form className="grid-form" aria-label={`Give feedback for ${item.plan.title}`} onSubmit={send} noValidate>
+    <FormGrid aria-label={`Give feedback for ${item.plan.title}`} onSubmit={send} noValidate>
       {item.questions.map((q) => (
-        <fieldset key={q.code} className="wide">
-          <legend>{q.label}</legend>
-          <label>
+        <FramedFieldset key={q.code} legend={q.label}>
+          <FormField>
             Score for {q.label} (1 lowest, 5 highest)
-            <select value={draft[q.code]?.score ?? ''} onChange={(e) => set(q.code, { score: e.target.value })}>
+            <NativeSelect value={draft[q.code]?.score ?? ''} onChange={(e) => set(q.code, { score: e.target.value })}>
               <option value="">Choose a score</option>
               {SCORES.map((n) => (
                 <option key={n} value={n}>
                   {n}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
           {withComment && (
-            <label>
+            <FormField>
               Comment on {q.label} (optional, confidential)
-              <textarea style={TEXTAREA} rows={2} maxLength={2000} value={draft[q.code]?.comment ?? ''} onChange={(e) => set(q.code, { comment: e.target.value })} />
-            </label>
+              <Textarea rows={2} maxLength={2000} value={draft[q.code]?.comment ?? ''} onChange={(e) => set(q.code, { comment: e.target.value })} />
+            </FormField>
           )}
-        </fieldset>
+        </FramedFieldset>
       ))}
-      <div className="wide">
-        <button type="submit" disabled={submit.isPending}>
-          {submit.isPending ? 'Sending…' : 'Send my feedback'}
-        </button>
-      </div>
+      <Button type="submit" disabled={submit.isPending}>
+        {submit.isPending ? 'Sending…' : 'Send my feedback'}
+      </Button>
       <Problem text={problem} />
       <Refusal error={submit.error} action="feedback" />
-    </form>
+    </FormGrid>
   );
 }

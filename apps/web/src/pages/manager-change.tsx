@@ -6,10 +6,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CheckField, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, plural } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Empty, ErrorNote, Section } from '../ui';
+import { Empty, ErrorNote, Notice, Section } from '../ui';
 import type { OrgChart, OrgChartNode } from './org-chart';
 
 export const MANAGER_CHANGE_PERMISSION = 'employee.update.operational';
@@ -108,42 +116,43 @@ export function ManagerChangePage() {
     setDone(null);
     if (ready) change.mutate();
   };
+  const refused = refusal(change.error);
 
   return (
     <>
       <Section title="Change manager">
-        <p className="hint">
+        <Hint>
           Choose the people, then one new manager, the date it starts and the reason. Everyone changes together or no one does. For a
           different manager per person, or more than {MANAGER_BULK_LIMIT} people, use the <Link to="/imports">employee update import</Link>.
-        </p>
-        {done && <p role="status">{done}</p>}
+        </Hint>
+        {done && <Notice notice={{ text: done, ok: true }} />}
         <ErrorNote error={chart.error} />
-        {chart.isPending && <p className="hint loading">Loading people…</p>}
+        {chart.isPending && <LoadingLine>Loading people…</LoadingLine>}
         {chart.isSuccess && people.length === 0 && <Empty>No one employed today is visible to you.</Empty>}
         {people.length > 0 && (
           <>
-            <div className="filters">
-              <label>
+            <FilterBar>
+              <FormField>
                 Department
-                <select value={department} onChange={(e) => setDepartment(e.target.value)}>
+                <NativeSelect value={department} onChange={(e) => setDepartment(e.target.value)}>
                   <option value="">All</option>
                   {departments.map((d) => (
                     <option key={d}>{d}</option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </NativeSelect>
+              </FormField>
+              <FormField>
                 Location
-                <select value={location} onChange={(e) => setLocation(e.target.value)}>
+                <NativeSelect value={location} onChange={(e) => setLocation(e.target.value)}>
                   <option value="">All</option>
                   {locations.map((l) => (
                     <option key={l}>{l}</option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </NativeSelect>
+              </FormField>
+              <FormField>
                 Current manager
-                <select value={manager} onChange={(e) => setManager(e.target.value)}>
+                <NativeSelect value={manager} onChange={(e) => setManager(e.target.value)}>
                   <option value="">Anyone</option>
                   <option value={NONE}>No manager</option>
                   {managers.map((m) => (
@@ -151,54 +160,54 @@ export function ManagerChangePage() {
                       {m.name} ({m.code})
                     </option>
                   ))}
-                </select>
-              </label>
-              <label>
+                </NativeSelect>
+              </FormField>
+              <FormField>
                 Name or code
-                <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
-              </label>
-            </div>
+                <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
+              </FormField>
+            </FilterBar>
             {shown.length === 0 ? (
               <Empty>No one matches these filters.</Empty>
             ) : (
-              <table aria-label="People">
-                <thead>
-                  <tr>
-                    <th scope="col">
+              <Table aria-label="People">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">
                       <input type="checkbox" aria-label="Choose everyone shown" checked={allShownChosen} onChange={toggleShown} />
-                    </th>
-                    <th scope="col">Code</th>
-                    <th scope="col">Name</th>
-                    <th scope="col">Designation</th>
-                    <th scope="col">Department</th>
-                    <th scope="col">Current manager</th>
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                    <TableHead scope="col">Code</TableHead>
+                    <TableHead scope="col">Name</TableHead>
+                    <TableHead scope="col">Designation</TableHead>
+                    <TableHead scope="col">Department</TableHead>
+                    <TableHead scope="col">Current manager</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {shown.map((p: OrgChartNode) => (
-                    <tr key={p.id}>
-                      <td>
+                    <TableRow key={p.id}>
+                      <TableCell>
                         <input type="checkbox" aria-label={`Choose ${p.name}`} checked={chosen.has(p.id)} onChange={() => toggle(p.id)} />
-                      </td>
-                      <td>{p.code}</td>
-                      <td>{p.name}</td>
-                      <td>{p.designation ?? '—'}</td>
-                      <td>{p.department ?? '—'}</td>
-                      <td>{managerName(p.managerId)}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{p.code}</TableCell>
+                      <TableCell>{p.name}</TableCell>
+                      <TableCell>{p.designation ?? '—'}</TableCell>
+                      <TableCell>{p.department ?? '—'}</TableCell>
+                      <TableCell>{managerName(p.managerId)}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             )}
           </>
         )}
       </Section>
       {people.length > 0 && (
         <Section title={chosen.size === 0 ? 'New manager: select people above' : `New manager for ${plural(chosen.size, 'person', 'people')}`}>
-          <form className="grid-form" onSubmit={submit} aria-label="New manager">
-            <label>
+          <FormGrid onSubmit={submit} aria-label="New manager">
+            <FormField>
               New manager
-              <select value={newManager} onChange={(e) => setNewManager(e.target.value)} required>
+              <NativeSelect value={newManager} onChange={(e) => setNewManager(e.target.value)} required>
                 <option value="">Choose…</option>
                 {[...people]
                   .sort((a, b) => a.name.localeCompare(b.name))
@@ -207,34 +216,35 @@ export function ManagerChangePage() {
                       {p.name} ({p.code})
                     </option>
                   ))}
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               Effective from
-              <input type="date" value={from} onChange={(e) => setEffectiveFrom(e.target.value)} required />
-            </label>
-            <label>
+              <Input type="date" value={from} onChange={(e) => setEffectiveFrom(e.target.value)} required />
+            </FormField>
+            <FormField>
               Reason
-              <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} required />
-            </label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={500} required />
+            </FormField>
             {can(REROUTE) && (
               // The box beside its words, on a row of its own (in a narrow cell the words wrapped under the box).
-              <label className="check wide">
+              <CheckField className="col-span-full">
                 <input type="checkbox" checked={moveApprovals} onChange={(e) => setMoveApprovals(e.target.checked)} /> Also move their open approvals to the new manager
-              </label>
+              </CheckField>
             )}
-            <button type="submit" disabled={!ready}>
+            <Button type="submit" disabled={!ready}>
               {change.isPending ? 'Changing…' : 'Change manager'}
-            </button>
-          </form>
-          {managerChosen && <p className="error">The new manager is among the people chosen: no one can manage themselves.</p>}
-          {tooMany && <p className="error">Choose at most {MANAGER_BULK_LIMIT} people at once, or use the employee update import.</p>}
-          {moveApprovals && future && <p className="error">Open approvals can move only once the change is in effect: choose today or an earlier date.</p>}
-          {change.error && (refusal(change.error) ? <p className="error">{refusal(change.error)}</p> : <ErrorNote error={change.error} />)}
-          <p className="hint">
+            </Button>
+          </FormGrid>
+          {/* Why the change cannot be sent: these lines never had the alert role, as they appear while the form is filled in and are read with it. */}
+          {managerChosen && <StatusNote tone="error">The new manager is among the people chosen: no one can manage themselves.</StatusNote>}
+          {tooMany && <StatusNote tone="error">Choose at most {MANAGER_BULK_LIMIT} people at once, or use the employee update import.</StatusNote>}
+          {moveApprovals && future && <StatusNote tone="error">Open approvals can move only once the change is in effect: choose today or an earlier date.</StatusNote>}
+          {change.error && (refused ? <StatusNote tone="error">{refused}</StatusNote> : <ErrorNote error={change.error} />)}
+          <Hint>
             Open approvals do not follow a new manager by themselves. When moved, each approval the current approver can no longer decide
             goes to whoever now approves it, and the old one is kept on record; approvals someone else can still decide stay where they are.
-          </p>
+          </Hint>
         </Section>
       )}
     </>

@@ -1,6 +1,10 @@
 // Notification rule approvals (C6): someone other than the author publishes or rejects a proposed change.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { ButtonRow } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, ApiError } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section } from '../../ui';
@@ -41,16 +45,23 @@ function RuleProposalDecision({ proposal, onDone }: { proposal: RuleProposal; on
     },
   });
   return (
-    <div className="row">
-      <button type="button" disabled={decide.isPending} aria-label={`Approve ${proposal.code}`} onClick={() => decide.mutate('publish')}>
+    <ButtonRow>
+      <Button type="button" disabled={decide.isPending} aria-label={`Approve ${proposal.code}`} onClick={() => decide.mutate('publish')}>
         Approve
-      </button>
-      <input aria-label={`Reason for rejecting ${proposal.code}`} placeholder="Reason to reject" maxLength={500} value={reason} onChange={(e) => setReason(e.target.value)} />
-      <button type="button" className="danger" disabled={decide.isPending || !reason.trim()} aria-label={`Reject ${proposal.code}`} onClick={() => decide.mutate('reject')}>
+      </Button>
+      <Input
+        aria-label={`Reason for rejecting ${proposal.code}`}
+        placeholder="Reason to reject"
+        maxLength={500}
+        className="w-auto"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <Button type="button" variant="danger" disabled={decide.isPending || !reason.trim()} aria-label={`Reject ${proposal.code}`} onClick={() => decide.mutate('reject')}>
         Reject
-      </button>
+      </Button>
       <ErrorNote error={decide.error} />
-    </div>
+    </ButtonRow>
   );
 }
 
@@ -69,14 +80,18 @@ export function NotificationRuleApprovalsPage() {
   }
   return (
     <Section title="Notification rule approvals">
-      <p className="hint">A change comes into force only once someone other than its author approves it, before its date. A date that has passed cannot be approved: reject it so that a new date can be proposed.</p>
+      <Hint>A change comes into force only once someone other than its author approves it, before its date. A date that has passed cannot be approved: reject it so that a new date can be proposed.</Hint>
       <ErrorNote error={proposals.error} />
       {proposals.data?.items.length === 0 && <Empty>No change is waiting for approval.</Empty>}
+      {/* `tasks`: the list's marker class, which styles.css draws each proposal by, as in the decision lists. */}
       <ul className="tasks">
         {proposals.data?.items.map((p) => (
           <li key={p.id} aria-label={`Proposed change to ${p.code}`}>
             <div>
-              <strong>{p.code}</strong> <span className="hint">revision {p.revision}, from {localDateTime(p.effectiveFrom)}, by {p.proposedByAccountKey ?? 'unknown'}</span>
+              <strong>{p.code}</strong>{' '}
+              <Hint as="span">
+                revision {p.revision}, from {localDateTime(p.effectiveFrom)}, by {p.proposedByAccountKey ?? 'unknown'}
+              </Hint>
             </div>
             <dl className="kv">
               <div>

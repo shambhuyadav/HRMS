@@ -2,11 +2,49 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, Item, Section } from '../../ui';
+import { Badge, Empty, ErrorNote, Item, Notice, Section } from '../../ui';
 import { EmployeePicker } from './off-cycle';
-import { type AnnualGrowth, answered, BASES, type Basis, basisLabel, CURRENCY, currentFinancialYear, DecisionInboxLink, FLUSH, H3, H4, type HistoryItem, type InitialSalaryBody, LoadProblem, money, moneyProblem, PANEL, percent, type PickedEmployee, type ProposalResult, PROPOSE, READ_HISTORY, SALARY_MANAGE, SALARY_READ, type SalaryArrangement, SCROLL, TEXTAREA, useKeys, useReloadCases, YEAR, YEAR_INPUT } from './shared';
+import {
+  type AnnualGrowth,
+  answered,
+  BASES,
+  type Basis,
+  basisLabel,
+  CURRENCY,
+  currentFinancialYear,
+  DecisionInboxLink,
+  FIELD_ROW,
+  type HistoryItem,
+  type InitialSalaryBody,
+  LoadProblem,
+  money,
+  moneyProblem,
+  PANEL,
+  percent,
+  type PickedEmployee,
+  type ProposalResult,
+  PROPOSE,
+  READ_HISTORY,
+  SALARY_MANAGE,
+  SALARY_READ,
+  type SalaryArrangement,
+  useKeys,
+  useReloadCases,
+  YEAR,
+  YEAR_INPUT,
+} from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // FR-029 / FR-089 / FR-090 / DF14: one employee's salary arrangements, increment history and annual growth.
@@ -21,7 +59,7 @@ export function SalaryPanel({ employee, onEmployee, focusRequest }: { employee: 
   return (
     <div ref={region} role="region" aria-label="Employee salary panel" tabIndex={-1}>
       <Section title="Employee salary">
-        <p className="hint">Salary figures are confidential: each part below appears only with its own salary grant in the selected role.</p>
+        <Hint>Salary figures are confidential: each part below appears only with its own salary grant in the selected role.</Hint>
         <EmployeePicker label="Find employee to view salary" selected={employee} onSelect={onEmployee} />
         {employee && <EmployeeSalary key={employee.id} employee={employee} />}
       </Section>
@@ -51,6 +89,7 @@ function CorrectionForm({ item, onSent, onCancel }: { item: HistoryItem; onSent:
     onSuccess: onSent,
   });
   const refusal = send.error instanceof ApiError ? CORRECTION_REFUSALS[send.error.code] : undefined;
+  const shownProblem = problem ?? refusal;
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const text = form.reason.trim();
@@ -64,42 +103,44 @@ function CorrectionForm({ item, onSent, onCancel }: { item: HistoryItem; onSent:
     send.mutate({ effectiveDate: form.effectiveDate, proposedAmount: monthly ? form.monthlyGross : form.annualCtc, proposedCounterpart: monthly ? form.annualCtc : form.monthlyGross, reason: text });
   };
   return (
-    <form className="grid-form" aria-label={`Correct the change effective ${formatDate(item.effectiveDate)}`} style={PANEL} onSubmit={submit}>
-      <p className="hint wide">
+    <FormGrid aria-label={`Correct the change effective ${formatDate(item.effectiveDate)}`} className="mt-3" onSubmit={submit}>
+      <Hint>
         A different financial Admin decides this in the <DecisionInboxLink />, and the salary changes only once it is approved. The change you are correcting stays on record. To undo it, enter the earlier amounts.
-      </p>
-      <label>
+      </Hint>
+      <FormField>
         Effective date
-        <input type="date" required value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
-      </label>
-      <label>
+        <Input type="date" required value={form.effectiveDate} onChange={(e) => setForm({ ...form, effectiveDate: e.target.value })} />
+      </FormField>
+      <FormField>
         Corrected monthly gross
-        <input inputMode="decimal" autoComplete="off" required value={form.monthlyGross} onChange={(e) => setForm({ ...form, monthlyGross: e.target.value })} />
-      </label>
-      <label>
+        <Input inputMode="decimal" autoComplete="off" required value={form.monthlyGross} onChange={(e) => setForm({ ...form, monthlyGross: e.target.value })} />
+      </FormField>
+      <FormField>
         Corrected annual CTC
-        <input inputMode="decimal" autoComplete="off" required value={form.annualCtc} onChange={(e) => setForm({ ...form, annualCtc: e.target.value })} />
-      </label>
-      <label className="wide">
+        <Input inputMode="decimal" autoComplete="off" required value={form.annualCtc} onChange={(e) => setForm({ ...form, annualCtc: e.target.value })} />
+      </FormField>
+      <FormField className="col-span-full">
         Reason (required)
-        <textarea required maxLength={1000} rows={3} style={TEXTAREA} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
-      </label>
-      {(problem ?? refusal) && (
-        <p role="alert" className="error wide">
-          {problem ?? refusal}
-        </p>
-      )}
+        <Textarea required maxLength={1000} rows={3} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
+      </FormField>
+      {shownProblem && <Notice notice={{ text: shownProblem, ok: false }} />}
       {!refusal && <ErrorNote error={send.error} />}
-      <div className="wide row">
-        <button type="submit" disabled={send.isPending}>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={send.isPending}>
           Send correction
-        </button>{' '}
-        <button type="button" className="secondary" onClick={onCancel}>
+        </Button>{' '}
+        <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ButtonRow>
+    </FormGrid>
   );
+}
+
+/** Whether an applied change was corrected, or is itself a correction; a dash for neither. */
+function HistoryStatus({ item }: { item: HistoryItem }) {
+  if (item.supersededByHistoryId) return <Badge tone="warn">Superseded by a correction</Badge>;
+  return item.correctsHistoryId ? <Badge>Correction</Badge> : <>—</>;
 }
 
 function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
@@ -136,114 +177,105 @@ function EmployeeSalary({ employee }: { employee: PickedEmployee }) {
   const scopeNote = 'This employee is not in the selected role’s scope.';
 
   return (
-    <div className="stack" style={PANEL}>
+    <div className={PANEL}>
       {canReadSalary && (
         <div>
-          <h3 id={`${ids}-salary`} style={H3}>
-            Salary arrangements
-          </h3>
-          {salary.isPending && <p className="hint loading">Loading salary…</p>}
+          <CardSubheading id={`${ids}-salary`}>Salary arrangements</CardSubheading>
+          {salary.isPending && <LoadingLine>Loading salary…</LoadingLine>}
           <LoadProblem error={salary.error} forbidden="The selected role cannot read this employee’s salary." notFound={scopeNote} />
           {salaryData && arrangements.length === 0 && <Empty>No salary arrangement is recorded for this employee.</Empty>}
           {arrangements.length > 0 && (
             <>
-              <div style={SCROLL}>
-                <table aria-labelledby={`${ids}-salary`}>
-                  <thead>
-                    <tr>
-                      <th scope="col">Effective from</th>
-                      <th scope="col">Effective to</th>
-                      <th scope="col">Monthly gross</th>
-                      <th scope="col">Annual CTC</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {arrangements.map((s) => (
-                      <tr key={s.id}>
-                        <td>{formatDate(s.effectiveFrom)}</td>
-                        <td>{s.effectiveTo ? formatDate(s.effectiveTo) : 'No end date'}</td>
-                        <td>{money(s.monthlyGross, s.currency)}</td>
-                        <td>{money(s.annualCtc, s.currency)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <p className="hint">An arrangement stays in force until the day the next one starts.</p>
-              {salaryData?.historyIncluded === false && <p className="hint">Earlier arrangements are not shown: the selected role has no salary history grant.</p>}
+              <Table aria-labelledby={`${ids}-salary`}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Effective from</TableHead>
+                    <TableHead scope="col">Effective to</TableHead>
+                    <TableHead scope="col">Monthly gross</TableHead>
+                    <TableHead scope="col">Annual CTC</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {arrangements.map((s) => (
+                    <TableRow key={s.id}>
+                      <TableCell>{formatDate(s.effectiveFrom)}</TableCell>
+                      <TableCell>{s.effectiveTo ? formatDate(s.effectiveTo) : 'No end date'}</TableCell>
+                      <TableCell>{money(s.monthlyGross, s.currency)}</TableCell>
+                      <TableCell>{money(s.annualCtc, s.currency)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Hint>An arrangement stays in force until the day the next one starts.</Hint>
+              {salaryData?.historyIncluded === false && <Hint>Earlier arrangements are not shown: the selected role has no salary history grant.</Hint>}
             </>
           )}
         </div>
       )}
-      {recorded && (
-        <p className="ok" role="status">
-          Initial salary recorded.
-        </p>
-      )}
+      {recorded && <Notice notice={{ text: 'Initial salary recorded.', ok: true }} />}
       {offerInitial && <InitialSalaryForm employeeId={employee.id} onRecorded={() => setRecorded(true)} />}
       {canReadIncrements && (
         <div>
-          <h3 id={`${ids}-history`} style={H3}>
-            Increment history
-          </h3>
-          {history.isPending && <p className="hint loading">Loading increment history…</p>}
+          <CardSubheading id={`${ids}-history`}>Increment history</CardSubheading>
+          {history.isPending && <LoadingLine>Loading increment history…</LoadingLine>}
           <LoadProblem error={history.error} forbidden="The selected role cannot read this employee’s increment history." notFound={scopeNote} />
           {historyData && historyItems.length === 0 && <Empty>No increments have been applied for this employee.</Empty>}
           {historyItems.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-labelledby={`${ids}-history`}>
-                <thead>
-                  <tr>
-                    <th scope="col">Effective date</th>
-                    <th scope="col">Basis</th>
-                    <th scope="col">Before</th>
-                    <th scope="col">After</th>
-                    <th scope="col">Change</th>
-                    <th scope="col">Change %</th>
-                    {withReasons && <th scope="col">Reason</th>}
-                    {withStatus && <th scope="col">Status</th>}
-                    {withAction && <th scope="col">Action</th>}
-                  </tr>
-                </thead>
-                <tbody>
-                  {historyItems.map((h, index) => (
-                    <tr key={`${h.effectiveDate}-${index}`}>
-                      <td>{formatDate(h.effectiveDate)}</td>
-                      <td>{basisLabel(h.basis)}</td>
-                      <td>{money(h.beforeAmount, h.currency)}</td>
-                      <td>{money(h.afterAmount, h.currency)}</td>
-                      <td>{money(h.changeAmount, h.currency)}</td>
-                      <td>{percent(h.changePercent, h.percentNaReason)}</td>
-                      {withReasons && <td>{h.reason ?? '—'}</td>}
-                      {withStatus && <td>{h.supersededByHistoryId ? <Badge tone="warn">Superseded by a correction</Badge> : h.correctsHistoryId ? <Badge>Correction</Badge> : '—'}</td>}
-                      {withAction && (
-                        <td>
-                          {h.correctable && (
-                            <button
+            <Table aria-labelledby={`${ids}-history`}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Effective date</TableHead>
+                  <TableHead scope="col">Basis</TableHead>
+                  <TableHead scope="col">Before</TableHead>
+                  <TableHead scope="col">After</TableHead>
+                  <TableHead scope="col">Change</TableHead>
+                  <TableHead scope="col">Change %</TableHead>
+                  {withReasons && <TableHead scope="col">Reason</TableHead>}
+                  {withStatus && <TableHead scope="col">Status</TableHead>}
+                  {withAction && <TableHead scope="col">Action</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {historyItems.map((h, index) => (
+                  <TableRow key={`${h.effectiveDate}-${index}`}>
+                    <TableCell>{formatDate(h.effectiveDate)}</TableCell>
+                    <TableCell>{basisLabel(h.basis)}</TableCell>
+                    <TableCell>{money(h.beforeAmount, h.currency)}</TableCell>
+                    <TableCell>{money(h.afterAmount, h.currency)}</TableCell>
+                    <TableCell>{money(h.changeAmount, h.currency)}</TableCell>
+                    <TableCell>{percent(h.changePercent, h.percentNaReason)}</TableCell>
+                    {withReasons && <TableCell>{h.reason ?? '—'}</TableCell>}
+                    {withStatus && (
+                      <TableCell>
+                        <HistoryStatus item={h} />
+                      </TableCell>
+                    )}
+                    {withAction && (
+                      <RowActionsCell>
+                        {h.correctable && (
+                          <RowActions>
+                            <Button
                               type="button"
-                              className="secondary"
+                              variant="outline"
+                              size="sm"
                               onClick={() => {
                                 setCorrecting(h);
                                 setCorrectionSent(false);
                               }}
                             >
                               Correct
-                            </button>
-                          )}
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                            </Button>
+                          </RowActions>
+                        )}
+                      </RowActionsCell>
+                    )}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
-          {withStatus && <p className="hint">A superseded change stays on record; reports and annual growth use the correction.</p>}
-          {correctionSent && (
-            <p className="ok" role="status">
-              Correction sent for an independent decision.
-            </p>
-          )}
+          {withStatus && <Hint>A superseded change stays on record; reports and annual growth use the correction.</Hint>}
+          {correctionSent && <Notice notice={{ text: 'Correction sent for an independent decision.', ok: true }} />}
           {correcting && (
             <CorrectionForm
               key={correcting.id}
@@ -292,38 +324,32 @@ function InitialSalaryForm({ employeeId, onRecorded }: { employeeId: string; onR
 
   return (
     <div>
-      <h3 id={`${ids}-title`} style={H3}>
-        Initial salary
-      </h3>
-      <p className="hint">Records the employee’s first salary arrangement. Enter both figures as agreed; annual CTC is never worked out from monthly gross. Later changes go through an increment case.</p>
-      <form className="grid-form" aria-labelledby={`${ids}-title`} onSubmit={submit}>
-        <label>
+      <CardSubheading id={`${ids}-title`}>Initial salary</CardSubheading>
+      <Hint>Records the employee’s first salary arrangement. Enter both figures as agreed; annual CTC is never worked out from monthly gross. Later changes go through an increment case.</Hint>
+      <FormGrid aria-labelledby={`${ids}-title`} onSubmit={submit}>
+        <FormField>
           Effective from
-          <input type="date" required value={form.effectiveFrom} onChange={(e) => setForm({ ...form, effectiveFrom: e.target.value })} />
-        </label>
-        <label>
+          <Input type="date" required value={form.effectiveFrom} onChange={(e) => setForm({ ...form, effectiveFrom: e.target.value })} />
+        </FormField>
+        <FormField>
           Monthly gross
-          <input inputMode="decimal" autoComplete="off" required value={form.monthlyGross} onChange={(e) => setForm({ ...form, monthlyGross: e.target.value })} />
-        </label>
-        <label>
+          <Input inputMode="decimal" autoComplete="off" required value={form.monthlyGross} onChange={(e) => setForm({ ...form, monthlyGross: e.target.value })} />
+        </FormField>
+        <FormField>
           Annual CTC
-          <input inputMode="decimal" autoComplete="off" required value={form.annualCtc} onChange={(e) => setForm({ ...form, annualCtc: e.target.value })} />
-        </label>
-        <label>
+          <Input inputMode="decimal" autoComplete="off" required value={form.annualCtc} onChange={(e) => setForm({ ...form, annualCtc: e.target.value })} />
+        </FormField>
+        <FormField>
           Currency
-          <input required maxLength={3} autoComplete="off" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />
-        </label>
-        {problem && (
-          <p role="alert" className="error wide">
-            {problem}
-          </p>
-        )}
-        <div className="wide row">
-          <button type="submit" disabled={record.isPending}>
+          <Input required maxLength={3} autoComplete="off" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />
+        </FormField>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={record.isPending}>
             Record initial salary
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
       <ErrorNote error={record.error} />
     </div>
   );
@@ -363,35 +389,29 @@ function AnnualGrowthPanel({ employeeId }: { employeeId: string }) {
   const yearCurrency = currencyChanged ? null : (g?.currency ?? null);
   return (
     <div>
-      <h3 id={`${ids}-title`} style={H3}>
-        Annual growth
-      </h3>
-      <form className="row" aria-labelledby={`${ids}-title`} onSubmit={submit}>
-        <label className="inline" style={FLUSH}>
+      <CardSubheading id={`${ids}-title`}>Annual growth</CardSubheading>
+      <form className={FIELD_ROW} aria-labelledby={`${ids}-title`} onSubmit={submit}>
+        <FormField className="w-auto">
           Financial year from April
-          <input type="number" inputMode="numeric" min={2000} max={2100} step={1} required style={YEAR_INPUT} value={year} onChange={(e) => setYear(e.target.value)} />
-        </label>
-        <label className="inline" style={FLUSH}>
+          <Input type="number" inputMode="numeric" min={2000} max={2100} step={1} required className={YEAR_INPUT} value={year} onChange={(e) => setYear(e.target.value)} />
+        </FormField>
+        <FormField className="w-auto">
           Basis
-          <select value={basis} onChange={(e) => setBasis(e.target.value as Basis)}>
+          <NativeSelect value={basis} onChange={(e) => setBasis(e.target.value as Basis)}>
             {BASES.map((b) => (
               <option key={b.value} value={b.value}>
                 {b.label}
               </option>
             ))}
-          </select>
-        </label>
-        <button type="submit">Show growth</button>
+          </NativeSelect>
+        </FormField>
+        <Button type="submit">Show growth</Button>
       </form>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      {requested && growth.isPending && <p className="hint loading">Loading annual growth…</p>}
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      {requested && growth.isPending && <LoadingLine>Loading annual growth…</LoadingLine>}
       <LoadProblem error={growth.error} forbidden="The selected role cannot read this employee’s annual growth." notFound="This employee is not in the selected role’s scope." />
       {g && (
-        <div className="stack" style={PANEL}>
+        <div className={PANEL}>
           <dl className="kv">
             <Item term="Financial year">
               {formatDate(g.periodStart)} to {formatDate(g.periodEnd)}
@@ -401,37 +421,35 @@ function AnnualGrowthPanel({ employeeId }: { employeeId: string }) {
             <Item term="Closing (in force on the last day of the year)">{money(g.closing, g.currency)}</Item>
             <Item term="Annual growth">{percent(g.annualGrowthPercent, g.percentNaReason)}</Item>
           </dl>
-          {currencyChanged && <p className="hint">The currency changed during the year, so the opening amount and the changes are shown without a currency code.</p>}
-          <h4 id={`${ids}-changes`} style={H4}>
+          {currencyChanged && <Hint>The currency changed during the year, so the opening amount and the changes are shown without a currency code.</Hint>}
+          <CardSubheading level={4} id={`${ids}-changes`}>
             Changes in the year
-          </h4>
+          </CardSubheading>
           {g.changes.length === 0 ? (
             <Empty>No increments took effect in this financial year.</Empty>
           ) : (
-            <div style={SCROLL}>
-              <table aria-labelledby={`${ids}-changes`}>
-                <thead>
-                  <tr>
-                    <th scope="col">Effective date</th>
-                    <th scope="col">Before</th>
-                    <th scope="col">After</th>
-                    <th scope="col">Change %</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {g.changes.map((c, index) => (
-                    <tr key={`${c.effectiveDate}-${index}`}>
-                      <td>{formatDate(c.effectiveDate)}</td>
-                      <td>{money(c.beforeAmount, yearCurrency)}</td>
-                      <td>{money(c.afterAmount, yearCurrency)}</td>
-                      <td>{percent(c.changePercent, c.percentNaReason)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-labelledby={`${ids}-changes`}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Effective date</TableHead>
+                  <TableHead scope="col">Before</TableHead>
+                  <TableHead scope="col">After</TableHead>
+                  <TableHead scope="col">Change %</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {g.changes.map((c, index) => (
+                  <TableRow key={`${c.effectiveDate}-${index}`}>
+                    <TableCell>{formatDate(c.effectiveDate)}</TableCell>
+                    <TableCell>{money(c.beforeAmount, yearCurrency)}</TableCell>
+                    <TableCell>{money(c.afterAmount, yearCurrency)}</TableCell>
+                    <TableCell>{percent(c.changePercent, c.percentNaReason)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
-          <p className="hint">Each change has its own percentage. Annual growth compares the closing salary with the opening one, so the change percentages are never added up.</p>
+          <Hint>Each change has its own percentage. Annual growth compares the closing salary with the opening one, so the change percentages are never added up.</Hint>
         </div>
       )}
     </div>

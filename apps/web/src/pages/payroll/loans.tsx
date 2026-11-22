@@ -3,14 +3,42 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { FieldSet } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, type EmployeeHit, formatDate, localDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, LIST_PAGE_SIZE, Pager, pageParams, Section } from '../../ui';
-import { ScheduleTables } from './ess';
+import { Empty, LIST_PAGE_SIZE, Notice, Pager, pageParams, Section } from '../../ui';
+import { LOAN_LIST, LoanCard, ScheduleTables } from './ess';
 import { ZERO } from './hold-proposals';
 import { EmployeePicker, EvidencePicker, Missing, Note } from './pickers';
 import { Problem, ReasonForm } from './problems';
-import { Fact, GROUP, H3, label, LOAN_DECIDE, LOAN_DISBURSE, LOAN_KIND, LOAN_READ, LOAN_REQUEST, LOAN_STATE, MONEY, money, MONTH, PATHS, PLAIN_LIST, SCROLL, Status, TEXTAREA, useIntentKey, useKeys } from './shared';
+import {
+  Fact,
+  label,
+  LOAN_DECIDE,
+  LOAN_DISBURSE,
+  LOAN_KIND,
+  LOAN_READ,
+  LOAN_REQUEST,
+  LOAN_STATE,
+  MONEY,
+  money,
+  MONTH,
+  PATHS,
+  READABLE_WIDTH,
+  Status,
+  useIntentKey,
+  useKeys,
+} from './shared';
 import type { Loan, RunDetail } from './types';
 
 // =========================================================================================================
@@ -18,13 +46,17 @@ import type { Loan, RunDetail } from './types';
 // =========================================================================================================
 
 const LOAN_FILTERS = ['REQUESTED', 'APPROVED', 'REJECTED', 'WITHDRAWN', 'CANCELLED', 'DISBURSED', 'CLOSED'];
+/** An instalment's fields side by side, their bottoms lined up with its remove button (the old `.row` of fields). */
+const FIELD_ROW = 'flex flex-wrap items-end gap-2';
+/** A group of choices or fields under its legend, as close together as the old fieldset rule drew them. */
+const GROUP_GAP = 'gap-[0.55rem]';
 
 export function LoansScreen() {
   const { can } = useSession();
   if (!can(LOAN_READ)) {
     return (
       <Section title="Loans and advances">
-        <Empty>The selected role cannot see loans and advances.</Empty>
+        <Empty refusal>The selected role cannot see loans and advances.</Empty>
       </Section>
     );
   }
@@ -52,9 +84,9 @@ function LoanList() {
     <Section
       title="Loans and advances"
       actions={
-        <label className="inline">
+        <FormField className="w-auto">
           State
-          <select
+          <NativeSelect
             value={state}
             onChange={(e) => {
               setState(e.target.value);
@@ -67,52 +99,52 @@ function LoanList() {
                 {label(LOAN_STATE, s)}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
       }
     >
-      {loans.isPending && <p className="hint loading">Loading loans…</p>}
+      {loans.isPending && <LoadingLine>Loading loans…</LoadingLine>}
       {loans.error && <Problem error={loans.error} act="read" />}
       {loans.data && loans.data.items.length === 0 && <Empty>No loans or advances in the selected role’s scope.</Empty>}
       {loans.data && loans.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Loans and advances">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Kind</th>
-                <th>Principal</th>
-                <th>State</th>
-                <th>Requested</th>
-                <th>Recovery head</th>
-                <th>Recovered</th>
-                <th>Outstanding</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loans.data.items.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.employeeCode}</td>
-                  <td>{label(LOAN_KIND, l.loanKind)}</td>
-                  <td>{money(l.principal, l.currencyCode)}</td>
-                  <td>
-                    <Status map={LOAN_STATE} code={l.state} />
-                  </td>
-                  <td>{formatDate(l.requestedAt)}</td>
-                  <td>{l.recoveryHead ?? '—'}</td>
-                  <td>{money(l.recovered, l.currencyCode)}</td>
-                  <td>{money(l.outstanding, l.currencyCode)}</td>
-                  <td>
-                    <button type="button" className="link" onClick={() => setOpenId(openId === l.id ? null : l.id)} aria-label={`Details of the loan of ${l.employeeCode}`}>
+        <Table aria-label="Loans and advances">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Kind</TableHead>
+              <TableHead scope="col">Principal</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Requested</TableHead>
+              <TableHead scope="col">Recovery head</TableHead>
+              <TableHead scope="col">Recovered</TableHead>
+              <TableHead scope="col">Outstanding</TableHead>
+              <TableHead scope="col">Details</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loans.data.items.map((l) => (
+              <TableRow key={l.id}>
+                <TableCell>{l.employeeCode}</TableCell>
+                <TableCell>{label(LOAN_KIND, l.loanKind)}</TableCell>
+                <TableCell>{money(l.principal, l.currencyCode)}</TableCell>
+                <TableCell>
+                  <Status map={LOAN_STATE} code={l.state} />
+                </TableCell>
+                <TableCell>{formatDate(l.requestedAt)}</TableCell>
+                <TableCell>{l.recoveryHead ?? '—'}</TableCell>
+                <TableCell>{money(l.recovered, l.currencyCode)}</TableCell>
+                <TableCell>{money(l.outstanding, l.currencyCode)}</TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button type="button" variant="outline" size="sm" onClick={() => setOpenId(openId === l.id ? null : l.id)} aria-label={`Details of the loan of ${l.employeeCode}`}>
                       {openId === l.id ? 'Hide' : 'Details'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {loans.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={loans.data.total ?? loans.data.items.length} onPage={setPage} label="Loan pages" noun="loan" />}
       {openId && <LoanDetail id={openId} />}
@@ -126,12 +158,12 @@ function LoanDetail({ id }: { id: string }) {
   const [note, setNote] = useState<string | null>(null);
   const loan = useQuery({ queryKey: keys.loan(id), queryFn: () => api<Loan>(`/v1/payroll-outputs/loans/${encodeURIComponent(id)}`), retry: retryTransient });
   const l = loan.data;
-  if (loan.isPending) return <p className="hint loading">Loading the loan…</p>;
+  if (loan.isPending) return <LoadingLine>Loading the loan…</LoadingLine>;
   if (!l) return <Problem error={loan.error} act="read" />;
   const name = `${label(LOAN_KIND, l.loanKind)} of ${l.employeeCode}`;
   return (
     <div role="region" aria-label={name}>
-      <h3 style={H3}>{name}</h3>
+      <CardSubheading>{name}</CardSubheading>
       <dl className="kv">
         <Fact term="Purpose">{l.purpose}</Fact>
         {/[1-9]/.test(l.awaitingRecognition ?? '') && <Fact term="Deducted, not yet recognised">{money(l.awaitingRecognition!, l.currencyCode)}</Fact>}
@@ -143,11 +175,7 @@ function LoanDetail({ id }: { id: string }) {
         {l.closeReason && <Fact term="Close reason">{l.closeReason}</Fact>}
       </dl>
       <ScheduleTables loan={l} name={name} />
-      {note && (
-        <p role="status" className="ok">
-          {note}
-        </p>
-      )}
+      <Notice notice={note ? { text: note, ok: true } : null} />
       {l.state === 'APPROVED' && can(LOAN_DISBURSE) && <DisbursementForm loan={l} onDone={setNote} />}
       {l.state === 'APPROVED' && can(LOAN_DECIDE) && <LoanCancel loan={l} onDone={setNote} />}
     </div>
@@ -169,23 +197,21 @@ export function LoanDecisionQueue() {
   if (!can(LOAN_READ)) {
     return (
       <Section title="Loan requests to decide">
-        <p className="hint">The selected role cannot list loan requests.</p>
+        <Hint>The selected role cannot list loan requests.</Hint>
       </Section>
     );
   }
   return (
     <Section title="Loan requests to decide">
-      <p className="hint">An approval fixes the recovery head and a schedule that recovers exactly the principal; neither changes afterwards. Loans carry no interest.</p>
-      {pending.isPending && <p className="hint loading">Loading loan requests…</p>}
+      <Hint>An approval fixes the recovery head and a schedule that recovers exactly the principal; neither changes afterwards. Loans carry no interest.</Hint>
+      {pending.isPending && <LoadingLine>Loading loan requests…</LoadingLine>}
       {pending.error && <Problem error={pending.error} act="read" />}
       {notes.map((n) => (
-        <p key={n.id} role="status" className="ok">
-          {n.text}
-        </p>
+        <Notice key={n.id} notice={{ text: n.text, ok: true }} />
       ))}
       {pending.data && pending.data.items.length === 0 && <Empty>No loan request is waiting for a decision.</Empty>}
       {pending.data && pending.data.items.length > 0 && (
-        <ul style={PLAIN_LIST} className="stack">
+        <ul className={LOAN_LIST}>
           {pending.data.items.map((l) => (
             <LoanDecisionItem key={l.id} loan={l} onFinished={(text) => setNotes((prev) => [...prev, { id: l.id, text }])} />
           ))}
@@ -241,85 +267,80 @@ function LoanDecisionItem({ loan, onFinished }: { loan: Loan; onFinished: (text:
     decide.reset();
     decide.mutate({ decision, recoveryComponentCode: code, installments: list, expectedVersion: loan.version, ...(why ? { reason: why } : {}) });
   };
+  const setRow = (id: number, patch: Partial<InstalmentDraft>) => setRows(rows.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   return (
-    <li aria-labelledby={titleId} className="card">
-      <h3 id={titleId} style={H3}>
-        {name}
-      </h3>
+    <LoanCard aria-labelledby={titleId}>
+      <CardSubheading id={titleId}>{name}</CardSubheading>
       <dl className="kv">
         <Fact term="Principal">{money(loan.principal, loan.currencyCode)}</Fact>
         <Fact term="Purpose">{loan.purpose}</Fact>
         <Fact term="Requested">{`${formatDate(loan.requestedAt)} by ${loan.requestOrigin === 'EMPLOYEE' ? 'the employee' : 'HR'}`}</Fact>
       </dl>
-      {own && <p className="hint">You entered this request, so someone else decides it.</p>}
-      {beneficiary && <p className="hint">This is your own loan, so someone else decides it.</p>}
-      <form onSubmit={submit} aria-label={`Decide ${name}`} className="stack" style={{ marginTop: '0.5rem' }}>
-        <fieldset style={GROUP}>
+      {own && <Hint>You entered this request, so someone else decides it.</Hint>}
+      {beneficiary && <Hint>This is your own loan, so someone else decides it.</Hint>}
+      <form onSubmit={submit} aria-label={`Decide ${name}`} className="mt-2 flex flex-col gap-3">
+        <FieldSet className={GROUP_GAP}>
           <legend>Decision</legend>
-          <label className="check">
+          <CheckField>
             <input type="radio" name={`${titleId}-decision`} checked={decision === 'APPROVE'} onChange={() => setDecision('APPROVE')} /> Approve
-          </label>
-          <label className="check">
+          </CheckField>
+          <CheckField>
             <input type="radio" name={`${titleId}-decision`} checked={decision === 'REJECT'} onChange={() => setDecision('REJECT')} /> Reject
-          </label>
-        </fieldset>
+          </CheckField>
+        </FieldSet>
         {decision === 'APPROVE' && (
           <>
-            <label>
+            <FormField>
               Recovery deduction head (code)
-              <input value={head} onChange={(e) => setHead(e.target.value)} maxLength={40} autoComplete="off" />
-            </label>
-            <fieldset style={GROUP}>
+              <Input value={head} onChange={(e) => setHead(e.target.value)} maxLength={40} autoComplete="off" className={READABLE_WIDTH} />
+            </FormField>
+            <FieldSet className={GROUP_GAP}>
               <legend>Instalments (they must recover exactly the principal)</legend>
               {rows.map((r, i) => (
-                <div key={r.id} className="row" style={{ alignItems: 'flex-end' }}>
-                  <label>
+                <div key={r.id} className={FIELD_ROW}>
+                  <FormField className="w-auto">
                     {`Instalment ${i + 1} due month`}
-                    <input type="month" value={r.dueMonth} onChange={(e) => setRows(rows.map((x) => (x.id === r.id ? { ...x, dueMonth: e.target.value } : x)))} />
-                  </label>
-                  <label>
+                    <Input type="month" value={r.dueMonth} onChange={(e) => setRow(r.id, { dueMonth: e.target.value })} />
+                  </FormField>
+                  <FormField className="w-auto">
                     {`Instalment ${i + 1} amount`}
-                    <input value={r.amount} onChange={(e) => setRows(rows.map((x) => (x.id === r.id ? { ...x, amount: e.target.value } : x)))} inputMode="decimal" autoComplete="off" />
-                  </label>
+                    <Input value={r.amount} onChange={(e) => setRow(r.id, { amount: e.target.value })} inputMode="decimal" autoComplete="off" />
+                  </FormField>
                   {rows.length > 1 && (
-                    <button type="button" className="secondary" onClick={() => setRows(rows.filter((x) => x.id !== r.id))} aria-label={`Remove instalment ${i + 1}`}>
+                    <Button type="button" variant="outline" onClick={() => setRows(rows.filter((x) => x.id !== r.id))} aria-label={`Remove instalment ${i + 1}`}>
                       Remove
-                    </button>
+                    </Button>
                   )}
                 </div>
               ))}
-              <div className="row">
-                <button
+              <ButtonRow>
+                <Button
                   type="button"
-                  className="secondary"
+                  variant="outline"
                   onClick={() => {
                     setRows([...rows, { id: nextRow.current, dueMonth: '', amount: '' }]);
                     nextRow.current += 1;
                   }}
                 >
                   Add an instalment
-                </button>
-              </div>
-            </fieldset>
+                </Button>
+              </ButtonRow>
+            </FieldSet>
           </>
         )}
-        <label>
+        <FormField>
           {decision === 'REJECT' ? 'Reason' : 'Reason (optional)'}
-          <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-        </label>
-        <div className="row">
-          <button type="submit" disabled={decide.isPending || blocked}>
+          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} className={READABLE_WIDTH} />
+        </FormField>
+        <ButtonRow>
+          <Button type="submit" disabled={decide.isPending || blocked}>
             {decide.isPending ? 'Sending…' : 'Send the decision'}
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
       </form>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
+      <Missing text={problem} />
       <Problem error={decide.error} act="loan-decide" />
-    </li>
+    </LoanCard>
   );
 }
 
@@ -371,44 +392,44 @@ function LoanRequestFor() {
   };
   return (
     <Section title="Request a loan or advance for an employee">
-      <form onSubmit={submit} aria-label="Request a loan for an employee" className="grid-form">
+      <FormGrid onSubmit={submit} aria-label="Request a loan for an employee">
         <EmployeePicker title="Employee" value={employee} onChange={setEmployee} />
-        <label>
+        <FormField>
           Kind
-          <select value={loanKind} onChange={(e) => setLoanKind(e.target.value)}>
+          <NativeSelect value={loanKind} onChange={(e) => setLoanKind(e.target.value)}>
             {Object.entries(LOAN_KIND).map(([k, v]) => (
               <option key={k} value={k}>
                 {v}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           Currency
-          <input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} maxLength={3} autoComplete="off" />
-        </label>
-        <label>
+          <Input value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} maxLength={3} autoComplete="off" />
+        </FormField>
+        <FormField>
           Amount
-          <input value={principal} onChange={(e) => setPrincipal(e.target.value)} inputMode="decimal" maxLength={20} autoComplete="off" />
-        </label>
-        <label className="wide">
+          <Input value={principal} onChange={(e) => setPrincipal(e.target.value)} inputMode="decimal" maxLength={20} autoComplete="off" />
+        </FormField>
+        <FormField className="col-span-full">
           Purpose
-          <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-        </label>
-        <div className="row">
-          <button type="submit" disabled={request.isPending}>
+          <Textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} maxLength={1000} rows={2} />
+        </FormField>
+        <ButtonRow>
+          <Button type="submit" disabled={request.isPending}>
             {request.isPending ? 'Sending…' : 'Send the request'}
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Missing text={problem} />
-        <div className="wide">
+        <div className="col-span-full">
           <Note text={note} />
           <Problem error={request.error} act="loan-request" />
         </div>
-      </form>
-      <p className="hint">
+      </FormGrid>
+      <Hint>
         Many requests at once: <Link to={PATHS.loanUpload}>upload a file of loan and advance requests</Link>.
-      </p>
+      </Hint>
     </Section>
   );
 }
@@ -448,30 +469,28 @@ function DisbursementForm({ loan, onDone }: { loan: Loan; onDone: (text: string)
     disburse.mutate({ disbursementDate: date, evidenceKey: intent.key(JSON.stringify(intended)), evidenceReference: reference.trim(), evidenceDocumentIds: documents, expectedVersion: loan.version });
   };
   return (
-    <form onSubmit={submit} aria-label={`Record the disbursement of the loan of ${loan.employeeCode}`} className="grid-form" style={{ marginTop: '0.5rem' }}>
-      <h3 style={H3} className="wide">
-        Record the disbursement
-      </h3>
-      {involved && <p className="hint wide">You requested or decided this loan, so someone else records its disbursement.</p>}
-      <label>
+    <FormGrid onSubmit={submit} aria-label={`Record the disbursement of the loan of ${loan.employeeCode}`} className="mt-2">
+      <CardSubheading>Record the disbursement</CardSubheading>
+      {involved && <Hint>You requested or decided this loan, so someone else records its disbursement.</Hint>}
+      <FormField>
         Disbursement date
-        <input type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value)} />
+      </FormField>
+      <FormField>
         Evidence reference
-        <input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={500} autoComplete="off" />
-      </label>
+        <Input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={500} autoComplete="off" />
+      </FormField>
       <EvidencePicker employeeId={loan.employeeId} chosen={documents} onChange={setDocuments} max={1} />
-      <div className="row">
-        <button type="submit" disabled={disburse.isPending || involved}>
+      <ButtonRow>
+        <Button type="submit" disabled={disburse.isPending || involved}>
           {disburse.isPending ? 'Recording…' : 'Record the disbursement'}
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Missing text={problem} />
-      <div className="wide">
+      <div className="col-span-full">
         <Problem error={disburse.error} act="disburse" />
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -507,6 +526,20 @@ interface RecoveryResult {
   done: boolean;
 }
 
+/** The recognition button: busy, continuing a pass cut short, or starting one. */
+function recogniseButtonText(pending: boolean, unfinished: boolean): string {
+  if (pending) return 'Recognising…';
+  return unfinished ? 'Continue' : 'Recognise loan recoveries';
+}
+
+/** What one pass of the recognition did, and whether every recovery of the run is now recognised. */
+function recoveryText(r: RecoveryResult): string {
+  const recognised = `${r.recognised} ${r.recognised === 1 ? 'recovery' : 'recoveries'} recognised in this pass`;
+  const closed = `${r.closed} ${r.closed === 1 ? 'loan' : 'loans'} fully recovered and closed`;
+  const rest = r.done ? 'Every recovery of this run is recognised.' : `${r.remaining} still to recognise: continue.`;
+  return `${recognised}; ${closed}. ${rest}`;
+}
+
 export function LoanRecoveries({ run }: { run: RunDetail }) {
   const keys = useKeys();
   const qc = useQueryClient();
@@ -517,19 +550,13 @@ export function LoanRecoveries({ run }: { run: RunDetail }) {
   const r = recognise.data;
   return (
     <Section title="Loan recoveries">
-      <p className="hint">Recoveries are recognised only from this processed run’s frozen deduction lines, and never above a loan’s outstanding balance.</p>
-      <div className="row">
-        <button type="button" disabled={recognise.isPending} onClick={() => recognise.mutate()}>
-          {recognise.isPending ? 'Recognising…' : r && !r.done ? 'Continue' : 'Recognise loan recoveries'}
-        </button>
-      </div>
-      {r && (
-        <p role="status" className="ok">
-          {`${r.recognised} ${r.recognised === 1 ? 'recovery' : 'recoveries'} recognised in this pass; ${r.closed} ${r.closed === 1 ? 'loan' : 'loans'} fully recovered and closed. ${
-            r.done ? 'Every recovery of this run is recognised.' : `${r.remaining} still to recognise: continue.`
-          }`}
-        </p>
-      )}
+      <Hint>Recoveries are recognised only from this processed run’s frozen deduction lines, and never above a loan’s outstanding balance.</Hint>
+      <ButtonRow>
+        <Button type="button" disabled={recognise.isPending} onClick={() => recognise.mutate()}>
+          {recogniseButtonText(recognise.isPending, r !== undefined && !r.done)}
+        </Button>
+      </ButtonRow>
+      {r && <Notice notice={{ text: recoveryText(r), ok: true }} />}
       {r && r.exceptions.length > 0 && (
         <ul aria-label="Recoveries not recognised">
           {r.exceptions.map((x) => (

@@ -3,6 +3,14 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { ButtonRow, FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
+import { RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate } from '../../api';
 import { useSession } from '../../session';
 import { ErrorNote, nextSort, Section, SortHeader, sortParams, StateBadge } from '../../ui';
@@ -109,34 +117,38 @@ export function EmployeesPage() {
   const groupLabel = (code: string) => STATUS_GROUPS.find((g) => g.code === code)?.label ?? words(code);
   const exportButton = (label: string, request: typeof exportList) => (
     <span key={label}>
-      <button className="secondary" disabled={request.isPending} onClick={() => request.mutate()}>
+      <Button variant="outline" disabled={request.isPending} onClick={() => request.mutate()}>
         {label}
-      </button>{' '}
+      </Button>{' '}
       {request.isSuccess && (
-        <span className="hint">
+        <Hint as="span">
           Requested. Download it from <Link to="/reports">Reports</Link>.
-        </span>
+        </Hint>
       )}{' '}
     </span>
   );
   // The list's own actions, where people look for them (the card header), for the roles that may take them.
   const headerActions =
     can('employee.create.operational') || can('employee.import.operational') ? (
-      <div className="row">
-        {can('employee.import.operational') && <Link to="/imports">Import employees</Link>}
-        {can('employee.create.operational') && (
-          <Link to="/employees/new" className="primary">
-            New employee
-          </Link>
+      <ButtonRow>
+        {can('employee.import.operational') && (
+          <Button asChild variant="outline" size="sm">
+            <Link to="/imports">Import employees</Link>
+          </Button>
         )}
-      </div>
+        {can('employee.create.operational') && (
+          <Button asChild size="sm">
+            <Link to="/employees/new">New employee</Link>
+          </Button>
+        )}
+      </ButtonRow>
     ) : undefined;
   return (
     <Section title={`Employees${list.data ? ` (${list.data.total})` : ''}`} actions={headerActions}>
-      <div className="grid-form filter-bar">
-        <label className="inline">
+      <FilterBar>
+        <FormField>
           Search{' '}
-          <input
+          <Input
             maxLength={100}
             value={search}
             placeholder="Name, code or email"
@@ -145,10 +157,10 @@ export function EmployeesPage() {
               listChanged();
             }}
           />
-        </label>
-        <label className="inline">
+        </FormField>
+        <FormField>
           Status{' '}
-          <select
+          <NativeSelect
             value={statusChoice}
             onChange={(e) =>
               setFilters(e.target.value.startsWith(GROUP_CHOICE) ? { status: '', statusGroup: e.target.value.slice(GROUP_CHOICE.length) } : { status: e.target.value, statusGroup: '' })
@@ -174,12 +186,12 @@ export function EmployeesPage() {
               ))}
               {filters.status && !EMPLOYEE_STATUSES.some((s) => s.code === filters.status) && <option value={filters.status}>{words(filters.status)}</option>}
             </optgroup>
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         {departmentChoices && (
-          <label className="inline">
+          <FormField>
             Department{' '}
-            <select value={filters.departmentId ?? ''} onChange={(e) => setFilters({ departmentId: e.target.value })}>
+            <NativeSelect value={filters.departmentId ?? ''} onChange={(e) => setFilters({ departmentId: e.target.value })}>
               <option value="">All</option>
               {departments.data?.items.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -187,38 +199,38 @@ export function EmployeesPage() {
                   {d.active ? '' : ' (inactive)'}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
         )}
-        <label className="inline">
-          Joined from <input type="date" value={filters.joinedFrom ?? ''} onChange={(e) => setFilters({ joinedFrom: e.target.value })} />
-        </label>
-        <label className="inline">
-          Joined to <input type="date" value={filters.joinedTo ?? ''} onChange={(e) => setFilters({ joinedTo: e.target.value })} />
-        </label>
-      </div>
+        <FormField>
+          Joined from <Input type="date" value={filters.joinedFrom ?? ''} onChange={(e) => setFilters({ joinedFrom: e.target.value })} />
+        </FormField>
+        <FormField>
+          Joined to <Input type="date" value={filters.joinedTo ?? ''} onChange={(e) => setFilters({ joinedTo: e.target.value })} />
+        </FormField>
+      </FilterBar>
       {filters.statusGroup && (
-        <p className="hint">
+        <Hint>
           Status: {groupLabel(filters.statusGroup)}{' '}
-          <button className="secondary" onClick={() => setFilters({ status: '', statusGroup: '' })}>
+          <Button variant="outline" onClick={() => setFilters({ status: '', statusGroup: '' })}>
             Clear
-          </button>
-        </p>
+          </Button>
+        </Hint>
       )}
       {!departmentChoices && (
-        <p className="hint">
+        <Hint>
           Your role cannot read the department list, so it cannot choose a department here.{' '}
           {filters.departmentId && (
-            <button className="secondary" onClick={() => setFilters({ departmentId: '' })}>
+            <Button variant="outline" onClick={() => setFilters({ departmentId: '' })}>
               Clear the department filter
-            </button>
+            </Button>
           )}
-        </p>
+        </Hint>
       )}
       <ErrorNote error={departments.error} />
-      <table>
-        <thead>
-          <tr>
+      <Table>
+        <TableHeader>
+          <TableRow>
             <SortHeader column="employeeCode" label="Code" sort={sort} onSort={onSort} />
             <SortHeader column="displayName" label="Name" sort={sort} onSort={onSort} />
             <SortHeader column="department" label="Department" sort={sort} onSort={onSort} />
@@ -227,52 +239,52 @@ export function EmployeesPage() {
             <SortHeader column="joiningDate" label="Joined" sort={sort} onSort={onSort} />
             <SortHeader column="status" label="Status" sort={sort} onSort={onSort} />
             {documents && (
-              <th>
+              <TableHead scope="col">
                 <span className="sr-only">Actions</span>
-              </th>
+              </TableHead>
             )}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {list.data?.items.map((e) => (
-            <tr key={e.id}>
-              <td>{e.employeeCode}</td>
-              <td>{can('employee.read.operational') ? <Link to={`/employees/${e.id}`}>{e.displayName}</Link> : e.displayName}</td>
-              <td>{e.assignment?.departmentName ?? '—'}</td>
-              <td>{e.assignment?.locationName ?? '—'}</td>
-              <td>{e.assignment?.designationName ?? '—'}</td>
-              <td>{formatDate(e.joiningDate)}</td>
-              <td>
+            <TableRow key={e.id}>
+              <TableCell>{e.employeeCode}</TableCell>
+              <TableCell>{can('employee.read.operational') ? <Link to={`/employees/${e.id}`}>{e.displayName}</Link> : e.displayName}</TableCell>
+              <TableCell>{e.assignment?.departmentName ?? '—'}</TableCell>
+              <TableCell>{e.assignment?.locationName ?? '—'}</TableCell>
+              <TableCell>{e.assignment?.designationName ?? '—'}</TableCell>
+              <TableCell>{formatDate(e.joiningDate)}</TableCell>
+              <TableCell>
                 <StateBadge state={e.status} />
-              </td>
+              </TableCell>
               {documents && (
-                <td>
+                <RowActionsCell>
                   <Link to={`/employees/${e.id}/documents`}>Documents</Link>
-                </td>
+                </RowActionsCell>
               )}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-      <div className="pager">
-        <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+        </TableBody>
+      </Table>
+      <PagerRow>
+        <PagerButton disabled={page <= 1} onClick={() => setPage(page - 1)}>
           Previous
-        </button>
-        <span>
+        </PagerButton>
+        <PagerCount>
           Page {page} of {pages}
-        </span>
-        <button disabled={page >= pages} onClick={() => setPage(page + 1)}>
+        </PagerCount>
+        <PagerButton disabled={page >= pages} onClick={() => setPage(page + 1)}>
           Next
-        </button>
-      </div>
+        </PagerButton>
+      </PagerRow>
       {filters.statusGroup && !filters.status && OFFER_VIEWS.includes(filters.statusGroup) && can(OFFER_READ) && (
-        <p className="hint">
+        <Hint>
           Offers still awaiting the candidate’s answer, and offers the candidate declined, are candidates rather than employee records: they stay in Hiring’s{' '}
           <Link to={HIRING_OFFERS}>offer list</Link>.
-        </p>
+        </Hint>
       )}
       {(can('employee.export.operational') || can(SECTION_EXPORT)) && (
-        <p>
+        <p className="flex flex-wrap items-center gap-2">
           {can('employee.export.operational') && exportButton('Export this list', exportList)}
           {can(SECTION_EXPORT) && sectionExports.map((s) => exportButton(s.label, s.request))}
         </p>

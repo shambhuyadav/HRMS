@@ -1,7 +1,7 @@
 // The timesheet API's refusals in plain words: the actions, their refusal texts and the refusal lines.
 
 import { ApiError, formatDate, isForbidden, readable } from '../../api';
-import { ErrorNote, NotPermitted } from '../../ui';
+import { ErrorNote, Notice, NotPermitted } from '../../ui';
 import { hm } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -88,13 +88,8 @@ export function refusalText(error: unknown, act: Act): string | null {
 export function Refusal({ error, act }: { error: unknown; act: Act }) {
   if (!error) return null;
   const text = refusalText(error, act);
-  return text === null ? (
-    <ErrorNote error={error} />
-  ) : (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  if (text === null) return <ErrorNote error={error} />;
+  return <Notice notice={{ text, ok: false }} />;
 }
 
 /** A list or detail that could not be read: a scope refusal in words, anything else as the API sent it. */

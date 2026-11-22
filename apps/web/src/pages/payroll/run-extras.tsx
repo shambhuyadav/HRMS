@@ -2,11 +2,16 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { api, type EmployeeHit } from '../../api';
 import { Section } from '../../ui';
 import { EmployeePicker, Missing, Note, person } from './pickers';
 import { Problem } from './problems';
-import { TEXTAREA, useKeys } from './shared';
+import { useKeys } from './shared';
 import type { RunDetail } from './types';
 
 // =========================================================================================================
@@ -24,6 +29,20 @@ interface VerifyResult {
   nextAfter: string | null;
 }
 
+/** The outcome of one pass of the rerun check, and of the whole check once it is complete. */
+function verifyText(r: VerifyResult, differs: boolean): string {
+  const pass = r.identical ? 'identical to the stored results' : `differences found (${r.lineDifferences} lines, ${r.totalDifferences} totals, ${r.paidDayDifferences} paid-day counts)`;
+  let whole = ' The check stopped at its time limit: continue it.';
+  if (r.complete) whole = differs ? ' The rerun found differences: report this to the payroll administrator.' : ' The rerun gives identical results for the whole revision.';
+  return `This pass checked ${r.records} records and ${r.lines} lines: ${pass}.${whole}`;
+}
+
+/** The rerun check's button: checking, continuing a check cut short, or starting one. */
+function verifyButtonText(pending: boolean, continuing: boolean): string {
+  if (pending) return 'Checking…';
+  return continuing ? 'Continue the check' : 'Check by recalculating';
+}
+
 export function RunVerify({ run }: { run: RunDetail }) {
   const [differs, setDiffers] = useState(false);
   const verify = useMutation({
@@ -34,18 +53,17 @@ export function RunVerify({ run }: { run: RunDetail }) {
   const nextAfter = r && !r.complete ? r.nextAfter : null;
   return (
     <Section title="Rerun check">
-      <p className="hint">Recalculates every record of this revision from its stored snapshot and compares the results with what is stored. Nothing is changed.</p>
-      <div className="row">
-        <button type="button" className="secondary" disabled={verify.isPending} onClick={() => verify.mutate(nextAfter)}>
-          {verify.isPending ? 'Checking…' : nextAfter ? 'Continue the check' : 'Check by recalculating'}
-        </button>
-      </div>
+      <Hint>Recalculates every record of this revision from its stored snapshot and compares the results with what is stored. Nothing is changed.</Hint>
+      <ButtonRow>
+        <Button type="button" variant="outline" disabled={verify.isPending} onClick={() => verify.mutate(nextAfter)}>
+          {verifyButtonText(verify.isPending, Boolean(nextAfter))}
+        </Button>
+      </ButtonRow>
+      {/* A status whether identical or not (announced politely): differences are a finding to report, not a failed action. */}
       {r && (
-        <p role="status" className={r.identical ? 'ok' : 'error'}>
-          {`This pass checked ${r.records} records and ${r.lines} lines: ${
-            r.identical ? 'identical to the stored results' : `differences found (${r.lineDifferences} lines, ${r.totalDifferences} totals, ${r.paidDayDifferences} paid-day counts)`
-          }.${r.complete ? (differs ? ' The rerun found differences: report this to the payroll administrator.' : ' The rerun gives identical results for the whole revision.') : ' The check stopped at its time limit: continue it.'}`}
-        </p>
+        <StatusNote tone={r.identical ? 'success' : 'error'} role="status">
+          {verifyText(r, differs)}
+        </StatusNote>
       )}
       <Problem error={verify.error} act="verify" />
     </Section>
@@ -73,16 +91,16 @@ export function MemberExclusion({ run }: { run: RunDetail }) {
   if (!open) {
     return (
       <div>
-        <button
+        <Button
           type="button"
-          className="secondary"
+          variant="outline"
           onClick={() => {
             setNote(null);
             setOpen(true);
           }}
         >
           Leave members out of this draft
-        </button>
+        </Button>
         <Note text={note} />
       </div>
     );
@@ -96,36 +114,36 @@ export function MemberExclusion({ run }: { run: RunDetail }) {
     exclude.mutate({ employeeIds: chosen.map((x) => x.id), reason: reason.trim(), expectedVersion: run.version });
   };
   return (
-    <form onSubmit={submit} aria-label="Leave members out of this draft" className="grid-form">
+    <FormGrid onSubmit={submit} aria-label="Leave members out of this draft">
       <EmployeePicker title="Member to leave out" value={null} onChange={(e) => e && setChosen(chosen.some((x) => x.id === e.id) ? chosen : [...chosen, e])} />
       {chosen.length > 0 && (
-        <ul className="wide" aria-label="Members to leave out">
+        <ul className="col-span-full" aria-label="Members to leave out">
           {chosen.map((x) => (
             <li key={x.id}>
               {person(x)}{' '}
-              <button type="button" className="link" onClick={() => setChosen(chosen.filter((y) => y.id !== x.id))} aria-label={`Keep ${person(x)}`}>
+              <Button type="button" variant="outline" size="sm" onClick={() => setChosen(chosen.filter((y) => y.id !== x.id))} aria-label={`Keep ${person(x)}`}>
                 Keep
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
       )}
-      <label className="wide">
+      <FormField className="col-span-full">
         Why they are left out
-        <textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} style={TEXTAREA} />
-      </label>
-      <div className="row">
-        <button type="submit" disabled={exclude.isPending}>
+        <Textarea value={reason} onChange={(e) => setReason(e.target.value)} maxLength={1000} rows={2} />
+      </FormField>
+      <ButtonRow>
+        <Button type="submit" disabled={exclude.isPending}>
           {exclude.isPending ? 'Saving…' : 'Leave them out'}
-        </button>
-        <button type="button" className="secondary" onClick={() => setOpen(false)}>
+        </Button>
+        <Button type="button" variant="outline" onClick={() => setOpen(false)}>
           Close
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Missing text={problem} />
-      <div className="wide">
+      <div className="col-span-full">
         <Problem error={exclude.error} act="exclude" />
       </div>
-    </form>
+    </FormGrid>
   );
 }

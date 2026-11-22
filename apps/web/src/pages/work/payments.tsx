@@ -2,9 +2,19 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
+import { FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatAmount, formatDate, idempotencyKey, localDate } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, ErrorNote, Section, StateBadge } from '../../ui';
+import { CELL_CONTROLS } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Payments (FR-076/077, DF07): manual outcome tracking; preparer, releaser and the claim's approvers differ.
@@ -29,43 +39,47 @@ export function PaymentsPage() {
   return (
     <>
       <Section title="Approved claims awaiting payment">
-        <p className="hint">Recording payments here never transfers money; outcomes come from bank evidence.</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Employee</th>
-              <th>Purpose</th>
-              <th>Approved</th>
-              <th>Paid</th>
-              <th>Pending</th>
-              <th>Can still prepare</th>
-              <th>State</th>
-              <th scope="col"><span className="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
+        <Hint>Recording payments here never transfers money; outcomes come from bank evidence.</Hint>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Purpose</TableHead>
+              <TableHead scope="col">Approved</TableHead>
+              <TableHead scope="col">Paid</TableHead>
+              <TableHead scope="col">Pending</TableHead>
+              <TableHead scope="col">Can still prepare</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Actions</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {payables.data?.items.map((p) => (
-              <tr key={p.claimId}>
-                <td>
-                  {p.employeeName} <span className="hint">{p.employeeCode}</span>
-                </td>
-                <td>{p.purpose}</td>
-                <td>{formatAmount(p.approvedAmount, p.currency)}</td>
-                <td>{formatAmount(p.netPaid, p.currency)}</td>
-                <td>{formatAmount(p.pending, p.currency)}</td>
-                <td>{formatAmount(p.allocatable, p.currency)}</td>
-                <td>
+              <TableRow key={p.claimId}>
+                <TableCell>
+                  {p.employeeName} <Hint as="span">{p.employeeCode}</Hint>
+                </TableCell>
+                <TableCell>{p.purpose}</TableCell>
+                <TableCell>{formatAmount(p.approvedAmount, p.currency)}</TableCell>
+                <TableCell>{formatAmount(p.netPaid, p.currency)}</TableCell>
+                <TableCell>{formatAmount(p.pending, p.currency)}</TableCell>
+                <TableCell>{formatAmount(p.allocatable, p.currency)}</TableCell>
+                <TableCell>
                   <StateBadge state={p.paymentState} />
-                </td>
-                <td>
-                  <button className="link" onClick={() => setSelected(p.claimId)}>
-                    Manage
-                  </button>
-                </td>
-              </tr>
+                </TableCell>
+                <RowActionsCell>
+                  <RowActions>
+                    <Button variant="outline" size="sm" onClick={() => setSelected(p.claimId)}>
+                      Manage
+                    </Button>
+                  </RowActions>
+                </RowActionsCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         {payables.data?.items.length === 0 && <Empty>Nothing awaiting payment.</Empty>}
         <ErrorNote error={payables.error} />
       </Section>
@@ -98,15 +112,15 @@ function OutcomeActorChoice({ instructionId, value, onChange }: { instructionId:
   });
   return (
     <>
-      <select aria-label="Outcome recorded by" value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect aria-label="Outcome recorded by" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">Choose who records the outcome</option>
         {actors.data?.items.map((a) => (
           <option key={a.userId} value={a.userId}>
             {a.employeeName ? `${a.employeeName} (${a.employeeCode})` : a.accountKey}
           </option>
         ))}
-      </select>
-      {actors.data?.items.length === 0 && <span className="hint">Nobody independent holds the confirmation duty for this payment.</span>}
+      </NativeSelect>
+      {actors.data?.items.length === 0 && <Hint as="span">Nobody independent holds the confirmation duty for this payment.</Hint>}
       <ErrorNote error={actors.error} />
     </>
   );
@@ -188,16 +202,15 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
 
   return (
     <Section title={`Payments for ${payable?.employeeName ?? 'claim'}`}>
-      <form
-        className="grid-form"
+      <FormGrid
         onSubmit={(e) => {
           e.preventDefault();
           prepare.mutate();
         }}
       >
-        <label>
+        <FormField>
           Amount
-          <input
+          <Input
             inputMode="decimal"
             placeholder={payable?.allocatable}
             value={amount}
@@ -206,10 +219,10 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
               prepareKey.current = null;
             }}
           />
-        </label>
-        <label>
+        </FormField>
+        <FormField>
           Payment date
-          <input
+          <Input
             type="date"
             value={paymentDate}
             onChange={(e) => {
@@ -218,11 +231,11 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
             }}
             required
           />
-        </label>
+        </FormField>
         {replaceable.length > 0 && (
-          <label>
+          <FormField>
             Replaces a failed payment
-            <select
+            <NativeSelect
               value={chosenRetry}
               onChange={(e) => {
                 setRetryOf(e.target.value);
@@ -235,16 +248,15 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
                   {`The failed payment of ${formatAmount(i.amount, i.currency)} dated ${formatDate(i.paymentDate)}`}
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
         )}
         {payrollInputsToReview(prepare.error).length > 0 && (
-          <fieldset>
-            <legend>Payroll reimbursements to review</legend>
-            <p className="hint">
+          <FramedFieldset legend="Payroll reimbursements to review">
+            <Hint>
               Payroll does not pay expense claims, but these payroll reimbursements were entered for this employee since the claim was submitted. Check that none of
               them pays this claim, then say why before preparing the payment.
-            </p>
+            </Hint>
             <ul>
               {payrollInputsToReview(prepare.error).map((p) => (
                 <li key={p.inputId}>
@@ -252,146 +264,164 @@ function ClaimPayments({ claimId, payable }: { claimId: string; payable: Payable
                 </li>
               ))}
             </ul>
-            <label>
+            <FormField>
               Why these do not pay this claim
-              <textarea value={payrollReview} maxLength={1000} required onChange={(e) => setPayrollReview(e.target.value)} />
-            </label>
-          </fieldset>
+              <Textarea value={payrollReview} maxLength={1000} required onChange={(e) => setPayrollReview(e.target.value)} />
+            </FormField>
+          </FramedFieldset>
         )}
-        <button type="submit" disabled={prepare.isPending}>
+        <Button type="submit" disabled={prepare.isPending}>
           Prepare payment
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
       {payrollInputsToReview(prepare.error).length === 0 && <ErrorNote error={prepare.error} />}
-      <table>
-        <thead>
-          <tr>
-            <th>Amount</th>
-            <th>Date</th>
-            <th>State</th>
-            <th>Reversed</th>
-            <th>Bank evidence reference</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">Amount</TableHead>
+            <TableHead scope="col">Date</TableHead>
+            <TableHead scope="col">State</TableHead>
+            <TableHead scope="col">Reversed</TableHead>
+            <TableHead scope="col">Bank evidence reference</TableHead>
+            <TableHead scope="col">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {instructions.data?.items.map((i) => (
-            <tr key={i.id}>
-              <td>{formatAmount(i.amount, i.currency)}</td>
-              <td>{formatDate(i.paymentDate)}</td>
-              <td>
+            <TableRow key={i.id}>
+              <TableCell>{formatAmount(i.amount, i.currency)}</TableCell>
+              <TableCell>{formatDate(i.paymentDate)}</TableCell>
+              <TableCell>
                 <StateBadge state={i.state} />
-                {i.retryOfInstructionId && <span className="hint"> Replaces a failed payment</span>}
-              </td>
-              <td>{formatAmount(i.reversed, i.currency)}</td>
-              <td>
+                {i.retryOfInstructionId && <Hint as="span"> Replaces a failed payment</Hint>}
+              </TableCell>
+              <TableCell>{formatAmount(i.reversed, i.currency)}</TableCell>
+              <TableCell>
                 {((i.state === 'RELEASED' && i.outcomeAssignedToMe) || i.state === 'CONFIRMED') && (
-                  <input aria-label="Evidence reference" placeholder="e.g. bank reference" value={evidence[i.id] ?? ''} onChange={(e) => setEvidence({ ...evidence, [i.id]: e.target.value })} />
+                  <Input
+                    aria-label="Evidence reference"
+                    placeholder="e.g. bank reference"
+                    className="w-auto"
+                    value={evidence[i.id] ?? ''}
+                    onChange={(e) => setEvidence({ ...evidence, [i.id]: e.target.value })}
+                  />
                 )}
-              </td>
-              <td className="row">
-                {i.state === 'PREPARED' && i.batchState === 'DRAFT' && (
-                  <>
-                    <Badge tone="neutral">Draft</Badge>
-                    {can('payment.prepare.operational') && (
-                      <button disabled={act.isPending} onClick={() => act.mutate(() => api(`/v1/expense/payments/${i.id}/ready`, { method: 'POST' }))}>
-                        Mark ready
-                      </button>
-                    )}
-                  </>
-                )}
-                {i.state === 'PREPARED' && i.batchState === 'READY' && can('payment.release.operational') && (
-                  <>
-                    <OutcomeActorChoice instructionId={i.id} value={outcomeActor[i.id] ?? ''} onChange={(userId) => setOutcomeActor({ ...outcomeActor, [i.id]: userId })} />
-                    <button
-                      disabled={act.isPending || !outcomeActor[i.id]}
-                      onClick={() => act.mutate(() => api(`/v1/expense/payments/${i.id}/release`, { body: { outcomeActorUserId: outcomeActor[i.id] } }), { onSuccess: () => setOutcomeActor((current) => omit(current, i.id)) })}
-                    >
-                      Release
-                    </button>
-                  </>
-                )}
-                {i.state === 'RELEASED' && (
-                  <>
-                    <span className="hint">{i.outcomeActorAccountKey ? `Outcome assigned to ${i.outcomeActorAccountKey}` : 'Nobody is assigned the outcome yet'}</span>
-                    {i.outcomeAssignedToMe && can('payment.confirm_outcome.operational') && (
-                      <>
-                        <button disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'CONFIRMED', evidenceKey: evidenceKey(i.id) })}>
-                          Confirm paid
-                        </button>
-                        <button className="danger" disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'FAILED', evidenceKey: evidenceKey(i.id) })}>
-                          Record failure
-                        </button>
-                      </>
-                    )}
-                    {can('payment.release.operational') && (
-                      <>
-                        <OutcomeActorChoice instructionId={i.id} value={outcomeActor[i.id] ?? ''} onChange={(userId) => setOutcomeActor({ ...outcomeActor, [i.id]: userId })} />
-                        <input aria-label="Reason for reassigning" placeholder="Reason" value={reassignReason[i.id] ?? ''} onChange={(e) => setReassignReason({ ...reassignReason, [i.id]: e.target.value })} />
-                        <button
-                          className="secondary"
-                          disabled={act.isPending || !outcomeActor[i.id] || !reassignReason[i.id]?.trim()}
-                          onClick={() =>
-                            act.mutate(() => api(`/v1/expense/payments/${i.id}/outcome-actor`, { body: { outcomeActorUserId: outcomeActor[i.id], reason: reassignReason[i.id]!.trim() } }), {
-                              onSuccess: () => {
-                                setOutcomeActor((current) => omit(current, i.id));
-                                setReassignReason((current) => omit(current, i.id));
-                              },
-                            })
-                          }
-                        >
-                          Reassign outcome
-                        </button>
-                      </>
-                    )}
-                  </>
-                )}
-                {i.state === 'CONFIRMED' && (
-                  <>
-                    <input
-                      aria-label="Amount to reverse"
-                      placeholder="Amount"
-                      inputMode="decimal"
-                      value={reversal[i.id]?.amount ?? ''}
-                      onChange={(e) => setReversal({ ...reversal, [i.id]: { amount: e.target.value, reason: reversal[i.id]?.reason ?? '' } })}
-                    />
-                    <input
-                      aria-label="Reason for the reversal"
-                      placeholder="Reason"
-                      value={reversal[i.id]?.reason ?? ''}
-                      onChange={(e) => setReversal({ ...reversal, [i.id]: { amount: reversal[i.id]?.amount ?? '', reason: e.target.value } })}
-                    />
-                    <button
-                      className="secondary"
-                      disabled={act.isPending || evidenceKey(i.id).length < 8 || !reversal[i.id]?.amount || !reversal[i.id]?.reason}
-                      onClick={() => record(i.id, 'reversal', { amount: reversal[i.id]!.amount, evidenceKey: evidenceKey(i.id), reason: reversal[i.id]!.reason })}
-                    >
-                      Record reversal
-                    </button>
-                  </>
-                )}
-              </td>
-            </tr>
+              </TableCell>
+              {/* The step's controls: fields beside their buttons, at the fields' height (not a row of small row actions). */}
+              <TableCell>
+                <div className={CELL_CONTROLS}>
+                  {i.state === 'PREPARED' && i.batchState === 'DRAFT' && (
+                    <>
+                      <Badge tone="neutral">Draft</Badge>
+                      {can('payment.prepare.operational') && (
+                        <Button disabled={act.isPending} onClick={() => act.mutate(() => api(`/v1/expense/payments/${i.id}/ready`, { method: 'POST' }))}>
+                          Mark ready
+                        </Button>
+                      )}
+                    </>
+                  )}
+                  {i.state === 'PREPARED' && i.batchState === 'READY' && can('payment.release.operational') && (
+                    <>
+                      <OutcomeActorChoice instructionId={i.id} value={outcomeActor[i.id] ?? ''} onChange={(userId) => setOutcomeActor({ ...outcomeActor, [i.id]: userId })} />
+                      <Button
+                        disabled={act.isPending || !outcomeActor[i.id]}
+                        onClick={() =>
+                          act.mutate(() => api(`/v1/expense/payments/${i.id}/release`, { body: { outcomeActorUserId: outcomeActor[i.id] } }), { onSuccess: () => setOutcomeActor((current) => omit(current, i.id)) })
+                        }
+                      >
+                        Release
+                      </Button>
+                    </>
+                  )}
+                  {i.state === 'RELEASED' && (
+                    <>
+                      <Hint as="span">{i.outcomeActorAccountKey ? `Outcome assigned to ${i.outcomeActorAccountKey}` : 'Nobody is assigned the outcome yet'}</Hint>
+                      {i.outcomeAssignedToMe && can('payment.confirm_outcome.operational') && (
+                        <>
+                          <Button disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'CONFIRMED', evidenceKey: evidenceKey(i.id) })}>
+                            Confirm paid
+                          </Button>
+                          <Button variant="danger" disabled={act.isPending || evidenceKey(i.id).length < 8} onClick={() => record(i.id, 'outcome', { outcome: 'FAILED', evidenceKey: evidenceKey(i.id) })}>
+                            Record failure
+                          </Button>
+                        </>
+                      )}
+                      {can('payment.release.operational') && (
+                        <>
+                          <OutcomeActorChoice instructionId={i.id} value={outcomeActor[i.id] ?? ''} onChange={(userId) => setOutcomeActor({ ...outcomeActor, [i.id]: userId })} />
+                          <Input
+                            aria-label="Reason for reassigning"
+                            placeholder="Reason"
+                            className="w-auto"
+                            value={reassignReason[i.id] ?? ''}
+                            onChange={(e) => setReassignReason({ ...reassignReason, [i.id]: e.target.value })}
+                          />
+                          <Button
+                            variant="outline"
+                            disabled={act.isPending || !outcomeActor[i.id] || !reassignReason[i.id]?.trim()}
+                            onClick={() =>
+                              act.mutate(() => api(`/v1/expense/payments/${i.id}/outcome-actor`, { body: { outcomeActorUserId: outcomeActor[i.id], reason: reassignReason[i.id]!.trim() } }), {
+                                onSuccess: () => {
+                                  setOutcomeActor((current) => omit(current, i.id));
+                                  setReassignReason((current) => omit(current, i.id));
+                                },
+                              })
+                            }
+                          >
+                            Reassign outcome
+                          </Button>
+                        </>
+                      )}
+                    </>
+                  )}
+                  {i.state === 'CONFIRMED' && (
+                    <>
+                      <Input
+                        aria-label="Amount to reverse"
+                        placeholder="Amount"
+                        inputMode="decimal"
+                        className="w-auto"
+                        value={reversal[i.id]?.amount ?? ''}
+                        onChange={(e) => setReversal({ ...reversal, [i.id]: { amount: e.target.value, reason: reversal[i.id]?.reason ?? '' } })}
+                      />
+                      <Input
+                        aria-label="Reason for the reversal"
+                        placeholder="Reason"
+                        className="w-auto"
+                        value={reversal[i.id]?.reason ?? ''}
+                        onChange={(e) => setReversal({ ...reversal, [i.id]: { amount: reversal[i.id]?.amount ?? '', reason: e.target.value } })}
+                      />
+                      <Button
+                        variant="outline"
+                        disabled={act.isPending || evidenceKey(i.id).length < 8 || !reversal[i.id]?.amount || !reversal[i.id]?.reason}
+                        onClick={() => record(i.id, 'reversal', { amount: reversal[i.id]!.amount, evidenceKey: evidenceKey(i.id), reason: reversal[i.id]!.reason })}
+                      >
+                        Record reversal
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       {instructions.data?.items.length === 0 && <Empty>No payments prepared yet.</Empty>}
-      <p className="hint">
+      <Hint>
         A prepared payment stays a draft until its preparer marks it ready, and only a ready payment can be released. The release names who records the outcome. Evidence
         references need at least 8 characters, and each outcome or reversal needs its own. The preparer, the approvers of the claim and the claimant cannot release, confirm or
         reverse. The entitlement approvers and the claimant cannot prepare.
-      </p>
+      </Hint>
       {notice && (
-        <p role="status" className="hint">
+        <StatusNote tone="info" role="status">
           {notice}
-        </p>
+        </StatusNote>
       )}
       <ErrorNote error={instructions.error ?? act.error} />
     </Section>
   );
 }
 
-/** A copy of the map without one key. */
 /** BR-024 (I-81 item 8): the payroll reimbursements a refused payment listed for review; none for any other answer. */
 interface PayrollInputToReview {
   inputId: string;
@@ -407,6 +437,7 @@ function payrollInputsToReview(error: unknown): PayrollInputToReview[] {
   return Array.isArray(listed) ? listed : [];
 }
 
+/** A copy of the map without one key. */
 function omit<T>(map: Record<string, T>, key: string): Record<string, T> {
   const next = { ...map };
   delete next[key];

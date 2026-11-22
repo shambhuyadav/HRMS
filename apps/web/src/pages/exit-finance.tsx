@@ -6,10 +6,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { FieldSet } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, download, formatAmount, formatDate, idempotencyKey, localDate, retryTransient } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Empty, ErrorNote, Section, StateBadge } from '../ui';
+import { Empty, ErrorNote, Item, Notice, Section, StateBadge } from '../ui';
 
 const LOAN_READ = 'payroll_loan.read.loan';
 const LOAN_DISBURSE = 'payroll_loan.disburse.loan';
@@ -26,6 +36,21 @@ export const EXIT_FINANCE_PATHS = {
 
 const AMOUNT = /^\d{1,15}(\.\d{1,4})?$/;
 const enc = encodeURIComponent;
+
+// The screens' own layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026).
+/** Links side by side under the page's title (the old `p.row`). */
+const LINK_ROW = 'flex flex-wrap items-center gap-x-4 gap-y-1';
+/** The early settlements waiting for a decision, one card under another. */
+const DECISION_LIST = 'm-0 flex list-none flex-col gap-3 p-0';
+/**
+ * One early settlement to decide: a card inside the queue's card, its parts stacked. It keeps the `card` marker class, so its note is
+ * drawn as a card's own (a boxed hint), as the other decision items of payroll are.
+ */
+const DECISION_ITEM = 'card flex flex-col gap-3 rounded-xl border border-border bg-card px-5 py-4 shadow-xs';
+/** The reason of a decision keeps a readable width, as the old form fields had it. */
+const READABLE_WIDTH = 'max-w-[560px]';
+/** A date or an amount of a table: it stays on one line. */
+const FIGURE_CELL = 'whitespace-nowrap';
 
 // ---------------------------------------------------------------------------------------------------------
 // Verified evidence (FR-106): the employee's own documents; only released and verified ones can be chosen.
@@ -47,7 +72,10 @@ function evidenceState(d: EvidenceDocument): string {
   return 'released, not verified yet, not usable';
 }
 
-/** One released, verified document of the employee as evidence; the files are not opened here. */
+/**
+ * One released, verified document of the employee as evidence; the files are not opened here. Placed in a form grid (FormGrid), it
+ * takes the grid's whole row, as the payroll screens' evidence choice does.
+ */
 export function VerifiedEvidencePicker({ employeeId, chosen, onChange, legend }: { employeeId: string; chosen: string | null; onChange: (id: string) => void; legend: string }) {
   const { can } = useSession();
   const name = useId();
@@ -57,23 +85,23 @@ export function VerifiedEvidencePicker({ employeeId, chosen, onChange, legend }:
     enabled: can(DOCUMENT_READ),
     retry: retryTransient,
   });
-  if (!can(DOCUMENT_READ)) return <p className="hint">The selected role cannot list the employee’s documents, so it cannot choose the evidence here.</p>;
+  if (!can(DOCUMENT_READ)) return <Hint className="col-span-full">The selected role cannot list the employee’s documents, so it cannot choose the evidence here.</Hint>;
   return (
-    <fieldset>
+    <FieldSet className="col-span-full gap-[0.55rem]">
       <legend>{legend}</legend>
-      {docs.isPending && <p className="hint loading">Loading the employee’s documents…</p>}
+      {docs.isPending && <LoadingLine>Loading the employee’s documents…</LoadingLine>}
       <ErrorNote error={docs.error} />
-      {docs.data && docs.data.items.length === 0 && <p className="hint">The employee has no documents yet: add the evidence to their record and have it verified first.</p>}
+      {docs.data && docs.data.items.length === 0 && <Hint>The employee has no documents yet: add the evidence to their record and have it verified first.</Hint>}
       {docs.data?.items.map((d) => {
         const usable = d.scanState === 'CLEAN' && d.verificationState === 'VERIFIED';
         return (
-          <label key={d.id} className="check">
+          <CheckField key={d.id}>
             <input type="radio" name={name} checked={chosen === d.id} disabled={!usable} onChange={() => onChange(d.id)} />{' '}
             {`${d.documentType}${d.fileName ? ` · ${d.fileName}` : ''} (${formatDate(d.uploadedAt)}): ${evidenceState(d)}`}
-          </label>
+          </CheckField>
         );
       })}
-    </fieldset>
+    </FieldSet>
   );
 }
 
@@ -143,13 +171,7 @@ const LOAN_WORDS: Record<string, string> = {
 };
 
 function Refusal({ error }: { error: unknown }) {
-  if (error instanceof ApiError && LOAN_WORDS[error.code]) {
-    return (
-      <p role="alert" className="error">
-        {LOAN_WORDS[error.code]}
-      </p>
-    );
-  }
+  if (error instanceof ApiError && LOAN_WORDS[error.code]) return <Notice notice={{ text: LOAN_WORDS[error.code]!, ok: false }} />;
   return <ErrorNote error={error} />;
 }
 
@@ -165,38 +187,38 @@ function LoanSettlementsScreen() {
     <>
       <h1>Loan early settlement</h1>
       <Section title="Disbursed loans and advances">
-        <p className="hint">
+        <Hint>
           An early settlement closes a disbursed loan in full: the employee repays the balance outside payroll or through the paid full and final settlement, and the
           company may waive or write off the rest. You enter the amounts with the evidence; someone else decides. Nothing is calculated here.
-        </p>
-        {!can(LOAN_READ) && <p className="hint">The selected role cannot view loans.</p>}
+        </Hint>
+        {!can(LOAN_READ) && <Hint>The selected role cannot view loans.</Hint>}
         <ErrorNote error={loans.error} />
         {loans.data && loans.data.items.length === 0 && <Empty>No disbursed loan or advance in the selected role’s scope.</Empty>}
         {loans.data && loans.data.items.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Kind</th>
-                <th>Principal</th>
-                <th>Outstanding</th>
-                <th>Disbursed</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Kind</TableHead>
+                <TableHead scope="col">Principal</TableHead>
+                <TableHead scope="col">Outstanding</TableHead>
+                <TableHead scope="col">Disbursed</TableHead>
+                <TableHead scope="col">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {loans.data.items.map((l) => (
-                <tr key={l.id}>
-                  <td>{l.employeeCode}</td>
-                  <td>{l.loanKind === 'ADVANCE' ? 'Salary advance' : 'Loan'}</td>
-                  <td>{formatAmount(l.principal, l.currencyCode)}</td>
-                  <td>{formatAmount(l.outstanding, l.currencyCode)}</td>
-                  <td>{formatDate(l.disbursementDate)}</td>
-                  <td>{can(LOAN_DISBURSE) ? <Link to={EXIT_FINANCE_PATHS.recordLoanSettlement(l.id)}>Record an early settlement</Link> : '—'}</td>
-                </tr>
+                <TableRow key={l.id}>
+                  <TableCell>{l.employeeCode}</TableCell>
+                  <TableCell>{l.loanKind === 'ADVANCE' ? 'Salary advance' : 'Loan'}</TableCell>
+                  <TableCell className={FIGURE_CELL}>{formatAmount(l.principal, l.currencyCode)}</TableCell>
+                  <TableCell className={FIGURE_CELL}>{formatAmount(l.outstanding, l.currencyCode)}</TableCell>
+                  <TableCell className={FIGURE_CELL}>{formatDate(l.disbursementDate)}</TableCell>
+                  <TableCell>{can(LOAN_DISBURSE) ? <Link to={EXIT_FINANCE_PATHS.recordLoanSettlement(l.id)}>Record an early settlement</Link> : '—'}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
       </Section>
     </>
@@ -237,7 +259,7 @@ function RecordLoanSettlementScreen() {
     return (
       <>
         <h1>Record an early settlement</h1>
-        <p className="hint">The selected role cannot record early settlements of loans.</p>
+        <Hint>The selected role cannot record early settlements of loans.</Hint>
       </>
     );
   }
@@ -268,25 +290,20 @@ function RecordLoanSettlementScreen() {
   return (
     <>
       <h1>Record an early settlement</h1>
-      <p className="row">
+      <p className={LINK_ROW}>
         <Link to={EXIT_FINANCE_PATHS.loanSettlements}>Loan early settlement</Link>
       </p>
       <ErrorNote error={loan.error} />
       {l && (
         <Section title={`${l.loanKind === 'ADVANCE' ? 'Salary advance' : 'Loan'} of ${l.employeeCode}`}>
           <dl className="kv">
-            <dt>State</dt>
-            <dd>
+            <Item term="State">
               <StateBadge state={l.state} />
-            </dd>
-            <dt>Principal</dt>
-            <dd>{formatAmount(l.principal, l.currencyCode)}</dd>
-            <dt>Recovered from processed payroll</dt>
-            <dd>{formatAmount(l.recovered, l.currencyCode)}</dd>
-            <dt>Deducted, not yet recognised</dt>
-            <dd>{formatAmount(l.awaitingRecognition, l.currencyCode)}</dd>
-            <dt>Outstanding</dt>
-            <dd>{formatAmount(l.outstanding, l.currencyCode)}</dd>
+            </Item>
+            <Item term="Principal">{formatAmount(l.principal, l.currencyCode)}</Item>
+            <Item term="Recovered from processed payroll">{formatAmount(l.recovered, l.currencyCode)}</Item>
+            <Item term="Deducted, not yet recognised">{formatAmount(l.awaitingRecognition, l.currencyCode)}</Item>
+            <Item term="Outstanding">{formatAmount(l.outstanding, l.currencyCode)}</Item>
           </dl>
           {(l.earlySettlements ?? []).length > 0 && (
             <ul>
@@ -301,87 +318,79 @@ function RecordLoanSettlementScreen() {
       )}
       {l && l.state === 'DISBURSED' && !pending && (
         <Section title="Early settlement">
-          <form onSubmit={submit} className="grid-form" aria-label="Record an early settlement">
-            <p className="hint wide">The repaid and waived amounts must add up to the outstanding balance; the loan closes in full once someone else approves.</p>
-            <label>
+          <FormGrid onSubmit={submit} aria-label="Record an early settlement">
+            <Hint>The repaid and waived amounts must add up to the outstanding balance; the loan closes in full once someone else approves.</Hint>
+            <FormField>
               Repaid by the employee
-              <input inputMode="decimal" value={repaid} onChange={(e) => setRepaid(e.target.value)} placeholder={l.outstanding} />
-            </label>
-            <label>
+              <Input inputMode="decimal" value={repaid} onChange={(e) => setRepaid(e.target.value)} placeholder={l.outstanding} />
+            </FormField>
+            <FormField>
               How it was repaid
-              <select value={route} onChange={(e) => setRoute(e.target.value)}>
+              <NativeSelect value={route} onChange={(e) => setRoute(e.target.value)}>
                 {Object.entries(ROUTE_LABEL).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
                 ))}
-              </select>
-            </label>
+              </NativeSelect>
+            </FormField>
             {route === 'DIRECT_REPAYMENT' && (
               <>
-                <label>
+                <FormField>
                   Repayment date
-                  <input type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value)} />
-                </label>
-                <label>
+                  <Input type="date" value={date} max={localDate()} onChange={(e) => setDate(e.target.value)} />
+                </FormField>
+                <FormField>
                   Receipt or bank reference
-                  <input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
-                </label>
+                  <Input value={reference} maxLength={500} onChange={(e) => setReference(e.target.value)} />
+                </FormField>
                 <VerifiedEvidencePicker employeeId={l.employeeId} chosen={doc} onChange={setDoc} legend="Evidence of the repayment (released and verified)" />
               </>
             )}
             {route === 'FINAL_SETTLEMENT' && (
-              <label>
+              <FormField>
                 Paid full and final settlement
-                <select value={settlementId} onChange={(e) => setSettlementId(e.target.value)}>
+                <NativeSelect value={settlementId} onChange={(e) => setSettlementId(e.target.value)}>
                   <option value="">Choose…</option>
                   {(paidSettlements.data?.items ?? [])
                     .filter((s) => s.employeeId === l.employeeId)
                     .map((s) => (
                       <option key={s.id} value={s.id}>{`Revision ${s.revision}, paid ${formatDate(s.paymentDate ?? null)}`}</option>
                     ))}
-                </select>
-              </label>
+                </NativeSelect>
+              </FormField>
             )}
-            <label>
+            <FormField>
               Waived or written off
-              <input inputMode="decimal" value={waived} onChange={(e) => setWaived(e.target.value)} placeholder="0" />
-            </label>
-            <label>
+              <Input inputMode="decimal" value={waived} onChange={(e) => setWaived(e.target.value)} placeholder="0" />
+            </FormField>
+            <FormField>
               Kind
-              <select value={waiverKind} onChange={(e) => setWaiverKind(e.target.value)}>
+              <NativeSelect value={waiverKind} onChange={(e) => setWaiverKind(e.target.value)}>
                 <option value="">Nothing waived</option>
                 {Object.entries(WAIVER_LABEL).map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label className="wide">
+              </NativeSelect>
+            </FormField>
+            <FormField className="col-span-full">
               Reason
-              <textarea value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
-            </label>
-            <div className="row">
-              <button type="submit" disabled={record.isPending}>
+              <Textarea value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+            </FormField>
+            <ButtonRow>
+              <Button type="submit" disabled={record.isPending}>
                 Record for an independent decision
-              </button>
-            </div>
-          </form>
-          {problem && (
-            <p role="alert" className="error">
-              {problem}
-            </p>
-          )}
+              </Button>
+            </ButtonRow>
+          </FormGrid>
+          {problem && <Notice notice={{ text: problem, ok: false }} />}
           <Refusal error={record.error} />
-          {record.isSuccess && (
-            <p role="status" className="ok">
-              Recorded. Someone other than you decides it; the loan closes only when it is approved.
-            </p>
-          )}
+          {record.isSuccess && <Notice notice={{ text: 'Recorded. Someone other than you decides it; the loan closes only when it is approved.', ok: true }} />}
         </Section>
       )}
-      {pending && <p className="hint">An early settlement of this loan is waiting for its decision.</p>}
+      {pending && <Hint>An early settlement of this loan is waiting for its decision.</Hint>}
     </>
   );
 }
@@ -412,23 +421,23 @@ function LoanSettlementDecision({ item }: { item: PendingLoanSettlement }) {
   });
   const recorder = me?.userId === item.recordedBy;
   return (
-    <li>
-      <p>
+    <li className={DECISION_ITEM}>
+      <p className="m-0">
         {`${item.employeeCode}: balance ${formatAmount(item.balance, item.currencyCode)}; repaid ${formatAmount(item.repaidAmount, item.currencyCode)}${item.repaymentRoute ? ` (${ROUTE_LABEL[item.repaymentRoute]})` : ''}; ${item.waiverKind ? `${WAIVER_LABEL[item.waiverKind]} ${formatAmount(item.waivedAmount, item.currencyCode)}` : 'nothing waived'}.`}
       </p>
-      {recorder && <p className="hint">You recorded this settlement, so someone else decides it.</p>}
-      <label>
+      {recorder && <Hint>You recorded this settlement, so someone else decides it.</Hint>}
+      <FormField className={READABLE_WIDTH}>
         Reason (required to reject)
-        <input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      <div className="row">
-        <button type="button" disabled={decide.isPending || recorder} onClick={() => decide.mutate('APPROVE')}>
+        <Input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <ButtonRow>
+        <Button type="button" disabled={decide.isPending || recorder} onClick={() => decide.mutate('APPROVE')}>
           Approve and close the loan
-        </button>
-        <button type="button" disabled={decide.isPending || recorder || !reason.trim()} onClick={() => decide.mutate('REJECT')}>
+        </Button>
+        <Button type="button" variant="danger" disabled={decide.isPending || recorder || !reason.trim()} onClick={() => decide.mutate('REJECT')}>
           Reject
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={decide.error} />
     </li>
   );
@@ -444,7 +453,7 @@ function LoanSettlementQueue() {
     <Section title="Loan early settlements to decide">
       <ErrorNote error={list.error} />
       {list.data && list.data.items.length === 0 && <Empty>No early settlement is waiting.</Empty>}
-      <ul>
+      <ul className={DECISION_LIST}>
         {list.data?.items.map((i) => (
           <LoanSettlementDecision key={i.id} item={i} />
         ))}
@@ -483,37 +492,39 @@ function DocumentsReceivedScreen() {
     <>
       <h1>My documents received</h1>
       <Section title="Letters and statements sent to you">
-        <p className="hint">Documents HR sends you arrive here, never as e-mail attachments. They stay available after you leave.</p>
-        {!can(OWN_DELIVERY) && <p className="hint">The selected role has no self-service documents.</p>}
+        <Hint>Documents HR sends you arrive here, never as e-mail attachments. They stay available after you leave.</Hint>
+        {!can(OWN_DELIVERY) && <Hint>The selected role has no self-service documents.</Hint>}
         <ErrorNote error={list.error} />
         {list.data && list.data.items.length === 0 && <Empty>Nothing has been sent to you yet.</Empty>}
         {list.data && list.data.items.length > 0 && (
-          <table>
-            <thead>
-              <tr>
-                <th>Document</th>
-                <th>Format</th>
-                <th>Sent</th>
-                <th>Opened</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Document</TableHead>
+                <TableHead scope="col">Format</TableHead>
+                <TableHead scope="col">Sent</TableHead>
+                <TableHead scope="col">Opened</TableHead>
+                <TableHead scope="col">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {list.data.items.map((d) => (
-                <tr key={d.id}>
-                  <td>{d.title}</td>
-                  <td>{d.format === 'TEXT' ? 'Text' : d.format}</td>
-                  <td>{formatDate(d.sentAt)}</td>
-                  <td>{d.firstReadAt ? formatDate(d.firstReadAt) : 'Not yet'}</td>
-                  <td>
-                    <button type="button" disabled={open.isPending} onClick={() => open.mutate(d.id)}>
-                      Download
-                    </button>
-                  </td>
-                </tr>
+                <TableRow key={d.id}>
+                  <TableCell>{d.title}</TableCell>
+                  <TableCell>{d.format === 'TEXT' ? 'Text' : d.format}</TableCell>
+                  <TableCell className={FIGURE_CELL}>{formatDate(d.sentAt)}</TableCell>
+                  <TableCell>{d.firstReadAt ? formatDate(d.firstReadAt) : 'Not yet'}</TableCell>
+                  <RowActionsCell>
+                    <RowActions>
+                      <Button type="button" variant="outline" size="sm" disabled={open.isPending} onClick={() => open.mutate(d.id)}>
+                        Download
+                      </Button>
+                    </RowActions>
+                  </RowActionsCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
         <ErrorNote error={open.error} />
       </Section>

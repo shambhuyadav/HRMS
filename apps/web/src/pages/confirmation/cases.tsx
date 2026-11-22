@@ -2,13 +2,40 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type KeyboardEvent, useId, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { ButtonRow } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Tab, TabList } from '@/components/tab-list';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, isForbidden, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, NotPermitted, Section, StateBadge } from '../../ui';
 import { AttentionPanel, OpenCasePanel } from './attention';
 import { CasePanel } from './case-panel';
 import { PendingExceptions } from './pending-exceptions';
-import { APPROVE_EXCEPTION, asTabView, type ConfirmationCase, countByView, DECIDE, EXPORT, fetchCases, MANAGE, MANAGE_POLICIES, MIXED_TIMING, outcomeLabel, PANEL, POLICIES_PATH, READ, SCROLL, SR_ONLY, TABS, type TabView, TimingBadge, useKeys, UUID, viewButtonId } from './shared';
+import {
+  APPROVE_EXCEPTION,
+  asTabView,
+  type ConfirmationCase,
+  countByView,
+  DECIDE,
+  EXPORT,
+  fetchCases,
+  MANAGE,
+  MANAGE_POLICIES,
+  MIXED_TIMING,
+  outcomeLabel,
+  POLICIES_PATH,
+  READ,
+  TABS,
+  type TabView,
+  TimingBadge,
+  useKeys,
+  UUID,
+  viewButtonId,
+} from './shared';
 
 export function ConfirmationsPage() {
   const { can } = useSession();
@@ -59,9 +86,9 @@ export function ConfirmationsPage() {
       {canRead && selectedId && <CasePanel key={selectedId} id={selectedId} focusRequest={focusRequest?.id === selectedId ? focusRequest.n : null} onClose={closeCase} />}
       {can(APPROVE_EXCEPTION) && <PendingExceptions onOpenCase={canRead ? (id) => selectCase(id, true) : null} />}
       {can(MANAGE_POLICIES) && (
-        <p className="hint">
+        <Hint>
           The duration each employee’s review takes comes from the <Link to={POLICIES_PATH}>confirmation policies</Link>.
-        </p>
+        </Hint>
       )}
       {can(MANAGE) && <AttentionPanel onOpenCase={canRead ? (id) => selectCase(id, true) : null} />}
       {can(MANAGE) && (
@@ -102,11 +129,11 @@ function CaseRegister({
   // FR-093: the export holds this view's cases, with their planned and actual dates and decisions.
   const exportView = useMutation({ mutationFn: (chosen: TabView) => api<{ id: string }>('/v1/reports', { body: { reportCode: 'CONFIRMATION_DUE', filters: { view: chosen } } }) });
 
-  const moveTab =(event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+  const moveTab = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     const last = TABS.length - 1;
-    const next =
-      event.key === 'ArrowRight' ? (index === last ? 0 : index + 1) : event.key === 'ArrowLeft' ? (index === 0 ? last : index - 1) : event.key === 'Home' ? 0 : event.key === 'End' ? last : null;
-    if (next === null) return;
+    const keyTargets: Record<string, number> = { ArrowRight: index === last ? 0 : index + 1, ArrowLeft: index === 0 ? last : index - 1, Home: 0, End: last };
+    const next = keyTargets[event.key];
+    if (next === undefined) return;
     event.preventDefault();
     const target = TABS[next]!.view;
     onView(target);
@@ -115,56 +142,53 @@ function CaseRegister({
 
   return (
     <Section title="Confirmation cases">
-      <p className="hint">
+      <Hint>
         Upcoming, due and overdue are worked out from the company business date. A passed due date never confirms anyone on its own. Extended lists the cases still open
         or under review whose probation was extended at least once; they also appear under their date view.
-      </p>
+      </Hint>
       {can(DECIDE) && (
-        <p className="hint">
+        <Hint>
           Recommendations waiting for your decision are in the <Link to="/tasks">Decision inbox</Link>.
-        </p>
+        </Hint>
       )}
-      <div role="tablist" aria-label="Confirmation views" className="row">
+      <TabList aria-label="Confirmation views">
         {TABS.map((t, index) => {
           const selected = t.view === view;
           const count = counts?.[t.view];
           return (
-            <button
+            <Tab
               key={t.view}
               ref={(el) => {
                 if (el) tabRefs.current.set(t.view, el);
                 else tabRefs.current.delete(t.view);
               }}
-              type="button"
-              role="tab"
               id={`${baseId}-tab-${t.view}`}
-              aria-selected={selected}
+              selected={selected}
               aria-controls={`${baseId}-panel`}
               tabIndex={selected ? 0 : -1}
-              className={selected ? undefined : 'secondary'}
               onClick={() => onView(t.view)}
               onKeyDown={(event) => moveTab(event, index)}
             >
               {t.label}
               {count === undefined ? '' : ` (${count})`}
-            </button>
+            </Tab>
           );
         })}
-      </div>
-      <div role="tabpanel" id={`${baseId}-panel`} aria-labelledby={`${baseId}-tab-${view}`} style={PANEL}>
-        {list.isPending && <p className="hint loading">Loading cases…</p>}
+      </TabList>
+      <div role="tabpanel" id={`${baseId}-panel`} aria-labelledby={`${baseId}-tab-${view}`} className="mt-3">
+        {list.isPending && <LoadingLine>Loading cases…</LoadingLine>}
         {isForbidden(list.error) ? <NotPermitted>The selected role cannot view confirmation cases.</NotPermitted> : <ErrorNote error={list.error} />}
         {list.data && list.data.items.length === 0 && <Empty>{tab.empty}</Empty>}
         {list.data && list.data.items.length > 0 && <CaseTable items={list.data.items} showTiming={MIXED_TIMING.has(view)} selectedId={selectedId} onSelect={onSelect} />}
       </div>
       {can(EXPORT) && (
-        <div className="row">
-          <button type="button" className="secondary" disabled={exportView.isPending} onClick={() => exportView.mutate(view)}>
+        <ButtonRow className="mt-4">
+          <Button type="button" variant="outline" disabled={exportView.isPending} onClick={() => exportView.mutate(view)}>
             Export this view
-          </button>
-          {exportView.isSuccess && exportView.variables === view && <p className="ok">Export requested. Download it from Reports when it is ready.</p>}
+          </Button>
+          {exportView.isSuccess && exportView.variables === view && <Hint as="span">Export requested. Download it from Reports when it is ready.</Hint>}
           <ErrorNote error={exportView.error} />
-        </div>
+        </ButtonRow>
       )}
     </Section>
   );
@@ -182,57 +206,57 @@ function CaseTable({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div style={SCROLL}>
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Employee</th>
-            <th scope="col">Start</th>
-            <th scope="col">Initial due</th>
-            <th scope="col">Current due</th>
-            <th scope="col">Extensions</th>
-            <th scope="col">State</th>
-            <th scope="col">Last outcome</th>
-            <th scope="col">
-              <span style={SR_ONLY}>Case</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((c) => {
-            const selected = c.id === selectedId;
-            return (
-              <tr key={c.id} aria-current={selected ? 'true' : undefined}>
-                <td>
-                  {c.employeeName} <span className="hint">{c.employeeCode}</span>
-                </td>
-                <td>{formatDate(c.startDate)}</td>
-                <td>{formatDate(c.initialDueDate)}</td>
-                <td>
-                  {formatDate(c.dueDate)}
-                  {showTiming && (
-                    <>
-                      {' '}
-                      <TimingBadge view={c.view} />
-                    </>
-                  )}
-                </td>
-                <td>{c.extensionCount}</td>
-                <td>
-                  <StateBadge state={c.state} />
-                </td>
-                <td>{c.lastOutcome ? outcomeLabel(c.lastOutcome) : '—'}</td>
-                <td>
-                  <button type="button" className="link" id={viewButtonId(c.id)} aria-label={`View case of ${c.employeeName} (${c.employeeCode})`} onClick={() => onSelect(c.id)}>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Employee</TableHead>
+          <TableHead scope="col">Start</TableHead>
+          <TableHead scope="col">Initial due</TableHead>
+          <TableHead scope="col">Current due</TableHead>
+          <TableHead scope="col">Extensions</TableHead>
+          <TableHead scope="col">State</TableHead>
+          <TableHead scope="col">Last outcome</TableHead>
+          <TableHead scope="col">
+            <span className="sr-only">Case</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((c) => {
+          const selected = c.id === selectedId;
+          return (
+            <TableRow key={c.id} aria-current={selected ? 'true' : undefined}>
+              <TableCell>
+                {c.employeeName} <Hint as="span">{c.employeeCode}</Hint>
+              </TableCell>
+              <TableCell>{formatDate(c.startDate)}</TableCell>
+              <TableCell>{formatDate(c.initialDueDate)}</TableCell>
+              <TableCell>
+                {formatDate(c.dueDate)}
+                {showTiming && (
+                  <>
+                    {' '}
+                    <TimingBadge view={c.view} />
+                  </>
+                )}
+              </TableCell>
+              <TableCell>{c.extensionCount}</TableCell>
+              <TableCell>
+                <StateBadge state={c.state} />
+              </TableCell>
+              <TableCell>{c.lastOutcome ? outcomeLabel(c.lastOutcome) : '—'}</TableCell>
+              <RowActionsCell>
+                <RowActions>
+                  <Button type="button" variant="outline" size="sm" id={viewButtonId(c.id)} aria-label={`View case of ${c.employeeName} (${c.employeeCode})`} onClick={() => onSelect(c.id)}>
                     View case
-                  </button>
-                  {selected && <span className="hint"> · shown below</span>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+                  </Button>
+                  {selected && <Hint as="span"> · shown below</Hint>}
+                </RowActions>
+              </RowActionsCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }

@@ -2,13 +2,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { ButtonRow, CheckField, FilterBar, FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { FieldDescription } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, isNotFound, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, Item, Notice, NotPermitted, Section, StateBadge } from '../../ui';
+import { Empty, Item, Notice, NotPermitted, Section, StateBadge, WarningNote } from '../../ui';
 import { wholeIn } from './goals';
 import { QueryProblem, Refusal } from './refusals';
 import { CycleReport } from './reports';
-import { type Cycle, CYCLE_MANAGE, CYCLE_READ, FLUSH, GROUP, levelsText, MONTH_NAME, PATHS, periodText, type RatingMode, ratingModeText, READ, REPORT, SCROLL, type SectionInfo, type Setting, shown, START_MONTHS, useKeys, UUID, type WindowKey, WINDOWS, windowText, yesNo } from './shared';
+import { type Cycle, CYCLE_MANAGE, CYCLE_READ, FIELD_ROW, levelsText, MONTH_NAME, PATHS, periodText, type RatingMode, ratingModeText, READ, REPORT, type SectionInfo, type Setting, shown, START_MONTHS, useKeys, UUID, type WindowKey, WINDOWS, windowText, yesNo } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: cycles (setting, register, a new cycle) and a cycle's detail
@@ -64,7 +73,7 @@ function SettingSection() {
   };
   return (
     <Section title="Cycle start month">
-      {setting.isPending && <p className="hint loading">Loading the setting…</p>}
+      {setting.isPending && <LoadingLine>Loading the setting…</LoadingLine>}
       <QueryProblem error={setting.error} forbidden="The selected role cannot view the appraisal setting." />
       {data &&
         (data.configured && data.cycleStartMonth !== null ? (
@@ -72,35 +81,29 @@ function SettingSection() {
             Cycles start on the 1st of <strong>{MONTH_NAME[data.cycleStartMonth] ?? data.cycleStartMonth}</strong> and run twelve months.
           </p>
         ) : (
-          <p role="note">
-            <Badge tone="warn">not set</Badge> No cycle start month is set, so cycles cannot be created yet. There is no default.
-          </p>
+          <WarningNote badge="not set">No cycle start month is set, so cycles cannot be created yet. There is no default.</WarningNote>
         ))}
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
+      <Notice notice={notice ? { text: notice, ok: true } : null} />
       {data && can(CYCLE_MANAGE) && (
-        <form className="grid-form" aria-label="Set the cycle start month" onSubmit={submit} noValidate>
-          <label>
+        <FormGrid aria-label="Set the cycle start month" onSubmit={submit} noValidate>
+          <FormField>
             Cycle start month
-            <select value={month} onChange={(e) => setMonth(e.target.value)}>
+            <NativeSelect value={month} onChange={(e) => setMonth(e.target.value)}>
               <option value="">Choose…</option>
               {START_MONTHS.map(([m, label]) => (
                 <option key={m} value={String(m)}>
                   {label}
                 </option>
               ))}
-            </select>
-          </label>
-          <div className="row">
-            <button type="submit" disabled={save.isPending || !month}>
+            </NativeSelect>
+          </FormField>
+          <ButtonRow>
+            <Button type="submit" disabled={save.isPending || !month}>
               {save.isPending ? 'Saving…' : 'Save the start month'}
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
           <Refusal error={save.error} action="setting" />
-        </form>
+        </FormGrid>
       )}
     </Section>
   );
@@ -117,57 +120,55 @@ function CycleRegister() {
   const data = shown(cycles);
   return (
     <Section title="Cycles">
-      <div className="row">
-        <label>
+      <FilterBar>
+        <FormField>
           State
-          <select value={state} onChange={(e) => setState(e.target.value)}>
+          <NativeSelect value={state} onChange={(e) => setState(e.target.value)}>
             <option value="">All</option>
             <option value="OPEN">Open</option>
             <option value="CLOSED">Closed</option>
-          </select>
-        </label>
-      </div>
-      {cycles.isPending && <p className="hint loading">Loading cycles…</p>}
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {cycles.isPending && <LoadingLine>Loading cycles…</LoadingLine>}
       <QueryProblem error={cycles.error} forbidden="The selected role cannot view appraisal cycles." />
       {data && data.items.length === 0 && <Empty>No cycles yet.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Appraisal cycles">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Period</th>
-                <th>Reviewer levels</th>
-                <th>Goal setting</th>
-                <th>Self-entry</th>
-                <th>Manager rating</th>
-                <th>State</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    <Link to={PATHS.cycle(c.id)}>{c.code}</Link>
-                  </td>
-                  <td>{c.name}</td>
-                  <td>{periodText(c)}</td>
-                  <td>{c.approvalLevels}</td>
-                  {WINDOWS.map((w) => (
-                    <td key={w.key}>
-                      {windowText(c.windows[w.key])}
-                      {c.windows[w.key]?.openToday ? ' (open today)' : ''}
-                    </td>
-                  ))}
-                  <td>
-                    <StateBadge state={c.state} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Appraisal cycles">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Code</TableHead>
+              <TableHead scope="col">Name</TableHead>
+              <TableHead scope="col">Period</TableHead>
+              <TableHead scope="col">Reviewer levels</TableHead>
+              <TableHead scope="col">Goal setting</TableHead>
+              <TableHead scope="col">Self-entry</TableHead>
+              <TableHead scope="col">Manager rating</TableHead>
+              <TableHead scope="col">State</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((c) => (
+              <TableRow key={c.id}>
+                <TableCell>
+                  <Link to={PATHS.cycle(c.id)}>{c.code}</Link>
+                </TableCell>
+                <TableCell>{c.name}</TableCell>
+                <TableCell>{periodText(c)}</TableCell>
+                <TableCell>{c.approvalLevels}</TableCell>
+                {WINDOWS.map((w) => (
+                  <TableCell key={w.key}>
+                    {windowText(c.windows[w.key])}
+                    {c.windows[w.key]?.openToday ? ' (open today)' : ''}
+                  </TableCell>
+                ))}
+                <TableCell>
+                  <StateBadge state={c.state} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );
@@ -282,123 +283,102 @@ function CycleForm({
     });
   };
   return (
-    <form className="grid-form" aria-label={label} onSubmit={submit} noValidate>
+    <FormGrid aria-label={label} onSubmit={submit} noValidate>
       {!initial && (
-        <label>
+        <FormField>
           Code
-          <input value={code} maxLength={40} onChange={(e) => setCode(e.target.value)} />
-        </label>
+          <Input value={code} maxLength={40} onChange={(e) => setCode(e.target.value)} />
+        </FormField>
       )}
-      <label>
+      <FormField>
         Name
-        <input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
-      </label>
+        <Input value={name} maxLength={200} onChange={(e) => setName(e.target.value)} />
+      </FormField>
       {!initial && (
-        <div>
-          <label>
-            Start date
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </label>
-          <p className="hint" style={FLUSH}>
-            {startMonth ? `The 1st of ${MONTH_NAME[startMonth] ?? 'the configured month'}; the cycle runs twelve months.` : 'Set the cycle start month first.'}
-          </p>
-        </div>
+        <FormField hint={<FieldDescription>{startMonth ? `The 1st of ${MONTH_NAME[startMonth] ?? 'the configured month'}; the cycle runs twelve months.` : 'Set the cycle start month first.'}</FieldDescription>}>
+          Start date
+          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </FormField>
       )}
-      <label>
+      <FormField>
         Reviewer levels
-        <select value={levels} onChange={(e) => setLevels(e.target.value)}>
+        <NativeSelect value={levels} onChange={(e) => setLevels(e.target.value)}>
           <option value="1">{levelsText(1)}</option>
           <option value="2">{levelsText(2)}</option>
           <option value="0">{levelsText(0)}</option>
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {levels !== '0' && (
-        <div>
-          <label>
-            Review due date
-            <input type="date" value={reviewDueOn} onChange={(e) => setReviewDueOn(e.target.value)} />
-          </label>
-          <p className="hint" style={FLUSH}>
-            Reviewer confirmations are due on this date (on or after the manager-rating window closes); later ones count as overdue.
-          </p>
-        </div>
+        <FormField hint={<FieldDescription>Reviewer confirmations are due on this date (on or after the manager-rating window closes); later ones count as overdue.</FieldDescription>}>
+          Review due date
+          <Input type="date" value={reviewDueOn} onChange={(e) => setReviewDueOn(e.target.value)} />
+        </FormField>
       )}
-      <label>
+      <FormField>
         Rating mode
-        <select value={ratingMode} onChange={(e) => setRatingMode(e.target.value === 'MANUAL' ? 'MANUAL' : 'FORMULA')}>
+        <NativeSelect value={ratingMode} onChange={(e) => setRatingMode(e.target.value === 'MANUAL' ? 'MANUAL' : 'FORMULA')}>
           <option value="FORMULA">{ratingModeText('FORMULA')}</option>
           <option value="MANUAL">{ratingModeText('MANUAL')}</option>
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <CheckField>
         <input type="checkbox" checked={goalReview} onChange={(e) => setGoalReview(e.target.checked)} /> Goals are reviewed before they take effect (KRA review)
-      </label>
-      <fieldset style={GROUP} className="wide">
-        <legend>Result split</legend>
-        <div className="row">
-          <label>
+      </CheckField>
+      <FramedFieldset legend="Result split">
+        <div className={FIELD_ROW}>
+          <FormField className="w-auto">
             Goals %
-            <input inputMode="numeric" value={goalPercent} maxLength={3} onChange={(e) => setGoalPercent(e.target.value)} />
-          </label>
-          <label>
+            <Input inputMode="numeric" value={goalPercent} maxLength={3} onChange={(e) => setGoalPercent(e.target.value)} />
+          </FormField>
+          <FormField className="w-auto">
             Competencies %
-            <input inputMode="numeric" value={competencyPercent} maxLength={2} onChange={(e) => setCompetencyPercent(e.target.value)} />
-          </label>
+            <Input inputMode="numeric" value={competencyPercent} maxLength={2} onChange={(e) => setCompetencyPercent(e.target.value)} />
+          </FormField>
         </div>
-        <p className="hint" style={FLUSH}>
+        <Hint className="m-0">
           {initial
             ? 'Whole percentages that add up to 100. Competencies 0 means the cycle does not assess them. Whether it does is fixed once an appraisal is enrolled; the split is fixed once one is submitted.'
             : 'Whole percentages that add up to 100, or leave both empty to use the company split. Competencies 0 means the cycle does not assess them.'}
-        </p>
-      </fieldset>
-      <fieldset style={GROUP} className="wide">
-        <legend>Sections included</legend>
-        {catalogue.isPending && <p className="hint loading">Loading the sections…</p>}
+        </Hint>
+      </FramedFieldset>
+      <FramedFieldset legend="Sections included">
+        {catalogue.isPending && <LoadingLine>Loading the sections…</LoadingLine>}
         {(shown(catalogue)?.items ?? []).map((s) => (
-          <label key={s.code}>
+          <CheckField key={s.code}>
             <input
               type="checkbox"
               checked={sections.includes(s.code)}
               onChange={(e) => setSections((prev) => (e.target.checked ? [...prev, s.code] : prev.filter((x) => x !== s.code)))}
             />{' '}
             {s.title}: {s.meaning} Filled by {s.filledBy.map((p) => (p === 'EMPLOYEE' ? 'the employee' : 'the manager')).join(' and ')}.
-          </label>
+          </CheckField>
         ))}
-        <p className="hint" style={FLUSH}>
-          None of these is scored. An included section must be filled in before its party submits; an excluded one never blocks a submission.
-        </p>
-      </fieldset>
-      <fieldset style={GROUP} className="wide">
-        <legend>Windows</legend>
-        <p className="hint" style={FLUSH}>
-          Both dates are included. Leave both dates of a window empty to schedule it later.
-        </p>
+        <Hint className="m-0">None of these is scored. An included section must be filled in before its party submits; an excluded one never blocks a submission.</Hint>
+      </FramedFieldset>
+      <FramedFieldset legend="Windows">
+        <Hint className="m-0">Both dates are included. Leave both dates of a window empty to schedule it later.</Hint>
         {WINDOWS.map((w) => (
-          <div className="row" key={w.key}>
-            <label>
+          <div className={FIELD_ROW} key={w.key}>
+            <FormField className="w-auto">
               {w.label} opens
-              <input type="date" value={windows[w.key].opensOn} onChange={(e) => setWindow(w.key, { opensOn: e.target.value })} />
-            </label>
-            <label>
+              <Input type="date" value={windows[w.key].opensOn} onChange={(e) => setWindow(w.key, { opensOn: e.target.value })} />
+            </FormField>
+            <FormField className="w-auto">
               {w.label} closes
-              <input type="date" value={windows[w.key].closesOn} onChange={(e) => setWindow(w.key, { closesOn: e.target.value })} />
-            </label>
+              <Input type="date" value={windows[w.key].closesOn} onChange={(e) => setWindow(w.key, { closesOn: e.target.value })} />
+            </FormField>
           </div>
         ))}
-      </fieldset>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" disabled={busy || !!blockedReason}>
+      </FramedFieldset>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" disabled={busy || !!blockedReason}>
           {busy ? 'Saving…' : submitLabel}
-        </button>
-        {blockedReason && <span className="hint">{blockedReason}</span>}
-      </div>
+        </Button>
+        {blockedReason && <Hint as="span">{blockedReason}</Hint>}
+      </ButtonRow>
       {children}
-    </form>
+    </FormGrid>
   );
 }
 
@@ -422,9 +402,9 @@ function NewCycleSection() {
   return (
     <Section title="New cycle">
       {created && (
-        <p className="ok" role="status">
+        <StatusNote tone="success" role="status">
           Created cycle <Link to={PATHS.cycle(created.id)}>{created.code}</Link> for {periodText(created)}.
-        </p>
+        </StatusNote>
       )}
       <CycleForm
         key={formKey}
@@ -495,7 +475,7 @@ function CycleDetailView({ id }: { id: string }) {
     },
   });
   const c = shown(cycle);
-  if (cycle.isPending) return <Section title="Appraisal cycle">{<p className="hint loading">Loading the cycle…</p>}</Section>;
+  if (cycle.isPending) return <Section title="Appraisal cycle">{<LoadingLine>Loading the cycle…</LoadingLine>}</Section>;
   if (!c) {
     return (
       <Section title="Appraisal cycle">
@@ -507,7 +487,14 @@ function CycleDetailView({ id }: { id: string }) {
   const busy = update.isPending || close.isPending;
   return (
     <div className="stack">
-      <Section title={`Cycle ${c.code}`} actions={<Link to={PATHS.cycles}>All cycles</Link>}>
+      <Section
+        title={`Cycle ${c.code}`}
+        actions={
+          <Button asChild variant="outline" size="sm">
+            <Link to={PATHS.cycles}>All cycles</Link>
+          </Button>
+        }
+      >
         <Notice notice={notice} />
         <dl className="kv">
           <Item term="Name">{c.name}</Item>
@@ -530,37 +517,35 @@ function CycleDetailView({ id }: { id: string }) {
             <StateBadge state={c.state} />
           </Item>
         </dl>
-        <div style={SCROLL}>
-          <table aria-label="Windows">
-            <thead>
-              <tr>
-                <th>Stage</th>
-                <th>Window</th>
-                <th>Open today</th>
-              </tr>
-            </thead>
-            <tbody>
-              {WINDOWS.map((w) => (
-                <tr key={w.key}>
-                  <td>{w.label}</td>
-                  <td>{windowText(c.windows[w.key])}</td>
-                  <td>{c.windows[w.key] ? yesNo(c.windows[w.key]!.openToday) : 'No'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="hint">Reviewer confirmation is a decision, not a windowed entry: it falls due on the review due date but is never refused for lateness. Window exceptions are recorded per appraisal.</p>
+        <Table aria-label="Windows">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Stage</TableHead>
+              <TableHead scope="col">Window</TableHead>
+              <TableHead scope="col">Open today</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {WINDOWS.map((w) => (
+              <TableRow key={w.key}>
+                <TableCell>{w.label}</TableCell>
+                <TableCell>{windowText(c.windows[w.key])}</TableCell>
+                <TableCell>{c.windows[w.key] ? yesNo(c.windows[w.key]!.openToday) : 'No'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <Hint>Reviewer confirmation is a decision, not a windowed entry: it falls due on the review due date but is never refused for lateness. Window exceptions are recorded per appraisal.</Hint>
         {can(READ) && (
           <p>
             <Link to={`${PATHS.appraisals}?cycleId=${c.id}`}>Appraisals in this cycle</Link>
           </p>
         )}
         {can(CYCLE_MANAGE) && open && (
-          <div className="row">
-            <button
+          <ButtonRow>
+            <Button
               type="button"
-              className="danger"
+              variant="danger"
               disabled={busy}
               onClick={() => {
                 setNotice(null);
@@ -568,16 +553,16 @@ function CycleDetailView({ id }: { id: string }) {
               }}
             >
               {close.isPending ? 'Closing…' : 'Close the cycle'}
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
         )}
         <Refusal error={close.error} action="cycle-close" />
       </Section>
       {can(CYCLE_MANAGE) && open && (
         <Section title="Change the cycle">
-          <p className="hint">
+          <Hint>
             The code and period never change. Reviewer levels, the goal review, the rating mode, the result split and the sections are fixed once an appraisal of the cycle has been submitted.
-          </p>
+          </Hint>
           <CycleForm
             key={c.version}
             initial={c}

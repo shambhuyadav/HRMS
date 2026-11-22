@@ -1,14 +1,22 @@
 // Preparing a settlement draft: the calculation, the lines editor and upload, submission and cancellation.
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
+import { ButtonRow, FormField, FormGrid, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, fileToBase64, formatDate, isConflict, readable } from '../../api';
 import { useSession } from '../../session';
-import { Empty, Section } from '../../ui';
+import { Empty, Notice, Section } from '../../ui';
 import { TemplateDownload } from '../records';
 import { plural } from './calculation-basis';
 import { CALCULATE_WORDS, LINES_WORDS, PREPARE_WORDS, Refusal, SUBMIT_WORDS, UPLOAD_WORDS } from './refusals';
 import { isCalculatedLine } from './settlement-views';
-import { AMOUNT, enc, GROUP, MAX_AMOUNT_TEXT, MAX_COMPONENT_CODE, MAX_LINE_REASON, MAX_LINES, MAX_REASON, MAX_UPLOAD_BYTES, SCROLL, SETTLEMENT_LINES, SHOWN_ROWS, TEXTAREA, UPLOAD_HEADER, UPLOAD_ROW_WORDS, UPLOAD_TEMPLATE, useKeys, useSettlementRefresh } from './shared';
+import { AMOUNT, enc, MAX_AMOUNT_TEXT, MAX_COMPONENT_CODE, MAX_LINE_REASON, MAX_LINES, MAX_REASON, MAX_UPLOAD_BYTES, SETTLEMENT_LINES, SHOWN_ROWS, UPLOAD_HEADER, UPLOAD_ROW_WORDS, UPLOAD_TEMPLATE, useKeys, useSettlementRefresh } from './shared';
 import type { ExitCase, LineBody, LineInput, LineKind, SettlementDetail, SettlementLine, UploadResult } from './types';
 
 export function PreparerActions({ s, exit, onNotice }: { s: SettlementDetail; exit: ExitCase | undefined; onNotice: (text: string) => void }) {
@@ -26,7 +34,7 @@ export function PreparerActions({ s, exit, onNotice }: { s: SettlementDetail; ex
   if (me?.userId !== s.preparedBy) {
     return (
       <Section title="Prepare this revision">
-        <p className="hint">Only the HR Administrator who prepared this revision can change, submit or cancel it.</p>
+        <Hint>Only the HR Administrator who prepared this revision can change, submit or cancel it.</Hint>
       </Section>
     );
   }
@@ -39,15 +47,15 @@ export function PreparerActions({ s, exit, onNotice }: { s: SettlementDetail; ex
         <LinesEditor key={`${editorKey}-${s.calculation?.id ?? 'not-calculated'}`} s={s} onUnsaved={setUnsavedLines} />
       ) : (
         <Section title="Enter the lines">
-          <p className="hint">The selected role does not receive settlement amounts, so the lines cannot be edited here.</p>
+          <Hint>The selected role does not receive settlement amounts, so the lines cannot be edited here.</Hint>
         </Section>
       )}
       {calculated ? (
         <Section title="Upload the lines">
-          <p className="hint">
+          <Hint>
             This draft is calculated, so its lines are not uploaded: an upload would replace the calculated lines. Enter the lines for components the calculation does not
             produce in the line editor, each with its reason.
-          </p>
+          </Hint>
         </Section>
       ) : (
         <LinesUpload s={s} exit={exit} onReplaced={setReplacedAt} />
@@ -89,26 +97,22 @@ function CalculateDraft({ s, unsavedLines }: { s: SettlementDetail; unsavedLines
   });
   return (
     <Section title="Calculate">
-      <p className="hint">
+      <Hint>
         The server calculates this draft from a snapshot taken now, under the settlement policy and the statutory rule packs in force on the last working date. Its items
         become the calculated lines; lines entered for components it does not produce stay. An item whose policy, rule pack or record is missing is shown as such and
         blocks approval. {again ? 'Calculating again takes a new snapshot and replaces the calculated lines.' : ''}
-      </p>
+      </Hint>
       {unsavedLines && (
-        <p className="hint" id={blockedId}>
+        <Hint id={blockedId}>
           Save the lines first: the calculation keeps the saved entered lines, not changes still in the line editor.
-        </p>
+        </Hint>
       )}
-      <div className="row">
-        <button type="button" disabled={calculate.isPending || unsavedLines} aria-describedby={unsavedLines ? blockedId : undefined} onClick={() => calculate.mutate(s.version)}>
+      <ButtonRow>
+        <Button type="button" disabled={calculate.isPending || unsavedLines} aria-describedby={unsavedLines ? blockedId : undefined} onClick={() => calculate.mutate(s.version)}>
           {again ? 'Calculate again' : 'Calculate'}
-        </button>
-      </div>
-      {done && (
-        <p className="ok" role="status">
-          {done}
-        </p>
-      )}
+        </Button>
+      </ButtonRow>
+      <Notice notice={done ? { text: done, ok: true } : null} />
       <Refusal
         error={calculate.error}
         words={CALCULATE_WORDS}
@@ -196,70 +200,63 @@ function LinesEditor({ s, onUnsaved }: { s: SettlementDetail; onUnsaved: (unsave
   return (
     <Section title={calculated ? 'Enter lines for other components' : 'Enter the lines'}>
       {calculated ? (
-        <p className="hint">
+        <Hint>
           This draft is calculated: its calculated lines stay as the calculation made them. Entered lines are for components the calculation does not produce, one line per
           pay component, each with the reason it is entered. Saving replaces the entered lines only, and the server records the net amount.
-        </p>
+        </Hint>
       ) : (
-        <p className="hint">
+        <Hint>
           One line per pay component. Earnings are zero or positive and deductions zero or negative; a notice adjustment needs the exit’s contractual notice period.
           Saving replaces every line of this draft, and the server records the net amount.
-        </p>
+        </Hint>
       )}
-      <form className="stack" aria-label="Settlement lines" onSubmit={submit}>
+      <form className="flex flex-col gap-3" aria-label="Settlement lines" onSubmit={submit}>
         {rows.length === 0 && <Empty>{calculated ? 'No entered lines. Add one for a component the calculation does not produce.' : 'No lines. Add one to start.'}</Empty>}
         {rows.map((r, i) => (
-          <fieldset key={r.key} style={GROUP}>
-            <legend>Line {i + 1}</legend>
-            <div className="row">
-              <label>
-                Pay component code
-                <input value={r.componentCode} maxLength={MAX_COMPONENT_CODE} disabled={save.isPending} onChange={(e) => change(r.key, { componentCode: e.target.value.toUpperCase() })} />
-              </label>
-              <label>
-                Amount
-                <input value={r.amount} maxLength={MAX_AMOUNT_TEXT} inputMode="decimal" disabled={save.isPending} onChange={(e) => change(r.key, { amount: e.target.value })} />
-              </label>
-              <label>
-                Line kind
-                <select value={r.lineKind} disabled={save.isPending} onChange={(e) => change(r.key, { lineKind: e.target.value === 'NOTICE_ADJUSTMENT' ? 'NOTICE_ADJUSTMENT' : 'STANDARD' })}>
-                  <option value="STANDARD">Standard</option>
-                  <option value="NOTICE_ADJUSTMENT">Notice adjustment</option>
-                </select>
-              </label>
-              <label>
-                {calculated ? 'Reason (required)' : 'Reason (optional)'}
-                <input value={r.reason} maxLength={MAX_LINE_REASON} disabled={save.isPending} onChange={(e) => change(r.key, { reason: e.target.value })} />
-              </label>
-              <button type="button" className="secondary" disabled={save.isPending} aria-label={`Remove line ${i + 1}`} onClick={() => remove(r.key)}>
-                Remove
-              </button>
-            </div>
-          </fieldset>
+          <FramedFieldset key={r.key} legend={<>Line {i + 1}</>}>
+            <FormGrid asChild>
+              <div>
+                <FormField>
+                  Pay component code
+                  <Input value={r.componentCode} maxLength={MAX_COMPONENT_CODE} disabled={save.isPending} onChange={(e) => change(r.key, { componentCode: e.target.value.toUpperCase() })} />
+                </FormField>
+                <FormField>
+                  Amount
+                  <Input value={r.amount} maxLength={MAX_AMOUNT_TEXT} inputMode="decimal" disabled={save.isPending} onChange={(e) => change(r.key, { amount: e.target.value })} />
+                </FormField>
+                <FormField>
+                  Line kind
+                  <NativeSelect value={r.lineKind} disabled={save.isPending} onChange={(e) => change(r.key, { lineKind: e.target.value === 'NOTICE_ADJUSTMENT' ? 'NOTICE_ADJUSTMENT' : 'STANDARD' })}>
+                    <option value="STANDARD">Standard</option>
+                    <option value="NOTICE_ADJUSTMENT">Notice adjustment</option>
+                  </NativeSelect>
+                </FormField>
+                <FormField>
+                  {calculated ? 'Reason (required)' : 'Reason (optional)'}
+                  <Input value={r.reason} maxLength={MAX_LINE_REASON} disabled={save.isPending} onChange={(e) => change(r.key, { reason: e.target.value })} />
+                </FormField>
+                <Button type="button" variant="danger" disabled={save.isPending} aria-label={`Remove line ${i + 1}`} onClick={() => remove(r.key)}>
+                  Remove
+                </Button>
+              </div>
+            </FormGrid>
+          </FramedFieldset>
         ))}
-        <div className="row">
-          <button type="button" className="secondary" disabled={save.isPending || rows.length >= MAX_LINES} onClick={add}>
+        <ButtonRow>
+          <Button type="button" variant="outline" disabled={save.isPending || rows.length >= MAX_LINES} onClick={add}>
             Add a line
-          </button>
-          <button type="submit" disabled={save.isPending}>
+          </Button>
+          <Button type="submit" disabled={save.isPending}>
             Save lines
-          </button>
-        </div>
-        {problem && (
-          <p role="alert" className="error">
-            {problem}
-          </p>
-        )}
+          </Button>
+        </ButtonRow>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
         <Refusal
           error={save.error}
           words={LINES_WORDS}
           noAnswer="No answer came back, so the lines may or may not have been saved. The settlement has been reloaded: check it before saving again."
         />
-        {notice && (
-          <p className="ok" role="status">
-            {notice}
-          </p>
-        )}
+        <Notice notice={notice ? { text: notice, ok: true } : null} />
       </form>
     </Section>
   );
@@ -314,17 +311,17 @@ function LinesUpload({ s, exit, onReplaced }: { s: SettlementDetail; exit: ExitC
   const ordered = result ? [...problems, ...result.errors.filter((e) => e.code === 'BATCH_REJECTED')] : [];
   return (
     <Section title="Upload the lines">
-      <p className="hint">
-        CSV with exactly the header <code>{UPLOAD_HEADER}</code> (template {UPLOAD_TEMPLATE}). Every row names this employee’s code ({s.employeeCode}) and the
+      <Hint>
+        CSV with exactly the header <code className="break-all">{UPLOAD_HEADER}</code> (template {UPLOAD_TEMPLATE}). Every row names this employee’s code ({s.employeeCode}) and the
         approved last working date{exit?.approvedLastWorkingDate ? ` (${formatDate(exit.approvedLastWorkingDate)})` : ' of the exit'}; one row per pay component; the
         line kind is STANDARD, NOTICE_ADJUSTMENT or blank. The file replaces every line of this draft, all or nothing. It is read at once and not kept.
-      </p>
-      {/* DF09 published template: GET /v1/settlements/lines/template, under the preparation grant the upload needs. */}
-      <TemplateDownload base={SETTLEMENT_LINES} code={UPLOAD_TEMPLATE} />
-      <div className="row">
-        <label>
+      </Hint>
+      <div className="flex flex-col gap-3">
+        {/* DF09 published template: GET /v1/settlements/lines/template, under the preparation grant the upload needs. */}
+        <TemplateDownload base={SETTLEMENT_LINES} code={UPLOAD_TEMPLATE} />
+        <FormField className="max-w-[560px]">
           Settlement lines file (CSV)
-          <input
+          <Input
             key={inputKey}
             type="file"
             accept=".csv,text/csv"
@@ -334,67 +331,70 @@ function LinesUpload({ s, exit, onReplaced }: { s: SettlementDetail; exit: ExitC
               setResult(null);
             }}
           />
-        </label>
+        </FormField>
+        <ButtonRow>
+          <Button type="button" variant="outline" disabled={upload.isPending} onClick={() => send(true)}>
+            Check the file
+          </Button>
+          <Button type="button" disabled={upload.isPending} onClick={() => send(false)}>
+            Upload and replace the lines
+          </Button>
+        </ButtonRow>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <Refusal
+          error={upload.error}
+          words={UPLOAD_WORDS}
+          noAnswer="No answer came back, so the lines may or may not have been replaced. The settlement has been reloaded: check it before uploading again."
+        />
+        {result && (
+          <div className="flex flex-col gap-3" role="status">
+            <UploadOutcome result={result} problemCount={problems.length} />
+            {ordered.length > 0 && (
+              <>
+                <Table aria-label="Upload problems">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead scope="col">Row</TableHead>
+                      <TableHead scope="col">Problem</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {ordered.slice(0, SHOWN_ROWS).map((e) => (
+                      <TableRow key={e.row}>
+                        <TableCell>{e.row}</TableCell>
+                        <TableCell>
+                          {UPLOAD_ROW_WORDS[e.code] ?? readable(e.code)} <Hint as="span">{e.code}</Hint>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {ordered.length > SHOWN_ROWS && <Hint>Showing the first {SHOWN_ROWS} of {ordered.length} rows.</Hint>}
+              </>
+            )}
+          </div>
+        )}
       </div>
-      <div className="row">
-        <button type="button" className="secondary" disabled={upload.isPending} onClick={() => send(true)}>
-          Check the file
-        </button>
-        <button type="button" disabled={upload.isPending} onClick={() => send(false)}>
-          Upload and replace the lines
-        </button>
-      </div>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <Refusal
-        error={upload.error}
-        words={UPLOAD_WORDS}
-        noAnswer="No answer came back, so the lines may or may not have been replaced. The settlement has been reloaded: check it before uploading again."
-      />
-      {result && (
-        <div className="stack" role="status">
-          {result.applied ? (
-            <p className="ok">
-              Uploaded: {result.accepted} of {result.total} rows replaced the lines of this draft.
-            </p>
-          ) : result.dryRun && result.rejected === 0 ? (
-            <p className="ok">
-              The file is valid: its {result.total} rows would replace the lines of this draft. Nothing was changed (check only).
-            </p>
-          ) : (
-            <p className="error">
-              The file was rejected, so nothing was changed: {problems.length} of {result.total} rows have a problem.
-            </p>
-          )}
-          {ordered.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label="Upload problems">
-                <thead>
-                  <tr>
-                    <th scope="col">Row</th>
-                    <th scope="col">Problem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ordered.slice(0, SHOWN_ROWS).map((e) => (
-                    <tr key={e.row}>
-                      <td>{e.row}</td>
-                      <td>
-                        {UPLOAD_ROW_WORDS[e.code] ?? readable(e.code)} <span className="hint">{e.code}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {ordered.length > SHOWN_ROWS && <p className="hint">Showing the first {SHOWN_ROWS} of {ordered.length} rows.</p>}
-            </div>
-          )}
-        </div>
-      )}
     </Section>
+  );
+}
+
+/** What a check or an upload of the lines came to; the box around it is the announced status, so the line itself has no role. */
+function UploadOutcome({ result, problemCount }: { result: UploadResult; problemCount: number }) {
+  if (result.applied) {
+    return (
+      <StatusNote tone="success">
+        Uploaded: {result.accepted} of {result.total} rows replaced the lines of this draft.
+      </StatusNote>
+    );
+  }
+  if (result.dryRun && result.rejected === 0) {
+    return <StatusNote tone="success">The file is valid: its {result.total} rows would replace the lines of this draft. Nothing was changed (check only).</StatusNote>;
+  }
+  return (
+    <StatusNote tone="error">
+      The file was rejected, so nothing was changed: {problemCount} of {result.total} rows have a problem.
+    </StatusNote>
   );
 }
 
@@ -413,19 +413,19 @@ function SubmitDraft({ s, onNotice, unsavedLines }: { s: SettlementDetail; onNot
   });
   return (
     <Section title="Submit for review">
-      <p className="hint">
+      <Hint>
         Submitting freezes revision {s.revision}: its lines can no longer change. An independent reviewer and then an independent approver decide it; neither can be you.
-      </p>
+      </Hint>
       {unsavedLines && (
-        <p className="hint" id={blockedId}>
+        <Hint id={blockedId}>
           Save the lines first: submitting freezes the saved lines, not changes still in the line editor.
-        </p>
+        </Hint>
       )}
-      <div className="row">
-        <button type="button" disabled={submit.isPending || unsavedLines} aria-describedby={unsavedLines ? blockedId : undefined} onClick={() => submit.mutate(s.version)}>
+      <ButtonRow>
+        <Button type="button" disabled={submit.isPending || unsavedLines} aria-describedby={unsavedLines ? blockedId : undefined} onClick={() => submit.mutate(s.version)}>
           Submit revision {s.revision} for review
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal
         error={submit.error}
         words={SUBMIT_WORDS}
@@ -463,21 +463,18 @@ function CancelDraft({ s, onNotice }: { s: SettlementDetail; onNotice: (text: st
   };
   return (
     <Section title="Cancel this draft">
-      <form className="stack" aria-label="Cancel this draft" onSubmit={send}>
-        <label>
+      <form className="flex flex-col gap-3" aria-label="Cancel this draft" onSubmit={send}>
+        {/* A readable width, as the old `.stack` form gave its fields. */}
+        <FormField className="max-w-[560px]">
           Reason for cancelling (required)
-          <textarea rows={2} maxLength={MAX_REASON} value={reason} disabled={cancel.isPending} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
-        {problem && (
-          <p role="alert" className="error">
-            {problem}
-          </p>
-        )}
-        <div className="row">
-          <button type="submit" className="danger" disabled={cancel.isPending}>
+          <Textarea rows={2} maxLength={MAX_REASON} value={reason} disabled={cancel.isPending} onChange={(e) => setReason(e.target.value)} className="resize-y" />
+        </FormField>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <ButtonRow>
+          <Button type="submit" variant="danger" disabled={cancel.isPending}>
             Cancel the draft
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Refusal error={cancel.error} words={PREPARE_WORDS} />
       </form>
     </Section>

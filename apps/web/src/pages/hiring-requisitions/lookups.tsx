@@ -1,6 +1,11 @@
 // Masters and people for the requisition and budget forms: departments, locations, designations and the hiring manager.
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, isForbidden, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, NotPermitted } from '../../ui';
@@ -83,19 +88,22 @@ export function useMasterOptions(current: Pick<Requisition, 'department' | 'loca
 
 export function MasterSelect({ label, value, options, loading, onChange }: { label: string; value: string; options: Option[]; loading: boolean; onChange: (id: string) => void }) {
   return (
-    <label>
+    <FormField>
       {label}
-      <select required value={value} onChange={(e) => onChange(e.target.value)}>
+      <NativeSelect required value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">{loading ? 'Loading…' : 'Choose…'}</option>
         {options.map((o) => (
           <option key={o.id} value={o.id}>
             {o.label}
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
 }
+
+/** One matching employee as a full-width choice, its words wrapping, tinted red on hover (the old `.choices` button; as in the pilot). */
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
 
 /** The hiring manager: the signed-in employee, the one already on the draft, or one found by an employee search. */
 export function HiringManagerField({ value, current, onChange }: { value: string; current: Person | null; onChange: (id: string) => void }) {
@@ -132,33 +140,39 @@ export function HiringManagerField({ value, current, onChange }: { value: string
   const found = term !== '' ? hits.data : undefined;
   return (
     <>
-      <label>
+      <FormField>
         Hiring manager
-        <select required value={value} onChange={(e) => onChange(e.target.value)}>
+        <NativeSelect required value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">Choose…</option>
           {choices.map((c) => (
             <option key={c.id} value={c.id}>
               {c.label}
             </option>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       {canSearch && (
-        <div className="wide">
-          <label>
+        <div className="col-span-full flex flex-col gap-[0.6rem]">
+          <FormField>
             Find another hiring manager
-            <input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
-          </label>
-          {term !== '' && hits.isLoading && <p className="hint">Searching…</p>}
+            <Input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
+          </FormField>
+          {term !== '' && hits.isLoading && <Hint className="m-0">Searching…</Hint>}
           {isForbidden(hits.error) ? <NotPermitted>The selected role cannot search employees.</NotPermitted> : <ErrorNote error={hits.error} />}
           {found && found.items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
           {found && found.items.length > 0 && (
-            <ul className="choices" aria-label="Matching employees">
+            <ul className="m-0 flex list-none flex-col gap-[0.6rem] p-0" aria-label="Matching employees">
               {found.items.map((e) => (
                 <li key={e.id}>
-                  <button type="button" aria-label={`Choose ${e.displayName} (${e.employeeCode}) as the hiring manager`} onClick={() => choose(e)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={CHOICE_BUTTON}
+                    aria-label={`Choose ${e.displayName} (${e.employeeCode}) as the hiring manager`}
+                    onClick={() => choose(e)}
+                  >
                     {e.displayName} ({e.employeeCode}) · {readable(e.status).toLowerCase()}
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>

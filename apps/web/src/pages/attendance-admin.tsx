@@ -12,15 +12,34 @@
 // The server re-checks every duty and rule; this page only offers what the role can do.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useRef, useState } from 'react';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, download, fileToBase64, formatDate, idempotencyKey, pinSession } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
-import { Badge, Empty, ErrorNote, Section, StateBadge } from '../ui';
+import { Badge, Empty, ErrorNote, Notice, Section, StateBadge, WarningNote } from '../ui';
 import { HELD_BATCH_NOTE, HeldBatchCheck, ImportBatches, type ImportJob, type ImportRow, TemplateDownload, useBatchFollowUp } from './records';
 
 const IMPORT = 'attendance.import.operational';
 const MANAGE = 'attendance_policy.manage.operational';
 const ACTIVATE = 'attendance_policy.activate.operational';
+
+// ---------------------------------------------------------------------------------------------------------
+// Layout pieces the shared helpers (FormField, Hint, Table …) do not cover (shadcn/ui move, 20 Nov 2026)
+// ---------------------------------------------------------------------------------------------------------
+
+/** A field of the one-column import form keeps a readable width, as the old `.stack` gave its selects. */
+const READABLE_FIELD = 'max-w-[560px]';
+/** A file field and its button on one line, the button level with the field's control (the old `div.inline`). */
+const FILE_ROW = 'flex flex-wrap items-end gap-x-4 gap-y-3';
+/** A form or a refusal opened below a row's buttons. */
+const BELOW_BUTTONS = 'mt-3';
 
 // ---------------------------------------------------------------------------------------------------------
 // Punch imports
@@ -91,7 +110,7 @@ function RowNote({ row }: { row: ImportRow }) {
   return (
     <>
       {ROW_PROBLEMS[row.errorCode] ?? row.errorCode}
-      <div className="hint">{row.errorCode}</div>
+      <HintLine>{row.errorCode}</HintLine>
     </>
   );
 }
@@ -102,75 +121,77 @@ function PunchJobView({ job, base, pending, onAction, error }: { job: ImportJob;
   const report = useMutation({ mutationFn: () => download(`${base}/${job.id}/error-report`) });
   // Rows left out come first; the rest only confirm what was applied.
   const ordered = [...quarantined, ...settled, ...applied];
+  const decidable = job.state === 'PREVIEWED' || job.state === 'UPLOADED';
+  const applyLabel = applied.length > 0 ? `Apply ${count(applied.length, 'row', 'rows')}` : 'Close the batch, nothing to apply';
   return (
     <Section
       title={`Preview: ${job.fileName ?? 'import'} (${job.template ?? ''})`}
       actions={
-        job.state === 'PREVIEWED' || job.state === 'UPLOADED' ? (
-          <div className="row">
+        decidable ? (
+          <ButtonRow>
             {job.state === 'PREVIEWED' && (
-              <button type="button" disabled={pending} onClick={() => onAction('commit')}>
-                {applied.length > 0 ? `Apply ${count(applied.length, 'row', 'rows')}` : 'Close the batch, nothing to apply'}
-              </button>
+              <Button type="button" disabled={pending} onClick={() => onAction('commit')}>
+                {applyLabel}
+              </Button>
             )}
-            <button type="button" className="secondary" disabled={pending} onClick={() => onAction('cancel')}>
+            <Button type="button" variant="outline" disabled={pending} onClick={() => onAction('cancel')}>
               Cancel import
-            </button>
-          </div>
+            </Button>
+          </ButtonRow>
         ) : undefined
       }
     >
       <p>
         <StateBadge state={job.state} /> {job.state === 'UPLOADED' ? null : count(job.rowCount ?? job.rows.length, 'row', 'rows')}
       </p>
-      {job.state === 'UPLOADED' && <p role="status">{HELD_BATCH_NOTE}</p>}
+      {job.state === 'UPLOADED' && <StatusNote tone="info" role="status">{HELD_BATCH_NOTE}</StatusNote>}
       {job.state === 'PREVIEWED' && (
-        <p role="status">
+        <StatusNote tone="info" role="status">
           {count(applied.length, 'row will be applied', 'rows will be applied')}. {count(quarantined.length, 'row is', 'rows are')} quarantined for review and {count(settled.length, 'repeat adds', 'repeats add')} nothing. Nothing is stored until you apply.
-        </p>
+        </StatusNote>
       )}
       {job.state === 'COMMITTED' && (
-        <p role="status">
+        <StatusNote tone="info" role="status">
           {count(job.acceptedCount, 'row was applied', 'rows were applied')}; {count(quarantined.length, 'row stays', 'rows stay')} quarantined and {count(settled.length, 'repeat added', 'repeats added')} nothing. Correct quarantined events and upload them in a new file.
-        </p>
+        </StatusNote>
       )}
       {job.state === 'CANCELLED' && <p>Import cancelled; nothing was applied.</p>}
       {left > 0 && job.state !== 'UPLOADED' && (
-        <div className="row">
-          <button type="button" className="secondary" disabled={report.isPending} onClick={() => report.mutate()}>
+        <ButtonRow>
+          <Button type="button" variant="outline" disabled={report.isPending} onClick={() => report.mutate()}>
             Download the error report
-          </button>
-          <span className="hint">The rows left out, with their cells as submitted.</span>
-        </div>
+          </Button>
+          <Hint as="span">The rows left out, with their cells as submitted.</Hint>
+        </ButtonRow>
       )}
       <ErrorNote error={report.error} />
       {job.rows.length > 0 && (
-        <table aria-label="Rows of this batch">
-          <thead>
-            <tr>
-              <th scope="col">Row</th>
-              <th scope="col">Event</th>
-              <th scope="col">Result</th>
-              <th scope="col">Note</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table aria-label="Rows of this batch">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Row</TableHead>
+              <TableHead scope="col">Event</TableHead>
+              <TableHead scope="col">Result</TableHead>
+              <TableHead scope="col">Note</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {ordered.slice(0, SHOWN_ROWS).map((r) => (
-              <tr key={r.rowNumber}>
-                <td>{r.rowNumber}</td>
-                <td>{r.businessKey}</td>
-                <td>
+              <TableRow key={r.rowNumber}>
+                <TableCell>{r.rowNumber}</TableCell>
+                <TableCell>{r.businessKey}</TableCell>
+                <TableCell>
                   <RowResult row={r} />
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <RowNote row={r} />
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
-      {ordered.length > SHOWN_ROWS && <p className="hint">Showing the first {SHOWN_ROWS} of {ordered.length} rows; the error report has every row left out.</p>}
+      {ordered.length > SHOWN_ROWS && <Hint>Showing the first {SHOWN_ROWS} of {ordered.length} rows; the error report has every row left out.</Hint>}
       <ErrorNote error={error} />
     </Section>
   );
@@ -240,10 +261,10 @@ export function PunchImportsPage() {
   return (
     <>
       <Section title="Import punches">
-        <form onSubmit={submit} className="stack">
-          <label>
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <FormField className={READABLE_FIELD}>
             Template
-            <select
+            <NativeSelect
               value={template.code}
               disabled={busy}
               onChange={(e) => {
@@ -259,16 +280,16 @@ export function PunchImportsPage() {
                   {t.label} ({t.code})
                 </option>
               ))}
-            </select>
-          </label>
-          <p className="hint">
+            </NativeSelect>
+          </FormField>
+          <Hint>
             CSV with exactly the header <code>{template.columns}</code>. {template.note} Nothing is stored until you apply a preview. Valid rows are applied and invalid ones quarantined for review; importing the same file again adds nothing.
-          </p>
+          </Hint>
           <TemplateDownload key={template.code} base={template.base} code={template.code} />
-          <div className="inline">
-            <label>
+          <div className={FILE_ROW}>
+            <FormField className="w-auto">
               Import file
-              <input
+              <Input
                 key={fileInput}
                 type="file"
                 accept=".csv,text/csv"
@@ -278,10 +299,10 @@ export function PunchImportsPage() {
                   uploadKey.current = null;
                 }}
               />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         <ErrorNote error={upload.error ?? resume.error} />
@@ -372,12 +393,11 @@ const draftBody = (v: DraftValues) => ({
     : {}),
 });
 
-const overtimeText = (p: AttendancePolicy) =>
-  !p.overtimeEnabled
-    ? 'overtime off'
-    : p.overtimeBasis
-      ? `overtime candidates: ${OVERTIME_BASIS_TEXT[p.overtimeBasis] ?? p.overtimeBasis}, from ${p.overtimeMinimumMinutes} minutes, rounded down to ${p.overtimeRoundingMinutes}-minute units`
-      : 'overtime on, its rules not set (cannot be activated)';
+function overtimeText(p: AttendancePolicy): string {
+  if (!p.overtimeEnabled) return 'overtime off';
+  if (!p.overtimeBasis) return 'overtime on, its rules not set (cannot be activated)';
+  return `overtime candidates: ${OVERTIME_BASIS_TEXT[p.overtimeBasis] ?? p.overtimeBasis}, from ${p.overtimeMinimumMinutes} minutes, rounded down to ${p.overtimeRoundingMinutes}-minute units`;
+}
 
 /** A mapping in words; a location by its name where the page knows it (an inactive one shows its code). */
 const mappingText = (m: Mapping, locationName: (code: string) => string = (code) => code) =>
@@ -404,61 +424,57 @@ function refusalText(error: unknown): string | null {
 function PolicyRefusal({ error }: { error: unknown }) {
   const words = refusalText(error);
   if (!words) return <ErrorNote error={error} />;
-  return (
-    <p role="alert" className="error">
-      {words}
-    </p>
-  );
+  return <Notice notice={{ text: words, ok: false }} />;
 }
 
 function DraftFields({ values, onChange }: { values: DraftValues; onChange: (v: DraftValues) => void }) {
   const field = (key: Exclude<keyof DraftValues, 'overtimeEnabled'>) => ({ value: values[key], onChange: (e: { target: { value: string } }) => onChange({ ...values, [key]: e.target.value }) });
   const overtime = values.overtimeEnabled && (
     <>
-      <label>
+      <FormField>
         Overtime basis
-        <select required {...field('overtimeBasis')}>
+        <NativeSelect required {...field('overtimeBasis')}>
           <option value="">Choose a basis</option>
           <option value="AFTER_SHIFT_END">Minutes after the shift ends</option>
           <option value="BEYOND_SCHEDULED_NET">Minutes beyond the scheduled net minutes</option>
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Overtime from (minutes)
-        <input required inputMode="numeric" pattern="\d{1,4}" {...field('overtimeMinimumMinutes')} />
-      </label>
-      <label>
+        <Input required inputMode="numeric" pattern="\d{1,4}" {...field('overtimeMinimumMinutes')} />
+      </FormField>
+      <FormField>
         Rounded down to units of (minutes)
-        <input required inputMode="numeric" pattern="[1-9]\d{0,3}" {...field('overtimeRoundingMinutes')} />
-      </label>
+        <Input required inputMode="numeric" pattern="[1-9]\d{0,3}" {...field('overtimeRoundingMinutes')} />
+      </FormField>
     </>
   );
   return (
     <>
-      <label>
+      <FormField>
         Effective from
-        <input type="date" required {...field('effectiveFrom')} />
-      </label>
-      <label>
+        <Input type="date" required {...field('effectiveFrom')} />
+      </FormField>
+      <FormField>
         Effective until (exclusive, optional)
-        <input type="date" {...field('effectiveTo')} />
-      </label>
-      <label>
+        <Input type="date" {...field('effectiveTo')} />
+      </FormField>
+      <FormField>
         Grace (minutes)
-        <input required inputMode="numeric" pattern="\d{1,4}" {...field('graceMinutes')} />
-      </label>
-      <label>
+        <Input required inputMode="numeric" pattern="\d{1,4}" {...field('graceMinutes')} />
+      </FormField>
+      <FormField>
         Present from (% of scheduled net minutes)
-        <input required inputMode="decimal" pattern="\d{1,3}(\.\d{1,2})?" {...field('presentPercent')} />
-      </label>
-      <label>
+        <Input required inputMode="decimal" pattern="\d{1,3}(\.\d{1,2})?" {...field('presentPercent')} />
+      </FormField>
+      <FormField>
         Half day from (% of scheduled net minutes)
-        <input required inputMode="decimal" pattern="\d{1,3}(\.\d{1,2})?" {...field('halfDayPercent')} />
-      </label>
-      <label className="check">
-        <input type="checkbox" checked={values.overtimeEnabled} onChange={(e) => onChange({ ...values, overtimeEnabled: e.target.checked })} /> Overtime candidates (proposed for a manager's
-        decision; never paid from here)
-      </label>
+        <Input required inputMode="decimal" pattern="\d{1,3}(\.\d{1,2})?" {...field('halfDayPercent')} />
+      </FormField>
+      <CheckField>
+        <input type="checkbox" checked={values.overtimeEnabled} onChange={(e) => onChange({ ...values, overtimeEnabled: e.target.checked })} /> Overtime candidates (proposed for a manager's decision; never
+        paid from here)
+      </CheckField>
       {overtime}
     </>
   );
@@ -477,24 +493,23 @@ function NewRevision({ onChanged }: { onChanged: () => void }) {
   });
   return (
     <Section title="New policy revision">
-      <form
-        className="grid-form"
+      <FormGrid
         aria-label="New policy revision"
         onSubmit={(e: FormEvent) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <label>
+        <FormField>
           Policy code
-          <input required maxLength={40} pattern="[A-Za-z][A-Za-z0-9_]*" value={code} onChange={(e) => setCode(e.target.value)} />
-        </label>
+          <Input required maxLength={40} pattern="[A-Za-z][A-Za-z0-9_]*" value={code} onChange={(e) => setCode(e.target.value)} />
+        </FormField>
         <DraftFields values={values} onChange={setValues} />
-        <button type="submit" disabled={create.isPending}>
+        <Button type="submit" disabled={create.isPending}>
           Create draft
-        </button>
-      </form>
-      <p className="hint">An existing code gets its next revision; a new code starts at revision 1. The revision stays a draft, applying to nobody, until it is mapped and someone other than its author activates it.</p>
+        </Button>
+      </FormGrid>
+      <Hint>An existing code gets its next revision; a new code starts at revision 1. The revision stays a draft, applying to nobody, until it is mapped and someone other than its author activates it.</Hint>
       <PolicyRefusal error={create.error} />
     </Section>
   );
@@ -508,21 +523,21 @@ function AddMapping({ policy, onDone }: { policy: AttendancePolicy; onDone: () =
     onSuccess: onDone,
   });
   const select = (label: string, key: keyof typeof choice, items: Option[] | undefined) => (
-    <label>
+    <FormField>
       {label}
-      <select value={choice[key]} onChange={(e) => setChoice({ ...choice, [key]: e.target.value })}>
+      <NativeSelect value={choice[key]} onChange={(e) => setChoice({ ...choice, [key]: e.target.value })}>
         <option value="">Any</option>
         {items?.map((o) => (
           <option key={o.id} value={o.id}>
             {key === 'gradeId' ? `${o.name} (${o.code})` : o.name}
           </option>
         ))}
-      </select>
-    </label>
+      </NativeSelect>
+    </FormField>
   );
   return (
-    <form
-      className="grid-form"
+    <FormGrid
+      className={BELOW_BUTTONS}
       aria-label={`Map ${nameOf(policy)}`}
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
@@ -531,15 +546,16 @@ function AddMapping({ policy, onDone }: { policy: AttendancePolicy; onDone: () =
     >
       {select('Grade', 'gradeId', options.data?.grades)}
       {select('Location', 'locationId', options.data?.locations)}
-      <button type="submit" disabled={add.isPending}>
+      <Button type="submit" disabled={add.isPending}>
         Add mapping
-      </button>
-      <p className="hint">Leaving both as Any maps the whole company, at the lowest priority.</p>
+      </Button>
+      <Hint>Leaving both as Any maps the whole company, at the lowest priority.</Hint>
       <ErrorNote error={options.error ?? add.error} />
-    </form>
+    </FormGrid>
   );
 }
 
+/** A revision's actions cell: its buttons, and the form or refusal a button opens below them. */
 function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy: AttendancePolicy; canManage: boolean; canActivate: boolean; onChanged: () => void }) {
   const [open, setOpen] = useState<'edit' | 'map' | 'retire' | null>(null);
   const [values, setValues] = useState<DraftValues>({
@@ -567,32 +583,40 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
   const retireIt = useMutation({ mutationFn: () => api(`/v1/attendance/policies/${policy.id}/retire`, { body: { expectedVersion: policy.version, effectiveTo: retire.effectiveTo, reason: retire.reason.trim() } }), onSuccess: done, onError: refreshOnError });
   const name = nameOf(policy);
   const toggle = (which: 'edit' | 'map' | 'retire') => setOpen(open === which ? null : which);
+  // Only as wide as the buttons, except while a form or a refusal under them needs the room.
+  const showsMore = open !== null || activate.isError;
   return (
-    <>
-      {policy.state === 'DRAFT' && canManage && (
-        <>
-          <button type="button" className="link" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => toggle('edit')}>
-            Edit
-          </button>{' '}
-          <button type="button" className="link" aria-label={`Map ${name}`} aria-expanded={open === 'map'} onClick={() => toggle('map')}>
-            Map
-          </button>{' '}
-        </>
+    <RowActionsCell expanded={showsMore}>
+      <RowActions>
+        {policy.state === 'DRAFT' && canManage && (
+          <>
+            <Button type="button" variant="outline" size="sm" aria-label={`Edit ${name}`} aria-expanded={open === 'edit'} onClick={() => toggle('edit')}>
+              Edit
+            </Button>{' '}
+            <Button type="button" variant="outline" size="sm" aria-label={`Map ${name}`} aria-expanded={open === 'map'} onClick={() => toggle('map')}>
+              Map
+            </Button>{' '}
+          </>
+        )}
+        {policy.state === 'DRAFT' && canActivate && (
+          <Button type="button" variant="outline" size="sm" aria-label={`Activate ${name}`} disabled={activate.isPending} onClick={() => activate.mutate()}>
+            Activate
+          </Button>
+        )}
+        {policy.state === 'ACTIVE' && canActivate && (
+          <Button type="button" variant="danger" size="sm" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => toggle('retire')}>
+            Retire
+          </Button>
+        )}
+      </RowActions>
+      {activate.isError && (
+        <div className={BELOW_BUTTONS}>
+          <PolicyRefusal error={activate.error} />
+        </div>
       )}
-      {policy.state === 'DRAFT' && canActivate && (
-        <button type="button" className="link" aria-label={`Activate ${name}`} disabled={activate.isPending} onClick={() => activate.mutate()}>
-          Activate
-        </button>
-      )}
-      {policy.state === 'ACTIVE' && canActivate && (
-        <button type="button" className="link danger" aria-label={`Retire ${name}`} aria-expanded={open === 'retire'} onClick={() => toggle('retire')}>
-          Retire
-        </button>
-      )}
-      <PolicyRefusal error={activate.error} />
       {open === 'edit' && (
-        <form
-          className="grid-form"
+        <FormGrid
+          className={BELOW_BUTTONS}
           aria-label={`Edit ${name}`}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
@@ -600,37 +624,37 @@ function RevisionActions({ policy, canManage, canActivate, onChanged }: { policy
           }}
         >
           <DraftFields values={values} onChange={setValues} />
-          <button type="submit" disabled={edit.isPending}>
+          <Button type="submit" disabled={edit.isPending}>
             Save draft
-          </button>
+          </Button>
           <PolicyRefusal error={edit.error} />
-        </form>
+        </FormGrid>
       )}
       {open === 'map' && <AddMapping policy={policy} onDone={done} />}
       {open === 'retire' && (
-        <form
-          className="grid-form"
+        <FormGrid
+          className={BELOW_BUTTONS}
           aria-label={`Retire ${name}`}
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             retireIt.mutate();
           }}
         >
-          <label>
+          <FormField>
             No longer applies from
-            <input type="date" required value={retire.effectiveTo} onChange={(e) => setRetire({ ...retire, effectiveTo: e.target.value })} />
-          </label>
-          <label className="wide">
+            <Input type="date" required value={retire.effectiveTo} onChange={(e) => setRetire({ ...retire, effectiveTo: e.target.value })} />
+          </FormField>
+          <FormField className="col-span-full">
             Reason for retiring
-            <input required maxLength={500} value={retire.reason} onChange={(e) => setRetire({ ...retire, reason: e.target.value })} />
-          </label>
-          <button type="submit" disabled={retireIt.isPending}>
+            <Input required maxLength={500} value={retire.reason} onChange={(e) => setRetire({ ...retire, reason: e.target.value })} />
+          </FormField>
+          <Button type="submit" disabled={retireIt.isPending}>
             Confirm retirement
-          </button>
+          </Button>
           <PolicyRefusal error={retireIt.error} />
-        </form>
+        </FormGrid>
       )}
-    </>
+    </RowActionsCell>
   );
 }
 
@@ -653,9 +677,9 @@ function MappingList({ policy, locationName, canRemove, onChanged }: { policy: A
             {canRemove && (
               <>
                 {' '}
-                <button type="button" className="link" aria-label={`Remove ${mappingText(m)}`} disabled={remove.isPending} onClick={() => remove.mutate(m.id)}>
+                <Button type="button" variant="danger" size="sm" aria-label={`Remove ${mappingText(m)}`} disabled={remove.isPending} onClick={() => remove.mutate(m.id)}>
                   Remove
-                </button>
+                </Button>
               </>
             )}
           </li>
@@ -683,48 +707,46 @@ export function AttendancePoliciesPage() {
         <ErrorNote error={revisions.error} />
         {revisions.isSuccess && items.length === 0 && <Empty>No attendance policy revisions yet.</Empty>}
         {items.length > 0 && (
-          <table aria-label="Attendance policy revisions">
-            <thead>
-              <tr>
-                <th scope="col">Revision</th>
-                <th scope="col">State</th>
-                <th scope="col">Period</th>
-                <th scope="col">Thresholds</th>
-                <th scope="col">Mapped to</th>
-                <th scope="col"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Attendance policy revisions">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Period</TableHead>
+                <TableHead scope="col">Thresholds</TableHead>
+                <TableHead scope="col">Mapped to</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {items.map((p) => (
-                <tr key={p.id}>
-                  <td>{nameOf(p)}</td>
-                  <td>
+                <TableRow key={p.id}>
+                  <TableCell>{nameOf(p)}</TableCell>
+                  <TableCell>
                     <StateBadge state={p.state} />
-                  </td>
-                  <td>{periodText(p)}</td>
-                  <td>
-                    {`Grace ${p.graceMinutes} minutes; present from ${Number(p.presentPercent)}%; half day from ${Number(p.halfDayPercent)}%; ${overtimeText(p)}`}
-                  </td>
-                  <td>
+                  </TableCell>
+                  <TableCell>{periodText(p)}</TableCell>
+                  <TableCell>{`Grace ${p.graceMinutes} minutes; present from ${Number(p.presentPercent)}%; half day from ${Number(p.halfDayPercent)}%; ${overtimeText(p)}`}</TableCell>
+                  <TableCell>
                     <MappingList key={p.version} policy={p} locationName={locationName} canRemove={p.state === 'DRAFT' && canManage} onChanged={refresh} />
                     {p.warnings.map((w) => (
-                      <p key={w.code} role="note">
-                        <Badge tone="warn">{w.code === 'UNMAPPED' ? 'unmapped' : 'overlap'}</Badge> {w.text}
-                      </p>
+                      <WarningNote key={w.code} badge={w.code === 'UNMAPPED' ? 'unmapped' : 'overlap'}>
+                        {w.text}
+                      </WarningNote>
                     ))}
-                  </td>
-                  <td>
-                    <RevisionActions key={p.version} policy={p} canManage={canManage} canActivate={canActivate} onChanged={refresh} />
-                  </td>
-                </tr>
+                  </TableCell>
+                  <RevisionActions key={p.version} policy={p} canManage={canManage} canActivate={canActivate} onChanged={refresh} />
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-        <p className="hint">
+        <Hint>
           When two revisions apply, the mapping naming more of grade and location wins. Activating a revision ends the earlier revision of its code on the new revision’s first day. The present and half-day percentages count against scheduled net minutes; on a half weekly-off, against half of them. Overtime
           candidates are minutes proposed for a manager’s decision, counted from the same punch pairs as worked time: every worked minute on a weekly off or holiday, and on a working day only a present one. Nothing pays them.
-        </p>
+        </Hint>
       </Section>
       {canManage && <NewRevision onChanged={refresh} />}
     </>

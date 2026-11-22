@@ -2,9 +2,18 @@
 // the requester may list (HR the company, a manager their team, BR-026), each with their manager on that day. The tree is built here:
 // people whose manager is not in the answer (or who have none) are its top. A search keeps the matches and the line above them.
 // Read-only; the server decides who is on it.
+// The tree keeps its own drawing in styles.css ("Organisation chart": .org-tree, .org-children, .org-item, .org-toggle, .org-card):
+// the lines joining a person to their team are placed against the toggle and card sizes set there, so those parts keep their
+// classes. What surrounds the tree (the summary, the search, the buttons, the notes, the team badge) is drawn with shadcn here.
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { ButtonRow, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { api, formatDate } from '../api';
 import { Icon } from '../icons';
 import { useSession } from '../session';
@@ -89,6 +98,21 @@ function matches(n: OrgChartNode, q: string): boolean {
   return [n.name, n.code, n.designation, n.department, n.location].some((v) => v?.toLowerCase().includes(q));
 }
 
+/** The chart's summary: a tinted strip of figures, wrapping on a narrow screen, the date at its end. */
+const SUMMARY_STRIP = 'mb-4 flex flex-wrap items-baseline gap-x-6 gap-y-2 rounded-md border border-border bg-accent px-4 py-[0.8rem] text-[0.88rem] text-muted-foreground';
+
+/** Whom a list without teams reports to, in the summary's words. */
+function teamWords(reportToViewer: boolean, commonManager: string | null): string {
+  if (reportToViewer) return 'all report to you';
+  if (commonManager) return 'all with the same manager';
+  return 'none with a team of their own';
+}
+
+/** A figure of the summary, in the text colour and a little larger than the words beside it. */
+function Figure({ children }: { children: ReactNode }) {
+  return <strong className="mr-[0.15rem] text-[1.05rem] text-foreground">{children}</strong>;
+}
+
 function PersonCard({ node, team, below, linked, hit }: { node: OrgChartNode; team: number; below: number; linked: boolean; hit: boolean }) {
   const place = [node.department, node.location].filter(Boolean).join(' · ');
   return (
@@ -103,10 +127,11 @@ function PersonCard({ node, team, below, linked, hit }: { node: OrgChartNode; te
         <span className="org-card-role">{node.designation ?? 'No designation'}</span>
         {place && <span className="org-card-place">{place}</span>}
       </span>
+      {/* Team size is information, not an alert: an info badge, not the brand red. Left out on a phone, where the card is narrow. */}
       {team > 0 && (
-        <span className="org-card-team" title={`${team} direct, ${below} in all`}>
+        <Badge variant="info" className="font-semibold phone:hidden" title={`${team} direct, ${below} in all`}>
           {team} direct{below > team ? ` · ${below} in all` : ''}
-        </span>
+        </Badge>
       )}
     </div>
   );
@@ -137,6 +162,7 @@ function Branch({
   return (
     <li role="treeitem" aria-level={depth} aria-expanded={kids.length > 0 ? expanded : undefined} aria-label={node.name} className="org-item">
       <div className="org-row">
+        {/* A native button drawn by styles.css: the branch line is centred on its 26px circle, so it keeps that size on a phone too. */}
         {kids.length > 0 ? (
           <button type="button" className="org-toggle" onClick={() => toggle(node.id)} aria-label={`${expanded ? 'Hide' : 'Show'} the team of ${node.name}`}>
             <Icon name="chevron" size={14} {...(expanded ? { className: 'open' } : {})} />
@@ -213,52 +239,50 @@ export function OrgChartPage() {
       title="Organisation chart"
       actions={
         people > 0 && !shown && !flat ? (
-          <>
-            <button type="button" className="secondary" onClick={() => setAll(true)}>
+          <ButtonRow>
+            <Button type="button" variant="outline" size="sm" onClick={() => setAll(true)}>
               Expand all
-            </button>
-            <button type="button" className="secondary" onClick={() => setAll(false)}>
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setAll(false)}>
               Collapse all
-            </button>
-          </>
+            </Button>
+          </ButtonRow>
         ) : undefined
       }
     >
       <ErrorNote error={chart.error} />
-      {chart.isPending && <p className="hint loading">Loading the chart…</p>}
+      {chart.isPending && <LoadingLine>Loading the chart…</LoadingLine>}
       {chart.isSuccess && people === 0 && <Empty>No one employed today is visible to you.</Empty>}
       {chart.isSuccess && people > 0 && (
         <>
-          <div className="org-stats" aria-label="Chart summary">
+          <div className={SUMMARY_STRIP} aria-label="Chart summary">
             <span>
-              <strong>{people}</strong> {people === 1 ? 'person' : 'people'}
+              <Figure>{people}</Figure> {people === 1 ? 'person' : 'people'}
             </span>
             {flat ? (
-              <span>{reportToViewer ? 'all report to you' : commonManager ? 'all with the same manager' : 'none with a team of their own'}</span>
+              <span>{teamWords(reportToViewer, commonManager)}</span>
             ) : (
               <>
                 <span>
-                  <strong>{managers}</strong> with a team
+                  <Figure>{managers}</Figure> with a team
                 </span>
                 <span>
-                  <strong>{tree.roots.length}</strong> at the top
+                  <Figure>{tree.roots.length}</Figure> at the top
                 </span>
                 <span>
-                  Widest team <strong>{widest}</strong>
+                  Widest team <Figure>{widest}</Figure>
                 </span>
               </>
             )}
-            <span className="hint">As of {formatDate(chart.data.asOf)}</span>
+            <Hint as="span" className="ml-auto phone:ml-0">
+              As of {formatDate(chart.data.asOf)}
+            </Hint>
           </div>
-          <label className="org-search">
+          <FormField className="mb-4 max-w-[460px]">
             Find a person
-            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code, designation, department or location" />
-          </label>
-          {chart.data.truncated && (
-            <p role="status" className="hint">
-              The chart shows the first {people} people only. Use the employee list or a report for the rest.
-            </p>
-          )}
+            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name, code, designation, department or location" />
+          </FormField>
+          {chart.data.truncated && <Hint role="status">The chart shows the first {people} people only. Use the employee list or a report for the rest.</Hint>}
           {shown && shown.size === 0 ? (
             <Empty>No one matches “{search.trim()}”.</Empty>
           ) : (
@@ -268,11 +292,11 @@ export function OrgChartPage() {
               ))}
             </ul>
           )}
-          <p className="hint">
+          <Hint>
             {flat
               ? `Everyone employed today (on probation, confirmed or serving notice) that you may see, as of ${formatDate(chart.data.asOf)}.`
               : `Everyone employed today (on probation, confirmed or serving notice) with their manager on ${formatDate(chart.data.asOf)}. People whose manager is outside what you may see, or who have none, start a branch.`}
-          </p>
+          </Hint>
         </>
       )}
     </Section>

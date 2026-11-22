@@ -2,10 +2,38 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { ButtonRow } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, isForbidden, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, NotPermitted, Section, StateBadge } from '../../ui';
-import { type AccessUser, APPROVE_GRANT, DIMENSION_LABEL, DIMENSIONS, type Grant, GRANT_LIST_LIMIT, type GrantView, LIST, localDay, type Outcome, REVOKE_ROLE, SCOPE_LABEL, SCROLL, shown, useAccessKeys, useRefreshAccess } from './shared';
+import { Badge, Empty, ErrorNote, Item, Notice, NotPermitted, Section, StateBadge, WarningNote } from '../../ui';
+import {
+  type AccessUser,
+  APPROVE_GRANT,
+  DIMENSION_LABEL,
+  DIMENSIONS,
+  FOLD,
+  FOLD_SUMMARY,
+  type Grant,
+  GRANT_LIST_LIMIT,
+  type GrantView,
+  LIST,
+  localDay,
+  type Outcome,
+  REVOKE_ROLE,
+  SCOPE_LABEL,
+  shown,
+  useAccessKeys,
+  useRefreshAccess,
+} from './shared';
+
+/** A grant's decision step in its cell: the reason, the buttons and any refusal, one under another, a little closer than a form. */
+const DECISION = 'flex flex-col items-start gap-[0.4rem]';
 
 // ---------------------------------------------------------------------------------------------------------
 // Grant lists: the selected user's assignments and the company's pending approvals
@@ -36,32 +64,24 @@ export function UserAssignments({
     <Section
       title={`Assignments of ${view.userLabel(userId, account)}`}
       actions={
-        <button type="button" className="secondary" onClick={onClose}>
+        <Button type="button" variant="outline" onClick={onClose}>
           Close
-        </button>
+        </Button>
       }
     >
       {account && (
         <dl className="kv">
-          <div>
-            <dt>Account</dt>
-            <dd>
-              {account} {user && !user.active && <Badge tone="bad">inactive</Badge>}
-            </dd>
-          </div>
-          {user && (
-            <div>
-              <dt>Employee</dt>
-              <dd>{user.employee ? `${user.employee.employeeCode} · ${user.employee.displayName}` : 'No employee link'}</dd>
-            </div>
-          )}
+          <Item term="Account">
+            {account} {user && !user.active && <Badge tone="bad">inactive</Badge>}
+          </Item>
+          {user && <Item term="Employee">{user.employee ? `${user.employee.employeeCode} · ${user.employee.displayName}` : 'No employee link'}</Item>}
         </dl>
       )}
-      {grants.isPending && <p className="hint loading">Loading assignments…</p>}
+      {grants.isPending && <LoadingLine>Loading assignments…</LoadingLine>}
       {isForbidden(grants.error) ? <NotPermitted>The selected role cannot read role assignments.</NotPermitted> : <ErrorNote error={grants.error} />}
       {items && items.length === 0 && <Empty>No role assignments for this user yet.</Empty>}
       {items && items.length > 0 && <GrantTable grants={items} view={view} />}
-      {items && items.length >= GRANT_LIST_LIMIT && <p className="hint">Showing the newest {GRANT_LIST_LIMIT} assignments.</p>}
+      {items && items.length >= GRANT_LIST_LIMIT && <Hint>Showing the newest {GRANT_LIST_LIMIT} assignments.</Hint>}
       {items && items.length > 0 && <CatalogueNote state={view.catalogue} />}
     </Section>
   );
@@ -74,40 +94,33 @@ export function PendingApprovals({ view, onSelectUser }: { view: GrantView; onSe
   const items = shown(pending)?.items;
   return (
     <Section title={`Pending approvals${items ? ` (${items.length})` : ''}`}>
-      {pending.isPending && <p className="hint loading">Loading pending grants…</p>}
+      {pending.isPending && <LoadingLine>Loading pending grants…</LoadingLine>}
       {isForbidden(pending.error) ? <NotPermitted>The selected role cannot read role assignments.</NotPermitted> : <ErrorNote error={pending.error} />}
       {outcome && <OutcomeNote outcome={outcome} />}
       {items && items.length === 0 && <Empty>No grants are waiting for approval.</Empty>}
       {items && items.length > 0 && <GrantTable grants={items} view={view} onSelectUser={onSelectUser} onOutcome={setOutcome} />}
-      {items && items.length >= GRANT_LIST_LIMIT && <p className="hint">Showing the newest {GRANT_LIST_LIMIT} pending grants.</p>}
+      {items && items.length >= GRANT_LIST_LIMIT && <Hint>Showing the newest {GRANT_LIST_LIMIT} pending grants.</Hint>}
       {items && items.length > 0 && <CatalogueNote state={view.catalogue} />}
     </Section>
   );
 }
 
+/** What became of a decision taken in the pending list: done, or overtaken by someone else's change (in the warning tint). */
 function OutcomeNote({ outcome }: { outcome: Outcome }) {
-  if (outcome.tone === 'ok') {
-    return (
-      <p className="ok" role="status">
-        {outcome.text}
-      </p>
-    );
-  }
+  if (outcome.tone === 'ok') return <Notice notice={{ text: outcome.text, ok: true }} />;
   return (
-    <p role="status">
-      <Badge tone="warn">changed</Badge> {outcome.text}
-    </p>
+    <WarningNote badge="changed" role="status">
+      {outcome.text}
+    </WarningNote>
   );
 }
 
 /** Without the catalogue, confidential permissions cannot be marked; say so rather than show them unmarked. */
 function CatalogueNote({ state }: { state: GrantView['catalogue'] }) {
   if (state === 'loaded') return null;
-  if (state === 'loading') return <p className="hint">Confidential permissions are marked once the role catalogue has loaded.</p>;
+  if (state === 'loading') return <Hint>Confidential permissions are marked once the role catalogue has loaded.</Hint>;
   return (
-    <p role="note">
-      <Badge tone="warn">not marked</Badge> The role catalogue could not be loaded, so confidential permissions are not marked. Reload the page before deciding.
-    </p>
+    <WarningNote badge="not marked">The role catalogue could not be loaded, so confidential permissions are not marked. Reload the page before deciding.</WarningNote>
   );
 }
 
@@ -125,69 +138,70 @@ function GrantTable({
   const { can } = useSession();
   const withActions = can(APPROVE_GRANT) || can(REVOKE_ROLE);
   return (
-    <div style={SCROLL}>
-      <table>
-        <thead>
-          <tr>
-            {onSelectUser && <th>Beneficiary</th>}
-            <th>Role</th>
-            <th>Scope</th>
-            <th>State</th>
-            <th>Effective</th>
-            <th>Purpose</th>
-            <th>Permissions</th>
-            <th>Requested by</th>
-            {withActions && <th>Actions</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {grants.map((g) => {
-            const beneficiary = view.userLabel(g.userId, g.userAccountKey);
-            const roleName = view.roleName(g.roleCode);
-            return (
-              <tr key={g.id}>
-                {onSelectUser && (
-                  <td>
-                    <div>{beneficiary}</div>
-                    <button type="button" className="link" aria-label={`Show assignments for ${beneficiary}`} onClick={() => onSelectUser(g.userId, g.userAccountKey ?? null)}>
-                      Show assignments
-                    </button>
-                  </td>
-                )}
-                <td>
-                  {roleName ?? g.roleCode}
-                  {roleName && <div className="hint">{g.roleCode}</div>}
-                </td>
-                <td>
-                  {SCOPE_LABEL[g.scopeKind] ?? g.scopeKind}
-                  <Restrictions filters={g.filters} view={view} />
-                </td>
-                <td>
-                  <StateBadge state={g.state} />
-                </td>
-                <td>
-                  <div>from {localDay(g.effectiveFrom)}</div>
-                  <div className="hint">{g.effectiveTo ? `ends ${localDay(g.effectiveTo)}` : 'no end date'}</div>
-                </td>
-                <td>{g.purpose ?? '—'}</td>
-                <td>
-                  <PermissionList permissionKeys={g.permissions} view={view} />
-                </td>
-                <td>
-                  <div>{view.userLabel(g.requestedBy, g.requestedByAccountKey)}</div>
-                  {g.approvedBy && <div className="hint">approved by {view.userLabel(g.approvedBy, g.approvedByAccountKey)}</div>}
-                </td>
-                {withActions && (
-                  <td>
-                    <GrantActions grant={g} subject={`${roleName ?? g.roleCode} for ${beneficiary}`} onOutcome={onOutcome} />
-                  </td>
-                )}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          {onSelectUser && <TableHead scope="col">Beneficiary</TableHead>}
+          <TableHead scope="col">Role</TableHead>
+          <TableHead scope="col">Scope</TableHead>
+          <TableHead scope="col">State</TableHead>
+          <TableHead scope="col">Effective</TableHead>
+          <TableHead scope="col">Purpose</TableHead>
+          <TableHead scope="col">Permissions</TableHead>
+          <TableHead scope="col">Requested by</TableHead>
+          {withActions && <TableHead scope="col">Actions</TableHead>}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {grants.map((g) => {
+          const beneficiary = view.userLabel(g.userId, g.userAccountKey);
+          const roleName = view.roleName(g.roleCode);
+          return (
+            <TableRow key={g.id}>
+              {onSelectUser && (
+                <TableCell>
+                  <div>{beneficiary}</div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-1"
+                    aria-label={`Show assignments for ${beneficiary}`}
+                    onClick={() => onSelectUser(g.userId, g.userAccountKey ?? null)}
+                  >
+                    Show assignments
+                  </Button>
+                </TableCell>
+              )}
+              <TableCell>
+                {roleName ?? g.roleCode}
+                {roleName && <HintLine>{g.roleCode}</HintLine>}
+              </TableCell>
+              <TableCell>
+                {SCOPE_LABEL[g.scopeKind] ?? g.scopeKind}
+                <Restrictions filters={g.filters} view={view} />
+              </TableCell>
+              <TableCell>
+                <StateBadge state={g.state} />
+              </TableCell>
+              <TableCell>
+                <div>from {localDay(g.effectiveFrom)}</div>
+                <HintLine>{g.effectiveTo ? `ends ${localDay(g.effectiveTo)}` : 'no end date'}</HintLine>
+              </TableCell>
+              <TableCell>{g.purpose ?? '—'}</TableCell>
+              <TableCell>
+                <PermissionList permissionKeys={g.permissions} view={view} />
+              </TableCell>
+              <TableCell>
+                <div>{view.userLabel(g.requestedBy, g.requestedByAccountKey)}</div>
+                {g.approvedBy && <HintLine>approved by {view.userLabel(g.approvedBy, g.approvedByAccountKey)}</HintLine>}
+              </TableCell>
+              {withActions && <GrantActions grant={g} subject={`${roleName ?? g.roleCode} for ${beneficiary}`} onOutcome={onOutcome} />}
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -195,9 +209,9 @@ function GrantTable({
 function Restrictions({ filters, view }: { filters: Grant['filters']; view: GrantView }) {
   if (!filters) return null; // not reported: claim nothing
   const dims = DIMENSIONS.filter((d) => (filters[d]?.length ?? 0) > 0);
-  if (dims.length === 0) return <div className="hint">no further restrictions</div>;
+  if (dims.length === 0) return <HintLine>no further restrictions</HintLine>;
   return (
-    <ul style={LIST}>
+    <ul className={LIST}>
       {dims.map((d) => (
         <li key={d}>
           {DIMENSION_LABEL[d]}: {(filters[d] ?? []).map((id) => view.restriction(d, id)).join(', ')}
@@ -209,7 +223,7 @@ function Restrictions({ filters, view }: { filters: Grant['filters']; view: Gran
 
 /** Confidential permissions (and any the catalogue cannot classify) are always listed and labelled; the rest fold away. */
 function PermissionList({ permissionKeys, view }: { permissionKeys: string[]; view: GrantView }) {
-  if (permissionKeys.length === 0) return <span className="hint">No permissions</span>;
+  if (permissionKeys.length === 0) return <Hint as="span">No permissions</Hint>;
   const keys = [...permissionKeys].sort();
   const marked = view.catalogue === 'loaded';
   const confidential = marked ? keys.filter((k) => view.confidential(k) === true) : [];
@@ -220,7 +234,7 @@ function PermissionList({ permissionKeys, view }: { permissionKeys: string[]; vi
   return (
     <>
       {listed > 0 && (
-        <ul style={LIST}>
+        <ul className={LIST}>
           {confidential.map((k) => (
             <li key={k}>
               <code>{k}</code> <Badge tone="warn">confidential</Badge>
@@ -234,9 +248,9 @@ function PermissionList({ permissionKeys, view }: { permissionKeys: string[]; vi
         </ul>
       )}
       {other.length > 0 && (
-        <details>
-          <summary>{listed > 0 ? `${other.length} other permission${plural}` : `${other.length} permission${plural}`}</summary>
-          <ul style={LIST}>
+        <details className={FOLD}>
+          <summary className={FOLD_SUMMARY}>{listed > 0 ? `${other.length} other permission${plural}` : `${other.length} permission${plural}`}</summary>
+          <ul className={LIST}>
             {other.map((k) => (
               <li key={k}>
                 <code>{k}</code>
@@ -281,7 +295,13 @@ function GrantActions({ grant, subject, onOutcome }: { grant: Grant; subject: st
 
   const decidable = grant.state === 'PENDING' && can(APPROVE_GRANT);
   const revocable = grant.state === 'ACTIVE' && can(REVOKE_ROLE);
-  if (!decidable && !revocable) return <ErrorNote error={act.error} />;
+  if (!decidable && !revocable) {
+    return (
+      <TableCell>
+        <ErrorNote error={act.error} />
+      </TableCell>
+    );
+  }
 
   const open = (next: 'reject' | 'revoke') => {
     act.reset();
@@ -292,60 +312,62 @@ function GrantActions({ grant, subject, onOutcome }: { grant: Grant; subject: st
   if (mode && ((mode === 'reject' && decidable) || (mode === 'revoke' && revocable))) {
     const noun = mode === 'reject' ? 'rejection' : 'revocation';
     return (
-      <form
-        className="stack"
-        style={{ gap: '0.4rem' }}
-        onSubmit={(e: FormEvent) => {
-          e.preventDefault();
-          const text = reason.trim();
-          if (text && !act.isPending) act.mutate({ action: mode, version: grant.version, reason: text });
-        }}
-      >
-        <input aria-label={`Reason for ${noun}`} placeholder="Reason (required)" required maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
-        {mode === 'revoke' && stored?.assignmentId === grant.id && (
-          <p className="hint">This is the assignment you are signed in with: revoking it ends your access in this role.</p>
-        )}
-        <div className="row">
-          <button type="submit" className="danger" disabled={!reason.trim() || act.isPending}>
-            {mode === 'reject' ? 'Confirm rejection' : 'Confirm revocation'}
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              act.reset();
-              setMode(null);
-              setReason('');
-            }}
-          >
-            Cancel
-          </button>
-        </div>
-        <ErrorNote error={act.error} />
-      </form>
+      <RowActionsCell expanded>
+        <form
+          className={DECISION}
+          onSubmit={(e: FormEvent) => {
+            e.preventDefault();
+            const text = reason.trim();
+            if (text && !act.isPending) act.mutate({ action: mode, version: grant.version, reason: text });
+          }}
+        >
+          <Input aria-label={`Reason for ${noun}`} placeholder="Reason (required)" required maxLength={500} autoFocus value={reason} onChange={(e) => setReason(e.target.value)} />
+          {mode === 'revoke' && stored?.assignmentId === grant.id && <Hint>This is the assignment you are signed in with: revoking it ends your access in this role.</Hint>}
+          <ButtonRow>
+            <Button type="submit" variant="danger" size="sm" disabled={!reason.trim() || act.isPending}>
+              {mode === 'reject' ? 'Confirm rejection' : 'Confirm revocation'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                act.reset();
+                setMode(null);
+                setReason('');
+              }}
+            >
+              Cancel
+            </Button>
+          </ButtonRow>
+          <ErrorNote error={act.error} />
+        </form>
+      </RowActionsCell>
     );
   }
 
   return (
-    <div className="stack" style={{ gap: '0.4rem' }}>
-      <div className="row">
-        {decidable && (
-          <>
-            <button type="button" disabled={act.isPending} onClick={() => act.mutate({ action: 'approve', version: grant.version })}>
-              Approve
-            </button>
-            <button type="button" className="danger" disabled={act.isPending} onClick={() => open('reject')}>
-              Reject
-            </button>
-          </>
-        )}
-        {revocable && (
-          <button type="button" className="danger" disabled={act.isPending} onClick={() => open('revoke')}>
-            Revoke
-          </button>
-        )}
+    <RowActionsCell expanded={!!act.error}>
+      <div className={DECISION}>
+        <RowActions>
+          {decidable && (
+            <>
+              <Button type="button" size="sm" disabled={act.isPending} onClick={() => act.mutate({ action: 'approve', version: grant.version })}>
+                Approve
+              </Button>
+              <Button type="button" variant="danger" size="sm" disabled={act.isPending} onClick={() => open('reject')}>
+                Reject
+              </Button>
+            </>
+          )}
+          {revocable && (
+            <Button type="button" variant="danger" size="sm" disabled={act.isPending} onClick={() => open('revoke')}>
+              Revoke
+            </Button>
+          )}
+        </RowActions>
+        <ErrorNote error={act.error} />
       </div>
-      <ErrorNote error={act.error} />
-    </div>
+    </RowActionsCell>
   );
 }

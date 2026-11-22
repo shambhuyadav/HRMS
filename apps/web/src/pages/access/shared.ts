@@ -1,7 +1,7 @@
-// Shared parts of the access screens: permission keys, labels, API shapes, styles, dates and the query hooks.
+// Shared parts of the access screens: permission keys, labels, API shapes, layout classes, dates and the query hooks.
 
 import { type UseQueryResult, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, useMemo } from 'react';
+import { useMemo } from 'react';
 import { api, formatDate, isForbidden } from '../../api';
 import { useSession } from '../../session';
 
@@ -92,10 +92,12 @@ export interface ProposalBody {
 export type RolesQuery = UseQueryResult<{ items: CatalogueRole[] }, Error>;
 export type OrgQuery = UseQueryResult<{ items: OrgItem[] }, Error>;
 
-export const SCROLL: CSSProperties = { overflowX: 'auto' };
-export const LIST: CSSProperties = { margin: 0, paddingLeft: '1.1rem' };
-export const GROUP: CSSProperties = { border: 'none', margin: 0, padding: 0, minWidth: 0 };
-export const TEXTAREA: CSSProperties = { font: 'inherit', padding: '0.4rem 0.5rem', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--text)', resize: 'vertical' };
+/** A list in a table cell (permissions, restrictions): it starts on the cell's first line, indented only for its bullets. */
+export const LIST = 'm-0 pl-[1.1rem]';
+/** A folded part (`<details>`: the permissions that are neither confidential nor unclassified); its summary names it. */
+export const FOLD = 'group/fold';
+/** The summary of a FOLD, in the accent colour, with room under it while the part is open; a 44px target on a phone. */
+export const FOLD_SUMMARY = 'w-max cursor-pointer text-[0.86rem] font-semibold text-[var(--accent)] group-open/fold:mb-[0.6rem] phone:py-3';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 

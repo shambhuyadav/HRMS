@@ -1,13 +1,40 @@
 // Offer letters (FR-014, FR-017, FR-018; DF09): preview, generation, download and the delivery record.
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { CircleAlertIcon, CircleCheckIcon } from 'lucide-react';
 import { type FormEvent, useId, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Alert } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, download, formatDate, idempotencyKey, isConflict, localDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, Section } from '../../ui';
-import { PRE } from './candidate-documents';
+import { Badge, Empty, Notice, Section } from '../../ui';
 import { DELIVERY_WORDS, LETTER_DOWNLOAD_WORDS, LETTER_ISSUE_WORDS, LoadProblem, Refusal, refusalText, type Words } from './refusals';
-import { COMPENSATION_READ, DELIVERY_CATEGORY, enc, H3, ISSUE_LETTER, labelOf, LETTER_DELIVERY_LABEL, LETTER_ISSUING_STATES, LETTER_TEMPLATE_READ, OFFER_LETTER_TYPE, OFFER_STATE_LABEL, PATHS, Problem, SCROLL, SR_ONLY, TEMPLATE_CODE, useKeys, useRefresh } from './shared';
+import {
+  COMPENSATION_READ,
+  DELIVERY_CATEGORY,
+  enc,
+  ISSUE_LETTER,
+  labelOf,
+  LETTER_DELIVERY_LABEL,
+  LETTER_ISSUING_STATES,
+  LETTER_TEMPLATE_READ,
+  OFFER_LETTER_TYPE,
+  OFFER_STATE_LABEL,
+  PATHS,
+  PREFORMATTED,
+  Problem,
+  TEMPLATE_CODE,
+  useKeys,
+  useRefresh,
+} from './shared';
 import type { DeliveryRecorded, LetterTemplateSummary, OfferLetter, OfferLetterListed, OfferLetterPreview, OfferLetters, OfferView, ReferenceValues } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -52,67 +79,63 @@ export function OfferLettersSection({ offer: o }: { offer: OfferView }) {
   const deliverable = canIssue ? items.filter((l) => l.deliveryState === 'NOT_DELIVERED' && l.current) : [];
   return (
     <Section title="Offer letters (confidential)">
-      <p className="hint">
+      <Hint>
         The system never e-mails or sends an offer letter. Download the letter here and hand it to the candidate yourself, outside the system; then record how and when it
         was delivered.
-      </p>
+      </Hint>
       {canRead ? (
         <>
-          {letters.isPending && <p className="hint loading">Loading the offer letters…</p>}
+          {letters.isPending && <LoadingLine>Loading the offer letters…</LoadingLine>}
           <LoadProblem error={letters.error} forbidden="The selected role cannot read this offer’s letters." missing="This offer’s letters are not available in the selected role’s scope." />
           {letters.data && items.length === 0 && <Empty>No offer letter has been generated for this offer.</Empty>}
           {items.length > 0 && <OfferLetterTable items={items} busy={open.isPending} onOpen={(l) => open.mutate(l)} />}
           <Refusal error={open.error} words={LETTER_DOWNLOAD_WORDS} />
         </>
       ) : (
-        <p className="hint">Reading and downloading stored letters, and recording their delivery, needs the grant that reads the offer compensation.</p>
+        <Hint>Reading and downloading stored letters, and recording their delivery, needs the grant that reads the offer compensation.</Hint>
       )}
-      {message && (
-        <p className={message.ok ? 'ok' : 'error'} role={message.ok ? 'status' : 'alert'}>
-          {message.text}
-        </p>
-      )}
+      <Notice notice={message} />
       {deliverable.length > 0 && <DeliveryForms letters={deliverable} offer={o} onFinished={(text, ok) => setMessage({ text, ok })} />}
       {issuing && <OfferLetterComposer offer={o} />}
-      {canIssue && !issuing && <p className="hint">{`Only an approved or accepted offer issues a letter. This offer’s state: ${labelOf(OFFER_STATE_LABEL, o.state)}.`}</p>}
+      {canIssue && !issuing && <Hint>{`Only an approved or accepted offer issues a letter. This offer’s state: ${labelOf(OFFER_STATE_LABEL, o.state)}.`}</Hint>}
     </Section>
   );
 }
 
 function OfferLetterTable({ items, busy, onOpen }: { items: OfferLetterListed[]; busy: boolean; onOpen: (l: OfferLetter) => void }) {
   return (
-    <div style={SCROLL}>
-      <table aria-label="Offer letters">
-        <thead>
-          <tr>
-            <th scope="col">Letter number</th>
-            <th scope="col">Template</th>
-            <th scope="col">Offer revision</th>
-            <th scope="col">Generated</th>
-            <th scope="col">Delivery</th>
-            <th scope="col">
-              <span style={SR_ONLY}>Download</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((l) => (
-            <tr key={l.id}>
-              <td>{l.outputNumber}</td>
-              <td>{`${l.templateCode}, revision ${l.templateRevision}`}</td>
-              <td>{l.offerRevision}</td>
-              <td>{formatDate(l.generatedAt)}</td>
-              <td>{deliveryText(l)}</td>
-              <td>
-                <button type="button" className="secondary" disabled={busy} aria-label={`Download offer letter ${l.outputNumber}`} onClick={() => onOpen(l)}>
+    <Table aria-label="Offer letters">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Letter number</TableHead>
+          <TableHead scope="col">Template</TableHead>
+          <TableHead scope="col">Offer revision</TableHead>
+          <TableHead scope="col">Generated</TableHead>
+          <TableHead scope="col">Delivery</TableHead>
+          <TableHead scope="col">
+            <span className="sr-only">Download</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((l) => (
+          <TableRow key={l.id}>
+            <TableCell>{l.outputNumber}</TableCell>
+            <TableCell>{`${l.templateCode}, revision ${l.templateRevision}`}</TableCell>
+            <TableCell>{l.offerRevision}</TableCell>
+            <TableCell>{formatDate(l.generatedAt)}</TableCell>
+            <TableCell>{deliveryText(l)}</TableCell>
+            <RowActionsCell>
+              <RowActions>
+                <Button type="button" variant="outline" size="sm" disabled={busy} aria-label={`Download offer letter ${l.outputNumber}`} onClick={() => onOpen(l)}>
                   Download
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+                </Button>
+              </RowActions>
+            </RowActionsCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -223,89 +246,105 @@ function OfferLetterComposer({ offer: o }: { offer: OfferView }) {
 
   const blockedId = `${id}-blocked`;
   return (
-    <div className="stack">
-      <h3 style={H3}>Issue an offer letter</h3>
-      <p className="hint">
+    <div className="flex flex-col gap-3">
+      <CardSubheading>Issue an offer letter</CardSubheading>
+      <Hint>
         The letter takes its values from the offer’s approved revision {o.currentRevision}: the candidate, the requisition’s post, the proposed joining date and the
         compensation. Nothing is typed into a letter, and a missing mandatory value blocks the final letter.
-      </p>
-      <form className="row" aria-label="Choose an offer letter template" onSubmit={runPreview} noValidate>
+      </Hint>
+      <FormGrid aria-label="Choose an offer letter template" onSubmit={runPreview} noValidate>
         {canTemplates ? (
-          <label className="inline">
+          <FormField>
             Offer letter template{' '}
-            <select value={code} disabled={busy} onChange={(e) => choose(e.target.value)}>
+            <NativeSelect value={code} disabled={busy} onChange={(e) => choose(e.target.value)}>
               <option value="">Choose…</option>
               {usable.map((t) => (
                 <option key={t.id} value={t.code}>
                   {t.name} ({t.code}, revision {t.publishedRevision})
                 </option>
               ))}
-            </select>
-          </label>
+            </NativeSelect>
+          </FormField>
         ) : (
-          <label className="inline">
+          <FormField>
             Offer letter template code{' '}
-            <input value={code} maxLength={40} disabled={busy} onChange={(e) => choose(e.target.value.toUpperCase())} />
-          </label>
+            <Input value={code} maxLength={40} disabled={busy} onChange={(e) => choose(e.target.value.toUpperCase())} />
+          </FormField>
         )}
-        <button type="submit" disabled={busy}>
+        <Button type="submit" disabled={busy}>
           Preview
-        </button>
-      </form>
+        </Button>
+      </FormGrid>
       {canTemplates && templates.data && usable.length === 0 && (
-        <p className="hint">
+        <Hint>
           No offer letter template is active with a published revision. HR writes and publishes one of the offer letter type under{' '}
           <Link to={PATHS.letterTemplates}>Letter templates</Link>.
-        </p>
+        </Hint>
       )}
       <LoadProblem error={templates.error} forbidden="The selected role cannot list letter templates." />
       <Problem text={problem} />
       <Refusal error={preview.error} words={words} />
-      {preview.isPending && <p className="hint">Preparing the preview…</p>}
-      {current && (
-        <div role="region" aria-label="Offer letter preview">
-          <h4 style={H3}>
-            Preview of {current.templateCode}, revision {current.templateRevision}, for offer revision {current.offerRevision}
-          </h4>
-          <p>
-            <Badge tone="warn">preview only</Badge> Nothing was stored or sent.
-          </p>
-          {current.missing.length > 0 ? (
-            <p id={blockedId} role="alert" className="error">
-              The final letter cannot be generated while the approved offer lacks these mandatory values: {current.missing.map((k) => placeholderName(labels, k)).join(', ')}.
-            </p>
-          ) : (
-            <p className="ok">Every mandatory value is present.</p>
-          )}
-          <pre style={PRE}>{current.text}</pre>
-        </div>
-      )}
-      <p className="hint">
+      {preview.isPending && <Hint>Preparing the preview…</Hint>}
+      {current && <LetterPreview preview={current} labels={labels} blockedId={blockedId} />}
+      <Hint>
         Generating stores the final letter as a confidential file with its template revision, the offer revision and you as its generator. It is not sent: download it
         from the list of offer letters and hand it to the candidate.
-      </p>
-      {current === null && !generated && <p className="hint">Preview the letter first: the final letter is offered once a preview has every mandatory value.</p>}
-      <div className="row">
-        <button type="button" disabled={busy || !canGenerate} aria-describedby={current && !canGenerate ? blockedId : undefined} onClick={generateFinal}>
+      </Hint>
+      {current === null && !generated && <Hint>Preview the letter first: the final letter is offered once a preview has every mandatory value.</Hint>}
+      <ButtonRow>
+        <Button type="button" disabled={busy || !canGenerate} aria-describedby={current && !canGenerate ? blockedId : undefined} onClick={generateFinal}>
           Generate final letter
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       {generate.error instanceof ApiError ? (
         <Refusal error={generate.error} words={words} />
       ) : (
         generate.error && (
-          <p role="alert" className="error">
-            No answer came back, so the letter may or may not have been stored; the offer letters have been read again. Generating it again from the same template stores
-            it at most once.
-          </p>
+          <Problem text="No answer came back, so the letter may or may not have been stored; the offer letters have been read again. Generating it again from the same template stores it at most once." />
         )
       )}
       {generated && (
-        <p className="ok" role="status">
-          {generated.replayed ? 'The letter was already stored by the earlier attempt: ' : 'Final letter stored: '}
-          {`letter number ${generated.outputNumber} (${generated.templateCode}, revision ${generated.templateRevision}; offer revision ${generated.offerRevision}). It was not sent: download it, hand it to the candidate and record the delivery.`}
-        </p>
+        <Notice
+          notice={{
+            text: `${generated.replayed ? 'The letter was already stored by the earlier attempt: ' : 'Final letter stored: '}letter number ${generated.outputNumber} (${generated.templateCode}, revision ${generated.templateRevision}; offer revision ${generated.offerRevision}). It was not sent: download it, hand it to the candidate and record the delivery.`,
+            ok: true,
+          }}
+        />
       )}
+    </div>
+  );
+}
+
+/**
+ * A preview of the letter, which stores and sends nothing: whether the final letter can be generated, then the text. The line
+ * saying every mandatory value is present has the success look but no role: it describes the preview, it is not an action's outcome.
+ */
+function LetterPreview({ preview, labels, blockedId }: { preview: OfferLetterPreview; labels: ReadonlyMap<string, string>; blockedId: string }) {
+  return (
+    <div role="region" aria-label="Offer letter preview">
+      <CardSubheading level={4}>
+        Preview of {preview.templateCode}, revision {preview.templateRevision}, for offer revision {preview.offerRevision}
+      </CardSubheading>
+      <p>
+        <Badge tone="warn">preview only</Badge> Nothing was stored or sent.
+      </p>
+      {preview.missing.length > 0 ? (
+        <Alert asChild variant="destructive">
+          <p id={blockedId} role="alert" className="error">
+            <CircleAlertIcon aria-hidden="true" />
+            The final letter cannot be generated while the approved offer lacks these mandatory values: {preview.missing.map((k) => placeholderName(labels, k)).join(', ')}.
+          </p>
+        </Alert>
+      ) : (
+        // An Alert says role="alert" unless told otherwise; this line has none.
+        <Alert asChild variant="success" role={undefined}>
+          <p className="ok">
+            <CircleCheckIcon aria-hidden="true" />
+            Every mandatory value is present.
+          </p>
+        </Alert>
+      )}
+      <pre className={PREFORMATTED}>{preview.text}</pre>
     </div>
   );
 }
@@ -321,12 +360,20 @@ function DeliveryForms({ letters, offer: o, onFinished }: { letters: OfferLetter
   const choices = methods.data?.items ?? [];
   return (
     <>
-      {methods.isPending && <p className="hint loading">Loading the delivery methods…</p>}
+      {methods.isPending && <LoadingLine>Loading the delivery methods…</LoadingLine>}
       <LoadProblem error={methods.error} forbidden="The selected role cannot list the delivery methods of offer letters." />
-      {methods.data && choices.length === 0 && <p className="hint">No delivery method of offer letters is active in this company. Ask HR to set one up.</p>}
+      {methods.data && choices.length === 0 && <Hint>No delivery method of offer letters is active in this company. Ask HR to set one up.</Hint>}
       {choices.length > 0 && letters.map((l) => <DeliveryForm key={l.id} letter={l} offer={o} methods={choices} onFinished={onFinished} />)}
     </>
   );
+}
+
+/** The delivery's required answers, checked before sending; whether the date is acceptable is the server's call. */
+function deliveryProblem(method: string, deliveredOn: string, confirmed: boolean, recipient: string): string | null {
+  if (!method) return 'Choose how the letter was delivered.';
+  if (!deliveredOn) return 'Enter the date the letter was delivered.';
+  if (!confirmed) return `Confirm that the letter went to the offer’s candidate, ${recipient}.`;
+  return null;
 }
 
 function DeliveryForm({
@@ -365,13 +412,7 @@ function DeliveryForm({
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (record.isPending) return;
-    const missing = !method
-      ? 'Choose how the letter was delivered.'
-      : !deliveredOn
-        ? 'Enter the date the letter was delivered.'
-        : !confirmed
-          ? `Confirm that the letter went to the offer’s candidate, ${recipient}.`
-          : null;
+    const missing = deliveryProblem(method, deliveredOn, confirmed, recipient);
     setProblem(missing);
     if (missing) {
       record.reset();
@@ -380,41 +421,38 @@ function DeliveryForm({
     record.mutate({ deliveryMethod: method, deliveredOn, recipientConfirmed: true });
   };
   return (
-    <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-      <h3 id={`${id}-title`} className="wide" style={H3}>
-        Record the delivery of offer letter {l.outputNumber}
-      </h3>
-      <label>
+    <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+      <CardSubheading id={`${id}-title`}>Record the delivery of offer letter {l.outputNumber}</CardSubheading>
+      <FormField>
         Delivery method (required)
-        <select value={method} onChange={(e) => setMethod(e.target.value)}>
+        <NativeSelect value={method} onChange={(e) => setMethod(e.target.value)}>
           <option value="">Choose…</option>
           {methods.map((m) => (
             <option key={m.code} value={m.code}>
               {m.label}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Delivered on (required)
-        <input type="date" required value={deliveredOn} onChange={(e) => setDeliveredOn(e.target.value)} />
-      </label>
-      <label className="check wide">
+        <Input type="date" required value={deliveredOn} onChange={(e) => setDeliveredOn(e.target.value)} />
+      </FormField>
+      <CheckField className="col-span-full">
         <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> The letter went to the offer’s candidate, {recipient}
-      </label>
-      <p className="hint wide">Record the delivery once the letter is in the candidate’s hands. A recorded delivery is final.</p>
+      </CheckField>
+      <Hint>Record the delivery once the letter is in the candidate’s hands. A recorded delivery is final.</Hint>
       <Problem text={problem} />
       {record.error && !isConflict(record.error) && (
-        <div className="wide">
+        <div className="col-span-full">
           <Refusal error={record.error} words={DELIVERY_WORDS} />
         </div>
       )}
-      <div className="wide row">
-        <button type="submit" disabled={record.isPending}>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={record.isPending}>
           Record delivery
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ButtonRow>
+    </FormGrid>
   );
 }
-

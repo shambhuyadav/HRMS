@@ -1,6 +1,12 @@
 // The TDS challans screen (CL-081): challans, the upload, and the reconciliation by month.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, formatMonth, localDate } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section } from '../../ui';
@@ -72,60 +78,64 @@ export function TdsChallansPage() {
   return (
     <>
       <Section title="TDS challans">
-        <div className="filters">
-          <label>
+        <FilterBar>
+          <FormField>
             Financial year
-            <input value={year} onChange={(e) => setYear(e.target.value)} pattern="\d{4}-\d{2}" />
-          </label>
-        </div>
+            <Input value={year} onChange={(e) => setYear(e.target.value)} pattern="\d{4}-\d{2}" />
+          </FormField>
+        </FilterBar>
         <ErrorNote error={challans.error} />
         {challans.data && challans.data.items.length === 0 && <Empty>No challan is recorded for {year}.</Empty>}
         {challans.data && challans.data.items.length > 0 && (
-          <table aria-label="Challans">
-            <thead>
-              <tr>
-                <th scope="col">Month</th>
-                <th scope="col">Section</th>
-                <th scope="col">BSR code</th>
-                <th scope="col">Serial</th>
-                <th scope="col">Deposited on</th>
-                <th scope="col">Amount</th>
-                <th scope="col">State</th>
-                {manage && <th scope="col">Action</th>}
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Challans">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Month</TableHead>
+                <TableHead scope="col">Section</TableHead>
+                <TableHead scope="col">BSR code</TableHead>
+                <TableHead scope="col">Serial</TableHead>
+                <TableHead scope="col">Deposited on</TableHead>
+                <TableHead scope="col">Amount</TableHead>
+                <TableHead scope="col">State</TableHead>
+                {manage && <TableHead scope="col">Action</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {challans.data.items.map((c) => (
-                <tr key={c.id}>
-                  <td>{formatMonth(c.month)}</td>
-                  <td>{c.section}</td>
-                  <td>{c.bsrCode}</td>
-                  <td>{c.challanSerial}</td>
-                  <td>{formatDate(c.depositDate)}</td>
-                  <td>{amountsHidden ? 'Hidden' : amount(c.amount)}</td>
-                  <td>{c.state === 'CANCELLED' ? `cancelled: ${c.cancelReason ?? ''}` : 'recorded'}</td>
+                <TableRow key={c.id}>
+                  <TableCell>{formatMonth(c.month)}</TableCell>
+                  <TableCell>{c.section}</TableCell>
+                  <TableCell>{c.bsrCode}</TableCell>
+                  <TableCell>{c.challanSerial}</TableCell>
+                  <TableCell>{formatDate(c.depositDate)}</TableCell>
+                  <TableCell>{amountsHidden ? 'Hidden' : amount(c.amount)}</TableCell>
+                  <TableCell>{c.state === 'CANCELLED' ? `cancelled: ${c.cancelReason ?? ''}` : 'recorded'}</TableCell>
                   {manage && (
-                    <td>
+                    <RowActionsCell>
                       {c.state === 'RECORDED' && (
-                        <button
-                          type="button"
-                          disabled={cancel.isPending}
-                          onClick={() => {
-                            const reason = window.prompt('Why is this challan cancelled?');
-                            if (reason?.trim()) cancel.mutate({ c, reason: reason.trim() });
-                          }}
-                        >
-                          Cancel
-                        </button>
+                        <RowActions>
+                          <Button
+                            type="button"
+                            variant="danger"
+                            size="sm"
+                            disabled={cancel.isPending}
+                            onClick={() => {
+                              const reason = window.prompt('Why is this challan cancelled?');
+                              if (reason?.trim()) cancel.mutate({ c, reason: reason.trim() });
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </RowActions>
                       )}
-                    </td>
+                    </RowActionsCell>
                   )}
-                </tr>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-        {challans.data && challans.data.items.length > 0 && amountsHidden && <p className="hint">The amounts deposited are company payroll figures: seeing them needs the payroll report read duty, company-wide.</p>}
+        {challans.data && challans.data.items.length > 0 && amountsHidden && <Hint>The amounts deposited are company payroll figures: seeing them needs the payroll report read duty, company-wide.</Hint>}
         <ErrorNote error={cancel.error} />
       </Section>
       {can(REPORT_READ) && (
@@ -133,32 +143,32 @@ export function TdsChallansPage() {
           <ErrorNote error={reconciliation.error} />
           {reconciliation.data && (
             <>
-              <p className="hint">Form 24Q: {plain(reconciliation.data.form24Q.status)}. {reconciliation.data.form24Q.reason}</p>
+              <Hint>Form 24Q: {plain(reconciliation.data.form24Q.status)}. {reconciliation.data.form24Q.reason}</Hint>
               {reconciliation.data.months.length === 0 ? (
                 <Empty>Nothing deducted or deposited in {year}.</Empty>
               ) : (
-                <table aria-label="Reconciliation">
-                  <thead>
-                    <tr>
-                      <th scope="col">Month</th>
-                      <th scope="col">TDS deducted</th>
-                      <th scope="col">Deposited</th>
-                      <th scope="col">Difference</th>
-                      <th scope="col">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+                <Table aria-label="Reconciliation">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead scope="col">Month</TableHead>
+                      <TableHead scope="col">TDS deducted</TableHead>
+                      <TableHead scope="col">Deposited</TableHead>
+                      <TableHead scope="col">Difference</TableHead>
+                      <TableHead scope="col">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {reconciliation.data.months.map((m) => (
-                      <tr key={m.month}>
-                        <td>{formatMonth(m.month)}</td>
-                        <td>{amount(m.deducted)}</td>
-                        <td>{amount(m.deposited)}</td>
-                        <td>{amount(m.difference)}</td>
-                        <td>{plain(m.status)}</td>
-                      </tr>
+                      <TableRow key={m.month}>
+                        <TableCell>{formatMonth(m.month)}</TableCell>
+                        <TableCell>{amount(m.deducted)}</TableCell>
+                        <TableCell>{amount(m.deposited)}</TableCell>
+                        <TableCell>{amount(m.difference)}</TableCell>
+                        <TableCell>{plain(m.status)}</TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
+                  </TableBody>
+                </Table>
               )}
             </>
           )}
@@ -167,42 +177,41 @@ export function TdsChallansPage() {
       {manage && (
         <>
           <Section title="Enter a challan">
-            <form
-              className="grid-form"
+            <FormGrid
               aria-label="Enter a challan"
               onSubmit={(e: FormEvent) => {
                 e.preventDefault();
                 if (!record.isPending) record.mutate();
               }}
             >
-              <label>
+              <FormField>
                 Month
-                <input type="month" value={form.month} onChange={set('month')} required />
-              </label>
-              <label>
+                <Input type="month" value={form.month} onChange={set('month')} required />
+              </FormField>
+              <FormField>
                 Section
-                <input value={form.section} onChange={set('section')} required maxLength={10} />
-              </label>
-              <label>
+                <Input value={form.section} onChange={set('section')} required maxLength={10} />
+              </FormField>
+              <FormField>
                 BSR code
-                <input value={form.bsrCode} onChange={set('bsrCode')} required maxLength={7} />
-              </label>
-              <label>
+                <Input value={form.bsrCode} onChange={set('bsrCode')} required maxLength={7} />
+              </FormField>
+              <FormField>
                 Challan serial
-                <input value={form.challanSerial} onChange={set('challanSerial')} required maxLength={5} />
-              </label>
-              <label>
+                <Input value={form.challanSerial} onChange={set('challanSerial')} required maxLength={5} />
+              </FormField>
+              <FormField>
                 Deposit date
-                <input type="date" value={form.depositDate} onChange={set('depositDate')} required />
-              </label>
-              <label>
+                <Input type="date" value={form.depositDate} onChange={set('depositDate')} required />
+              </FormField>
+              <FormField>
                 Amount
-                <input value={form.amount} onChange={set('amount')} required inputMode="decimal" />
-              </label>
-              <button type="submit" disabled={record.isPending}>
+                <Input value={form.amount} onChange={set('amount')} required inputMode="decimal" />
+              </FormField>
+              <Button type="submit" disabled={record.isPending}>
                 Record challan
-              </button>
-            </form>
+              </Button>
+            </FormGrid>
             <ErrorNote error={record.error} />
           </Section>
           <UploadPanel template={TDS_CHALLAN_TEMPLATE} title="Upload TDS challans" fileLabel="Challan file" />

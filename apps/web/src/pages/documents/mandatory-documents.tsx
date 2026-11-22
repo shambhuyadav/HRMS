@@ -1,12 +1,19 @@
 // Mandatory document types and the employee document compliance report (CL-150; FR-010; FR-056).
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint, HintLine } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, formatDate, isForbidden, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, ErrorNote, NotPermitted, Section } from '../../ui';
+import { Badge, Empty, ErrorNote, NotPermitted, Notice, Section } from '../../ui';
 import { keepOnPage, ReportExport } from '../leave-admin';
 import { Refusal, type Words } from './refusals';
-import { SCROLL, SR_ONLY } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Mandatory document types and the employee document compliance report (CL-150; FR-010; FR-056; migration 0261;
@@ -94,54 +101,51 @@ function MandatoryTypes() {
   const canManage = can(REQUIREMENT_MANAGE);
   return (
     <Section title="Mandatory document types">
-      <p className="hint">
+      <Hint>
         Each employee must hold a document of every type in force for them: the company-wide ones and those of their employment type. A requirement starts today or later and is ended with a
         reason; it is never edited or deleted, so earlier days keep the rules they had.
-      </p>
-      {notice && (
-        <p className="ok" role="status">
-          {notice}
-        </p>
-      )}
-      {list.isPending && <p className="hint loading">Loading the mandatory document types…</p>}
+      </Hint>
+      {notice && <Notice notice={{ text: notice, ok: true }} />}
+      {list.isPending && <LoadingLine>Loading the mandatory document types…</LoadingLine>}
       {isForbidden(list.error) ? <NotPermitted>The selected role cannot read the mandatory document types.</NotPermitted> : <ErrorNote error={list.error} />}
       {data && data.items.length === 0 && <Empty>No document type is mandatory yet.</Empty>}
       {data && data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Mandatory document types">
-            <thead>
-              <tr>
-                <th scope="col">Document type</th>
-                <th scope="col">Employees</th>
-                <th scope="col">From</th>
-                <th scope="col">Status</th>
-                <th scope="col">Reason</th>
+        <Table aria-label="Mandatory document types">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Document type</TableHead>
+              <TableHead scope="col">Employees</TableHead>
+              <TableHead scope="col">From</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Reason</TableHead>
+              {canManage && (
+                <TableHead scope="col">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((r) => (
+              <TableRow key={r.id}>
+                <TableCell>{r.documentType.label}</TableCell>
+                <TableCell>{r.employmentType ? `${r.employmentType.label} only` : 'All employment types'}</TableCell>
+                <TableCell>{formatDate(r.effectiveFrom)}</TableCell>
+                <TableCell>
+                  <Badge tone={r.inForceToday ? 'good' : 'neutral'}>{requirementState(r, data.businessDate)}</Badge>
+                </TableCell>
+                <TableCell>
+                  {r.reason}
+                  {r.endReason && <HintLine>{`Ended: ${r.endReason}`}</HintLine>}
+                </TableCell>
                 {canManage && (
-                  <th scope="col">
-                    <span style={SR_ONLY}>Actions</span>
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {data.items.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.documentType.label}</td>
-                  <td>{r.employmentType ? `${r.employmentType.label} only` : 'All employment types'}</td>
-                  <td>{formatDate(r.effectiveFrom)}</td>
-                  <td>
-                    <Badge tone={r.inForceToday ? 'good' : 'neutral'}>{requirementState(r, data.businessDate)}</Badge>
-                  </td>
-                  <td>
-                    {r.reason}
-                    {r.endReason && <div className="hint">{`Ended: ${r.endReason}`}</div>}
-                  </td>
-                  {canManage && (
-                    <td>
-                      {r.effectiveTo === null && (
-                        <button
+                  <RowActionsCell>
+                    {r.effectiveTo === null && (
+                      <RowActions>
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="danger"
+                          size="sm"
                           aria-label={`End the requirement for ${r.documentType.label}${r.employmentType ? ` (${r.employmentType.label})` : ''}`}
                           onClick={() => {
                             setEnding(r);
@@ -149,15 +153,15 @@ function MandatoryTypes() {
                           }}
                         >
                           End
-                        </button>
-                      )}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                        </Button>
+                      </RowActions>
+                    )}
+                  </RowActionsCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {data && canManage && ending && (
         <EndRequirementForm
@@ -211,50 +215,46 @@ function AddRequirementForm({ list, onDone }: { list: RequirementList; onDone: (
     save.mutate({ documentType, ...(employmentType ? { employmentType } : {}), effectiveFrom, reason: reason.trim() });
   };
   return (
-    <form className="grid-form" aria-label="New mandatory document type" onSubmit={submit} noValidate>
+    <FormGrid aria-label="New mandatory document type" onSubmit={submit} noValidate>
       <h3>Make a document type mandatory</h3>
-      <label>
+      <FormField>
         Document type
-        <select value={documentType} onChange={(e) => setDocumentType(e.target.value)}>
+        <NativeSelect value={documentType} onChange={(e) => setDocumentType(e.target.value)}>
           <option value="">Choose…</option>
           {list.options.documentTypes.map((o) => (
             <option key={o.code} value={o.code}>
               {o.label}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         For
-        <select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)}>
+        <NativeSelect value={employmentType} onChange={(e) => setEmploymentType(e.target.value)}>
           <option value="">All employment types</option>
           {list.options.employmentTypes.map((o) => (
             <option key={o.code} value={o.code}>
               {`${o.label} only`}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Starts on
-        <input type="date" value={effectiveFrom} min={list.businessDate} onChange={(e) => setEffectiveFrom(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" value={effectiveFrom} min={list.businessDate} onChange={(e) => setEffectiveFrom(e.target.value)} />
+      </FormField>
+      <FormField>
         Reason
-        <input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" disabled={save.isPending}>
+        <Input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" disabled={save.isPending}>
           Make it mandatory
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={save.error} words={REQUIREMENT_WORDS} />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -278,31 +278,27 @@ function EndRequirementForm({ requirement: r, today, onCancel, onDone, onStale }
     save.mutate();
   };
   return (
-    <form className="grid-form" aria-label="End a mandatory document type" onSubmit={submit} noValidate>
+    <FormGrid aria-label="End a mandatory document type" onSubmit={submit} noValidate>
       <h3>{`End: ${r.documentType.label}${r.employmentType ? ` (${r.employmentType.label} only)` : ''}`}</h3>
-      <label>
+      <FormField>
         No longer mandatory from
-        <input type="date" value={effectiveTo} min={today} onChange={(e) => setEffectiveTo(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" value={effectiveTo} min={today} onChange={(e) => setEffectiveTo(e.target.value)} />
+      </FormField>
+      <FormField>
         Reason
-        <input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
-      </label>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      <div className="row">
-        <button type="submit" disabled={save.isPending}>
+        <Input value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      <ButtonRow>
+        <Button type="submit" disabled={save.isPending}>
           End the requirement
-        </button>
-        <button type="button" className="secondary" disabled={save.isPending} onClick={onCancel}>
+        </Button>
+        <Button type="button" variant="outline" disabled={save.isPending} onClick={onCancel}>
           Keep it
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={save.error} words={REQUIREMENT_WORDS} />
-    </form>
+    </FormGrid>
   );
 }
 
@@ -324,53 +320,54 @@ function ComplianceReportForm() {
   };
   return (
     <Section title="Employee document compliance">
-      <p className="hint">
+      <Hint>
         The employees in the selected role’s scope who miss a mandatory document type, with the missing types and their count. A rejected, expired or quarantined document does not count; one
         waiting for its scan or verification does. Generated as a file in the background, then downloaded here or from Reports.
-      </p>
-      <form className="grid-form" aria-label="Compliance report filters" onSubmit={keepOnPage}>
-        {canOrg && (
-          <>
-            <label>
-              Department
-              <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
-                <option value="">All departments in scope</option>
-                {(departments.data?.items ?? []).map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Location
-              <select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
-                <option value="">All locations in scope</option>
-                {(locations.data?.items ?? []).map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
-        )}
-        <label>
-          Employees
-          <select value={statusGroup} onChange={(e) => setStatusGroup(e.target.value)}>
-            <option value="ACTIVE">Active (probation, confirmed, notice)</option>
-            <option value="ON_PROBATION">On probation</option>
-            <option value="ON_NOTICE">On notice</option>
-            <option value="LEFT">Left</option>
-          </select>
-        </label>
-        <label>
-          As on (blank: today)
-          <input type="date" value={asOn} onChange={(e) => setAsOn(e.target.value)} />
-        </label>
-      </form>
+      </Hint>
+      <FilterBar asChild>
+        <form aria-label="Compliance report filters" onSubmit={keepOnPage}>
+          {canOrg && (
+            <>
+              <FormField>
+                Department
+                <NativeSelect value={departmentId} onChange={(e) => setDepartmentId(e.target.value)}>
+                  <option value="">All departments in scope</option>
+                  {(departments.data?.items ?? []).map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </FormField>
+              <FormField>
+                Location
+                <NativeSelect value={locationId} onChange={(e) => setLocationId(e.target.value)}>
+                  <option value="">All locations in scope</option>
+                  {(locations.data?.items ?? []).map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </FormField>
+            </>
+          )}
+          <FormField>
+            Employees
+            <NativeSelect value={statusGroup} onChange={(e) => setStatusGroup(e.target.value)}>
+              <option value="ACTIVE">Active (probation, confirmed, notice)</option>
+              <option value="ON_PROBATION">On probation</option>
+              <option value="ON_NOTICE">On notice</option>
+              <option value="LEFT">Left</option>
+            </NativeSelect>
+          </FormField>
+          <FormField>
+            As on (blank: today)
+            <Input type="date" value={asOn} onChange={(e) => setAsOn(e.target.value)} />
+          </FormField>
+        </form>
+      </FilterBar>
       <ReportExport reportCode="EMPLOYEE_DOCUMENT_COMPLIANCE" filters={filters} label="Generate the compliance report" />
     </Section>
   );
 }
-

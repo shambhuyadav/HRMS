@@ -2,12 +2,37 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, isConflict, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, Section } from '../../ui';
 import { candidateListQuery } from './candidates';
 import { APPLY_WORDS, LoadProblem, Refusal } from './refusals';
-import { APPLICATION_MANAGE, APPLICATION_READ, CANDIDATE_READ, Denied, enc, labelOf, LIMITS, Missing, PATHS, REQUISITION_READ, REQUISITION_STATE_LABEL, RequisitionStateBadge, SCROLL, SR_ONLY, useKeys, useRefresh, UUID } from './shared';
+import {
+  APPLICATION_MANAGE,
+  APPLICATION_READ,
+  CANDIDATE_READ,
+  Denied,
+  enc,
+  labelOf,
+  LIMITS,
+  Missing,
+  PATHS,
+  REQUISITION_READ,
+  REQUISITION_STATE_LABEL,
+  RequisitionStateBadge,
+  useKeys,
+  useRefresh,
+  UUID,
+} from './shared';
 import { ApplicationTable } from './tracker';
 import type { ApplicationRow, ApplicationView, CandidatePage, CandidateSummary, RequisitionView } from './types';
 
@@ -39,19 +64,17 @@ function RequisitionApplications({ id }: { id: string }) {
   const code = r?.code ?? items[0]?.requisition.code ?? null;
   return (
     <>
-      <p>
-        <Link className="back-link" to={PATHS.tracker}>← Hiring tracker</Link>
-      </p>
+      <BackLink to={PATHS.tracker}>← Hiring tracker</BackLink>
       <h1>{code ? `Applications for ${code}` : 'Applications for the requisition'}</h1>
       {r && <RequisitionSummary r={r} />}
       <LoadProblem error={requisition.error} forbidden="The selected role cannot view this requisition." missing="This requisition is not available in the selected role’s scope." />
       <Section title={`Applications${list.data ? ` (${items.length})` : ''}`}>
-        <p className="hint">One application per candidate and requisition. Each application is decided on its own: ending one never changes the candidate’s other applications.</p>
-        {list.isPending && <p className="hint loading">Loading applications…</p>}
+        <Hint>One application per candidate and requisition. Each application is decided on its own: ending one never changes the candidate’s other applications.</Hint>
+        {list.isPending && <LoadingLine>Loading applications…</LoadingLine>}
         <LoadProblem error={list.error} forbidden="The selected role cannot view applications." />
         {list.data && items.length === 0 && <Empty>No candidates have applied to this requisition yet.</Empty>}
         {items.length > 0 && <ApplicationTable items={items} showRequisition={false} label="Applications" />}
-        {items.length >= LIMITS.applications && <p className="hint">Showing the first {LIMITS.applications} applications.</p>}
+        {items.length >= LIMITS.applications && <Hint>Showing the first {LIMITS.applications} applications.</Hint>}
       </Section>
       {can(APPLICATION_MANAGE) &&
         can(CANDIDATE_READ) &&
@@ -59,7 +82,7 @@ function RequisitionApplications({ id }: { id: string }) {
           <AddApplicationPanel requisitionId={id} appliedCandidateIds={new Set(items.map((a) => a.candidate.id))} />
         ) : (
           <Section title="Add a candidate">
-            <p className="hint">Candidates apply only to an approved requisition; this one is {labelOf(REQUISITION_STATE_LABEL, state).toLowerCase()}.</p>
+            <Hint>Candidates apply only to an approved requisition; this one is {labelOf(REQUISITION_STATE_LABEL, state).toLowerCase()}.</Hint>
           </Section>
         ))}
     </>
@@ -71,7 +94,7 @@ function RequisitionSummary({ r }: { r: RequisitionView }) {
     <Section title="Requisition">
       <dl className="kv">
         <Item term="Requisition">
-          {r.code} <span className="hint">{r.title}</span>
+          {r.code} <Hint as="span">{r.title}</Hint>
         </Item>
         <Item term="State">
           <RequisitionStateBadge state={r.state} />
@@ -84,7 +107,7 @@ function RequisitionSummary({ r }: { r: RequisitionView }) {
         {r.designation && <Item term="Designation">{r.designation.name}</Item>}
         {r.hiringManager && (
           <Item term="Hiring manager">
-            {r.hiringManager.displayName} <span className="hint">{r.hiringManager.employeeCode}</span>
+            {r.hiringManager.displayName} <Hint as="span">{r.hiringManager.employeeCode}</Hint>
           </Item>
         )}
       </dl>
@@ -117,67 +140,70 @@ function AddApplicationPanel({ requisitionId, appliedCandidateIds }: { requisiti
   });
   return (
     <Section title="Add a candidate">
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setTerm(search.trim());
-        }}
-      >
-        <label className="inline">
-          Find an active candidate
-          <input type="search" maxLength={100} value={search} placeholder="Code, name or skill" onChange={(e) => setSearch(e.target.value)} />
-        </label>
-        <button type="submit" className="secondary">
-          Search candidates
-        </button>
-      </form>
-      {term !== null && hits.isPending && <p className="hint">Searching…</p>}
+      <FilterBar asChild>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            setTerm(search.trim());
+          }}
+        >
+          <FormField>
+            Find an active candidate
+            <Input type="search" maxLength={100} value={search} placeholder="Code, name or skill" onChange={(e) => setSearch(e.target.value)} />
+          </FormField>
+          <Button type="submit" variant="outline">
+            Search candidates
+          </Button>
+        </form>
+      </FilterBar>
+      {term !== null && hits.isPending && <Hint>Searching…</Hint>}
       <LoadProblem error={hits.error} forbidden="The selected role cannot search the candidate register." />
       {hits.data && hits.data.items.length === 0 && <Empty>No active candidates match.</Empty>}
       {hits.data && hits.data.items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Active candidates">
-            <thead>
-              <tr>
-                <th scope="col">Candidate</th>
-                <th scope="col">Skills</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Action</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+        // The table and its "refine the search" line are one result: the line stays a quiet line under the table, not a card's note.
+        <div>
+          <Table aria-label="Active candidates">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Candidate</TableHead>
+                <TableHead scope="col">Skills</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">Action</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {hits.data.items.map((c) => (
-                <tr key={c.id}>
-                  <td>
-                    {c.fullName} <span className="hint">{c.candidateCode}</span>
-                  </td>
-                  <td>{c.skills.length > 0 ? c.skills.join(', ') : '—'}</td>
-                  <td>
-                    {appliedCandidateIds.has(c.id) ? (
-                      <span className="hint">Already applied</span>
-                    ) : (
-                      <button type="button" disabled={add.isPending} aria-label={`Add ${c.fullName} (${c.candidateCode}) to this requisition`} onClick={() => add.mutate(c)}>
-                        Add to this requisition
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <TableRow key={c.id}>
+                  <TableCell>
+                    {c.fullName} <Hint as="span">{c.candidateCode}</Hint>
+                  </TableCell>
+                  <TableCell>{c.skills.length > 0 ? c.skills.join(', ') : '—'}</TableCell>
+                  <RowActionsCell>
+                    <RowActions>
+                      {appliedCandidateIds.has(c.id) ? (
+                        <Hint as="span">Already applied</Hint>
+                      ) : (
+                        <Button type="button" size="sm" disabled={add.isPending} aria-label={`Add ${c.fullName} (${c.candidateCode}) to this requisition`} onClick={() => add.mutate(c)}>
+                          Add to this requisition
+                        </Button>
+                      )}
+                    </RowActions>
+                  </RowActionsCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-          {hits.data.total > hits.data.items.length && <p className="hint">Showing the first {hits.data.items.length} of {hits.data.total}; refine the search.</p>}
+            </TableBody>
+          </Table>
+          {hits.data.total > hits.data.items.length && <Hint>Showing the first {hits.data.items.length} of {hits.data.total}; refine the search.</Hint>}
         </div>
       )}
       <Refusal error={add.error} words={APPLY_WORDS} />
       {add.isSuccess && (
-        <p className="ok" role="status">
+        <StatusNote tone="success" role="status">
           {add.data.candidate.fullName} ({add.data.candidate.candidateCode}) now has an application at the applied stage.{' '}
           <Link to={PATHS.application(add.data.id)}>Open the application</Link>
-        </p>
+        </StatusNote>
       )}
     </Section>
   );
 }
-

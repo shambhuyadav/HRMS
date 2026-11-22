@@ -2,12 +2,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Badge, Empty, Section } from '../../ui';
+import { Badge, Empty, Section, WarningNote } from '../../ui';
 import { howText, plural } from './calculation-basis';
-import { COMPONENT_KIND_LABEL, DECISION_LABEL, enc, H3, Item, ITEM_KIND_LABEL, ITEM_STATUS_LABEL, labelOf, LINE_KIND_LABEL, LINE_SOURCE_LABEL, LoadProblem, LOAN_KIND_LABEL, Money, PATHS, POLICY_READ, SCROLL, STATUTORY_READ, STEP_LABEL, useKeys, UserRef, when } from './shared';
-import { type CalculationItem, deciderLabel, type FinalPeriodRun, type SettlementCalculation, type SettlementDetail, type SettlementLine } from './types';
+import { COMPONENT_KIND_LABEL, DECISION_LABEL, enc, FOLD, FOLD_SUMMARY, Item, ITEM_KIND_LABEL, ITEM_STATUS_LABEL, labelOf, LINE_KIND_LABEL, LINE_SOURCE_LABEL, LoadProblem, LOAN_KIND_LABEL, Money, PATHS, POLICY_READ, STATUTORY_READ, STEP_LABEL, useKeys, UserRef, when } from './shared';
+import { type CalculationItem, deciderLabel, type FinalPeriodRun, type OutstandingLoan, type SettlementCalculation, type SettlementDetail, type SettlementLine } from './types';
 
 /** Whether the amount group came back (the lines, the net amount, the calculation and the waiver come with it, or none of them). */
 const withAmounts = (s: SettlementDetail) => s.lines !== undefined || s.netAmount !== undefined || s.calculation !== undefined;
@@ -24,7 +28,7 @@ export function CalculationView({ s }: { s: SettlementDetail }) {
   if (!withAmounts(s)) {
     return (
       <Section title="Calculation">
-        <p className="hint">The calculation is confidential like the settlement amounts, and the selected role does not receive it.</p>
+        <Hint>The calculation is confidential like the settlement amounts, and the selected role does not receive it.</Hint>
       </Section>
     );
   }
@@ -32,12 +36,12 @@ export function CalculationView({ s }: { s: SettlementDetail }) {
   return (
     <Section title="Calculation">
       {s.noticeWaiver && (
-        <p role="note">
-          <Badge tone="warn">waived</Badge> Notice recovery waived: {s.noticeWaiver.reason}{' '}
-          <span className="hint">
+        <WarningNote badge="waived">
+          Notice recovery waived: {s.noticeWaiver.reason}{' '}
+          <Hint as="span">
             (by <UserRef userId={s.noticeWaiver.waivedBy} />, {when(s.noticeWaiver.waivedAt)})
-          </span>
-        </p>
+          </Hint>
+        </WarningNote>
       )}
       {k === null ? (
         <Empty>Not calculated yet.</Empty>
@@ -64,10 +68,10 @@ export function CalculationView({ s }: { s: SettlementDetail }) {
             </Item>
           </dl>
           {k.blockingCount > 0 && (
-            <p className="hint">
+            <Hint>
               An item that blocks approval needs a policy, rule pack or record that is missing. Once it is in place the draft is calculated again; a submitted revision is
               returned and corrected through a new revision.
-            </p>
+            </Hint>
           )}
           <CalculationItems items={k.items} currency={k.currencyCode} />
           {k.sequence > 1 && <EarlierSnapshots s={s} current={k} />}
@@ -85,40 +89,38 @@ export function CalculationView({ s }: { s: SettlementDetail }) {
 function CalculationItems({ items, currency }: { items: readonly CalculationItem[]; currency: string }) {
   if (items.length === 0) return <Empty>The calculation has no items.</Empty>;
   return (
-    <div style={SCROLL}>
-      <table aria-label="Calculation items">
-        <thead>
-          <tr>
-            <th scope="col">Item</th>
-            <th scope="col">Status</th>
-            <th scope="col">Pay component</th>
-            <th scope="col">Leave type</th>
-            <th scope="col">Amount</th>
-            <th scope="col">How</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((i) => (
-            <tr key={i.position}>
-              <td>{labelOf(ITEM_KIND_LABEL, i.kind)}</td>
-              <td>
-                {labelOf(ITEM_STATUS_LABEL, i.status)}
-                {i.blocking && (
-                  <>
-                    {' '}
-                    <Badge tone="bad">Blocks approval</Badge>
-                  </>
-                )}
-              </td>
-              <td>{i.componentCode ?? ''}</td>
-              <td>{i.leaveTypeCode ?? ''}</td>
-              <td>{i.amount === null ? '' : <Money value={i.amount} currency={currency} />}</td>
-              <td>{howText(i)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label="Calculation items">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Item</TableHead>
+          <TableHead scope="col">Status</TableHead>
+          <TableHead scope="col">Pay component</TableHead>
+          <TableHead scope="col">Leave type</TableHead>
+          <TableHead scope="col">Amount</TableHead>
+          <TableHead scope="col">How</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((i) => (
+          <TableRow key={i.position}>
+            <TableCell>{labelOf(ITEM_KIND_LABEL, i.kind)}</TableCell>
+            <TableCell>
+              {labelOf(ITEM_STATUS_LABEL, i.status)}
+              {i.blocking && (
+                <>
+                  {' '}
+                  <Badge tone="bad">Blocks approval</Badge>
+                </>
+              )}
+            </TableCell>
+            <TableCell>{i.componentCode ?? ''}</TableCell>
+            <TableCell>{i.leaveTypeCode ?? ''}</TableCell>
+            <TableCell>{i.amount === null ? '' : <Money value={i.amount} currency={currency} />}</TableCell>
+            <TableCell>{howText(i)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -134,9 +136,9 @@ function EarlierSnapshots({ s, current }: { s: SettlementDetail; current: Settle
   });
   const earlier = (list.data?.items ?? []).filter((k) => k.id !== current.id);
   return (
-    <details onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
-      <summary>Earlier snapshots</summary>
-      {list.isFetching && !list.data && <p className="hint loading">Loading the earlier snapshots…</p>}
+    <details className={FOLD} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary className={FOLD_SUMMARY}>Earlier snapshots</summary>
+      {list.isFetching && !list.data && <LoadingLine>Loading the earlier snapshots…</LoadingLine>}
       <LoadProblem error={list.error} forbidden="The selected role cannot read the calculation snapshots." />
       {list.data && earlier.length === 0 && <Empty>No earlier snapshot.</Empty>}
       {earlier.length > 0 && (
@@ -160,7 +162,7 @@ export function SettlementLines({ s }: { s: SettlementDetail }) {
   if (s.lines === undefined && s.netAmount === undefined) {
     return (
       <Section title="Lines and net amount">
-        <p className="hint">Settlement amounts are confidential, and the selected role does not receive them.</p>
+        <Hint>Settlement amounts are confidential, and the selected role does not receive them.</Hint>
       </Section>
     );
   }
@@ -170,13 +172,13 @@ export function SettlementLines({ s }: { s: SettlementDetail }) {
     <Section title="Lines and net amount">
       {s.lines && (
         <>
-          <h3 style={H3}>Calculated lines</h3>
+          <CardSubheading>Calculated lines</CardSubheading>
           {calculated.length > 0 ? (
             <LineTable lines={calculated} currency={s.currencyCode} label="Calculated lines" source={false} reasons={false} />
           ) : (
             <Empty>{s.calculationStatus === 'CALCULATED' ? 'The calculation produced no line.' : 'None: this revision is not calculated.'}</Empty>
           )}
-          <h3 style={H3}>Entered lines</h3>
+          <CardSubheading>Entered lines</CardSubheading>
           {entered.length > 0 ? (
             <LineTable lines={entered} currency={s.currencyCode} label="Entered lines" reasons />
           ) : (
@@ -186,7 +188,7 @@ export function SettlementLines({ s }: { s: SettlementDetail }) {
       )}
       {s.netAmount !== undefined && (
         <p>
-          <strong>Net amount:</strong> <Money value={s.netAmount} currency={s.currencyCode} /> <span className="hint">(as recorded by the server for these lines)</span>
+          <strong>Net amount:</strong> <Money value={s.netAmount} currency={s.currencyCode} /> <Hint as="span">(as recorded by the server for these lines)</Hint>
         </p>
       )}
     </Section>
@@ -208,36 +210,34 @@ export function LineTable({
   reasons?: boolean;
 }) {
   return (
-    <div style={SCROLL}>
-      <table aria-label={label}>
-        <thead>
-          <tr>
-            <th scope="col">Pay component</th>
-            <th scope="col">Kind</th>
-            <th scope="col">Line kind</th>
-            {source && <th scope="col">Source</th>}
-            <th scope="col">Amount</th>
-            {reasons && <th scope="col">Reason</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((l) => (
-            <tr key={l.componentCode}>
-              <td>
-                {l.componentName} <span className="hint">{l.componentCode}</span>
-              </td>
-              <td>{labelOf(COMPONENT_KIND_LABEL, l.componentKind)}</td>
-              <td>{labelOf(LINE_KIND_LABEL, l.lineKind)}</td>
-              {source && <td>{labelOf(LINE_SOURCE_LABEL, l.source)}</td>}
-              <td>
-                <Money value={l.amount} currency={currency} />
-              </td>
-              {reasons && <td>{l.reason || '—'}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label={label}>
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Pay component</TableHead>
+          <TableHead scope="col">Kind</TableHead>
+          <TableHead scope="col">Line kind</TableHead>
+          {source && <TableHead scope="col">Source</TableHead>}
+          <TableHead scope="col">Amount</TableHead>
+          {reasons && <TableHead scope="col">Reason</TableHead>}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {lines.map((l) => (
+          <TableRow key={l.componentCode}>
+            <TableCell>
+              {l.componentName} <Hint as="span">{l.componentCode}</Hint>
+            </TableCell>
+            <TableCell>{labelOf(COMPONENT_KIND_LABEL, l.componentKind)}</TableCell>
+            <TableCell>{labelOf(LINE_KIND_LABEL, l.lineKind)}</TableCell>
+            {source && <TableCell>{labelOf(LINE_SOURCE_LABEL, l.source)}</TableCell>}
+            <TableCell>
+              <Money value={l.amount} currency={currency} />
+            </TableCell>
+            {reasons && <TableCell>{l.reason || '—'}</TableCell>}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -249,7 +249,7 @@ export function LineTable({
 function FinalPeriodPayroll({ runs }: { runs: readonly FinalPeriodRun[] }) {
   return (
     <>
-      <h3 style={H3}>Monthly payroll for the final period</h3>
+      <CardSubheading>Monthly payroll for the final period</CardSubheading>
       {runs.length === 0 ? (
         <Empty>No payroll run covers the last working date yet.</Empty>
       ) : (
@@ -272,7 +272,7 @@ function Days({ value }: { value: string }) {
   return (
     <>
       {Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-      {finer && <span className="hint"> (exactly {value})</span>}
+      {finer && <Hint as="span"> (exactly {value})</Hint>}
     </>
   );
 }
@@ -287,85 +287,84 @@ export function RemainingBalances({ s }: { s: SettlementDetail }) {
   if (!b) {
     return (
       <Section title="Remaining balances">
-        <p className="hint">Remaining loan and leave balances are shown with the settlement amounts, and the selected role does not receive them.</p>
+        <Hint>Remaining loan and leave balances are shown with the settlement amounts, and the selected role does not receive them.</Hint>
       </Section>
     );
   }
   return (
     <Section title="Remaining balances">
-      <p className="hint">Read-only. These balances do not change the settlement lines; no encashment or recovery is worked out from them.</p>
+      <Hint>Read-only. These balances do not change the settlement lines; no encashment or recovery is worked out from them.</Hint>
       {b.finalPeriodPayroll !== undefined && <FinalPeriodPayroll runs={b.finalPeriodPayroll} />}
-      <h3 style={H3}>Paid leave as at the last working date ({formatDate(b.asOf)})</h3>
+      <CardSubheading>Paid leave as at the last working date ({formatDate(b.asOf)})</CardSubheading>
       {b.leave.length === 0 ? (
         <Empty>No paid leave type is active.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label="Leave balances at the last working date">
-            <thead>
-              <tr>
-                <th scope="col">Leave type</th>
-                <th scope="col">Available (days)</th>
-                <th scope="col">Pending (days)</th>
-                <th scope="col">Taken (days)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {b.leave.map((l) => (
-                <tr key={l.leaveType}>
-                  <td>{l.leaveType}</td>
-                  <td>
-                    <Days value={l.available} />
-                  </td>
-                  <td>
-                    <Days value={l.pending} />
-                  </td>
-                  <td>
-                    <Days value={l.taken} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Leave balances at the last working date">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Leave type</TableHead>
+              <TableHead scope="col">Available (days)</TableHead>
+              <TableHead scope="col">Pending (days)</TableHead>
+              <TableHead scope="col">Taken (days)</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {b.leave.map((l) => (
+              <TableRow key={l.leaveType}>
+                <TableCell>{l.leaveType}</TableCell>
+                <TableCell>
+                  <Days value={l.available} />
+                </TableCell>
+                <TableCell>
+                  <Days value={l.pending} />
+                </TableCell>
+                <TableCell>
+                  <Days value={l.taken} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      <h3 style={H3}>Outstanding loans and advances</h3>
-      {b.loans === undefined ? (
-        <p className="hint">Loans and advances are not in use, so no loan balance is shown.</p>
-      ) : b.loans.length === 0 ? (
-        <Empty>No outstanding loan or advance.</Empty>
-      ) : (
-        <div style={SCROLL}>
-          <table aria-label="Outstanding loans and advances">
-            <thead>
-              <tr>
-                <th scope="col">Kind</th>
-                <th scope="col">Disbursed</th>
-                <th scope="col">Principal</th>
-                <th scope="col">Recovered</th>
-                <th scope="col">Outstanding</th>
-              </tr>
-            </thead>
-            <tbody>
-              {b.loans.map((l) => (
-                <tr key={l.id}>
-                  <td>{labelOf(LOAN_KIND_LABEL, l.loanKind)}</td>
-                  <td>{formatDate(l.disbursementDate)}</td>
-                  <td>
-                    <Money value={l.principal} currency={l.currencyCode} />
-                  </td>
-                  <td>
-                    <Money value={l.recovered} currency={l.currencyCode} />
-                  </td>
-                  <td>
-                    <Money value={l.outstanding} currency={l.currencyCode} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <CardSubheading>Outstanding loans and advances</CardSubheading>
+      <LoanBalances loans={b.loans} />
     </Section>
+  );
+}
+
+/** The outstanding loans and advances; `undefined` while the loans module is not in use. */
+function LoanBalances({ loans }: { loans: readonly OutstandingLoan[] | undefined }) {
+  if (loans === undefined) return <Hint>Loans and advances are not in use, so no loan balance is shown.</Hint>;
+  if (loans.length === 0) return <Empty>No outstanding loan or advance.</Empty>;
+  return (
+    <Table aria-label="Outstanding loans and advances">
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">Kind</TableHead>
+          <TableHead scope="col">Disbursed</TableHead>
+          <TableHead scope="col">Principal</TableHead>
+          <TableHead scope="col">Recovered</TableHead>
+          <TableHead scope="col">Outstanding</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {loans.map((l) => (
+          <TableRow key={l.id}>
+            <TableCell>{labelOf(LOAN_KIND_LABEL, l.loanKind)}</TableCell>
+            <TableCell>{formatDate(l.disbursementDate)}</TableCell>
+            <TableCell>
+              <Money value={l.principal} currency={l.currencyCode} />
+            </TableCell>
+            <TableCell>
+              <Money value={l.recovered} currency={l.currencyCode} />
+            </TableCell>
+            <TableCell>
+              <Money value={l.outstanding} currency={l.currencyCode} />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -377,33 +376,31 @@ export function DecisionTrail({ s }: { s: SettlementDetail }) {
       {s.decisions.length === 0 ? (
         <Empty>No review or approval decision yet.</Empty>
       ) : (
-        <div style={SCROLL}>
-          <table aria-label="Decisions">
-            <thead>
-              <tr>
-                <th scope="col">Step</th>
-                <th scope="col">Decision</th>
-                <th scope="col">Decided by</th>
-                <th scope="col">Decided</th>
-              </tr>
-            </thead>
-            <tbody>
-              {s.decisions.map((d, i) => (
-                <tr key={`${d.transactionId}-${d.step}-${i}`}>
-                  <td>{labelOf(STEP_LABEL, d.action)}</td>
-                  <td>{labelOf(DECISION_LABEL, d.decision)}</td>
-                  <td>
-                    {d.decidedBy ? deciderLabel(d.decidedBy, myUserId) : '—'}
-                    {d.onBehalfOf && <span className="hint">{` on behalf of ${deciderLabel(d.onBehalfOf, myUserId)}`}</span>}
-                  </td>
-                  <td>
-                    <time dateTime={d.decidedAt}>{when(d.decidedAt)}</time>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Decisions">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Step</TableHead>
+              <TableHead scope="col">Decision</TableHead>
+              <TableHead scope="col">Decided by</TableHead>
+              <TableHead scope="col">Decided</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {s.decisions.map((d, i) => (
+              <TableRow key={`${d.transactionId}-${d.step}-${i}`}>
+                <TableCell>{labelOf(STEP_LABEL, d.action)}</TableCell>
+                <TableCell>{labelOf(DECISION_LABEL, d.decision)}</TableCell>
+                <TableCell>
+                  {d.decidedBy ? deciderLabel(d.decidedBy, myUserId) : '—'}
+                  {d.onBehalfOf && <Hint as="span">{` on behalf of ${deciderLabel(d.onBehalfOf, myUserId)}`}</Hint>}
+                </TableCell>
+                <TableCell>
+                  <time dateTime={d.decidedAt}>{when(d.decidedAt)}</time>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
     </Section>
   );

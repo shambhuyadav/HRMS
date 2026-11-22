@@ -2,10 +2,33 @@
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useId, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, plural, readable, retryTransient } from '../../api';
-import { Badge, Empty, ErrorNote, Section } from '../../ui';
+import { Badge, Empty, ErrorNote, Notice, Section } from '../../ui';
 import { BulkJobStatus, exclusionReasonLabel, useBulkJob } from '../bulk-jobs';
-import { answered, basisLabel, type Cycle, FLUSH, H3, LoadProblem, type OpenedCase, OPENING_PAGE_SIZE, type OpeningExclusion, type OpeningPage, PANEL, type QueuedJob, RECURRENCE_LABEL, SCROLL, useKeys, YEAR, YEAR_INPUT } from './shared';
+import {
+  answered,
+  basisLabel,
+  type Cycle,
+  FIELD_ROW,
+  LoadProblem,
+  type OpenedCase,
+  OPENING_PAGE_SIZE,
+  type OpeningExclusion,
+  type OpeningPage,
+  PANEL,
+  type QueuedJob,
+  RECURRENCE_LABEL,
+  useKeys,
+  YEAR,
+  YEAR_INPUT,
+} from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // FR-091 / DF15: cycles and opening a review for a year (the roster snapshot, queued as a bulk job; it changes no
@@ -43,77 +66,85 @@ export function CyclesSection({ companyWide }: { companyWide: boolean }) {
 
   // Only an active common-date cycle can open a review for a year; the others say why instead of offering it.
   const reviewControl = (c: Cycle) => {
-    if (!c.active) return <span className="hint">Inactive cycle</span>;
-    if (c.recurrenceBasis !== 'COMMON_DATE') return <span className="hint">No common review date</span>;
-    if (!companyWide) return <span className="hint">Reviews are opened from a company-wide role</span>;
+    if (!c.active) return <Hint as="span">Inactive cycle</Hint>;
+    if (c.recurrenceBasis !== 'COMMON_DATE') return <Hint as="span">No common review date</Hint>;
+    if (!companyWide) return <Hint as="span">Reviews are opened from a company-wide role</Hint>;
     return (
-      <form className="row" aria-label={`Open a review of ${c.code} revision ${c.revision}`} onSubmit={(e) => submit(e, c)}>
-        <label className="inline" style={FLUSH}>
+      <form className={FIELD_ROW} aria-label={`Open a review of ${c.code} revision ${c.revision}`} onSubmit={(e) => submit(e, c)}>
+        <FormField className="w-auto">
           Review year
-          <input
+          <Input
             type="number"
             inputMode="numeric"
             min={2000}
             max={2100}
             step={1}
             required
-            style={YEAR_INPUT}
+            className={YEAR_INPUT}
             value={yearOf(c.id)}
             onChange={(e) => setYears({ ...years, [c.id]: e.target.value })}
           />
-        </label>
-        <button type="submit" disabled={open.isPending}>
+        </FormField>
+        <Button type="submit" disabled={open.isPending}>
           Open review
-        </button>
-        {problem?.cycleId === c.id && (
-          <span role="alert" className="error">
-            {problem.text}
-          </span>
-        )}
+        </Button>
+        {problem?.cycleId === c.id && <Notice notice={{ text: problem.text, ok: false }} />}
       </form>
     );
   };
 
   return (
     <Section title="Increment cycles">
-      <p className="hint">A cycle is a review schedule, not an entitlement: opening a review creates draft cases for the eligible employees and changes no salary.</p>
-      {companyWide && <p className="hint">Type the review year: the cases take effect on the cycle’s review date in that year.</p>}
-      {cycles.isPending && <p className="hint loading">Loading cycles…</p>}
+      <Hint>A cycle is a review schedule, not an entitlement: opening a review creates draft cases for the eligible employees and changes no salary.</Hint>
+      {companyWide && <Hint>Type the review year: the cases take effect on the cycle’s review date in that year.</Hint>}
+      {cycles.isPending && <LoadingLine>Loading cycles…</LoadingLine>}
       <LoadProblem error={cycles.error} forbidden="The selected role cannot manage increment cycles." />
       {data && items.length === 0 && <Empty>No increment cycles are configured for this company.</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Cycle</th>
-                <th scope="col">Revision</th>
-                <th scope="col">Recurrence</th>
-                <th scope="col">Basis</th>
-                <th scope="col">Status</th>
-                <th scope="col">Review</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((c) => (
-                <tr key={c.id}>
-                  <td>{readable(c.code)}</td>
-                  <td>{c.revision}</td>
-                  <td>{RECURRENCE_LABEL[c.recurrenceBasis] ?? readable(c.recurrenceBasis)}</td>
-                  <td>{basisLabel(c.compensationBasis)}</td>
-                  <td>
-                    <Badge tone={c.active ? 'good' : 'neutral'}>{c.active ? 'active' : 'inactive'}</Badge>
-                  </td>
-                  <td>{reviewControl(c)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Cycle</TableHead>
+              <TableHead scope="col">Revision</TableHead>
+              <TableHead scope="col">Recurrence</TableHead>
+              <TableHead scope="col">Basis</TableHead>
+              <TableHead scope="col">Status</TableHead>
+              <TableHead scope="col">Review</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((c) => (
+              <TableRow key={c.id}>
+                <TableCell>{readable(c.code)}</TableCell>
+                <TableCell>{c.revision}</TableCell>
+                <TableCell>{RECURRENCE_LABEL[c.recurrenceBasis] ?? readable(c.recurrenceBasis)}</TableCell>
+                <TableCell>{basisLabel(c.compensationBasis)}</TableCell>
+                <TableCell>
+                  <Badge tone={c.active ? 'good' : 'neutral'}>{c.active ? 'active' : 'inactive'}</Badge>
+                </TableCell>
+                <TableCell>{reviewControl(c)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       {queued && <OpeningJob key={queued.jobId} cycle={queued.cycle} year={queued.year} jobId={queued.jobId} />}
       <ErrorNote error={open.error} />
     </Section>
+  );
+}
+
+/** Where a queued opening stands, in words: opened (with what it did), stopped, or still queued. */
+function OpeningOutcome({ review, state, created, excluded }: { review: string; state: string | undefined; created: number | null; excluded: number | null }) {
+  if (state === 'COMPLETED') {
+    const counts = created !== null && excluded !== null ? `: ${plural(created, 'draft case', 'draft cases')} created, ${plural(excluded, 'employee', 'employees')} excluded` : '';
+    return <Notice notice={{ text: `Review of ${review} opened${counts}. It changed no salary.`, ok: true }} />;
+  }
+  if (state === 'FAILED') return <Hint role="status">The review of {review} stopped before it finished; the reason is below.</Hint>;
+  return (
+    <Notice
+      notice={{ text: `Review of ${review} queued. The draft cases are created in the background and appear in the case list once the opening has run.`, ok: true }}
+    />
   );
 }
 
@@ -136,21 +167,8 @@ function OpeningJob({ cycle, year, jobId }: { cycle: Cycle; year: number; jobId:
   const review = `${cycle.code} (revision ${cycle.revision}) for ${year}`;
 
   return (
-    <div className="stack" style={PANEL}>
-      {completed ? (
-        <p className="ok" role="status">
-          Review of {review} opened{created !== null && excluded !== null ? `: ${plural(created, 'draft case', 'draft cases')} created, ${plural(excluded, 'employee', 'employees')} excluded` : ''}.
-          It changed no salary.
-        </p>
-      ) : state === 'FAILED' ? (
-        <p className="hint" role="status">
-          The review of {review} stopped before it finished; the reason is below.
-        </p>
-      ) : (
-        <p className="ok" role="status">
-          Review of {review} queued. The draft cases are created in the background and appear in the case list once the opening has run.
-        </p>
-      )}
+    <div className={PANEL}>
+      <OpeningOutcome review={review} state={state} created={created} excluded={excluded} />
       <BulkJobStatus jobId={jobId} />
       {completed && (
         <>
@@ -182,14 +200,14 @@ function MoreRows({ query, shown, total, what }: { query: { hasNextPage: boolean
   return (
     <>
       {total !== null && shown < total && (
-        <p className="hint">
+        <Hint>
           Showing {shown} of {total} {what}.
-        </p>
+        </Hint>
       )}
       {query.hasNextPage && (
-        <button type="button" className="secondary" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
+        <Button type="button" variant="outline" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
           Show more {what}
-        </button>
+        </Button>
       )}
     </>
   );
@@ -200,37 +218,33 @@ function OpenedCases({ jobId, total }: { jobId: string; total: number | null }) 
   const { query, items } = useOpeningList<OpenedCase>(jobId, 'cases');
   return (
     <div>
-      <h3 id={`${ids}-title`} style={H3}>
-        Draft cases created
-      </h3>
-      {query.isPending && <p className="hint loading">Loading the cases…</p>}
+      <CardSubheading id={`${ids}-title`}>Draft cases created</CardSubheading>
+      {query.isPending && <LoadingLine>Loading the cases…</LoadingLine>}
       <LoadProblem error={query.error} forbidden="The selected role cannot read this review’s cases." />
       {query.isSuccess && items.length === 0 && <Empty>The opening created no draft case.</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-labelledby={`${ids}-title`}>
-            <thead>
-              <tr>
-                <th scope="col">Employee</th>
-                <th scope="col">Review</th>
-                <th scope="col">Effective date</th>
-                <th scope="col">Decisions due</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((c) => (
-                <tr key={c.caseId}>
-                  <td>
-                    {c.employeeName} ({c.employeeCode})
-                  </td>
-                  <td>{c.occurrence}</td>
-                  <td>{formatDate(c.effectiveDate)}</td>
-                  <td>{formatDate(c.decisionDueOn)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-labelledby={`${ids}-title`}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Review</TableHead>
+              <TableHead scope="col">Effective date</TableHead>
+              <TableHead scope="col">Decisions due</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((c) => (
+              <TableRow key={c.caseId}>
+                <TableCell>
+                  {c.employeeName} ({c.employeeCode})
+                </TableCell>
+                <TableCell>{c.occurrence}</TableCell>
+                <TableCell>{formatDate(c.effectiveDate)}</TableCell>
+                <TableCell>{formatDate(c.decisionDueOn)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       <MoreRows query={query} shown={items.length} total={total} what="cases" />
     </div>
@@ -242,36 +256,32 @@ function OpeningExclusions({ jobId, total }: { jobId: string; total: number | nu
   const { query, items } = useOpeningList<OpeningExclusion>(jobId, 'exclusions');
   return (
     <div>
-      <h3 id={`${ids}-title`} style={H3}>
-        Excluded employees
-      </h3>
-      <p className="hint">Each employee of the cycle without a new case is listed with the reason and what repairs it.</p>
-      {query.isPending && <p className="hint loading">Loading the exclusions…</p>}
+      <CardSubheading id={`${ids}-title`}>Excluded employees</CardSubheading>
+      <Hint>Each employee of the cycle without a new case is listed with the reason and what repairs it.</Hint>
+      {query.isPending && <LoadingLine>Loading the exclusions…</LoadingLine>}
       <LoadProblem error={query.error} forbidden="The selected role cannot read this review’s exclusions." />
       {query.isSuccess && items.length === 0 && <Empty>The opening excluded no employee.</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-labelledby={`${ids}-title`}>
-            <thead>
-              <tr>
-                <th scope="col">Employee</th>
-                <th scope="col">Reason</th>
-                <th scope="col">What repairs it</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((x) => (
-                <tr key={`${x.employeeId}:${x.occurrence}`}>
-                  <td>
-                    {x.employeeName} ({x.employeeCode})
-                  </td>
-                  <td>{exclusionReasonLabel(x.reason)}</td>
-                  <td>{x.repairPath ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-labelledby={`${ids}-title`}>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Employee</TableHead>
+              <TableHead scope="col">Reason</TableHead>
+              <TableHead scope="col">What repairs it</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((x) => (
+              <TableRow key={`${x.employeeId}:${x.occurrence}`}>
+                <TableCell>
+                  {x.employeeName} ({x.employeeCode})
+                </TableCell>
+                <TableCell>{exclusionReasonLabel(x.reason)}</TableCell>
+                <TableCell>{x.repairPath ?? '—'}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
       <MoreRows query={query} shown={items.length} total={total} what="exclusions" />
     </div>

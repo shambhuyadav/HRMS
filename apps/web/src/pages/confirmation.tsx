@@ -16,7 +16,7 @@
 //
 // The code is in ./confirmation/: the confirmations page and its register (cases), one case (case-panel, case-exceptions),
 // the exception decision queue (pending-exceptions), the attention list and a new case (attention), the policies screen
-// (policies), shared.tsx (permission keys, limits, the API's shapes, query keys, styles and helpers), refusals.tsx, and
+// (policies), shared.tsx (permission keys, limits, the API's shapes, query keys, layout pieces and helpers), refusals.tsx, and
 // routes.ts. This entry module re-exports what other modules import from it.
 export { ConfirmationsPage } from './confirmation/cases';
 export { ConfirmationPoliciesPage } from './confirmation/policies';

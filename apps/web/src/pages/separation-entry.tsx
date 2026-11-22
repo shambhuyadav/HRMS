@@ -5,8 +5,14 @@
 // /v1/exit-reasons). Whoever enters it never recommends or approves it. The server decides every rule; refusals are said in words.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError } from '../api';
-import { ErrorNote, Section } from '../ui';
+import { ErrorNote, Notice, Section } from '../ui';
 import { VerifiedEvidencePicker } from './exit-finance';
 
 type SeparationType = 'RETIREMENT' | 'TERMINATION' | 'DEATH' | 'DISABLEMENT' | 'END_OF_CONTRACT';
@@ -158,82 +164,68 @@ export function EnterSeparationForm({ employeeId, exitsKey }: { employeeId: stri
 
   return (
     <Section title="Enter a separation other than a resignation">
-      <p className="hint">
+      <Hint>
         For a retirement, termination, death, disablement or end of contract. HR enters it with the document received; it follows the exit route, and you will not recommend or approve
         it.
-      </p>
-      <form onSubmit={submit} className="grid-form" aria-label="Enter a separation">
-        <label>
+      </Hint>
+      <FormGrid onSubmit={submit} aria-label="Enter a separation">
+        <FormField>
           Type of separation
-          <select value={type} onChange={(e) => setType(e.target.value as SeparationType | '')}>
+          <NativeSelect value={type} onChange={(e) => setType(e.target.value as SeparationType | '')}>
             <option value="">Choose…</option>
             {TYPES.map((t) => (
               <option key={t} value={t}>
                 {SEPARATION_TYPE_RULES[t].label}
               </option>
             ))}
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         {rule && (
           <>
-            <p className="hint">
+            <Hint>
               {rule.dateRule} {rule.route}
-            </p>
-            <label>
+            </Hint>
+            <FormField>
               {rule.dateLabel}
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-            </label>
-            <label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </FormField>
+            <FormField>
               Reference of the document received
-              <input value={reference} maxLength={MAX_REFERENCE} onChange={(e) => setReference(e.target.value)} />
-            </label>
+              <Input value={reference} maxLength={MAX_REFERENCE} onChange={(e) => setReference(e.target.value)} />
+            </FormField>
             <VerifiedEvidencePicker employeeId={employeeId} chosen={doc} onChange={setDoc} legend={`The document: ${rule.evidence} (released and verified)`} />
-            <label>
+            <FormField>
               {rule.reasonCodeRequired ? 'Ground of the termination (exit reason, required)' : 'Exit reason (optional)'}
-              <select value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} disabled={codes.length === 0}>
+              <NativeSelect value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} disabled={codes.length === 0}>
                 <option value="">{rule.reasonCodeRequired ? 'Choose…' : 'None'}</option>
                 {codes.map((c) => (
                   <option key={c.code} value={c.code}>
                     {`${c.label} (${c.code})`}
                   </option>
                 ))}
-              </select>
-            </label>
+              </NativeSelect>
+            </FormField>
             {reasons.isSuccess && codes.length === 0 && (
-              <p className="hint">
+              <Hint>
                 No exit reason codes are configured yet. {rule.reasonCodeRequired ? 'A termination cannot be entered until an administrator adds them to the EXIT_REASON reference list.' : ''}
-              </p>
+              </Hint>
             )}
             <ErrorNote error={reasons.error} />
-            <label>
+            <FormField>
               Reason (optional; seen by authorised reviewers only)
-              <textarea value={reason} maxLength={MAX_REASON} onChange={(e) => setReason(e.target.value)} />
-            </label>
+              <Textarea value={reason} maxLength={MAX_REASON} onChange={(e) => setReason(e.target.value)} />
+            </FormField>
           </>
         )}
-        <div className="row">
-          <button type="submit" disabled={enter.isPending}>
+        <ButtonRow>
+          <Button type="submit" disabled={enter.isPending}>
             Enter the separation
-          </button>
-        </div>
-      </form>
-      {problem && (
-        <p role="alert" className="error">
-          {problem}
-        </p>
-      )}
-      {refusal ? (
-        <p role="alert" className="error">
-          {refusal}
-        </p>
-      ) : (
-        <ErrorNote error={enter.error} />
-      )}
-      {entered && (
-        <p role="status" className="ok">
-          {`The ${entered.toLowerCase()} is entered and waits for the manager’s recommendation.`}
-        </p>
-      )}
+          </Button>
+        </ButtonRow>
+      </FormGrid>
+      {problem && <Notice notice={{ text: problem, ok: false }} />}
+      {refusal ? <Notice notice={{ text: refusal, ok: false }} /> : <ErrorNote error={enter.error} />}
+      {entered && <Notice notice={{ text: `The ${entered.toLowerCase()} is entered and waits for the manager’s recommendation.`, ok: true }} />}
     </Section>
   );
 }

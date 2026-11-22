@@ -1,7 +1,9 @@
 // Refusals of the employee routes in plain words, and the refusal and read-problem lines.
 
+import { CircleAlertIcon } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ApiError } from '../../api';
-import { Empty, ErrorNote } from '../../ui';
+import { Empty, ErrorNote, Notice } from '../../ui';
 import { words } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -110,23 +112,24 @@ export function Refusal({ error, rule }: { error: unknown; rule?: string }) {
   if (error instanceof ApiError && error.code === 'ACTIVATION_REQUIREMENTS_MISSING') {
     const details = (error.details ?? {}) as { missing?: string[]; checkDate?: string };
     return (
-      <div role="alert" className="error">
-        <p>This employee cannot be activated yet. The check date is {details.checkDate}. Still missing:</p>
-        <ul>
-          {details.missing?.map((code) => (
-            <li key={code}>{MISSING_REQUIREMENTS[code] ?? words(code)}</li>
-          ))}
-        </ul>
-      </div>
+      <Alert variant="destructive">
+        <CircleAlertIcon aria-hidden="true" />
+        <AlertTitle asChild>
+          <p className="m-0">This employee cannot be activated yet. The check date is {details.checkDate}. Still missing:</p>
+        </AlertTitle>
+        <AlertDescription asChild className="block">
+          <ul className="m-0 pl-5">
+            {details.missing?.map((code) => (
+              <li key={code}>{MISSING_REQUIREMENTS[code] ?? words(code)}</li>
+            ))}
+          </ul>
+        </AlertDescription>
+      </Alert>
     );
   }
   const text = refusalText(error, rule);
   if (!text) return <ErrorNote error={error} />;
-  return (
-    <p role="alert" className="error">
-      {text}
-    </p>
-  );
+  return <Notice notice={{ text, ok: false }} />;
 }
 
 /** A record the server would not read: out of scope and nonexistent are the same answer. */

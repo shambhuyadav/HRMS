@@ -2,6 +2,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate, localDate } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section } from '../../ui';
@@ -77,145 +85,146 @@ export function SalaryJvPage() {
           {mappings.isSuccess && !inForce && <Empty>No GL mapping is in force: the salary JV is not configured until the pay heads are mapped to your ledger accounts.</Empty>}
           {inForce && (
             <>
-              <p className="hint">
+              <Hint>
                 Revision {inForce.revision} from {formatDate(inForce.effectiveFrom)}. Net pay is credited to {inForce.netPayAccountCode}
                 {inForce.netPayAccountName ? ` (${inForce.netPayAccountName})` : ''}; expenses carry the department as cost centre.
-              </p>
-              <table aria-label="Mapped heads">
-                <thead>
-                  <tr>
-                    <th scope="col">Pay head</th>
-                    <th scope="col">Account</th>
-                    <th scope="col">Liability account</th>
-                  </tr>
-                </thead>
-                <tbody>
+              </Hint>
+              <Table aria-label="Mapped heads">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Pay head</TableHead>
+                    <TableHead scope="col">Account</TableHead>
+                    <TableHead scope="col">Liability account</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {inForce.lines.map((l) => (
-                    <tr key={l.componentCode}>
-                      <td>
+                    <TableRow key={l.componentCode}>
+                      <TableCell>
                         {l.componentName} ({l.componentCode})
-                      </td>
-                      <td>{l.accountCode}</td>
-                      <td>{l.payableAccountCode ?? '—'}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{l.accountCode}</TableCell>
+                      <TableCell>{l.payableAccountCode ?? '—'}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </>
           )}
         </Section>
       )}
       {can(MAPPING_MANAGE) && (
         <Section title="New mapping revision">
-          <form
-            className="grid-form"
+          <FormGrid
             aria-label="New mapping revision"
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
               if (!save.isPending) save.mutate();
             }}
           >
-            <label>
+            <FormField>
               Effective from
-              <input type="date" value={form.effectiveFrom} onChange={(e) => setForm((f) => ({ ...f, effectiveFrom: e.target.value }))} required />
-            </label>
-            <label>
+              <Input type="date" value={form.effectiveFrom} onChange={(e) => setForm((f) => ({ ...f, effectiveFrom: e.target.value }))} required />
+            </FormField>
+            <FormField>
               Net pay account
-              <input value={form.netPayAccountCode} onChange={(e) => setForm((f) => ({ ...f, netPayAccountCode: e.target.value }))} required maxLength={40} />
-            </label>
-            <label>
+              <Input value={form.netPayAccountCode} onChange={(e) => setForm((f) => ({ ...f, netPayAccountCode: e.target.value }))} required maxLength={40} />
+            </FormField>
+            <FormField>
               Heads (one per line: HEAD=ACCOUNT, or HEAD=ACCOUNT/LIABILITY for an employer contribution)
-              <textarea value={form.lines} onChange={(e) => setForm((f) => ({ ...f, lines: e.target.value }))} required rows={6} />
-            </label>
-            <label>
+              <Textarea value={form.lines} onChange={(e) => setForm((f) => ({ ...f, lines: e.target.value }))} required rows={6} />
+            </FormField>
+            <FormField>
               Reason
-              <input value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} required maxLength={500} />
-            </label>
-            <button type="submit" disabled={save.isPending}>
+              <Input value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} required maxLength={500} />
+            </FormField>
+            <Button type="submit" disabled={save.isPending}>
               Record mapping
-            </button>
-          </form>
+            </Button>
+          </FormGrid>
           <ErrorNote error={save.error} />
         </Section>
       )}
       {can(REPORT_READ) && (
         <Section title="Salary JV">
-          <form
-            className="filters"
-            aria-label="Payroll run"
-            onSubmit={(e: FormEvent) => {
-              e.preventDefault();
-              setShownRun(runId.trim());
-              exportJv.reset();
-            }}
-          >
-            {pickable.length > 0 ? (
-              <label>
-                Payroll run
-                <select value={runId} onChange={(e) => setRunId(e.target.value)} required>
-                  <option value="">Choose a run…</option>
-                  {pickable.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.periodCode} · revision {r.revision} · {r.state === 'APPROVED' ? 'approved' : 'processed'}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : (
-              <label>
-                Payroll run id
-                <input value={runId} onChange={(e) => setRunId(e.target.value)} required />
-              </label>
-            )}
-            <button type="submit">Show voucher</button>
-          </form>
-          <p className="hint">{pickable.length > 0 ? 'Approved and processed runs, most recent first.' : 'An approved or processed run; its id is on the payroll run’s page.'}</p>
+          <FilterBar asChild>
+            <form
+              aria-label="Payroll run"
+              onSubmit={(e: FormEvent) => {
+                e.preventDefault();
+                setShownRun(runId.trim());
+                exportJv.reset();
+              }}
+            >
+              {pickable.length > 0 ? (
+                <FormField>
+                  Payroll run
+                  <NativeSelect value={runId} onChange={(e) => setRunId(e.target.value)} required>
+                    <option value="">Choose a run…</option>
+                    {pickable.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.periodCode} · revision {r.revision} · {r.state === 'APPROVED' ? 'approved' : 'processed'}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </FormField>
+              ) : (
+                <FormField>
+                  Payroll run id
+                  <Input value={runId} onChange={(e) => setRunId(e.target.value)} required />
+                </FormField>
+              )}
+              <Button type="submit">Show voucher</Button>
+            </form>
+          </FilterBar>
+          <Hint>{pickable.length > 0 ? 'Approved and processed runs, most recent first.' : 'An approved or processed run; its id is on the payroll run’s page.'}</Hint>
           <ErrorNote error={jv.error} />
+          {/* An error, but a status: a voucher the server cannot work out is a finding about the configuration, not a failed action. */}
           {jv.data?.status === 'NOT_CONFIGURED' && (
-            <p className="error" role="status">
+            <StatusNote tone="error" role="status">
               Not configured: {jv.data.reason === 'NO_GL_MAPPING' ? 'no GL mapping is in force for this period.' : `map ${jv.data.missing.map((m) => `${m.componentCode} (${plain(m.problem)})`).join(', ')}.`}
-            </p>
+            </StatusNote>
           )}
           {jv.data?.status === 'READY' && jv.data.totals && (
             <>
-              <table aria-label="Voucher">
-                <thead>
-                  <tr>
-                    <th scope="col">Account</th>
-                    <th scope="col">Cost centre</th>
-                    <th scope="col">Narration</th>
-                    <th scope="col">Debit</th>
-                    <th scope="col">Credit</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table aria-label="Voucher">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Account</TableHead>
+                    <TableHead scope="col">Cost centre</TableHead>
+                    <TableHead scope="col">Narration</TableHead>
+                    <TableHead scope="col">Debit</TableHead>
+                    <TableHead scope="col">Credit</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {jv.data.lines.map((l, n) => (
-                    <tr key={n}>
-                      <td>
+                    <TableRow key={n}>
+                      <TableCell>
                         {l.accountCode}
                         {l.accountName ? ` ${l.accountName}` : ''}
-                      </td>
-                      <td>{l.costCentre || '—'}</td>
-                      <td>{l.narration}</td>
-                      <td>{l.side === 'DEBIT' ? amount(l.amount) : ''}</td>
-                      <td>{l.side === 'CREDIT' ? amount(l.amount) : ''}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{l.costCentre || '—'}</TableCell>
+                      <TableCell>{l.narration}</TableCell>
+                      <TableCell>{l.side === 'DEBIT' ? amount(l.amount) : ''}</TableCell>
+                      <TableCell>{l.side === 'CREDIT' ? amount(l.amount) : ''}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-              <p role="status">
+                </TableBody>
+              </Table>
+              <StatusNote tone={jv.data.totals.balanced ? 'info' : 'error'} role="status">
                 {jv.data.periodCode}, dated {formatDate(jv.data.voucherDate)}: debits {amount(jv.data.totals.debit)}, credits {amount(jv.data.totals.credit)}
                 {jv.data.totals.balanced ? ', balanced.' : ', NOT balanced.'}
-              </p>
+              </StatusNote>
               {can(REPORT_EXPORT) && (
-                <button type="button" disabled={exportJv.isPending} onClick={() => exportJv.mutate()}>
+                <Button type="button" disabled={exportJv.isPending} onClick={() => exportJv.mutate()}>
                   Request CSV / XLSX export
-                </button>
+                </Button>
               )}
               {exportJv.isSuccess && (
-                <p role="status">
+                <StatusNote tone="success" role="status">
                   Export requested. Download it from <Link to="/reports">Reports</Link> once it is ready.
-                </p>
+                </StatusNote>
               )}
               <ErrorNote error={exportJv.error} />
             </>

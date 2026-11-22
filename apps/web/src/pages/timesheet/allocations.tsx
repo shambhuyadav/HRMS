@@ -2,12 +2,22 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, ApiError, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, LIST_PAGE_SIZE, Notice, NotPermitted, pageParams, Pager, Section, StateBadge, When } from '../../ui';
 import { EmployeeField, JobField } from './fields';
 import { ReadProblem, Refusal } from './refusals';
-import { ALLOC_MANAGE, ALLOC_READ, FLUSH, H3, PERCENT, Problem, SCROLL, shown, TEXTAREA, useKeys } from './shared';
+import { ALLOC_MANAGE, ALLOC_READ, FORM_END, PERCENT, Problem, Remark, shown, useKeys } from './shared';
 import type { Allocation } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -34,49 +44,47 @@ export function AllocationsScreen() {
   return (
     <div className="stack">
       <Section title="Resource allocations">
-        <p className="hint">An allocation is a share of the employee’s daily capacity on a job. Overlapping jobs may total 100%; above that, only the employee’s direct manager records an exception with a reason.</p>
-        <div className="row">
-          <label>
+        <Hint>An allocation is a share of the employee’s daily capacity on a job. Overlapping jobs may total 100%; above that, only the employee’s direct manager records an exception with a reason.</Hint>
+        <FilterBar>
+          <FormField>
             Status
-            <select value={state} onChange={(e) => setState(e.target.value)}>
+            <NativeSelect value={state} onChange={(e) => setState(e.target.value)}>
               <option value="">All</option>
               <option value="ACTIVE">Active</option>
               <option value="CANCELLED">Cancelled</option>
-            </select>
-          </label>
-          <label>
+            </NativeSelect>
+          </FormField>
+          <FormField>
             Overlapping from
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </label>
-          <label>
+            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </FormField>
+          <FormField>
             Overlapping to
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-          </label>
-        </div>
+            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </FormField>
+        </FilterBar>
         <ReadProblem error={list.error} what="resource allocations" />
-        {list.isPending && <p className="hint loading">Loading allocations…</p>}
+        {list.isPending && <LoadingLine>Loading allocations…</LoadingLine>}
         {data && data.items.length === 0 && <Empty>No allocations match.</Empty>}
         {data && data.items.length > 0 && (
-          <div style={SCROLL}>
-            <table aria-label="Allocations">
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Project and job</th>
-                  <th>Interval</th>
-                  <th>Allocation</th>
-                  <th>Status</th>
-                  <th>Over-allocation exception</th>
-                  {can(ALLOC_MANAGE) && <th>Change</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((a) => (
-                  <AllocationRow key={a.id} a={a} manage={can(ALLOC_MANAGE)} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table aria-label="Allocations">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Project and job</TableHead>
+                <TableHead scope="col">Interval</TableHead>
+                <TableHead scope="col">Allocation</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Over-allocation exception</TableHead>
+                {can(ALLOC_MANAGE) && <TableHead scope="col">Change</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((a) => (
+                <AllocationRow key={a.id} a={a} manage={can(ALLOC_MANAGE)} />
+              ))}
+            </TableBody>
+          </Table>
         )}
         {data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={data.total ?? data.items.length} onPage={(p) => setPaging({ query, page: p })} label="Allocation pages" noun="allocation" />}
       </Section>
@@ -89,53 +97,55 @@ function AllocationRow({ a, manage }: { a: Allocation; manage: boolean }) {
   const [open, setOpen] = useState<'change' | 'cancel' | null>(null);
   return (
     <>
-      <tr>
-        <td>
+      <TableRow>
+        <TableCell>
           {a.employeeName} ({a.employeeCode})
-        </td>
-        <td>
+        </TableCell>
+        <TableCell>
           {a.projectCode} / {a.jobCode}: {a.jobName}
-        </td>
-        <td>
+        </TableCell>
+        <TableCell>
           {formatDate(a.startDate)} to {formatDate(a.endDate)}
-        </td>
-        <td>{a.allocationPercent}%</td>
-        <td>
+        </TableCell>
+        <TableCell>{a.allocationPercent}%</TableCell>
+        <TableCell>
           <StateBadge state={a.state} />
-          {a.source === 'IMPORT' && <div className="hint">imported</div>}
-          {a.cancelReason && <div className="hint">Cancelled: {a.cancelReason}</div>}
-        </td>
-        <td>
+          {a.source === 'IMPORT' && <Remark>imported</Remark>}
+          {a.cancelReason && <Remark>Cancelled: {a.cancelReason}</Remark>}
+        </TableCell>
+        <TableCell>
           {a.overAllocation ? (
             <>
               Peak {a.overAllocation.peakPercent}% · recorded <When at={a.overAllocation.recordedAt} />
-              <div className="hint">Reason: {a.overAllocation.reason}</div>
+              <Remark>Reason: {a.overAllocation.reason}</Remark>
             </>
           ) : (
             '—'
           )}
-        </td>
+        </TableCell>
         {manage && (
-          <td>
+          <RowActionsCell>
             {a.state === 'ACTIVE' ? (
-              <div className="row">
-                <button type="button" className="secondary" aria-expanded={open === 'change'} onClick={() => setOpen(open === 'change' ? null : 'change')}>
+              <RowActions>
+                <Button type="button" variant="outline" size="sm" aria-expanded={open === 'change'} onClick={() => setOpen(open === 'change' ? null : 'change')}>
                   Change {a.employeeCode} on {a.jobCode}
-                </button>
-                <button type="button" className="danger" aria-expanded={open === 'cancel'} onClick={() => setOpen(open === 'cancel' ? null : 'cancel')}>
+                </Button>
+                <Button type="button" variant="danger" size="sm" aria-expanded={open === 'cancel'} onClick={() => setOpen(open === 'cancel' ? null : 'cancel')}>
                   Cancel {a.employeeCode} on {a.jobCode}
-                </button>
-              </div>
+                </Button>
+              </RowActions>
             ) : (
               '—'
             )}
-          </td>
+          </RowActionsCell>
         )}
-      </tr>
+      </TableRow>
       {manage && open && (
-        <tr>
-          <td colSpan={7}>{open === 'change' ? <ChangeAllocation a={a} onDone={() => setOpen(null)} /> : <CancelAllocation a={a} onDone={() => setOpen(null)} />}</td>
-        </tr>
+        <TableRow>
+          <TableCell colSpan={7}>
+            {open === 'change' ? <ChangeAllocation a={a} onDone={() => setOpen(null)} /> : <CancelAllocation a={a} onDone={() => setOpen(null)} />}
+          </TableCell>
+        </TableRow>
       )}
     </>
   );
@@ -144,10 +154,10 @@ function AllocationRow({ a, manage }: { a: Allocation; manage: boolean }) {
 /** The exception reason, offered once the API reports that the total would exceed 100% (or one is on record). */
 function ExceptionReason({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <label className="wide">
+    <FormField className="col-span-full">
       Over-allocation exception reason (the employee’s direct manager only)
-      <textarea rows={2} maxLength={1000} value={value} onChange={(e) => onChange(e.target.value)} style={TEXTAREA} />
-    </label>
+      <Textarea rows={2} maxLength={1000} value={value} onChange={(e) => onChange(e.target.value)} />
+    </FormField>
   );
 }
 
@@ -189,34 +199,32 @@ function NewAllocationForm() {
   };
   return (
     <Section title="New allocation">
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-        <h3 id={`${id}-title`} className="wide" style={H3}>
-          Allocate an employee to a job
-        </h3>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+        <CardSubheading id={`${id}-title`}>Allocate an employee to a job</CardSubheading>
         <EmployeeField label="Employee" value={f.employee} onChange={set('employee')} />
         <JobField projectId={f.project} jobId={f.job} onProject={set('project')} onJob={set('job')} />
-        <label>
+        <FormField>
           From
-          <input type="date" value={f.start} onChange={(e) => set('start')(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={f.start} onChange={(e) => set('start')(e.target.value)} />
+        </FormField>
+        <FormField>
           To
-          <input type="date" value={f.end} onChange={(e) => set('end')(e.target.value)} />
-        </label>
-        <label>
+          <Input type="date" value={f.end} onChange={(e) => set('end')(e.target.value)} />
+        </FormField>
+        <FormField>
           Allocation (%)
-          <input inputMode="decimal" value={f.percent} maxLength={6} onChange={(e) => set('percent')(e.target.value)} />
-        </label>
+          <Input inputMode="decimal" value={f.percent} maxLength={6} onChange={(e) => set('percent')(e.target.value)} />
+        </FormField>
         {askReason && <ExceptionReason value={f.reason} onChange={set('reason')} />}
-        <div className="wide">
+        <div className={FORM_END}>
           <Problem text={problem} />
           <Refusal error={create.error} act="allocation" />
           <Notice notice={notice} />
-          <button type="submit" disabled={create.isPending}>
+          <Button type="submit" className="self-start" disabled={create.isPending}>
             {askReason ? 'Allocate with the exception' : 'Allocate'}
-          </button>
+          </Button>
         </div>
-      </form>
+      </FormGrid>
     </Section>
   );
 }
@@ -259,29 +267,29 @@ function ChangeAllocation({ a, onDone }: { a: Allocation; onDone: () => void }) 
     save.mutate(body);
   };
   return (
-    <form className="grid-form" aria-label={`Change the allocation of ${a.employeeCode} on ${a.jobCode}`} onSubmit={submit} noValidate>
-      <label>
+    <FormGrid aria-label={`Change the allocation of ${a.employeeCode} on ${a.jobCode}`} onSubmit={submit} noValidate>
+      <FormField>
         New end date
-        <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
-      </label>
-      <label>
+        <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+      </FormField>
+      <FormField>
         New allocation (%)
-        <input inputMode="decimal" value={percent} maxLength={6} onChange={(e) => setPercent(e.target.value)} />
-      </label>
+        <Input inputMode="decimal" value={percent} maxLength={6} onChange={(e) => setPercent(e.target.value)} />
+      </FormField>
       {askReason && <ExceptionReason value={reason} onChange={setReason} />}
-      <div className="wide">
+      <div className={FORM_END}>
         <Problem text={problem} />
         <Refusal error={save.error} act="allocation" />
-        <div className="row">
-          <button type="submit" disabled={save.isPending}>
+        <ButtonRow>
+          <Button type="submit" disabled={save.isPending}>
             Save allocation
-          </button>
-          <button type="button" className="secondary" onClick={onDone}>
+          </Button>
+          <Button type="button" variant="outline" onClick={onDone}>
             Close
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
       </div>
-    </form>
+    </FormGrid>
   );
 }
 
@@ -312,23 +320,21 @@ function CancelAllocation({ a, onDone }: { a: Allocation; onDone: () => void }) 
   };
   return (
     <form aria-label={`Cancel the allocation of ${a.employeeCode} on ${a.jobCode}`} onSubmit={submit} noValidate className="stack">
-      <label>
+      <FormField>
         Cancellation reason
-        <textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
-      <p className="hint" style={FLUSH}>
-        A cancelled allocation is final and stays on record.
-      </p>
+        <Textarea rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
+      <Hint className="m-0">A cancelled allocation is final and stays on record.</Hint>
       <Problem text={problem} />
       <Refusal error={cancel.error} act="allocation" />
-      <div className="row">
-        <button type="submit" className="danger" disabled={cancel.isPending}>
+      <ButtonRow>
+        <Button type="submit" variant="danger" disabled={cancel.isPending}>
           Cancel allocation
-        </button>
-        <button type="button" className="secondary" onClick={onDone}>
+        </Button>
+        <Button type="button" variant="outline" onClick={onDone}>
           Close
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
     </form>
   );
 }

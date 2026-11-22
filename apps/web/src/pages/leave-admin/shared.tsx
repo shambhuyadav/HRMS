@@ -1,7 +1,9 @@
-// Shared parts of the leave administration screens: shapes, keys, words, and the report export other pages use too.
+// Shared parts of the leave administration screens: shapes, keys and words, and the report export other pages use too.
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { FormEvent } from 'react';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
 import { api, download, formatDate } from '../../api';
 import { isReportRefusal, reportProblem } from '../../report-failures';
 import { ErrorNote, StateBadge } from '../../ui';
@@ -89,6 +91,9 @@ export const periodText = (p: Pick<PolicyRevision, 'effectiveFrom' | 'effectiveT
 /** A filter form applies as it changes: Enter in one of its fields does not reload the page. */
 export const keepOnPage = (e: FormEvent) => e.preventDefault();
 
+/** The export's button, its state, its download and anything that went wrong, side by side, wrapping on a narrow screen. */
+const EXPORT_ROW = 'flex flex-wrap items-center gap-x-4 gap-y-3 not-last:mb-3';
+
 /**
  * Requests a report for the shown filters and offers its download when it is ready: reports are generated in the
  * background and the download re-checks access (FR-056).
@@ -118,17 +123,17 @@ export function ReportExport({
   });
   const save = useMutation({ mutationFn: () => download(`/v1/reports/${id}/download`) });
   return (
-    <div className="inline">
-      <button type="button" className="secondary" disabled={disabled || request.isPending} onClick={() => request.mutate()}>
+    <div className={EXPORT_ROW}>
+      <Button type="button" variant="outline" disabled={disabled || request.isPending} onClick={() => request.mutate()}>
         {label}
-      </button>
+      </Button>
       {status.data && <StateBadge state={status.data.state} />}
       {status.data?.state === 'COMPLETED' && (
-        <button type="button" className="link" onClick={() => save.mutate()}>
+        <Button type="button" variant="link" onClick={() => save.mutate()}>
           Download{status.data.rowCount !== null ? ` (${status.data.rowCount} rows)` : ''}
-        </button>
+        </Button>
       )}
-      {status.data && reportProblem(status.data) && <span className="hint">{reportProblem(status.data)}</span>}
+      {status.data && reportProblem(status.data) && <Hint as="span">{reportProblem(status.data)}</Hint>}
       <ErrorNote error={request.error ?? status.error ?? save.error} />
     </div>
   );

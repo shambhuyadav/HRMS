@@ -2,6 +2,11 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { api, type EmployeeHit, isForbidden, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, NotPermitted } from '../../ui';
@@ -11,6 +16,11 @@ import type { Project, ProjectDetail } from './types';
 // ---------------------------------------------------------------------------------------------------------
 // Employee and job choices for the forms
 // ---------------------------------------------------------------------------------------------------------
+
+/** The employee search's matches, stacked, and one match as a full-width choice tinted red on hover (the old `.choices`). */
+const CHOICE_LIST = 'm-0 flex list-none flex-col gap-[0.6rem] p-0';
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
+
 interface Choice {
   id: string;
   label: string;
@@ -52,40 +62,39 @@ export function EmployeeField({ label, value, current, onChange }: { label: stri
   const lower = label.toLowerCase();
   return (
     <>
-      <label>
+      <FormField>
         {label}
-        <select required value={value} onChange={(e) => onChange(e.target.value)}>
+        <NativeSelect required value={value} onChange={(e) => onChange(e.target.value)}>
           <option value="">Choose…</option>
           {choices.map((c) => (
             <option key={c.id} value={c.id}>
               {c.label}
             </option>
           ))}
-        </select>
-      </label>
-      {canSearch ? (
-        <div className="wide">
-          <label>
+        </NativeSelect>
+      </FormField>
+      {!canSearch && <Hint>The selected role cannot search employees, so only the choices above are offered.</Hint>}
+      {canSearch && (
+        <div className="col-span-full flex flex-col gap-[0.6rem]">
+          <FormField>
             Find {choices.length > 0 ? `another ${lower}` : `the ${lower}`}
-            <input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
-          </label>
-          {term !== '' && hits.isLoading && <p className="hint">Searching…</p>}
+            <Input type="search" value={search} maxLength={100} placeholder="Name, employee code or work email" onChange={(e) => setSearch(e.target.value)} />
+          </FormField>
+          {term !== '' && hits.isLoading && <Hint className="m-0">Searching…</Hint>}
           {isForbidden(hits.error) ? <NotPermitted>The selected role cannot search employees.</NotPermitted> : <ErrorNote error={hits.error} />}
           {found && found.items.length === 0 && <Empty>No employees match “{term}”.</Empty>}
           {found && found.items.length > 0 && (
-            <ul className="choices" aria-label={`Matching employees for ${lower}`}>
+            <ul className={CHOICE_LIST} aria-label={`Matching employees for ${lower}`}>
               {found.items.map((e) => (
                 <li key={e.id}>
-                  <button type="button" aria-label={`Choose ${e.displayName} (${e.employeeCode}) as ${lower}`} onClick={() => choose(e)}>
+                  <Button type="button" variant="outline" className={CHOICE_BUTTON} aria-label={`Choose ${e.displayName} (${e.employeeCode}) as ${lower}`} onClick={() => choose(e)}>
                     {e.displayName} ({e.employeeCode}) · {readable(e.status).toLowerCase()}
-                  </button>
+                  </Button>
                 </li>
               ))}
             </ul>
           )}
         </div>
-      ) : (
-        <p className="hint wide">The selected role cannot search employees, so only the choices above are offered.</p>
       )}
     </>
   );
@@ -103,13 +112,13 @@ export function JobField({ projectId, jobId, onProject, onJob }: { projectId: st
     enabled: canRead && projectId !== '',
     retry: retryTransient,
   });
-  if (!canRead) return <p className="hint wide">The selected role cannot list projects and jobs, so no job can be chosen here.</p>;
+  if (!canRead) return <Hint>The selected role cannot list projects and jobs, so no job can be chosen here.</Hint>;
   const jobs = (shown(detail)?.jobs ?? []).filter((j) => j.active);
   return (
     <>
-      <label>
+      <FormField>
         Project
-        <select
+        <NativeSelect
           required
           value={projectId}
           onChange={(e) => {
@@ -123,19 +132,19 @@ export function JobField({ projectId, jobId, onProject, onJob }: { projectId: st
               {p.code}: {p.name}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
+        </NativeSelect>
+      </FormField>
+      <FormField>
         Job
-        <select required value={jobId} disabled={projectId === ''} onChange={(e) => onJob(e.target.value)}>
+        <NativeSelect required value={jobId} disabled={projectId === ''} onChange={(e) => onJob(e.target.value)}>
           <option value="">{projectId === '' ? 'Choose a project first' : 'Choose…'}</option>
           {jobs.map((j) => (
             <option key={j.id} value={j.id}>
               {j.code}: {j.name}
             </option>
           ))}
-        </select>
-      </label>
+        </NativeSelect>
+      </FormField>
       <ErrorNote error={projects.error ?? detail.error} />
     </>
   );

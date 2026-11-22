@@ -2,13 +2,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ButtonRow, FilterBar, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
+import { Button } from '@/components/ui/button';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, type EmployeeHit, personLabel, readable, retryTransient } from '../../api';
 import { useSession } from '../../session';
-import { Empty, NotPermitted, Section, StateBadge, When } from '../../ui';
+import { Empty, Notice, NotPermitted, Section, StateBadge, When } from '../../ui';
 import { type GoalDraft, goalsBody, GoalsEditor } from './goals';
 import { CycleSelect, DepartmentSelect, EmployeePicker } from './lookups';
 import { QueryProblem, Refusal } from './refusals';
-import { type Appraisal, APPRAISAL_STATES, type AppraisalPage, CYCLE_READ, type GoalInput, MANAGE, PAGE_SIZES, PATHS, READ, SCROLL, shown, SOURCE_LABEL, taskStatusText, useKeys, UUID } from './shared';
+import { type Appraisal, APPRAISAL_STATES, type AppraisalPage, CYCLE_READ, type GoalInput, MANAGE, PAGE_SIZES, PATHS, READ, shown, SOURCE_LABEL, taskStatusText, useKeys, UUID } from './shared';
 
 // ---------------------------------------------------------------------------------------------------------
 // Screen: the appraisal register (FR-044 lists within row scope) and enrolment
@@ -78,11 +85,11 @@ function AppraisalRegister() {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   return (
     <Section title="Appraisals">
-      <div className="row">
+      <FilterBar>
         {can(CYCLE_READ) && <CycleSelect label="Cycle" allLabel="All cycles" value={filters.cycleId} onChange={(cycleId) => setFilter({ cycleId })} />}
-        <label>
+        <FormField>
           State
-          <select value={filters.state} onChange={(e) => setFilter({ state: e.target.value })}>
+          <NativeSelect value={filters.state} onChange={(e) => setFilter({ state: e.target.value })}>
             <option value="">All states</option>
             {APPRAISAL_STATES.map((s) => (
               <option key={s} value={s}>
@@ -90,80 +97,78 @@ function AppraisalRegister() {
               </option>
             ))}
             <option value={GOAL_REVIEW_GROUP}>{taskStatusText(GOAL_REVIEW_GROUP)}</option>
-          </select>
-        </label>
+          </NativeSelect>
+        </FormField>
         <DepartmentSelect value={filters.departmentId} onChange={(departmentId) => setFilter({ departmentId })} />
-        <label>
+        <FormField>
           Rows per page
-          <select value={String(filters.pageSize)} onChange={(e) => setFilter({ pageSize: Number(e.target.value) })}>
+          <NativeSelect value={String(filters.pageSize)} onChange={(e) => setFilter({ pageSize: Number(e.target.value) })}>
             {PAGE_SIZES.map((n) => (
               <option key={n} value={String(n)}>
                 {n}
               </option>
             ))}
-          </select>
-        </label>
-      </div>
-      {list.isPending && <p className="hint loading">Loading appraisals…</p>}
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {list.isPending && <LoadingLine>Loading appraisals…</LoadingLine>}
       <QueryProblem error={list.error} forbidden="The selected role cannot view appraisals." />
       {data && data.items.length === 0 && <Empty>No appraisals match.</Empty>}
       {data && data.items.length > 0 && (
         <>
-          <div style={SCROLL}>
-            <table aria-label="Appraisal register">
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Department</th>
-                  <th>Cycle</th>
-                  <th>State</th>
-                  <th>Task status</th>
-                  <th>Goals</th>
-                  <th>Weight total</th>
-                  <th>Revision</th>
-                  <th>Source</th>
-                  {withRating && <th>Weighted manager result</th>}
-                  {withRating && <th>Final rating</th>}
-                  <th>Completed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <Link to={PATHS.appraisal(r.id)}>{personLabel(r.employee)}</Link>
-                    </td>
-                    <td>{r.employee.department?.name ?? '—'}</td>
-                    <td>{r.cycle.code}</td>
-                    <td>
-                      <StateBadge state={r.state} />
-                    </td>
-                    <td>{taskStatusText(r.taskStatus)}</td>
-                    <td>{r.goalCount}</td>
-                    <td>{r.goalWeightTotal === 100 ? '100' : `${r.goalWeightTotal} (must be 100)`}</td>
-                    <td>{r.revision}</td>
-                    <td>{SOURCE_LABEL[r.source] ?? readable(r.source)}</td>
-                    {withRating && <td>{r.weightedResult ?? '—'}</td>}
-                    {withRating && <td>{r.finalRating ?? '—'}</td>}
-                    <td>
-                      <When at={r.completedAt} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="pager">
-            <button type="button" className="secondary" disabled={filters.page <= 1} onClick={() => setParams(listQuery({ ...filters, page: filters.page - 1 }))}>
+          <Table aria-label="Appraisal register">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Department</TableHead>
+                <TableHead scope="col">Cycle</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Task status</TableHead>
+                <TableHead scope="col">Goals</TableHead>
+                <TableHead scope="col">Weight total</TableHead>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">Source</TableHead>
+                {withRating && <TableHead scope="col">Weighted manager result</TableHead>}
+                {withRating && <TableHead scope="col">Final rating</TableHead>}
+                <TableHead scope="col">Completed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((r) => (
+                <TableRow key={r.id}>
+                  <TableCell>
+                    <Link to={PATHS.appraisal(r.id)}>{personLabel(r.employee)}</Link>
+                  </TableCell>
+                  <TableCell>{r.employee.department?.name ?? '—'}</TableCell>
+                  <TableCell>{r.cycle.code}</TableCell>
+                  <TableCell>
+                    <StateBadge state={r.state} />
+                  </TableCell>
+                  <TableCell>{taskStatusText(r.taskStatus)}</TableCell>
+                  <TableCell>{r.goalCount}</TableCell>
+                  <TableCell>{r.goalWeightTotal === 100 ? '100' : `${r.goalWeightTotal} (must be 100)`}</TableCell>
+                  <TableCell>{r.revision}</TableCell>
+                  <TableCell>{SOURCE_LABEL[r.source] ?? readable(r.source)}</TableCell>
+                  {withRating && <TableCell>{r.weightedResult ?? '—'}</TableCell>}
+                  {withRating && <TableCell>{r.finalRating ?? '—'}</TableCell>}
+                  <TableCell>
+                    <When at={r.completedAt} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <PagerRow>
+            <PagerButton disabled={filters.page <= 1} onClick={() => setParams(listQuery({ ...filters, page: filters.page - 1 }))}>
               Previous page
-            </button>
-            <span>
+            </PagerButton>
+            <PagerCount>
               Page {data.page} of {pages} · {data.total} appraisal{data.total === 1 ? '' : 's'}
-            </span>
-            <button type="button" className="secondary" disabled={filters.page >= pages} onClick={() => setParams(listQuery({ ...filters, page: filters.page + 1 }))}>
+            </PagerCount>
+            <PagerButton disabled={filters.page >= pages} onClick={() => setParams(listQuery({ ...filters, page: filters.page + 1 }))}>
               Next page
-            </button>
-          </div>
+            </PagerButton>
+          </PagerRow>
         </>
       )}
     </Section>
@@ -208,25 +213,19 @@ function EnrolSection() {
   };
   return (
     <Section title="Enrol an employee">
-      <p className="hint">
-        Enrols the employee in an open cycle as a draft appraisal. Goals are optional here and can be set later, inside the goal-setting window. Nobody enrols themselves.
-      </p>
-      <form className="grid-form" aria-label="Enrol an employee" onSubmit={submit} noValidate>
+      <Hint>Enrols the employee in an open cycle as a draft appraisal. Goals are optional here and can be set later, inside the goal-setting window. Nobody enrols themselves.</Hint>
+      <FormGrid aria-label="Enrol an employee" onSubmit={submit} noValidate>
         <CycleSelect label="Cycle" openOnly value={cycleId} onChange={setCycleId} />
         <EmployeePicker value={employee} onChange={setEmployee} />
         <GoalsEditor drafts={drafts} onChange={setDrafts} />
-        {problem && (
-          <p role="alert" className="error">
-            {problem}
-          </p>
-        )}
-        <div className="row">
-          <button type="submit" disabled={create.isPending}>
+        {problem && <Notice notice={{ text: problem, ok: false }} />}
+        <ButtonRow>
+          <Button type="submit" disabled={create.isPending}>
             {create.isPending ? 'Enrolling…' : 'Enrol as a draft'}
-          </button>
-        </div>
+          </Button>
+        </ButtonRow>
         <Refusal error={create.error} action="enrol" />
-      </form>
+      </FormGrid>
     </Section>
   );
 }

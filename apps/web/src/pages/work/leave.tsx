@@ -1,8 +1,17 @@
 // Leave (FR-024 to FR-026): balances, the request form and own requests with withdrawal.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CheckField, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, formatDate, formatUnits } from '../../api';
 import { useSession } from '../../session';
 import { Empty, ErrorNote, Section, StateBadge } from '../../ui';
@@ -39,14 +48,58 @@ interface LeaveRequest {
 /** The released content of one leave evidence document, for the requester or a reviewer assigned to the request (I-22). */
 export const leaveEvidencePath = (requestId: string, documentId: string) => `/v1/leave/requests/${requestId}/evidence/${documentId}/content`;
 
-/** Inline follow-ups on an own request: resubmit a returned request, or ask to cancel approved leave (DF03). */
-function LeaveRequestActions({ request: r, onChanged }: { request: LeaveRequest; onChanged: () => void }) {
+/** A follow-up form in a request's actions cell (the old `td form.inline`): its fields and button side by side, bottoms aligned. */
+const CELL_FORM = 'mt-[0.4rem] flex flex-wrap items-end gap-x-4 gap-y-3';
+
+/** Which inline follow-up an own request offers (DF03): resubmit a returned request, or ask to cancel approved leave. */
+type FollowUp = 'resubmit' | 'cancel' | 'cancellation-waiting' | null;
+
+function followUpOf(r: LeaveRequest, can: (permission: string) => boolean): FollowUp {
+  if (r.state === 'RETURNED' && can('leave.submit.operational')) return 'resubmit';
+  if (r.state === 'APPROVED' && r.cancellationState === 'SUBMITTED') return 'cancellation-waiting';
+  if (r.state === 'APPROVED' && can('leave.cancel.operational')) return 'cancel';
+  return null;
+}
+
+/**
+ * An own request's actions cell: the actions given as children (withdraw, raise again), then the inline follow-up. Closed, the cell
+ * takes only the room of its buttons; with a follow-up form open it takes the room the form needs, its words wrapping.
+ */
+function RequestActionsCell({ request: r, onChanged, children }: { request: LeaveRequest; onChanged: () => void; children: ReactNode }) {
   const { can } = useSession();
   const [open, setOpen] = useState(false);
+  const followUp = followUpOf(r, can);
+  const done = () => {
+    setOpen(false);
+    onChanged();
+  };
+  return (
+    <RowActionsCell expanded={open}>
+      <RowActions>
+        {children}
+        {followUp === 'resubmit' && !open && (
+          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            Correct and resubmit
+          </Button>
+        )}
+        {followUp === 'cancellation-waiting' && <Hint as="span">Cancellation waiting for decision</Hint>}
+        {followUp === 'cancel' && !open && (
+          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            Cancel leave
+          </Button>
+        )}
+      </RowActions>
+      {followUp === 'resubmit' && open && <ResubmitForm request={r} onDone={done} />}
+      {followUp === 'cancel' && open && <CancellationForm request={r} onDone={done} />}
+    </RowActionsCell>
+  );
+}
+
+/** Correcting a returned request: new dates, a new private reason and documents, each kept from before when left alone. */
+function ResubmitForm({ request: r, onDone }: { request: LeaveRequest; onDone: () => void }) {
   const [dates, setDates] = useState({ startDate: r.startDate.slice(0, 10), endDate: r.endDate.slice(0, 10), halfDay: r.halfDay });
   // The earlier private reason is kept by the server unless a new one is sent (the employee cannot read it back).
   const [newReason, setNewReason] = useState('');
-  const [reason, setReason] = useState('');
   // Nothing ticked: the server keeps the documents attached before (I-22).
   const [evidence, setEvidence] = useState<string[]>([]);
   const resubmit = useMutation({
@@ -61,69 +114,57 @@ function LeaveRequestActions({ request: r, onChanged }: { request: LeaveRequest;
           expectedVersion: r.version,
         },
       }),
-    onSuccess: () => {
-      setOpen(false);
-      setNewReason('');
-      setEvidence([]);
-      onChanged();
-    },
+    onSuccess: onDone,
   });
+  return (
+    <form
+      className={CELL_FORM}
+      onSubmit={(e) => {
+        e.preventDefault();
+        resubmit.mutate();
+      }}
+    >
+      <Input type="date" aria-label="From" required className="w-auto" value={dates.startDate} onChange={(e) => setDates({ ...dates, startDate: e.target.value })} />
+      {!dates.halfDay && <Input type="date" aria-label="To" required className="w-auto" value={dates.endDate} onChange={(e) => setDates({ ...dates, endDate: e.target.value })} />}
+      <CheckField>
+        <input type="checkbox" checked={dates.halfDay} onChange={(e) => setDates({ ...dates, halfDay: e.target.checked })} /> Half day
+      </CheckField>
+      <Input
+        aria-label="New reason (private)"
+        placeholder="New reason (private, optional)"
+        maxLength={1000}
+        className="w-auto"
+        value={newReason}
+        onChange={(e) => setNewReason(e.target.value)}
+      />
+      <EvidenceChoice chosen={evidence} onChange={setEvidence} earlier={r.evidence ?? []} />
+      <Button disabled={resubmit.isPending}>Resubmit</Button>
+      <Hint as="span">Leave the new reason empty and your earlier reason is kept; tick no document and the documents attached before are kept.</Hint>
+      <EvidenceError error={resubmit.error} keptEarlier={evidence.length === 0} />
+    </form>
+  );
+}
+
+/** Asking to cancel approved leave, with the reason for it. */
+function CancellationForm({ request: r, onDone }: { request: LeaveRequest; onDone: () => void }) {
+  const [reason, setReason] = useState('');
   const cancel = useMutation({
     mutationFn: () => api(`/v1/leave/requests/${r.id}/cancellation`, { body: { reason } }),
-    onSuccess: () => {
-      setOpen(false);
-      setReason('');
-      onChanged();
-    },
+    onSuccess: onDone,
   });
-
-  if (r.state === 'RETURNED' && can('leave.submit.operational')) {
-    return open ? (
-      <form
-        className="inline"
-        onSubmit={(e) => {
-          e.preventDefault();
-          resubmit.mutate();
-        }}
-      >
-        <input type="date" aria-label="From" required value={dates.startDate} onChange={(e) => setDates({ ...dates, startDate: e.target.value })} />
-        {!dates.halfDay && <input type="date" aria-label="To" required value={dates.endDate} onChange={(e) => setDates({ ...dates, endDate: e.target.value })} />}
-        <label className="check">
-          <input type="checkbox" checked={dates.halfDay} onChange={(e) => setDates({ ...dates, halfDay: e.target.checked })} /> Half day
-        </label>
-        <input aria-label="New reason (private)" placeholder="New reason (private, optional)" maxLength={1000} value={newReason} onChange={(e) => setNewReason(e.target.value)} />
-        <EvidenceChoice chosen={evidence} onChange={setEvidence} earlier={r.evidence ?? []} />
-        <button disabled={resubmit.isPending}>Resubmit</button>
-        <span className="hint">Leave the new reason empty and your earlier reason is kept; tick no document and the documents attached before are kept.</span>
-        <EvidenceError error={resubmit.error} keptEarlier={evidence.length === 0} />
-      </form>
-    ) : (
-      <button className="link" onClick={() => setOpen(true)}>
-        Correct and resubmit
-      </button>
-    );
-  }
-  if (r.state === 'APPROVED' && r.cancellationState === 'SUBMITTED') return <span className="hint">Cancellation waiting for decision</span>;
-  if (r.state === 'APPROVED' && can('leave.cancel.operational')) {
-    return open ? (
-      <form
-        className="inline"
-        onSubmit={(e) => {
-          e.preventDefault();
-          cancel.mutate();
-        }}
-      >
-        <input aria-label="Cancellation reason" placeholder="Reason" required maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
-        <button disabled={cancel.isPending}>Ask to cancel</button>
-        <ErrorNote error={cancel.error} />
-      </form>
-    ) : (
-      <button className="link" onClick={() => setOpen(true)}>
-        Cancel leave
-      </button>
-    );
-  }
-  return null;
+  return (
+    <form
+      className={CELL_FORM}
+      onSubmit={(e) => {
+        e.preventDefault();
+        cancel.mutate();
+      }}
+    >
+      <Input aria-label="Cancellation reason" placeholder="Reason" required maxLength={1000} className="w-auto" value={reason} onChange={(e) => setReason(e.target.value)} />
+      <Button disabled={cancel.isPending}>Ask to cancel</Button>
+      <ErrorNote error={cancel.error} />
+    </form>
+  );
 }
 
 export function LeavePage() {
@@ -172,9 +213,9 @@ export function LeavePage() {
       <Section title="Leave">
         <p>
           Your own leave is not in this role’s scope.{' '}
-          <button type="button" className="link" onClick={switchRole}>
+          <Button type="button" variant="link" size="inline" onClick={switchRole}>
             Switch role
-          </button>{' '}
+          </Button>{' '}
           and choose your Employee role to see your balances or request leave.
         </p>
         {can('leave.approve.operational') && (
@@ -188,118 +229,118 @@ export function LeavePage() {
   return (
     <>
       <Section title="Leave balances (days)">
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>Available</th>
-              <th>Pending</th>
-              <th>Taken</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Type</TableHead>
+              <TableHead scope="col">Available</TableHead>
+              <TableHead scope="col">Pending</TableHead>
+              <TableHead scope="col">Taken</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {balances.data?.items.map((b) => (
-              <tr key={b.leaveType}>
-                <td>
+              <TableRow key={b.leaveType}>
+                <TableCell>
                   {b.leaveTypeName || b.leaveType} {b.paid || /unpaid/i.test(b.leaveTypeName ?? '') ? '' : '(unpaid)'}
-                </td>
-                <td>{b.paid ? formatUnits(b.available) : '—'}</td>
-                <td>{formatUnits(b.pending)}</td>
-                <td>{formatUnits(b.taken)}</td>
-              </tr>
+                </TableCell>
+                <TableCell>{b.paid ? formatUnits(b.available) : '—'}</TableCell>
+                <TableCell>{formatUnits(b.pending)}</TableCell>
+                <TableCell>{formatUnits(b.taken)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         <ErrorNote error={balances.error} />
       </Section>
 
       {can('leave.submit.operational') && (
         <Section title="Request leave">
           {raisingAgain && <RaiseAgainNote onCancel={() => setRaisingAgain(null)} />}
-          <form
-            className="grid-form"
+          <FormGrid
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
               submit.mutate();
             }}
           >
-            <label>
+            <FormField>
               Type
-              <select value={form.leaveType} onChange={(e) => setForm({ ...form, leaveType: e.target.value })}>
+              <NativeSelect value={form.leaveType} onChange={(e) => setForm({ ...form, leaveType: e.target.value })}>
                 {(balances.data?.items ?? []).map((b) => (
                   <option key={b.leaveType} value={b.leaveType}>
                     {b.leaveTypeName || b.leaveType}
                   </option>
                 ))}
-              </select>
-            </label>
-            <label>
+              </NativeSelect>
+            </FormField>
+            <FormField>
               From
-              <input type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
-            </label>
+              <Input type="date" required value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
+            </FormField>
             {!form.halfDay && (
-              <label>
+              <FormField>
                 To
-                <input type="date" required value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
-              </label>
+                <Input type="date" required value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
+              </FormField>
             )}
             {/* Its own row under the dates, not floating beside them. */}
-            <label className="check wide">
+            <CheckField className="col-span-full">
               <input type="checkbox" checked={form.halfDay} onChange={(e) => setForm({ ...form, halfDay: e.target.checked })} /> Half day
-            </label>
-            <label className="wide">
+            </CheckField>
+            <FormField className="col-span-full">
               Reason (private, optional)
-              <input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} maxLength={1000} />
-            </label>
+              <Input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} maxLength={1000} />
+            </FormField>
             <EvidenceChoice chosen={evidence} onChange={setEvidence} />
-            <button type="submit" disabled={submit.isPending}>
+            <Button type="submit" disabled={submit.isPending}>
               Submit request
-            </button>
-          </form>
-          {submit.isSuccess && <p className="ok">Request submitted for review.</p>}
+            </Button>
+          </FormGrid>
+          {submit.isSuccess && <StatusNote tone="success">Request submitted for review.</StatusNote>}
           <EvidenceError error={submit.error} />
         </Section>
       )}
 
       <Section title="My requests">
-        <table>
-          <thead>
-            <tr>
-              <th>Type</th>
-              <th>From</th>
-              <th>To</th>
-              <th>Days</th>
-              <th>State</th>
-              <th>Documents</th>
-              <th>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Type</TableHead>
+              <TableHead scope="col">From</TableHead>
+              <TableHead scope="col">To</TableHead>
+              <TableHead scope="col">Days</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Documents</TableHead>
+              <TableHead scope="col">
                 <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {requests.data?.items.map((r) => (
-              <tr key={r.id}>
-                <td>{typeName(r.leaveType)}</td>
-                <td>{formatDate(r.startDate)}</td>
-                <td>{formatDate(r.endDate)}</td>
-                <td>{formatUnits(r.units)}</td>
-                <td>
+              <TableRow key={r.id}>
+                <TableCell>{typeName(r.leaveType)}</TableCell>
+                <TableCell>{formatDate(r.startDate)}</TableCell>
+                <TableCell>{formatDate(r.endDate)}</TableCell>
+                <TableCell>{formatUnits(r.units)}</TableCell>
+                <TableCell>
                   <StateBadge state={r.state} />
                   <RaisedAgainHint predecessorRequestId={r.predecessorRequestId} />
-                </td>
-                <td>
+                </TableCell>
+                <TableCell>
                   <EvidenceList evidence={r.evidence ?? []} openPath={(documentId) => leaveEvidencePath(r.id, documentId)} />
-                </td>
-                <td>
+                </TableCell>
+                <RequestActionsCell request={r} onChanged={refresh}>
                   {(r.state === 'SUBMITTED' || r.state === 'RETURNED') && can('leave.withdraw.operational') && (
-                    <button className="link" onClick={() => withdraw.mutate(r.id)}>
+                    <Button variant="danger" size="sm" onClick={() => withdraw.mutate(r.id)}>
                       Withdraw
-                    </button>
+                    </Button>
                   )}{' '}
                   {canRaiseAgain(r, followedRequests(requests.data?.items ?? [])) && can('leave.submit.operational') && (
-                    <button
+                    <Button
                       type="button"
-                      className="link"
+                      variant="outline"
+                      size="sm"
                       onClick={() => {
                         submit.reset();
                         // The private reason is not read back: the new request states its own.
@@ -309,16 +350,15 @@ export function LeavePage() {
                       }}
                     >
                       Raise again
-                    </button>
+                    </Button>
                   )}{' '}
-                  <LeaveRequestActions request={r} onChanged={refresh} />
-                </td>
-              </tr>
+                </RequestActionsCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
         {requests.data?.items.length === 0 && <Empty>{can('leave.submit.operational') ? 'No leave requests yet. Use Request leave above to ask for time off.' : 'No leave requests yet.'}</Empty>}
-        {requests.isPending && <p className="hint loading">Loading your requests…</p>}
+        {requests.isPending && <LoadingLine>Loading your requests…</LoadingLine>}
         <ErrorNote error={requests.error} />
         <ErrorNote error={withdraw.error} />
       </Section>

@@ -2,6 +2,17 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useId, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { BackLink } from '@/components/back-link';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, CheckField, ChoiceRow, FilterBar, FormField, FormGrid, LabelledFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActionsCell } from '@/components/row-actions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, formatDate, isConflict, localDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Empty, Item, NotPermitted, Section } from '../../ui';
@@ -9,7 +20,41 @@ import { HandoverSection, Onboarding } from './handover';
 import { OfferApprovalList } from './offer-approvals';
 import { OfferLettersSection } from './offer-letters';
 import { COMPENSATION_WORDS, LoadProblem, OFFER_WORDS, Refusal } from './refusals';
-import { APPLICATION_READ, CandidateLink, COMPENSATION_APPROVE, COMPENSATION_MANAGE, COMPENSATION_READ, CURRENCY, DECISION_LABEL, Denied, EMPLOYEE_STATUS_LABEL, enc, GROUP, H3, HANDOVER, ISSUE_LETTER, labelOf, LIMITS, Missing, Money, MONEY, OFFER_MANAGE, OFFER_READ, OFFER_STATE_LABEL, OFFER_STATES, OfferStateBadge, OPEN_OFFER_STATES, PATHS, personText, Problem, RequisitionStateBadge, SCROLL, SR_ONLY, STAGE_LABEL, TEXTAREA, useKeys, useRefresh, useUserId, UUID } from './shared';
+import {
+  APPLICATION_READ,
+  CandidateLink,
+  COMPENSATION_APPROVE,
+  COMPENSATION_MANAGE,
+  COMPENSATION_READ,
+  CURRENCY,
+  DECISION_LABEL,
+  Denied,
+  EMPLOYEE_STATUS_LABEL,
+  enc,
+  HANDOVER,
+  ISSUE_LETTER,
+  labelOf,
+  LIMITS,
+  Missing,
+  Money,
+  MONEY,
+  Notice,
+  OFFER_MANAGE,
+  OFFER_READ,
+  OFFER_STATE_LABEL,
+  OFFER_STATES,
+  OfferStateBadge,
+  OPEN_OFFER_STATES,
+  PATHS,
+  personText,
+  Problem,
+  RequisitionStateBadge,
+  STAGE_LABEL,
+  useKeys,
+  useRefresh,
+  useUserId,
+  UUID,
+} from './shared';
 import type { OfferSummary, OfferView } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -42,63 +87,63 @@ function OfferList() {
   const items = list.data?.items ?? [];
   return (
     <Section title={`All offers${list.data ? ` (${items.length})` : ''}`}>
-      <label className="inline">
-        State
-        <select value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="">All states</option>
-          {OFFER_STATES.map((s) => (
-            <option key={s} value={s}>
-              {labelOf(OFFER_STATE_LABEL, s)}
-            </option>
-          ))}
-        </select>
-      </label>
-      {list.isPending && <p className="hint loading">Loading offers…</p>}
+      <FilterBar>
+        <FormField>
+          State
+          <NativeSelect value={state} onChange={(e) => setState(e.target.value)}>
+            <option value="">All states</option>
+            {OFFER_STATES.map((s) => (
+              <option key={s} value={s}>
+                {labelOf(OFFER_STATE_LABEL, s)}
+              </option>
+            ))}
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
+      {list.isPending && <LoadingLine>Loading offers…</LoadingLine>}
       <LoadProblem error={list.error} forbidden="The selected role cannot list offers." />
       {list.data && items.length === 0 && <Empty>No offers to show. An offer is prepared from a candidate’s application in the hiring tracker.</Empty>}
       {items.length > 0 && (
-        <div style={SCROLL}>
-          <table aria-label="Offers">
-            <thead>
-              <tr>
-                <th scope="col">Candidate</th>
-                <th scope="col">Requisition</th>
-                <th scope="col">State</th>
-                <th scope="col">Proposed joining date</th>
-                <th scope="col">Revision</th>
-                <th scope="col">Prepared</th>
-                <th scope="col">
-                  <span style={SR_ONLY}>Offer</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((o) => (
-                <tr key={o.id}>
-                  <td>
-                    {o.candidate.fullName} <span className="hint">{o.candidate.candidateCode}</span>
-                  </td>
-                  <td>
-                    {o.requisition.code} <span className="hint">{o.requisition.title}</span>
-                  </td>
-                  <td>
-                    <OfferStateBadge state={o.state} />
-                  </td>
-                  <td>{formatDate(o.proposedJoiningDate)}</td>
-                  <td>{o.currentRevision > 0 ? o.currentRevision : 'Not submitted'}</td>
-                  <td>{formatDate(o.createdAt)}</td>
-                  <td>
-                    <Link to={PATHS.offer(o.id)} aria-label={`Open the offer to ${o.candidate.fullName} (${o.candidate.candidateCode})`}>
-                      Open
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table aria-label="Offers">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Candidate</TableHead>
+              <TableHead scope="col">Requisition</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Proposed joining date</TableHead>
+              <TableHead scope="col">Revision</TableHead>
+              <TableHead scope="col">Prepared</TableHead>
+              <TableHead scope="col">
+                <span className="sr-only">Offer</span>
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((o) => (
+              <TableRow key={o.id}>
+                <TableCell>
+                  {o.candidate.fullName} <Hint as="span">{o.candidate.candidateCode}</Hint>
+                </TableCell>
+                <TableCell>
+                  {o.requisition.code} <Hint as="span">{o.requisition.title}</Hint>
+                </TableCell>
+                <TableCell>
+                  <OfferStateBadge state={o.state} />
+                </TableCell>
+                <TableCell>{formatDate(o.proposedJoiningDate)}</TableCell>
+                <TableCell>{o.currentRevision > 0 ? o.currentRevision : 'Not submitted'}</TableCell>
+                <TableCell>{formatDate(o.createdAt)}</TableCell>
+                <RowActionsCell>
+                  <Link to={PATHS.offer(o.id)} aria-label={`Open the offer to ${o.candidate.fullName} (${o.candidate.candidateCode})`}>
+                    Open
+                  </Link>
+                </RowActionsCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
-      {items.length >= LIMITS.offers && <p className="hint">Showing the latest {LIMITS.offers} offers.</p>}
+      {items.length >= LIMITS.offers && <Hint>Showing the latest {LIMITS.offers} offers.</Hint>}
     </Section>
   );
 }
@@ -129,13 +174,9 @@ function OfferDetail({ id }: { id: string }) {
   const closed = o !== undefined && !OPEN_OFFER_STATES.includes(o.state);
   return (
     <>
-      {o && (
-        <p>
-          <Link className="back-link" to={PATHS.offers}>← Offers</Link>
-        </p>
-      )}
+      {o && <BackLink to={PATHS.offers}>← Offers</BackLink>}
       <h1>{o ? `Offer to ${o.candidate.fullName} (${o.candidate.candidateCode}) for ${o.requisition.code}` : 'Offer'}</h1>
-      {detail.isPending && <p className="hint loading">Loading the offer…</p>}
+      {detail.isPending && <LoadingLine>Loading the offer…</LoadingLine>}
       <LoadProblem error={detail.error} forbidden="The selected role cannot view this offer." missing="This offer is not available in the selected role’s scope." />
       {o && (
         <>
@@ -145,7 +186,7 @@ function OfferDetail({ id }: { id: string }) {
                 <CandidateLink candidate={o.candidate} />
               </Item>
               <Item term="Requisition">
-                {o.requisition.code} <span className="hint">{o.requisition.title}</span> <RequisitionStateBadge state={o.requisition.state} />
+                {o.requisition.code} <Hint as="span">{o.requisition.title}</Hint> <RequisitionStateBadge state={o.requisition.state} />
               </Item>
               <Item term="Application">
                 {can(APPLICATION_READ) ? <Link to={PATHS.application(o.application.id)}>{labelOf(STAGE_LABEL, o.application.stage)}</Link> : labelOf(STAGE_LABEL, o.application.stage)}
@@ -168,22 +209,16 @@ function OfferDetail({ id }: { id: string }) {
               </p>
             )}
             {o.state === 'SUBMITTED' && o.pendingWith && o.pendingWith.assignee.userId === userId && can(COMPENSATION_APPROVE) && (
-              <p className="hint">
+              <Hint>
                 It waits for your decision under <Link to={PATHS.offers}>Offer approvals</Link>.
-              </p>
+              </Hint>
             )}
             {o.requisition.state !== 'APPROVED' && OPEN_OFFER_STATES.includes(o.state) && !o.handedOverEmployeeId && (
-              <p className="hint">The requisition is no longer approved: the offer cannot be accepted or handed over.</p>
+              <Hint>The requisition is no longer approved: the offer cannot be accepted or handed over.</Hint>
             )}
-            {closed && !o.handedOverEmployeeId && (
-              <p className="hint">This offer is closed. A new offer can be prepared from the application, or the application ended.</p>
-            )}
+            {closed && !o.handedOverEmployeeId && <Hint>This offer is closed. A new offer can be prepared from the application, or the application ended.</Hint>}
           </Section>
-          {notice && (
-            <p className="ok" role="status">
-              {notice}
-            </p>
-          )}
+          <Notice text={notice} />
           {o.compensation && <CompensationView compensation={o.compensation} userId={userId} />}
           <OfferActions offer={o} busy={reloading} onDone={done} />
           {(can(COMPENSATION_READ) || can(ISSUE_LETTER)) && <OfferLettersSection offer={o} />}
@@ -195,33 +230,31 @@ function OfferDetail({ id }: { id: string }) {
             {o.decisions.length === 0 ? (
               <Empty>No approval decisions yet.</Empty>
             ) : (
-              <div style={SCROLL}>
-                <table aria-label="Approval history">
-                  <thead>
-                    <tr>
-                      <th scope="col">Revision</th>
-                      <th scope="col">Decision</th>
-                      <th scope="col">Decided by</th>
-                      <th scope="col">When</th>
-                      {withReasons && <th scope="col">Reason</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {o.decisions.map((d, index) => (
-                      <tr key={`${d.decidedAt}-${index}`}>
-                        <td>{d.revision}</td>
-                        <td>{labelOf(DECISION_LABEL, d.decision)}</td>
-                        <td>
-                          {personText(d.decidedBy, userId)}
-                          {d.onBehalfOf && <span className="hint">{` on behalf of ${personText(d.onBehalfOf, userId)}`}</span>}
-                        </td>
-                        <td>{formatDate(d.decidedAt)}</td>
-                        {withReasons && <td>{d.reason ?? '—'}</td>}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table aria-label="Approval history">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col">Revision</TableHead>
+                    <TableHead scope="col">Decision</TableHead>
+                    <TableHead scope="col">Decided by</TableHead>
+                    <TableHead scope="col">When</TableHead>
+                    {withReasons && <TableHead scope="col">Reason</TableHead>}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {o.decisions.map((d, index) => (
+                    <TableRow key={`${d.decidedAt}-${index}`}>
+                      <TableCell>{d.revision}</TableCell>
+                      <TableCell>{labelOf(DECISION_LABEL, d.decision)}</TableCell>
+                      <TableCell>
+                        {personText(d.decidedBy, userId)}
+                        {d.onBehalfOf && <Hint as="span">{` on behalf of ${personText(d.onBehalfOf, userId)}`}</Hint>}
+                      </TableCell>
+                      <TableCell>{formatDate(d.decidedAt)}</TableCell>
+                      {withReasons && <TableCell>{d.reason ?? '—'}</TableCell>}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </Section>
         </>
@@ -250,35 +283,33 @@ function CompensationView({ compensation: c, userId }: { compensation: NonNullab
       )}
       {c.revisions.length > 0 && (
         <>
-          <h3 style={H3}>Submitted revisions</h3>
-          <div style={SCROLL}>
-            <table aria-label="Submitted revisions">
-              <thead>
-                <tr>
-                  <th scope="col">Revision</th>
-                  <th scope="col">Proposed joining date</th>
-                  <th scope="col">Annual CTC</th>
-                  <th scope="col">Monthly gross</th>
-                  <th scope="col">Submitted</th>
-                </tr>
-              </thead>
-              <tbody>
-                {c.revisions.map((r) => (
-                  <tr key={r.revision}>
-                    <td>{r.revision}</td>
-                    <td>{formatDate(r.proposedJoiningDate)}</td>
-                    <td>
-                      <Money value={r.annualCtc} currency={r.currencyCode} />
-                    </td>
-                    <td>
-                      <Money value={r.monthlyGross} currency={r.currencyCode} />
-                    </td>
-                    <td>{formatDate(r.submittedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CardSubheading>Submitted revisions</CardSubheading>
+          <Table aria-label="Submitted revisions">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Revision</TableHead>
+                <TableHead scope="col">Proposed joining date</TableHead>
+                <TableHead scope="col">Annual CTC</TableHead>
+                <TableHead scope="col">Monthly gross</TableHead>
+                <TableHead scope="col">Submitted</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {c.revisions.map((r) => (
+                <TableRow key={r.revision}>
+                  <TableCell>{r.revision}</TableCell>
+                  <TableCell>{formatDate(r.proposedJoiningDate)}</TableCell>
+                  <TableCell>
+                    <Money value={r.annualCtc} currency={r.currencyCode} />
+                  </TableCell>
+                  <TableCell>
+                    <Money value={r.monthlyGross} currency={r.currencyCode} />
+                  </TableCell>
+                  <TableCell>{formatDate(r.submittedAt)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </>
       )}
     </Section>
@@ -294,7 +325,7 @@ function OfferActions({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
   if (!(draft && manage) && !priceIt && !(o.state === 'APPROVED' && manage) && !(withdrawable && manage)) return null;
   return (
     <Section title="Offer actions">
-      {o.state === 'SUBMITTED' && <p className="hint">An independent eligible Admin decides this revision; meanwhile the offer can only be withdrawn.</p>}
+      {o.state === 'SUBMITTED' && <Hint>An independent eligible Admin decides this revision; meanwhile the offer can only be withdrawn.</Hint>}
       {draft && manage && <JoiningDateForm offer={o} busy={busy} onDone={onDone} />}
       {priceIt && <CompensationForm offer={o} busy={busy} onDone={onDone} />}
       {draft && manage && <SubmitOffer offer={o} busy={busy} onDone={onDone} />}
@@ -330,28 +361,36 @@ function JoiningDateForm({ offer: o, busy, onDone }: { offer: OfferView; busy: b
   };
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Terms
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-        <label>
+      <CardSubheading id={`${id}-title`}>Terms</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+        <FormField>
           Proposed joining date (required)
-          <input type="date" required value={joining} onChange={(e) => setJoining(e.target.value)} />
-        </label>
+          <Input type="date" required value={joining} onChange={(e) => setJoining(e.target.value)} />
+        </FormField>
         <Problem text={problem} />
         {save.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={save.error} words={OFFER_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={save.isPending || busy}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={save.isPending || busy}>
             Save joining date
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
     </>
   );
+}
+
+/** The format checks made before sending (a currency code, at least one amount, plain decimals); the amounts are the server's call. */
+function compensationProblem(currencyCode: string, annualCtc: string, monthlyGross: string): string | null {
+  if (!CURRENCY.test(currencyCode)) return 'Enter a three-letter currency code, such as INR.';
+  if (!annualCtc && !monthlyGross) return 'Enter the annual CTC, the monthly gross or both.';
+  if ((annualCtc && !MONEY.test(annualCtc)) || (monthlyGross && !MONEY.test(monthlyGross))) {
+    return 'Enter amounts as digits with up to 4 decimal places and no separators, for example 1200000.00.';
+  }
+  return null;
 }
 
 /**
@@ -389,13 +428,7 @@ function CompensationForm({ offer: o, busy, onDone }: { offer: OfferView; busy: 
     const code = currency.trim().toUpperCase();
     const a = annual.trim();
     const m = monthly.trim();
-    const missing = !CURRENCY.test(code)
-      ? 'Enter a three-letter currency code, such as INR.'
-      : !a && !m
-        ? 'Enter the annual CTC, the monthly gross or both.'
-        : (a && !MONEY.test(a)) || (m && !MONEY.test(m))
-          ? 'Enter amounts as digits with up to 4 decimal places and no separators, for example 1200000.00.'
-          : null;
+    const missing = compensationProblem(code, a, m);
     setProblem(missing);
     if (missing) {
       save.reset();
@@ -405,38 +438,36 @@ function CompensationForm({ offer: o, busy, onDone }: { offer: OfferView; busy: 
   };
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Compensation (confidential)
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-        <label>
+      <CardSubheading id={`${id}-title`}>Compensation (confidential)</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+        <FormField>
           Currency
-          <input required maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
-        </label>
-        <label>
+          <Input required maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
+        </FormField>
+        <FormField>
           Annual CTC
-          <input inputMode="decimal" maxLength={20} value={annual} onChange={(e) => setAnnual(e.target.value)} />
-        </label>
-        <label>
+          <Input inputMode="decimal" maxLength={20} value={annual} onChange={(e) => setAnnual(e.target.value)} />
+        </FormField>
+        <FormField>
           Monthly gross
-          <input inputMode="decimal" maxLength={20} value={monthly} onChange={(e) => setMonthly(e.target.value)} />
-        </label>
-        <p className="hint wide">
+          <Input inputMode="decimal" maxLength={20} value={monthly} onChange={(e) => setMonthly(e.target.value)} />
+        </FormField>
+        <Hint>
           Recording replaces the whole compensation: give every amount that applies. Whoever records it cannot approve the offer, and the amounts never appear in
           notifications or the audit trail.
-        </p>
+        </Hint>
         <Problem text={problem} />
         {save.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={save.error} words={COMPENSATION_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={save.isPending || busy}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={save.isPending || busy}>
             Record compensation
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
     </>
   );
 }
@@ -451,19 +482,26 @@ function SubmitOffer({ offer: o, busy, onDone }: { offer: OfferView; busy: boole
   });
   return (
     <>
-      <h3 style={H3}>Submit for approval</h3>
-      <p className="hint">
+      <CardSubheading>Submit for approval</CardSubheading>
+      <Hint>
         Submitting pins these terms and the compensation as revision {o.currentRevision + 1} for an independent eligible Admin, who is never the person who
         prepared the offer, recorded its compensation or submits it.
-      </p>
-      <div className="row">
-        <button type="button" disabled={submit.isPending || busy} onClick={() => submit.mutate({ expectedVersion: o.version })}>
+      </Hint>
+      <ButtonRow>
+        <Button type="button" disabled={submit.isPending || busy} onClick={() => submit.mutate({ expectedVersion: o.version })}>
           Submit for approval
-        </button>
-      </div>
+        </Button>
+      </ButtonRow>
       <Refusal error={submit.error} words={OFFER_WORDS} />
     </>
   );
+}
+
+/** The response's required answers, checked before sending. */
+function responseProblem(response: string, respondedOn: string): string | null {
+  if (response === '') return 'Choose whether the candidate accepted or declined.';
+  if (!respondedOn) return 'Enter the date of the response.';
+  return null;
 }
 
 function ResponseForm({ offer: o, busy, onDone }: { offer: OfferView; busy: boolean; onDone: (notice?: string) => void }) {
@@ -487,7 +525,7 @@ function ResponseForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (record.isPending || busy) return;
-    const missing = response === '' ? 'Choose whether the candidate accepted or declined.' : !respondedOn ? 'Enter the date of the response.' : null;
+    const missing = responseProblem(response, respondedOn);
     setProblem(missing);
     if (missing || response === '') {
       record.reset();
@@ -497,38 +535,35 @@ function ResponseForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
   };
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        The candidate’s response
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-        <fieldset className="wide" style={GROUP}>
-          <legend>Response</legend>
-          <div className="row">
-            <label className="check">
+      <CardSubheading id={`${id}-title`}>The candidate’s response</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+        <LabelledFieldset legend="Response">
+          <ChoiceRow>
+            <CheckField>
               <input type="radio" name={`${id}-response`} value="ACCEPTED" checked={response === 'ACCEPTED'} onChange={() => setResponse('ACCEPTED')} /> Accepted
-            </label>
-            <label className="check">
+            </CheckField>
+            <CheckField>
               <input type="radio" name={`${id}-response`} value="DECLINED" checked={response === 'DECLINED'} onChange={() => setResponse('DECLINED')} /> Declined
-            </label>
-          </div>
-        </fieldset>
-        <label>
+            </CheckField>
+          </ChoiceRow>
+        </LabelledFieldset>
+        <FormField>
           Responded on (required)
-          <input type="date" required value={respondedOn} onChange={(e) => setRespondedOn(e.target.value)} />
-        </label>
-        <p className="hint wide">An acceptance needs the requisition still approved and an open vacancy; the response date cannot be in the future.</p>
+          <Input type="date" required value={respondedOn} onChange={(e) => setRespondedOn(e.target.value)} />
+        </FormField>
+        <Hint>An acceptance needs the requisition still approved and an open vacancy; the response date cannot be in the future.</Hint>
         <Problem text={problem} />
         {record.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={record.error} words={OFFER_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={record.isPending || busy}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={record.isPending || busy}>
             Record response
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
     </>
   );
 }
@@ -561,27 +596,25 @@ function WithdrawForm({ offer: o, busy, onDone }: { offer: OfferView; busy: bool
   };
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Withdraw the offer
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-        <label className="wide">
+      <CardSubheading id={`${id}-title`}>Withdraw the offer</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+        <FormField className="col-span-full">
           Reason for withdrawing (required)
-          <textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-        </label>
-        {o.state === 'SUBMITTED' && <p className="hint wide">Withdrawing cancels the approval that is waiting.</p>}
+          <Textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+        </FormField>
+        {o.state === 'SUBMITTED' && <Hint>Withdrawing cancels the approval that is waiting.</Hint>}
         <Problem text={problem} />
         {withdraw.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={withdraw.error} words={OFFER_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" className="danger" disabled={withdraw.isPending || busy}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" variant="danger" disabled={withdraw.isPending || busy}>
             Withdraw offer
-          </button>
-        </div>
-      </form>
+          </Button>
+        </ButtonRow>
+      </FormGrid>
     </>
   );
 }

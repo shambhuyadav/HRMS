@@ -5,7 +5,15 @@
 // the estimated in-hand is the server's (BR-011; I-80, decided under owner delegation, 6 Nov 2026), shown with the server's
 // own note on how it is made, and "Not available" where the server makes none.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type FormEvent, useRef, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
+import { ButtonRow, FilterBar, FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { PagerButton, PagerCount, PagerRow } from '@/components/pager';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api, ApiError, download, fileToBase64, formatAmount, formatDate, formatMonth, idempotencyKey, isForbidden, localDate, pinSession, retryTransient } from '../api';
 import { isReportRefusal, reportProblem } from '../report-failures';
 import type { ScreenRoute } from '../screens';
@@ -32,10 +40,24 @@ const STATUSES: { value: string; label: string }[] = [
 ];
 const statusLabel = (code: string) => STATUSES.find((s) => s.value === code)?.label ?? code;
 
-const SCROLL: CSSProperties = { overflowX: 'auto' };
 /** C4: a refusal of the past, not of salaries: today and later still answer. */
 const needsHistoryGrant = (error: unknown) => error instanceof ApiError && error.code === 'HISTORY_GRANT_REQUIRED';
 const HISTORY_GRANT_NOTE = 'Earlier dates and whole months need the salary history grant, which the selected role does not hold. Today and later dates are available.';
+
+/** A refused salary read or export: the history grant's note, the role's refusal in `forbidden`'s words, or the API's error. */
+function SalaryProblem({ error, forbidden }: { error: unknown; forbidden: string }) {
+  if (needsHistoryGrant(error)) return <NotPermitted>{HISTORY_GRANT_NOTE}</NotPermitted>;
+  if (isForbidden(error)) return <NotPermitted>{forbidden}</NotPermitted>;
+  return <ErrorNote error={error} />;
+}
+
+// The screens' own layout pieces, as utility classes (shadcn/ui move, 20 Nov 2026).
+/** A field and its button side by side, their bottoms lined up, wrapping on a narrow screen (the old `.row` and `div.inline`). */
+const FIELD_ROW = 'flex flex-wrap items-end gap-x-4 gap-y-3';
+/** A date or an amount of the list: it stays on one line. */
+const FIGURE_CELL = 'whitespace-nowrap';
+/** An action of a requested export ("Download CSV"): the items of `ul.tasks` stack their parts at full width, so it keeps its own. */
+const ITEM_ACTION = 'self-start';
 
 /** A decimal string the server returned, with its currency. Never computed here. */
 const money = (value: string, currency: string) => formatAmount(value, currency);
@@ -92,7 +114,7 @@ const periodOf = (f: Filters) => (f.view === 'month' ? { from: `${f.month}-01`, 
 
 function SalaryMasterScreen() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint loading">Loading…</p>;
+  if (!me) return <LoadingLine>Loading…</LoadingLine>;
   const read = can(SALARY_READ);
   const exporting = can(SALARY_EXPORT);
   return (
@@ -124,48 +146,50 @@ function SalaryMaster({ read, exporting }: { read: boolean; exporting: boolean }
   return (
     <>
       <Section title="Filters">
-        <form className="grid-form" aria-label="Salary master filters" onSubmit={submit}>
-          <label>
-            Effective
-            <select value={filters.view} onChange={(e) => setFilters({ ...filters, view: e.target.value as Filters['view'] })}>
-              <option value="day">On a day</option>
-              <option value="month">In a month</option>
-            </select>
-          </label>
-          {filters.view === 'day' ? (
-            <label>
-              Day
-              <input type="date" required value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
-            </label>
-          ) : (
-            <label>
-              Month
-              <input type="month" required value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} />
-            </label>
-          )}
-          <label>
-            Employee
-            <input value={filters.search} maxLength={100} placeholder="Code, name or work email" onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
-          </label>
-          <label>
-            Status
-            <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-              <option value="">Any status</option>
-              {STATUSES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit" disabled={!ready}>
-            Show
-          </button>
-        </form>
-        <p className="hint">
+        <FilterBar asChild>
+          <form aria-label="Salary master filters" onSubmit={submit}>
+            <FormField>
+              Effective
+              <NativeSelect value={filters.view} onChange={(e) => setFilters({ ...filters, view: e.target.value as Filters['view'] })}>
+                <option value="day">On a day</option>
+                <option value="month">In a month</option>
+              </NativeSelect>
+            </FormField>
+            {filters.view === 'day' ? (
+              <FormField>
+                Day
+                <Input type="date" required value={filters.date} onChange={(e) => setFilters({ ...filters, date: e.target.value })} />
+              </FormField>
+            ) : (
+              <FormField>
+                Month
+                <Input type="month" required value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })} />
+              </FormField>
+            )}
+            <FormField>
+              Employee
+              <Input value={filters.search} maxLength={100} placeholder="Code, name or work email" onChange={(e) => setFilters({ ...filters, search: e.target.value })} />
+            </FormField>
+            <FormField>
+              Status
+              <NativeSelect value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+                <option value="">Any status</option>
+                {STATUSES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </NativeSelect>
+            </FormField>
+            <Button type="submit" disabled={!ready}>
+              Show
+            </Button>
+          </form>
+        </FilterBar>
+        <Hint>
           A day shows the salary arrangement each employee had in force on it; a month shows every arrangement in force at any time in it, so an employee whose salary changed that month
           appears once per arrangement. The exports below take the same filters.
-        </p>
+        </Hint>
       </Section>
       {read ? (
         <SalaryList filters={applied} page={page} onPage={setPage} />
@@ -198,59 +222,57 @@ function SalaryList({ filters, page, onPage }: { filters: Filters; page: number;
   const period = data ? (data.period.month ? `in ${data.period.month}` : `on ${formatDate(data.period.from)}`) : '';
   return (
     <Section title={data ? `Salaries ${period} (${data.total})` : 'Salaries'}>
-      {list.isPending && <p className="hint loading">Loading salaries…</p>}
-      {needsHistoryGrant(list.error) ? <NotPermitted>{HISTORY_GRANT_NOTE}</NotPermitted> : isForbidden(list.error) ? <NotPermitted>The selected role cannot view salaries.</NotPermitted> : <ErrorNote error={list.error} />}
+      {list.isPending && <LoadingLine>Loading salaries…</LoadingLine>}
+      <SalaryProblem error={list.error} forbidden="The selected role cannot view salaries." />
       {data && data.items.length === 0 && <Empty>{page === 1 ? 'No salary arrangement matches these filters.' : 'No arrangements on this page.'}</Empty>}
       {data && data.items.length > 0 && (
         <>
-          <div style={SCROLL}>
-            <table aria-label="Salary master">
-              <thead>
-                <tr>
-                  <th scope="col">Employee</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Grade</th>
-                  <th scope="col">Effective from</th>
-                  <th scope="col">Effective to</th>
-                  <th scope="col">Annual CTC</th>
-                  <th scope="col">Monthly gross</th>
-                  {data.estimate && <th scope="col">{`${data.estimate.label} (estimate)`}</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {data.items.map((r) => (
-                  <tr key={`${r.employeeId}-${r.effectiveFrom}`}>
-                    <td>
-                      {r.displayName} <span className="hint">{r.employeeCode}</span>
-                    </td>
-                    <td>{statusLabel(r.status)}</td>
-                    <td>{r.grade ?? '—'}</td>
-                    <td>{formatDate(r.effectiveFrom)}</td>
-                    <td>{r.effectiveTo ? formatDate(r.effectiveTo) : 'No end date'}</td>
-                    <td>{money(r.annualCtc, r.currency)}</td>
-                    <td>{money(r.monthlyGross, r.currency)}</td>
-                    {data.estimate && <td>{r.estimatedInHand ? money(r.estimatedInHand, r.currency) : 'Not available'}</td>}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="hint">An arrangement stays in force until the day the next one starts.</p>
-          {data.estimate && <p className="hint">{`${data.estimate.label}: ${data.estimate.message}`}</p>}
+          <Table aria-label="Salary master">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Employee</TableHead>
+                <TableHead scope="col">Status</TableHead>
+                <TableHead scope="col">Grade</TableHead>
+                <TableHead scope="col">Effective from</TableHead>
+                <TableHead scope="col">Effective to</TableHead>
+                <TableHead scope="col">Annual CTC</TableHead>
+                <TableHead scope="col">Monthly gross</TableHead>
+                {data.estimate && <TableHead scope="col">{`${data.estimate.label} (estimate)`}</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.items.map((r) => (
+                <TableRow key={`${r.employeeId}-${r.effectiveFrom}`}>
+                  <TableCell>
+                    {r.displayName} <Hint as="span">{r.employeeCode}</Hint>
+                  </TableCell>
+                  <TableCell>{statusLabel(r.status)}</TableCell>
+                  <TableCell>{r.grade ?? '—'}</TableCell>
+                  <TableCell className={FIGURE_CELL}>{formatDate(r.effectiveFrom)}</TableCell>
+                  <TableCell>{r.effectiveTo ? formatDate(r.effectiveTo) : 'No end date'}</TableCell>
+                  <TableCell className={FIGURE_CELL}>{money(r.annualCtc, r.currency)}</TableCell>
+                  <TableCell className={FIGURE_CELL}>{money(r.monthlyGross, r.currency)}</TableCell>
+                  {data.estimate && <TableCell>{r.estimatedInHand ? money(r.estimatedInHand, r.currency) : 'Not available'}</TableCell>}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Hint>An arrangement stays in force until the day the next one starts.</Hint>
+          {data.estimate && <Hint>{`${data.estimate.label}: ${data.estimate.message}`}</Hint>}
         </>
       )}
       {pages > 1 && (
-        <div className="row">
-          <button type="button" className="secondary" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+        <PagerRow>
+          <PagerButton disabled={page <= 1} onClick={() => onPage(page - 1)}>
             Previous
-          </button>
-          <span className="hint">
+          </PagerButton>
+          <PagerCount>
             Page {page} of {pages}
-          </span>
-          <button type="button" className="secondary" disabled={page >= pages} onClick={() => onPage(page + 1)}>
+          </PagerCount>
+          <PagerButton disabled={page >= pages} onClick={() => onPage(page + 1)}>
             Next
-          </button>
-        </div>
+          </PagerButton>
+        </PagerRow>
       )}
     </Section>
   );
@@ -281,30 +303,32 @@ function SalaryExports({ filters }: { filters: Filters }) {
   const shown = filters.view === 'month' ? `for ${formatMonth(filters.month)}` : `on ${formatDate(period.from)}`;
   return (
     <Section title="Exports">
-      <div className="row">
-        <button type="button" disabled={request.isPending} onClick={() => request.mutate({ reportCode: 'SALARY_MASTER', period, label: `Salary export ${shown}` })}>
-          Export salaries {shown}
-        </button>
+      <div className="flex flex-col gap-3">
+        <ButtonRow>
+          <Button type="button" disabled={request.isPending} onClick={() => request.mutate({ reportCode: 'SALARY_MASTER', period, label: `Salary export ${shown}` })}>
+            Export salaries {shown}
+          </Button>
+        </ButtonRow>
+        <div className={FIELD_ROW}>
+          <FormField className="w-auto">
+            Financial year starting April
+            <Input inputMode="numeric" value={year} maxLength={4} onChange={(e) => setYear(e.target.value.trim())} />
+          </FormField>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={request.isPending || !validYear}
+            onClick={() => request.mutate({ reportCode: 'ANNUAL_SALARY', period: { from: `${fy}-04-01`, to: `${fy + 1}-03-31` }, label: `Annual salary export ${fy}-${String(fy + 1).slice(2)}` })}
+          >
+            Export annual salaries {validYear ? `${fy}-${String(fy + 1).slice(2)}` : ''}
+          </Button>
+        </div>
       </div>
-      <div className="row">
-        <label>
-          Financial year starting April
-          <input inputMode="numeric" value={year} maxLength={4} onChange={(e) => setYear(e.target.value.trim())} />
-        </label>
-        <button
-          type="button"
-          className="secondary"
-          disabled={request.isPending || !validYear}
-          onClick={() => request.mutate({ reportCode: 'ANNUAL_SALARY', period: { from: `${fy}-04-01`, to: `${fy + 1}-03-31` }, label: `Annual salary export ${fy}-${String(fy + 1).slice(2)}` })}
-        >
-          Export annual salaries {validYear ? `${fy}-${String(fy + 1).slice(2)}` : ''}
-        </button>
-      </div>
-      <p className="hint">
+      <Hint>
         The exports use the filters shown above (as last applied with Show). The annual export lists every arrangement in force during the financial year, 1 April to 31 March. Exports are
         generated in the background, re-check your access when downloaded and expire after 24 hours.
-      </p>
-      {needsHistoryGrant(request.error) ? <NotPermitted>{HISTORY_GRANT_NOTE}</NotPermitted> : isForbidden(request.error) ? <NotPermitted>The selected role cannot export salaries.</NotPermitted> : <ErrorNote error={request.error} />}
+      </Hint>
+      <SalaryProblem error={request.error} forbidden="The selected role cannot export salaries." />
       {requested.length > 0 && (
         <ul className="tasks" aria-label="Requested exports">
           {requested.map((r) => (
@@ -328,12 +352,12 @@ function ExportStatus({ id, label }: { id: string; label: string }) {
   return (
     <li>
       <strong>{label}</strong> <StateBadge state={s?.state} />
-      {s?.rowCount !== null && s?.rowCount !== undefined && <span className="hint"> {s.rowCount} rows</span>}
-      {s && reportProblem(s) && <span className="hint"> {reportProblem(s)}</span>}
+      {s?.rowCount !== null && s?.rowCount !== undefined && <Hint as="span"> {s.rowCount} rows</Hint>}
+      {s && reportProblem(s) && <Hint as="span"> {reportProblem(s)}</Hint>}
       {s?.state === 'COMPLETED' && (
-        <button type="button" className="link" disabled={get.isPending} onClick={() => get.mutate()}>
+        <Button type="button" variant="outline" size="sm" className={ITEM_ACTION} disabled={get.isPending} onClick={() => get.mutate()}>
           Download CSV
-        </button>
+        </Button>
       )}
       <ErrorNote error={get.error ?? status.error} />
     </li>
@@ -372,7 +396,7 @@ const SALARY_TEMPLATE: ImportTemplate = {
 
 function SalaryUploadScreen() {
   const { me, can } = useSession();
-  if (!me) return <p className="hint loading">Loading…</p>;
+  if (!me) return <LoadingLine>Loading…</LoadingLine>;
   return (
     <>
       <h1>Salary master upload</h1>
@@ -467,20 +491,21 @@ function SalaryUpload() {
   return (
     <>
       <Section title="Upload">
-        <form onSubmit={submit} className="stack">
-          <p className="hint">
-            CSV with exactly the header <code>{t.columns}</code> (template {t.code}). {t.note} Nothing is recorded until you commit a preview, and a batch is applied all or nothing: one
+        <form onSubmit={submit} className="flex flex-col gap-3">
+          <Hint>
+            {/* The header is one long word of comma-joined column names: it may break anywhere, or it runs out of the card on a phone. */}
+            CSV with exactly the header <code className="break-all">{t.columns}</code> (template {t.code}). {t.note} Nothing is recorded until you commit a preview, and a batch is applied all or nothing: one
             row with a problem rejects the whole batch.
-          </p>
+          </Hint>
           <TemplateDownload base={t.base} code={t.code} />
-          <div className="inline">
-            <label>
+          <div className={FIELD_ROW}>
+            <FormField className="w-auto">
               Salary file
-              <input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
-            </label>
-            <button type="submit" disabled={!file || busy}>
+              <Input key={fileInput} type="file" accept=".csv,text/csv" disabled={busy} onChange={(e) => choose(e.target.files?.[0] ?? null)} />
+            </FormField>
+            <Button type="submit" disabled={!file || busy}>
               Validate
-            </button>
+            </Button>
           </div>
         </form>
         {isForbidden(upload.error) ? <NotPermitted>The selected role cannot upload salaries.</NotPermitted> : <ErrorNote error={upload.error ?? resume.error} />}

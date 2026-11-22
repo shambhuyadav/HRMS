@@ -1,5 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { FormField } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
 import { ApiError, api } from '../api';
 import { Icon, type IconName } from '../icons';
 import { CALLBACK_PATH, completeOidcSignIn, type OidcSignInConfig, rememberProviderLogout, startOidcSignIn } from '../oidc';
@@ -20,21 +26,60 @@ const FEATURES: readonly [IconName, string][] = [
   ['shield', 'Two-step sign-in and a full audit trail'],
 ];
 
+/** The card beside the brand panel (the old `.narrow`), drawn as a shadcn Card: up to 440px wide, its parts stacked. */
+const AUTH_CARD = 'm-0 flex w-full max-w-[440px] flex-col gap-[0.9rem] rounded-xl border border-border bg-card px-8 py-9 shadow-[var(--shadow)]';
+/** The card's title, a little larger than a page title. */
+const AUTH_TITLE = 'text-[1.6rem]';
+/** The roles to choose from, one full-width choice under another (the old `.choices` list). */
+const CHOICE_LIST = 'm-0 flex list-none flex-col gap-[0.6rem] p-0';
+/**
+ * One role as a full-width choice: its mark, its words from the left and wrapping, an arrow at the end, tinted red on hover. Button
+ * narrows its side padding when it holds an icon (`has-[>svg]`); the arrow is one, so the choice repeats its own padding for that case.
+ */
+const CHOICE_BUTTON =
+  'h-auto w-full justify-start gap-[0.85rem] px-4 py-[0.8rem] text-left whitespace-normal has-[>svg]:px-4 hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
+/** The role's mark: its icon on a soft red square. */
+const CHOICE_ICON = 'grid size-[40px] flex-none place-items-center rounded-[10px] bg-[var(--accent-soft)] text-[var(--accent)]';
+/** The role's name above its scope, taking the room between the mark and the arrow. */
+const CHOICE_TEXT = 'flex min-w-0 flex-1 flex-col gap-[0.1rem]';
+
+// The signed-out pages' frame: the brand panel beside the card. The panel is dark in both themes (the --dark surface, white words, the
+// light red of --accent-on-dark), with the brand red down its edge. At 920px or less the two stack: the panel becomes a bar holding
+// only the logo (a stretched row left a third of a phone screen dark and empty), the card below it.
+
+/** Two columns side by side; one column at 920px or less, the brand bar keeping its own height. */
+const AUTH_FRAME =
+  'grid min-h-screen grid-cols-[minmax(340px,1fr)_minmax(380px,1fr)] bg-background [@media(max-width:920px)]:grid-cols-1 [@media(max-width:920px)]:grid-rows-[auto_1fr]';
+const BRAND_PANEL =
+  'relative flex flex-col justify-between gap-8 overflow-hidden bg-[var(--dark)] px-12 py-10 text-white shadow-[inset_4px_0_0_var(--accent-bright)] [@media(max-width:920px)]:px-6 [@media(max-width:920px)]:py-5';
+const LOGO = 'flex items-center gap-3 text-[1.35rem] font-bold tracking-[-0.01em]';
+/** The brand's mark: a rounded square in the brand red holding a white frame. */
+const BRAND_MARK =
+  "relative size-[30px] flex-none rounded-[8px] bg-[var(--accent-bright)] shadow-[inset_0_-1px_0_rgb(0_0_0/0.18)] after:absolute after:inset-[8.5px] after:rounded-[4px] after:border-[2.5px] after:border-solid after:border-white/95 after:content-['']";
+/** The headline and the features; left out of the one-column bar. */
+const PITCH = '[@media(max-width:920px)]:hidden';
+const HEADLINE = 'm-0 mb-7 max-w-[27rem] text-[2.1rem] leading-[1.2] font-bold tracking-[-0.02em] text-white';
+const FEATURES_LIST = 'm-0 flex list-none flex-col gap-[0.9rem] p-0 text-white/84';
+const FEATURE_ICON = 'grid size-[36px] flex-none place-items-center rounded-[10px] border border-white/10 bg-white/8 text-[var(--accent-on-dark)]';
+const FOOT = 'm-0 text-[0.8rem] text-white/45 [@media(max-width:920px)]:hidden';
+/** The card's side: the card centred; under the bar at 920px or less, from the top. */
+const CARD_SIDE = 'flex items-center justify-center px-6 py-8 [@media(max-width:920px)]:items-start [@media(max-width:920px)]:pt-10';
+
 /** The signed-out pages (sign-in, the way back from the provider, the role choice): the product beside the card. */
 function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="auth">
-      <section className="auth-brand">
-        <div className="auth-logo">
-          <span className="brand-mark" aria-hidden="true" />
+    <div className={AUTH_FRAME}>
+      <section className={BRAND_PANEL}>
+        <div className={LOGO}>
+          <span className={BRAND_MARK} aria-hidden="true" />
           <span>HRMS</span>
         </div>
-        <div className="auth-pitch">
-          <p className="auth-headline">Hire-to-retire HR and payroll, in one place.</p>
-          <ul className="auth-features">
+        <div className={PITCH}>
+          <p className={HEADLINE}>Hire-to-retire HR and payroll, in one place.</p>
+          <ul className={FEATURES_LIST}>
             {FEATURES.map(([icon, text]) => (
-              <li key={text}>
-                <span className="auth-feature-icon">
+              <li key={text} className="flex items-center gap-[0.8rem]">
+                <span className={FEATURE_ICON}>
                   <Icon name={icon} size={18} />
                 </span>
                 {text}
@@ -42,9 +87,9 @@ function AuthLayout({ children }: { children: ReactNode }) {
             ))}
           </ul>
         </div>
-        <p className="auth-foot">Secure sign-in · Your data stays on your company's server</p>
+        <p className={FOOT}>Secure sign-in · Your data stays on your company's server</p>
       </section>
-      <div className="auth-panel">{children}</div>
+      <div className={CARD_SIDE}>{children}</div>
     </div>
   );
 }
@@ -59,13 +104,13 @@ export function SignInPage() {
 
 function SignInContent() {
   const config = useQuery({ queryKey: ['sign-in-config'], queryFn: () => api<SignInConfig>('/sign-in/config'), retry: false, staleTime: Infinity });
-  if (config.isPending) return <main className="narrow"><p className="hint loading">Loading…</p></main>;
+  if (config.isPending) return <main className={AUTH_CARD}><LoadingLine>Loading…</LoadingLine></main>;
   const c = config.data;
   if (c?.mode === 'OIDC') return window.location.pathname === CALLBACK_PATH ? <OidcCallback config={c} /> : <OidcSignIn config={c} />;
   if (c?.mode === 'NONE') {
     return (
-      <main className="narrow">
-        <h1>HRMS</h1>
+      <main className={AUTH_CARD}>
+        <h1 className={AUTH_TITLE}>HRMS</h1>
         <p>Sign-in is not configured on this server. Contact your administrator.</p>
       </main>
     );
@@ -76,19 +121,21 @@ function SignInContent() {
 function OidcSignIn({ config }: { config: OidcSignInConfig }) {
   const [error, setError] = useState<unknown>(null);
   return (
-    <main className="narrow">
-      <h1>Welcome back</h1>
-      <p className="hint">Sign in with your organisation account. You will be asked for your second factor (authenticator app).</p>
-      <button
+    <main className={AUTH_CARD}>
+      <h1 className={AUTH_TITLE}>Welcome back</h1>
+      <Hint>Sign in with your organisation account. You will be asked for your second factor (authenticator app).</Hint>
+      {/* The card's one action, across the card and a little taller than other buttons (the old `full-width` button). */}
+      <Button
         type="button"
-        className="block"
+        size="lg"
+        className="w-full"
         onClick={() => {
           setError(null);
           startOidcSignIn(config).catch(setError);
         }}
       >
         Sign in
-      </button>
+      </Button>
       <ErrorNote error={error} />
     </main>
   );
@@ -113,24 +160,24 @@ function OidcCallback({ config }: { config: OidcSignInConfig }) {
   // A first sign-in sets up the authenticator app; that sign-in itself did not use it, so the API asks for one that does.
   const secondFactorNeeded = error instanceof ApiError && error.code === 'SIGN_IN_MFA_REQUIRED';
   return (
-    <main className="narrow">
-      <h1>HRMS</h1>
+    <main className={AUTH_CARD}>
+      <h1 className={AUTH_TITLE}>HRMS</h1>
       {secondFactorNeeded ? (
         <>
           <p>Your authenticator app is set up. To finish, sign in once more with your password and a code from the app.</p>
-          <button type="button" onClick={() => startOidcSignIn(config, undefined, { reauthenticate: true }).catch(setError)}>
+          <Button type="button" onClick={() => startOidcSignIn(config, undefined, { reauthenticate: true }).catch(setError)}>
             Sign in with your code
-          </button>
+          </Button>
         </>
       ) : error ? (
         <>
           <ErrorNote error={error} />
-          <button type="button" onClick={() => startOidcSignIn(config).catch(setError)}>
+          <Button type="button" onClick={() => startOidcSignIn(config).catch(setError)}>
             Sign in again
-          </button>
+          </Button>
         </>
       ) : (
-        <p className="hint">Signing you in…</p>
+        <Hint>Signing you in…</Hint>
       )}
     </main>
   );
@@ -152,15 +199,15 @@ function DevSignIn() {
     }
   };
   return (
-    <main className="narrow">
-      <h1>HRMS</h1>
-      <p className="hint">Development sign-in (synthetic accounts only).</p>
-      <form onSubmit={submit} className="stack">
-        <label>
+    <main className={AUTH_CARD}>
+      <h1 className={AUTH_TITLE}>HRMS</h1>
+      <Hint>Development sign-in (synthetic accounts only).</Hint>
+      <form onSubmit={submit} className="flex flex-col gap-3">
+        <FormField>
           Account key
-          <input value={accountKey} onChange={(e) => setAccountKey(e.target.value)} autoComplete="username" required minLength={3} />
-        </label>
-        <button type="submit">Sign in</button>
+          <Input value={accountKey} onChange={(e) => setAccountKey(e.target.value)} autoComplete="username" required minLength={3} />
+        </FormField>
+        <Button type="submit">Sign in</Button>
       </form>
       <ErrorNote error={error} />
     </main>
@@ -187,48 +234,48 @@ export function SelectRolePage() {
 
   return (
     <AuthLayout>
-    <main className="narrow">
-      <h1>Choose how you are working</h1>
-      <p className="hint">Each role shows its own menu and data. You can switch at any time from the top bar.</p>
-      {companies.length === 0 && <p>You have no active role in any company. Contact your administrator.</p>}
-      {companies.length > 1 && (
-        <label>
-          Company
-          <select value={stored?.companyId ?? ''} onChange={(e) => selectCompany(e.target.value)}>
-            <option value="" disabled>
-              Select a company
-            </option>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
+      <main className={AUTH_CARD}>
+        <h1 className={AUTH_TITLE}>Choose how you are working</h1>
+        <Hint>Each role shows its own menu and data. You can switch at any time from the top bar.</Hint>
+        {companies.length === 0 && <p>You have no active role in any company. Contact your administrator.</p>}
+        {companies.length > 1 && (
+          <FormField>
+            Company
+            <NativeSelect value={stored?.companyId ?? ''} onChange={(e) => selectCompany(e.target.value)}>
+              <option value="" disabled>
+                Select a company
               </option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </FormField>
+        )}
+        {assignments.data && (
+          <ul className={CHOICE_LIST}>
+            {assignments.data.items.map((a) => (
+              <li key={a.id}>
+                <Button variant="outline" className={CHOICE_BUTTON} onClick={() => selectAssignment(a.id)}>
+                  <span className={CHOICE_ICON}>
+                    <Icon name={roleIcon(a.roleCode)} size={20} className="size-[20px]" />
+                  </span>
+                  <span className={CHOICE_TEXT}>
+                    <strong>{a.roleName}</strong> <Hint as="span">scope: {a.scopeKind.toLowerCase()}</Hint>
+                  </span>
+                  <Icon name="chevron" size={16} className="size-4 text-muted-foreground" />
+                </Button>
+              </li>
             ))}
-          </select>
-        </label>
-      )}
-      {assignments.data && (
-        <ul className="choices">
-          {assignments.data.items.map((a) => (
-            <li key={a.id}>
-              <button onClick={() => selectAssignment(a.id)}>
-                <span className="choice-icon">
-                  <Icon name={roleIcon(a.roleCode)} size={20} />
-                </span>
-                <span className="choice-text">
-                  <strong>{a.roleName}</strong> <span className="hint">scope: {a.scopeKind.toLowerCase()}</span>
-                </span>
-                <Icon name="chevron" size={16} className="choice-go" />
-              </button>
-            </li>
-          ))}
-          {assignments.data.items.length === 0 && <li>No active roles in this company.</li>}
-        </ul>
-      )}
-      <ErrorNote error={assignments.error} />
-      <button className="link" onClick={() => void signOut()}>
-        Sign out
-      </button>
-    </main>
+            {assignments.data.items.length === 0 && <li>No active roles in this company.</li>}
+          </ul>
+        )}
+        <ErrorNote error={assignments.error} />
+        <Button variant="link" onClick={() => void signOut()}>
+          Sign out
+        </Button>
+      </main>
     </AuthLayout>
   );
 }

@@ -1,12 +1,45 @@
 // A candidate's CV and other documents (confidential): the list, the approved searchable CV text, and the upload.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type CSSProperties, type FormEvent, useId, useState } from 'react';
+import { type FormEvent, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CardSubheading } from '@/components/card-subheading';
+import { ButtonRow, FormField, FormGrid } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { RowActions, RowActionsCell } from '@/components/row-actions';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import { api, download, fileToBase64, formatDate, retryTransient } from '../../api';
 import { useSession } from '../../session';
 import { Badge, Empty, Item, Section } from '../../ui';
 import { CV_TEXT_WORDS, DOWNLOAD_WORDS, LoadProblem, Refusal, UPLOAD_WORDS } from './refusals';
-import { CANDIDATE_DOCUMENT_TYPES, CANDIDATE_READ, CONSENT_LABEL, CV_TEXT_SOURCE_LABEL, CV_TEXT_STATE_LABEL, DOCUMENT_READ, DOCUMENT_TYPE_LABEL, DOCUMENT_UPLOAD, Done, enc, H3, labelOf, MAX_CV_TEXT, MAX_UPLOAD_BYTES, Notice, PATHS, personText, Problem, ScanBadge, SCROLL, SR_ONLY, TEXTAREA, useKeys, useRefresh, useUserId } from './shared';
+import {
+  CANDIDATE_DOCUMENT_TYPES,
+  CANDIDATE_READ,
+  CONSENT_LABEL,
+  CV_TEXT_SOURCE_LABEL,
+  CV_TEXT_STATE_LABEL,
+  DOCUMENT_READ,
+  DOCUMENT_TYPE_LABEL,
+  DOCUMENT_UPLOAD,
+  enc,
+  labelOf,
+  MAX_CV_TEXT,
+  MAX_UPLOAD_BYTES,
+  Notice,
+  PATHS,
+  personText,
+  PREFORMATTED,
+  Problem,
+  ScanBadge,
+  useKeys,
+  useRefresh,
+  useUserId,
+} from './shared';
 import type { CandidateDocument, CandidateView, CvText, CvTextApproved, DocumentUploaded } from './types';
 
 // ---------------------------------------------------------------------------------------------------------
@@ -26,10 +59,10 @@ export function CandidateDocuments({ candidate: c }: { candidate: CandidateView 
   const open = useMutation({ mutationFn: (d: CandidateDocument) => download(`/v1/hiring/candidate-documents/${enc(d.id)}/content`) });
   return (
     <Section title="CV and documents (confidential)">
-      <p className="hint">Every file is scanned for malware and can be opened only once the scan releases it; each opening is recorded in the audit trail.</p>
+      <Hint>Every file is scanned for malware and can be opened only once the scan releases it; each opening is recorded in the audit trail.</Hint>
       {canRead ? (
         <>
-          {docs.isPending && <p className="hint loading">Loading documents…</p>}
+          {docs.isPending && <LoadingLine>Loading documents…</LoadingLine>}
           <LoadProblem error={docs.error} forbidden="The selected role cannot read this candidate’s documents." missing="This candidate is not available in the selected role’s scope." />
           {docs.data && docs.data.items.length === 0 && <Empty>No documents on record.</Empty>}
           {docs.data && docs.data.items.length > 0 && <DocumentTable items={docs.data.items} showCandidate={false} busy={open.isPending} onOpen={(d) => open.mutate(d)} label="Candidate documents" />}
@@ -37,10 +70,20 @@ export function CandidateDocuments({ candidate: c }: { candidate: CandidateView 
           {docs.data && <SearchableCvText documents={docs.data.items.filter((d) => d.documentType === 'CV')} />}
         </>
       ) : (
-        <p className="hint">The selected role can add documents to this candidate but not read them.</p>
+        <Hint>The selected role can add documents to this candidate but not read them.</Hint>
       )}
       {can(DOCUMENT_UPLOAD) && <UploadDocumentForm candidateId={c.id} />}
     </Section>
+  );
+}
+
+/** A released file can be downloaded; any other says when, if ever, it will be. */
+function DownloadAction({ document: d, busy, onOpen }: { document: CandidateDocument; busy: boolean; onOpen: (d: CandidateDocument) => void }) {
+  if (d.scanState !== 'CLEAN') return <Hint as="span">{d.scanState === 'QUARANTINED' ? 'Never available' : 'Available once released'}</Hint>;
+  return (
+    <Button type="button" variant="outline" size="sm" disabled={busy} aria-label={`Download ${d.fileName ?? labelOf(DOCUMENT_TYPE_LABEL, d.documentType)}`} onClick={() => onOpen(d)}>
+      Download
+    </Button>
   );
 }
 
@@ -62,46 +105,40 @@ export function DocumentTable({
 }) {
   const { can } = useSession();
   return (
-    <div style={SCROLL}>
-      <table aria-label={label}>
-        <thead>
-          <tr>
-            {showCandidate && <th scope="col">Candidate</th>}
-            <th scope="col">Type</th>
-            <th scope="col">File</th>
-            <th scope="col">Uploaded</th>
-            <th scope="col">Malware scan</th>
-            {showMatch && <th scope="col">Approved CV text</th>}
-            <th scope="col">
-              <span style={SR_ONLY}>Download</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((d) => (
-            <tr key={d.id}>
-              {showCandidate && <td>{can(CANDIDATE_READ) ? <Link to={PATHS.candidate(d.candidateId)}>{d.candidateCode}</Link> : d.candidateCode}</td>}
-              <td>{labelOf(DOCUMENT_TYPE_LABEL, d.documentType)}</td>
-              <td>{d.fileName ?? '—'}</td>
-              <td>{formatDate(d.uploadedAt)}</td>
-              <td>
-                <ScanBadge state={d.scanState} />
-              </td>
-              {showMatch && <td>{d.contentMatch ? <Badge tone="good">matched in approved CV text</Badge> : '—'}</td>}
-              <td>
-                {d.scanState === 'CLEAN' ? (
-                  <button type="button" className="secondary" disabled={busy} aria-label={`Download ${d.fileName ?? labelOf(DOCUMENT_TYPE_LABEL, d.documentType)}`} onClick={() => onOpen(d)}>
-                    Download
-                  </button>
-                ) : (
-                  <span className="hint">{d.scanState === 'QUARANTINED' ? 'Never available' : 'Available once released'}</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <Table aria-label={label}>
+      <TableHeader>
+        <TableRow>
+          {showCandidate && <TableHead scope="col">Candidate</TableHead>}
+          <TableHead scope="col">Type</TableHead>
+          <TableHead scope="col">File</TableHead>
+          <TableHead scope="col">Uploaded</TableHead>
+          <TableHead scope="col">Malware scan</TableHead>
+          {showMatch && <TableHead scope="col">Approved CV text</TableHead>}
+          <TableHead scope="col">
+            <span className="sr-only">Download</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((d) => (
+          <TableRow key={d.id}>
+            {showCandidate && <TableCell>{can(CANDIDATE_READ) ? <Link to={PATHS.candidate(d.candidateId)}>{d.candidateCode}</Link> : d.candidateCode}</TableCell>}
+            <TableCell>{labelOf(DOCUMENT_TYPE_LABEL, d.documentType)}</TableCell>
+            <TableCell>{d.fileName ?? '—'}</TableCell>
+            <TableCell>{formatDate(d.uploadedAt)}</TableCell>
+            <TableCell>
+              <ScanBadge state={d.scanState} />
+            </TableCell>
+            {showMatch && <TableCell>{d.contentMatch ? <Badge tone="good">matched in approved CV text</Badge> : '—'}</TableCell>}
+            <RowActionsCell>
+              <RowActions>
+                <DownloadAction document={d} busy={busy} onOpen={onOpen} />
+              </RowActions>
+            </RowActionsCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
 
@@ -109,22 +146,27 @@ export function DocumentTable({
 // FR-013 approved searchable CV content (I-82 item 4): approved by an eligible Admin, read only when asked (audited)
 // ---------------------------------------------------------------------------------------------------------
 
-export const PRE: CSSProperties = { whiteSpace: 'pre-wrap', fontFamily: 'inherit', border: '1px solid var(--line)', borderRadius: 6, padding: '0.75rem', margin: '0.5rem 0', maxHeight: '24rem', overflowY: 'auto' };
-
 function SearchableCvText({ documents }: { documents: CandidateDocument[] }) {
   if (documents.length === 0) return null;
   return (
     <>
-      <p className="hint">
+      <Hint>
         Searchable CV text: nothing is searchable on upload. The CV search matches only text an eligible Admin approved for a released CV of a candidate whose consent is
         given, and it never shows that text. No text extraction is configured, so the Admin types or pastes the text from the CV. Each look at an approved text is
         recorded in the audit trail.
-      </p>
+      </Hint>
       {documents.map((d) => (
         <CvTextPanel key={d.id} document={d} />
       ))}
     </>
   );
+}
+
+/** Whether the CV search matches this CV now, and why not when it does not. */
+function searchableText(text: CvText): string {
+  if (text.searchable) return 'Yes: the CV search matches this approved text';
+  if (text.approved) return 'No: the text is approved, but the candidate’s consent is no longer given or the retention date has passed';
+  return 'No: no text of this CV is approved for search';
 }
 
 function CvTextPanel({ document: d }: { document: CandidateDocument }) {
@@ -158,41 +200,34 @@ function CvTextPanel({ document: d }: { document: CandidateDocument }) {
   };
   const data = shown ? text.data : undefined;
   return (
-    <div role="region" aria-labelledby={`${id}-title`}>
-      <h3 id={`${id}-title`} style={H3}>
-        Searchable text of {name}
-      </h3>
-      <div className="row">
+    // Its parts (buttons, status, text, history, forms) are stacked with room between them: the forms are not boxed in a card.
+    <div role="region" aria-labelledby={`${id}-title`} className="flex flex-col gap-3">
+      <CardSubheading id={`${id}-title`}>Searchable text of {name}</CardSubheading>
+      <ButtonRow>
         {shown ? (
-          <button type="button" className="secondary" onClick={hide}>
+          <Button type="button" variant="outline" onClick={hide}>
             Hide searchable text
-          </button>
+          </Button>
         ) : (
-          <button
+          <Button
             type="button"
-            className="secondary"
+            variant="outline"
             onClick={() => {
               setNotice(null);
               setShown(true);
             }}
           >
             Show searchable text
-          </button>
+          </Button>
         )}
-      </div>
+      </ButtonRow>
       <Notice text={notice} />
-      {shown && text.isPending && <p className="hint loading">Loading the searchable text…</p>}
+      {shown && text.isPending && <LoadingLine>Loading the searchable text…</LoadingLine>}
       {shown && <Refusal error={text.error} words={CV_TEXT_WORDS} />}
       {data && (
         <>
           <dl className="kv" aria-label={`Status of the searchable text of ${name}`}>
-            <Item term="Searchable now">
-              {data.searchable
-                ? 'Yes: the CV search matches this approved text'
-                : data.approved
-                  ? 'No: the text is approved, but the candidate’s consent is no longer given or the retention date has passed'
-                  : 'No: no text of this CV is approved for search'}
-            </Item>
+            <Item term="Searchable now">{searchableText(data)}</Item>
             <Item term="Candidate consent">{labelOf(CONSENT_LABEL, data.consentStatus)}</Item>
             {data.approved && (
               <>
@@ -202,35 +237,33 @@ function CvTextPanel({ document: d }: { document: CandidateDocument }) {
             )}
           </dl>
           {data.approved && (
-            <pre style={PRE} aria-label={`Approved searchable text of ${name}`}>
+            <pre className={PREFORMATTED} aria-label={`Approved searchable text of ${name}`}>
               {data.approved.content}
             </pre>
           )}
           {data.history.length > 0 && (
-            <div style={SCROLL}>
-              <table aria-label={`Approvals of the searchable text of ${name}`}>
-                <thead>
-                  <tr>
-                    <th scope="col">State</th>
-                    <th scope="col">Source</th>
-                    <th scope="col">Approved</th>
-                    <th scope="col">Revoked</th>
-                    <th scope="col">Reason for revoking</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.history.map((h) => (
-                    <tr key={h.id}>
-                      <td>{labelOf(CV_TEXT_STATE_LABEL, h.state)}</td>
-                      <td>{labelOf(CV_TEXT_SOURCE_LABEL, h.source)}</td>
-                      <td>{`${formatDate(h.approvedAt)}${h.approvedByPerson ? ` by ${personText(h.approvedByPerson, userId)}` : ''}`}</td>
-                      <td>{formatDate(h.revokedAt)}</td>
-                      <td>{h.revocationReason ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table aria-label={`Approvals of the searchable text of ${name}`}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">State</TableHead>
+                  <TableHead scope="col">Source</TableHead>
+                  <TableHead scope="col">Approved</TableHead>
+                  <TableHead scope="col">Revoked</TableHead>
+                  <TableHead scope="col">Reason for revoking</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.history.map((h) => (
+                  <TableRow key={h.id}>
+                    <TableCell>{labelOf(CV_TEXT_STATE_LABEL, h.state)}</TableCell>
+                    <TableCell>{labelOf(CV_TEXT_SOURCE_LABEL, h.source)}</TableCell>
+                    <TableCell>{`${formatDate(h.approvedAt)}${h.approvedByPerson ? ` by ${personText(h.approvedByPerson, userId)}` : ''}`}</TableCell>
+                    <TableCell>{formatDate(h.revokedAt)}</TableCell>
+                    <TableCell>{h.revocationReason ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </>
       )}
@@ -262,26 +295,26 @@ function CvTextApproveForm({ document: d, name, onDone }: { document: CandidateD
     approve.mutate(content === '' ? {} : { content });
   };
   return (
-    <form className="grid-form" aria-label={`Approve searchable text of ${name}`} onSubmit={submit} noValidate>
-      <label className="wide">
+    <FormGrid aria-label={`Approve searchable text of ${name}`} onSubmit={submit} noValidate>
+      <FormField className="col-span-full">
         Text of the CV, typed or pasted from the released file
-        <textarea maxLength={MAX_CV_TEXT} rows={6} value={content} onChange={(e) => setContent(e.target.value)} style={TEXTAREA} />
-      </label>
-      <p className="hint wide">
+        <Textarea maxLength={MAX_CV_TEXT} rows={6} value={content} onChange={(e) => setContent(e.target.value)} />
+      </FormField>
+      <Hint>
         Approving replaces any text approved before. The text is kept as approved (line breaks normalised, up to 100,000 characters); only the CV search uses it, and it
         never appears in search results, notifications or the audit trail.
-      </p>
+      </Hint>
       {approve.error && (
-        <div className="wide">
+        <div className="col-span-full">
           <Refusal error={approve.error} words={CV_TEXT_WORDS} />
         </div>
       )}
-      <div className="wide row">
-        <button type="submit" disabled={approve.isPending}>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" disabled={approve.isPending}>
           Approve as searchable text
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ButtonRow>
+    </FormGrid>
   );
 }
 
@@ -308,23 +341,23 @@ function CvTextRevokeForm({ document: d, name, onDone }: { document: CandidateDo
     revoke.mutate({ reason: text });
   };
   return (
-    <form className="grid-form" aria-label={`Revoke searchable text of ${name}`} onSubmit={submit} noValidate>
-      <label className="wide">
+    <FormGrid aria-label={`Revoke searchable text of ${name}`} onSubmit={submit} noValidate>
+      <FormField className="col-span-full">
         Reason for revoking the searchable text (required)
-        <textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} style={TEXTAREA} />
-      </label>
+        <Textarea required maxLength={1000} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </FormField>
       <Problem text={problem} />
       {revoke.error && (
-        <div className="wide">
+        <div className="col-span-full">
           <Refusal error={revoke.error} words={CV_TEXT_WORDS} />
         </div>
       )}
-      <div className="wide row">
-        <button type="submit" className="danger" disabled={revoke.isPending}>
+      <ButtonRow className="col-span-full">
+        <Button type="submit" variant="danger" disabled={revoke.isPending}>
           Revoke searchable text
-        </button>
-      </div>
-    </form>
+        </Button>
+      </ButtonRow>
+    </FormGrid>
   );
 }
 
@@ -332,6 +365,13 @@ function uploadedText(scanState: string): string {
   if (scanState === 'QUARANTINED') return 'The file failed the malware scan and was quarantined: it can never be opened.';
   if (scanState === 'CLEAN') return 'Uploaded and released by the malware scan.';
   return 'Uploaded. The file is waiting for the malware scan and can be opened once it is released.';
+}
+
+/** The checks made before sending: a file is chosen, and it is within the size the server accepts. */
+function fileProblem(file: File | null): string | null {
+  if (file === null) return 'Choose a file to upload.';
+  if (file.size > MAX_UPLOAD_BYTES) return 'Files can be at most 10 MB.';
+  return null;
 }
 
 function UploadDocumentForm({ candidateId }: { candidateId: string }) {
@@ -356,7 +396,7 @@ function UploadDocumentForm({ candidateId }: { candidateId: string }) {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (upload.isPending) return;
-    const missing = file === null ? 'Choose a file to upload.' : file.size > MAX_UPLOAD_BYTES ? 'Files can be at most 10 MB.' : null;
+    const missing = fileProblem(file);
     setProblem(missing);
     if (missing || file === null) {
       upload.reset();
@@ -366,38 +406,39 @@ function UploadDocumentForm({ candidateId }: { candidateId: string }) {
   };
   return (
     <>
-      <h3 id={`${id}-title`} style={H3}>
-        Add a document
-      </h3>
-      <form className="grid-form" aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
-        <label>
+      <CardSubheading id={`${id}-title`}>Add a document</CardSubheading>
+      <FormGrid aria-labelledby={`${id}-title`} onSubmit={submit} noValidate>
+        <FormField>
           Document type
-          <select value={documentType} onChange={(e) => setDocumentType(e.target.value)}>
+          <NativeSelect value={documentType} onChange={(e) => setDocumentType(e.target.value)}>
             {CANDIDATE_DOCUMENT_TYPES.map((t) => (
               <option key={t.code} value={t.code}>
                 {t.label}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </NativeSelect>
+        </FormField>
+        <FormField>
           File (PDF, JPEG or PNG, up to 10 MB)
-          <input key={inputKey} type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        </label>
+          <Input key={inputKey} type="file" accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        </FormField>
         <Problem text={problem} />
         {upload.error && (
-          <div className="wide">
+          <div className="col-span-full">
             <Refusal error={upload.error} words={UPLOAD_WORDS} />
           </div>
         )}
-        <div className="wide row">
-          <button type="submit" disabled={upload.isPending}>
+        <ButtonRow className="col-span-full">
+          <Button type="submit" disabled={upload.isPending}>
             Upload
-          </button>
-        </div>
-        {upload.isSuccess && <Done>{uploadedText(upload.data.scanState)}</Done>}
-      </form>
+          </Button>
+        </ButtonRow>
+        {upload.isSuccess && (
+          <StatusNote tone="success" role="status">
+            {uploadedText(upload.data.scanState)}
+          </StatusNote>
+        )}
+      </FormGrid>
     </>
   );
 }
-

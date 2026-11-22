@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { CheckField, FilterBar, FormField, FramedFieldset } from '@/components/form-field';
+import { Hint } from '@/components/hint';
+import { LoadingLine } from '@/components/loading-line';
+import { StatusNote } from '@/components/status-note';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { api } from '../api';
 import type { ScreenRoute } from '../screens';
 import { useSession } from '../session';
@@ -50,33 +58,32 @@ export function NotificationPreferencesPanel() {
   });
   return (
     <Section title="Notification preferences">
-      <p className="hint">
+      <Hint>
         Your occasions are hidden unless you share them. Colleagues then see your name, department and the occasion, never your birth date, year or age. Notices about your tasks,
         decisions and account security always reach you and cannot be switched off.
-      </p>
-      <p className="hint">Email is sent only for notices your company has enabled for email. It says what happened and links here, never confidential details.</p>
-      {preferences.isPending && <p className="hint loading">Loading preferences…</p>}
+      </Hint>
+      <Hint>Email is sent only for notices your company has enabled for email. It says what happened and links here, never confidential details.</Hint>
+      {preferences.isPending && <LoadingLine>Loading preferences…</LoadingLine>}
       {/* One block per occasion, each choice a labelled checkbox: it fits a phone screen, where a four-column table would not. */}
       {preferences.data && (
-        <div className="stack">
+        <div className="flex flex-col gap-3">
           {preferences.data.items.map((p) => {
             const occasion = occasionOf(p.eventType);
             return (
-              <fieldset key={p.eventType}>
-                <legend>{occasion.name}</legend>
-                <label className="check">
+              <FramedFieldset key={p.eventType} legend={occasion.name}>
+                <CheckField>
                   <input type="checkbox" checked={p.publishCelebration} disabled={save.isPending} onChange={(e) => save.mutate({ eventType: p.eventType, publishCelebration: e.target.checked })} />{' '}
                   {occasion.share}
-                </label>
-                <label className="check">
+                </CheckField>
+                <CheckField>
                   <input type="checkbox" checked={p.receiveOptional} disabled={save.isPending} onChange={(e) => save.mutate({ eventType: p.eventType, receiveOptional: e.target.checked })} />{' '}
                   {occasion.see}
-                </label>
-                <label className="check">
+                </CheckField>
+                <CheckField>
                   <input type="checkbox" checked={p.receiveEmail ?? true} disabled={save.isPending} onChange={(e) => save.mutate({ eventType: p.eventType, receiveEmail: e.target.checked })} />{' '}
                   {occasion.email}
-                </label>
-              </fieldset>
+                </CheckField>
+              </FramedFieldset>
             );
           })}
         </div>
@@ -132,49 +139,51 @@ function FailedEventsSection({ scopeKey }: { scopeKey: string }) {
   });
   return (
     <Section title={`Events not dispatched${events.data ? ` (${events.data.total})` : ''}`}>
-      <p className="hint">An event that fails is retried after 1, 5 and 15 minutes, then stays failed. It created no notification, so it is listed here. It never undoes the business action behind it.</p>
-      <label className="inline">
-        State{' '}
-        <select
-          value={state}
-          onChange={(e) => {
-            setState(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">All</option>
-          <option value="RETRYING">Retrying</option>
-          <option value="FAILED">Failed</option>
-        </select>
-      </label>
+      <Hint>An event that fails is retried after 1, 5 and 15 minutes, then stays failed. It created no notification, so it is listed here. It never undoes the business action behind it.</Hint>
+      <FilterBar>
+        <FormField>
+          State{' '}
+          <NativeSelect
+            value={state}
+            onChange={(e) => {
+              setState(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All</option>
+            <option value="RETRYING">Retrying</option>
+            <option value="FAILED">Failed</option>
+          </NativeSelect>
+        </FormField>
+      </FilterBar>
       {events.data?.items.length === 0 && <Empty>No events are retrying or failed.</Empty>}
       {events.data && events.data.items.length > 0 && (
-        <table aria-label="Events not dispatched">
-          <thead>
-            <tr>
-              <th scope="col">Raised</th>
-              <th scope="col">Topic</th>
-              <th scope="col">State</th>
-              <th scope="col">Attempts</th>
-              <th scope="col">Error class</th>
-              <th scope="col">Next attempt</th>
-            </tr>
-          </thead>
-          <tbody>
+        <Table aria-label="Events not dispatched">
+          <TableHeader>
+            <TableRow>
+              <TableHead scope="col">Raised</TableHead>
+              <TableHead scope="col">Topic</TableHead>
+              <TableHead scope="col">State</TableHead>
+              <TableHead scope="col">Attempts</TableHead>
+              <TableHead scope="col">Error class</TableHead>
+              <TableHead scope="col">Next attempt</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {events.data.items.map((e) => (
-              <tr key={e.id}>
-                <td>{when(e.occurredAt)}</td>
-                <td>{e.topic}</td>
-                <td>
+              <TableRow key={e.id}>
+                <TableCell>{when(e.occurredAt)}</TableCell>
+                <TableCell>{e.topic}</TableCell>
+                <TableCell>
                   <StateText state={e.state} />
-                </td>
-                <td>{e.attempts}</td>
-                <td>{e.failureCode ?? '—'}</td>
-                <td>{e.nextAttemptAt ? when(e.nextAttemptAt) : '—'}</td>
-              </tr>
+                </TableCell>
+                <TableCell>{e.attempts}</TableCell>
+                <TableCell>{e.failureCode ?? '—'}</TableCell>
+                <TableCell>{e.nextAttemptAt ? when(e.nextAttemptAt) : '—'}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       )}
       {events.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={events.data.total} onPage={setPage} label="Pages of events not dispatched" noun="event" />}
       <ErrorNote error={events.error} />
@@ -220,11 +229,11 @@ export function DeliveryLogPage() {
   return (
     <>
       <Section title={`Delivery log${log.data ? ` (${log.data.total})` : ''}`}>
-        <p className="hint">The state of each notification, its attempts and the code of its last failure. Message content is never shown here. A failed or suppressed notice does not change the decision it was about.</p>
-        <div className="inline">
-          <label className="inline">
+        <Hint>The state of each notification, its attempts and the code of its last failure. Message content is never shown here. A failed or suppressed notice does not change the decision it was about.</Hint>
+        <FilterBar>
+          <FormField>
             State{' '}
-            <select
+            <NativeSelect
               value={state}
               onChange={(e) => {
                 setState(e.target.value);
@@ -237,11 +246,11 @@ export function DeliveryLogPage() {
                   {readable(s)}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="inline">
+            </NativeSelect>
+          </FormField>
+          <FormField>
             Event{' '}
-            <select
+            <NativeSelect
               value={category}
               onChange={(e) => {
                 setCategory(e.target.value);
@@ -254,11 +263,11 @@ export function DeliveryLogPage() {
                   {readable(c)}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="inline">
+            </NativeSelect>
+          </FormField>
+          <FormField>
             From{' '}
-            <input
+            <Input
               type="date"
               value={from}
               onChange={(e) => {
@@ -266,10 +275,10 @@ export function DeliveryLogPage() {
                 setPage(1);
               }}
             />
-          </label>
-          <label className="inline">
+          </FormField>
+          <FormField>
             To{' '}
-            <input
+            <Input
               type="date"
               value={to}
               onChange={(e) => {
@@ -277,47 +286,47 @@ export function DeliveryLogPage() {
                 setPage(1);
               }}
             />
-          </label>
+          </FormField>
           {can(EXPORT_DELIVERY) && (
-            <button type="button" className="secondary" disabled={!from || !to || exportLog.isPending} onClick={() => exportLog.mutate()}>
+            <Button type="button" variant="outline" disabled={!from || !to || exportLog.isPending} onClick={() => exportLog.mutate()}>
               Export this log
-            </button>
+            </Button>
           )}
-        </div>
-        {can(EXPORT_DELIVERY) && (!from || !to) && <p className="hint">An export covers a period: choose both dates.</p>}
-        {exportLog.isSuccess && <p className="ok">Export requested. Download it from Reports when it is ready.</p>}
+        </FilterBar>
+        {can(EXPORT_DELIVERY) && (!from || !to) && <Hint>An export covers a period: choose both dates.</Hint>}
+        {exportLog.isSuccess && <StatusNote tone="success">Export requested. Download it from Reports when it is ready.</StatusNote>}
         <ErrorNote error={exportLog.error} />
-        {log.isFetching && !log.data && <p className="hint loading">Loading the log…</p>}
+        {log.isFetching && !log.data && <LoadingLine>Loading the log…</LoadingLine>}
         {log.data?.items.length === 0 && <Empty>No notifications match.</Empty>}
         {log.data && log.data.items.length > 0 && (
-          <table aria-label="Delivery log">
-            <thead>
-              <tr>
-                <th scope="col">Raised</th>
-                <th scope="col">Event</th>
-                <th scope="col">Recipient</th>
-                <th scope="col">Channel</th>
-                <th scope="col">State</th>
-                <th scope="col">Attempts</th>
-                <th scope="col">Failure code</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table aria-label="Delivery log">
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">Raised</TableHead>
+                <TableHead scope="col">Event</TableHead>
+                <TableHead scope="col">Recipient</TableHead>
+                <TableHead scope="col">Channel</TableHead>
+                <TableHead scope="col">State</TableHead>
+                <TableHead scope="col">Attempts</TableHead>
+                <TableHead scope="col">Failure code</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {log.data.items.map((n) => (
-                <tr key={n.id}>
-                  <td>{when(n.occurredAt)}</td>
-                  <td>{n.category}</td>
-                  <td>{n.recipientAccount}</td>
-                  <td>{readable(n.channel)}</td>
-                  <td>
+                <TableRow key={n.id}>
+                  <TableCell>{when(n.occurredAt)}</TableCell>
+                  <TableCell>{n.category}</TableCell>
+                  <TableCell>{n.recipientAccount}</TableCell>
+                  <TableCell>{readable(n.channel)}</TableCell>
+                  <TableCell>
                     <StateText state={n.state} />
-                  </td>
-                  <td>{n.attempts}</td>
-                  <td>{n.lastFailureCode ?? '—'}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell>{n.attempts}</TableCell>
+                  <TableCell>{n.lastFailureCode ?? '—'}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
         {log.data && <Pager page={page} pageSize={LIST_PAGE_SIZE} total={log.data.total} onPage={setPage} label="Pages of the delivery log" noun="notification" />}
         <ErrorNote error={log.error} />
