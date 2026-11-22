@@ -34,9 +34,9 @@
    variant stops just short of it ("width < 560px"), so the app's breakpoint has a variant of its own: phone:min-h-[44px]. */
 @custom-variant phone (@media (max-width: 560px));
 
-/* shadcn's colour roles, mapped onto the HRMS tokens of styles.css (which hold the light and dark values, the red brand, and the
-   accessibility pass of 20 Nov 2026). "inline" puts the token itself into each class, so nothing here defines a variable that could
-   clash: in HRMS --muted and --accent are text colours, while shadcn's muted and accent are backgrounds. */
+/* shadcn's colour roles, mapped onto the HRMS tokens of styles.css (which hold the light and dark values on the zinc scale, the red
+   brand, and the accessibility pass of 20 Nov 2026). "inline" puts the token itself into each class, so nothing here defines a
+   variable that could clash: in HRMS --muted and --accent are text colours, while shadcn's muted and accent are backgrounds. */
 @theme inline {
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
@@ -53,7 +53,9 @@
   --color-secondary-foreground: var(--text);
   --color-muted: var(--surface-sunken);
   --color-muted-foreground: var(--muted);
-  --color-accent: var(--surface-soft);
+  /* As in shadcn's zinc theme, accent (the hover tint of ghost and outline buttons, a quiet panel) is the same zinc-100 as muted:
+     the lighter --surface-soft barely shows against a white card. */
+  --color-accent: var(--surface-sunken);
   --color-accent-foreground: var(--text);
   --color-destructive: var(--bad);
   --color-border: var(--line);
@@ -65,15 +67,17 @@
   --color-chart-3: var(--series-3);
   --color-chart-4: var(--series-4);
 
-  /* The sidebar stays dark in both themes, as now. */
-  --color-sidebar: var(--dark);
-  --color-sidebar-foreground: rgb(255 255 255 / 0.74);
-  --color-sidebar-primary: var(--accent-bright);
-  --color-sidebar-primary-foreground: #ffffff;
-  --color-sidebar-accent: rgb(255 255 255 / 0.085);
-  --color-sidebar-accent-foreground: #ffffff;
-  --color-sidebar-border: rgb(255 255 255 / 0.06);
-  --color-sidebar-ring: var(--focus-on-dark);
+  /* The menu: shadcn's light sidebar (zinc-900 in the dark theme), on the --sidebar-* tokens of styles.css. sidebar-muted-foreground
+     is an HRMS role of its own, for the section titles, chevrons and counts (shadcn's foreground at 70% would not keep 4.5:1). */
+  --color-sidebar: var(--sidebar-bg);
+  --color-sidebar-foreground: var(--sidebar-text);
+  --color-sidebar-muted-foreground: var(--sidebar-label);
+  --color-sidebar-primary: var(--accent-fill);
+  --color-sidebar-primary-foreground: var(--on-accent);
+  --color-sidebar-accent: var(--sidebar-hover);
+  --color-sidebar-accent-foreground: var(--sidebar-text-strong);
+  --color-sidebar-border: var(--sidebar-edge);
+  --color-sidebar-ring: var(--focus);
 
   /* shadcn's radius steps on the HRMS radii (6, 8, 10 and 12px). */
   --radius-sm: var(--radius-xs);

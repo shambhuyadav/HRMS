@@ -7,10 +7,12 @@
 // - The sheet is named "Menu" for assistive technology (the registry says "Sidebar"), with no description.
 // - The menu never shrinks to icons, so the icon-mode tooltips (and with them the Tooltip dependency) are left out, as are the parts
 //   the shell does not use (input, skeleton, group and row actions).
-// - The HRMS menu look: dark in both themes, rows of 0.87rem text beside an 18px icon, the row of the page shown lit with the red
-//   marker at its edge, uppercase section titles. A row is lit when isActive is set or when it is a router link to the page shown
-//   (NavLink marks it aria-current="page"). Each <button> sets every property of the old `button` rule of styles.css, each link sets
-//   its own colour and underline, lists drop their bullets and indent, and borders name their colour: there is no Tailwind reset.
+// - The look is shadcn's light sidebar (owner's request of 23 Nov 2026; zinc-900 in the dark theme), its colours the --color-sidebar
+//   roles of tailwind.css: rows of 0.87rem text beside an 18px icon, the row of the page shown on the hover tint in the strong text
+//   colour with the brand red marker at its edge (the menu's one red signal), uppercase section titles in the muted text. A row is
+//   lit when isActive is set or when it is a router link to the page shown (NavLink marks it aria-current="page"). Each <button>
+//   sets every property of the old `button` rule of styles.css, each link sets its own colour and underline, lists drop their
+//   bullets and indent, and borders name their colour: there is no Tailwind reset.
 // - React 18: SidebarMenuButton is a forwardRef, so a Radix trigger rendered through it (asChild) reaches the <button>.
 import { cva, type VariantProps } from 'class-variance-authority';
 import { PanelLeftIcon } from 'lucide-react';
@@ -194,7 +196,7 @@ function Sidebar({
         className={cn(
           'fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear',
           side === 'left' ? 'left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]' : 'right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]',
-          // The edge line is drawn on the dark menu itself (it would vanish against the light page otherwise).
+          // The menu draws the hairline between itself and the page.
           variant === 'floating' || variant === 'inset'
             ? 'p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]'
             : 'border-sidebar-border bg-sidebar group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l',
@@ -266,14 +268,14 @@ function SidebarSeparator({ className, ...props }: React.ComponentPropsWithoutRe
   return <Separator data-slot="sidebar-separator" data-sidebar="separator" className={cn('mx-2 w-auto bg-sidebar-border', className)} {...props} />;
 }
 
-/** The menu's scrolling body, with the HRMS menu's padding and its thin dark scrollbar. */
+/** The menu's scrolling body, with the HRMS menu's padding and a thin scrollbar in the stronger hairline colour. */
 function SidebarContent({ className, ...props }: React.ComponentPropsWithoutRef<'div'>) {
   return (
     <div
       data-slot="sidebar-content"
       data-sidebar="content"
       className={cn(
-        'flex min-h-0 flex-1 flex-col gap-2 overflow-auto px-3 pt-[0.85rem] pb-6 [scrollbar-color:#3a414d_transparent] [scrollbar-width:thin] group-data-[collapsible=icon]:overflow-hidden',
+        'flex min-h-0 flex-1 flex-col gap-2 overflow-auto px-3 pt-[0.85rem] pb-6 [scrollbar-color:var(--line-strong)_transparent] [scrollbar-width:thin] group-data-[collapsible=icon]:overflow-hidden',
         className,
       )}
       {...props}
@@ -286,7 +288,7 @@ function SidebarGroup({ className, ...props }: React.ComponentPropsWithoutRef<'d
   return <div data-slot="sidebar-group" data-sidebar="group" className={cn('relative flex w-full min-w-0 flex-col gap-[2px] p-0', className)} {...props} />;
 }
 
-/** A section title (WORKSPACE, MODULES): small uppercase letters, spaced out. */
+/** A section title (WORKSPACE, MODULES): small uppercase letters, spaced out, in the menu's muted text (4.5:1). */
 function SidebarGroupLabel({ className, asChild = false, ...props }: React.ComponentPropsWithoutRef<'div'> & { asChild?: boolean }) {
   const Comp = asChild ? Slot.Root : 'div';
   return (
@@ -294,7 +296,7 @@ function SidebarGroupLabel({ className, asChild = false, ...props }: React.Compo
       data-slot="sidebar-group-label"
       data-sidebar="group-label"
       className={cn(
-        'mx-3 mt-[0.2rem] mb-[0.4rem] flex shrink-0 items-center rounded-md p-0 text-[0.72rem] font-semibold tracking-[0.07em] text-white/[0.56] uppercase ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 contrast-more:text-white/75 [&>svg]:shrink-0',
+        'mx-3 mt-[0.2rem] mb-[0.4rem] flex shrink-0 items-center rounded-md p-0 text-[0.72rem] font-medium tracking-[0.07em] text-sidebar-muted-foreground uppercase ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:shrink-0',
         'group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0',
         className,
       )}
@@ -315,25 +317,26 @@ function SidebarMenuItem({ className, ...props }: React.ComponentPropsWithoutRef
   return <li data-slot="sidebar-menu-item" data-sidebar="menu-item" className={cn('group/menu-item relative', className)} {...props} />;
 }
 
-// The row of the page shown: lit, with the red marker at its edge and its icon in the light red; in Windows high-contrast mode, the
-// system's highlight colours (the tint and the marker are not drawn there).
+// The row of the page shown: on the hover tint in the strong text colour (its icon too), with the brand red marker at its edge; in
+// Windows high-contrast mode, the system's highlight colours (the tint and the marker are not drawn there).
 const LIT_ROW = [
-  'data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[active=true]:shadow-[inset_2px_0_0_var(--accent-bright)] data-[active=true]:[&>svg:first-child]:text-[var(--accent-on-dark)]',
-  'aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground aria-[current=page]:shadow-[inset_2px_0_0_var(--accent-bright)] aria-[current=page]:[&>svg:first-child]:text-[var(--accent-on-dark)]',
+  'data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[active=true]:shadow-[inset_2px_0_0_var(--sidebar-marker)]',
+  'aria-[current=page]:bg-sidebar-accent aria-[current=page]:text-sidebar-accent-foreground aria-[current=page]:shadow-[inset_2px_0_0_var(--sidebar-marker)]',
   'forced-colors:data-[active=true]:bg-[color:Highlight] forced-colors:data-[active=true]:text-[color:HighlightText] forced-colors:data-[active=true]:forced-color-adjust-none forced-colors:data-[active=true]:[&>svg:first-child]:text-[color:HighlightText]',
   'forced-colors:aria-[current=page]:bg-[color:Highlight] forced-colors:aria-[current=page]:text-[color:HighlightText] forced-colors:aria-[current=page]:forced-color-adjust-none forced-colors:aria-[current=page]:[&>svg:first-child]:text-[color:HighlightText]',
 ];
 
-// A row: a link to a page, or the button that opens a module's group. Long names wrap (none is cut short).
+// A row: a link to a page, or the button that opens a module's group, its icon in the words' colour. Long names wrap (none is cut
+// short).
 const ROW = [
-  'flex items-center rounded-sm border-0 bg-transparent font-medium text-sidebar-foreground no-underline shadow-none ring-sidebar-ring outline-hidden contrast-more:text-white/90',
-  'transition-[color,background-color,box-shadow] duration-[120ms] hover:bg-white/[0.055] hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground',
+  'flex items-center rounded-sm border-0 bg-transparent font-medium text-sidebar-foreground no-underline shadow-none ring-sidebar-ring outline-hidden',
+  'transition-[color,background-color,box-shadow] duration-[120ms] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground',
   'disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&>svg]:shrink-0',
 ];
 
 const sidebarMenuButtonVariants = cva(
   [
-    'peer/menu-button w-full gap-[0.7rem] overflow-hidden text-left [&>svg:first-child]:text-white/[0.46]',
+    'peer/menu-button w-full gap-[0.7rem] overflow-hidden text-left',
     ...ROW,
     ...LIT_ROW,
     'group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2!',
@@ -376,7 +379,7 @@ function SidebarMenuBadge({ className, ...props }: React.ComponentPropsWithoutRe
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
       className={cn(
-        'pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium text-sidebar-foreground tabular-nums select-none',
+        'pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium text-sidebar-muted-foreground tabular-nums select-none',
         'peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[active=true]/menu-button:text-sidebar-accent-foreground',
         'peer-data-[size=sm]/menu-button:top-1 peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5',
         'group-data-[collapsible=icon]:hidden',
@@ -394,7 +397,7 @@ function SidebarMenuSub({ className, ...props }: React.ComponentPropsWithoutRef<
       data-slot="sidebar-menu-sub"
       data-sidebar="menu-sub"
       className={cn(
-        'mt-[2px] mr-0 mb-[6px] ml-[1.45rem] flex min-w-0 list-none flex-col gap-px border-l border-white/[0.09] py-0 pr-0 pl-[0.65rem]',
+        'mt-[2px] mr-0 mb-[6px] ml-[1.45rem] flex min-w-0 list-none flex-col gap-px border-l border-sidebar-border py-0 pr-0 pl-[0.65rem]',
         'group-data-[collapsible=icon]:hidden',
         className,
       )}

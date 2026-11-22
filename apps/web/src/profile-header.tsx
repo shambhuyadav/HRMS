@@ -10,11 +10,11 @@ import { StateBadge } from './ui';
 
 /** The card: the initials beside the name and facts; on a phone a little tighter, the initials at the top. */
 const CARD =
-  'flex items-center gap-[1rem_1.25rem] rounded-xl border border-border bg-card px-6 py-[1.35rem] shadow-[var(--shadow-xs)] phone:items-start phone:gap-[0.85rem] phone:px-4 phone:py-[1.05rem]';
-/** The initials stand in for a photo (the system keeps none): the top bar's avatar, larger, in the information tint. */
+  'flex items-center gap-[1rem_1.25rem] rounded-xl border border-border bg-card px-6 py-[1.35rem] shadow-sm phone:items-start phone:gap-[0.85rem] phone:px-4 phone:py-[1.05rem]';
+/** The initials stand in for a photo (the system keeps none): the top bar's avatar (shadcn's, on the muted tile), larger. */
 const AVATAR =
-  'grid size-[64px] flex-none place-items-center rounded-full bg-[var(--info-soft)] text-[1.35rem] font-[650] tracking-[0.02em] text-[var(--info)] shadow-[inset_0_0_0_1px_var(--info-edge)] select-none phone:size-[48px] phone:text-[1.05rem]';
-const NAME = 'm-0 text-[1.3rem] leading-[1.25] font-[650] tracking-[-0.015em] text-foreground [overflow-wrap:anywhere] phone:text-[1.12rem]';
+  'grid size-[64px] flex-none place-items-center rounded-full bg-muted text-[1.35rem] font-medium tracking-[0.02em] text-foreground select-none phone:size-[48px] phone:text-[1.05rem]';
+const NAME = 'm-0 text-[1.3rem] leading-[1.25] font-semibold tracking-tight text-foreground [overflow-wrap:anywhere] phone:text-[1.12rem]';
 const SUBTITLE = 'm-0 text-[0.9rem] font-medium text-[var(--body)] [overflow-wrap:anywhere]';
 /** The facts side by side, wrapping; one under another on a phone. */
 const FACTS = 'm-0 mt-[0.45rem] flex list-none flex-wrap gap-[0.35rem_1.35rem] p-0 text-[0.84rem] text-muted-foreground phone:flex-col phone:gap-[0.3rem]';

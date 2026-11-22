@@ -79,8 +79,8 @@ export function DepartmentSelect({ value, onChange }: { value: string; onChange:
   );
 }
 
-/** One matching employee as a full-width choice, its words wrapping, tinted red on hover (the old `.choices` button; as in the pilot). */
-const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
+/** One matching employee as a full-width choice, its words wrapping, on the outline button's hover tint (the old `.choices` button). */
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal';
 
 /** Whom to enrol: an employee found by an employee search (the server checks row scope and refuses one's own record). */
 export function EmployeePicker({ value, onChange }: { value: EmployeeHit | null; onChange: (e: EmployeeHit | null) => void }) {

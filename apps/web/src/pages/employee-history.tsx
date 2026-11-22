@@ -23,8 +23,8 @@ const CONFIRMATION_READ = 'confirmation.read.operational';
 
 /** The matching employees, one full-width choice under another (the old `.choices` list). */
 const CHOICE_LIST = 'm-0 mt-3 flex list-none flex-col gap-[0.6rem] p-0';
-/** One matching employee as a full-width choice, its words wrapping, tinted red on hover (the old `.choices` button; as in the pilot). */
-const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
+/** One matching employee as a full-width choice, its words wrapping, on the outline button's hover tint (the old `.choices` button). */
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal';
 
 export interface TimelineEvent {
   category: string;

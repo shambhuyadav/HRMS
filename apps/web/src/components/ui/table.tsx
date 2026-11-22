@@ -7,6 +7,7 @@
 //   last row keeps its frame there.
 // - A cell's text wraps, as HRMS tables always did (only headings stay on one line): shadcn's one-line cells made wide lists such as
 //   My team (10 columns) scroll sideways inside their card on a laptop. A date or code that must not break uses `whitespace-nowrap`.
+// - Headings are in the muted text, as shadcn's data tables have them, on the card itself (styles.css draws no strip behind them).
 // Borders name their colour (border-border): the app has no Tailwind reset to give every border the hairline colour.
 import * as React from 'react';
 import { InCardContext } from '@/components/card-context';
@@ -48,7 +49,7 @@ function TableHead({ className, ...props }: React.ComponentPropsWithoutRef<'th'>
     <th
       data-slot="table-head"
       className={cn(
-        'h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
+        'h-10 px-2 text-left align-middle font-medium whitespace-nowrap text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]',
         className,
       )}
       {...props}

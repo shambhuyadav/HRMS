@@ -196,6 +196,15 @@ function loadGroupChoices(): Record<string, boolean> {
 }
 
 /**
+ * The name of the module group holding the page shown, open or closed, in the menu's strong text colour (its icon too). The brand
+ * red marker stays on the page's own row (components/ui/sidebar.tsx), the menu's one red signal.
+ */
+const CURRENT_GROUP = 'text-sidebar-accent-foreground';
+
+/** A group's chevron, in the menu's muted colour, turning a quarter when the group opens (not for a person who asks for less motion). */
+const GROUP_CHEVRON = 'text-sidebar-muted-foreground transition-transform duration-150 group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none';
+
+/**
  * The menu: the core pages, then the module groups. A group opens by itself when the current page is in it; the user can open or
  * close any group, and that choice is remembered on this device (a convenience only: nothing depends on it).
  */
@@ -262,20 +271,15 @@ function MainMenu({ pathname, onNavigate }: { pathname: string; onNavigate: () =
                     </SidebarMenuItem>
                   );
                 }
-                // The group holding the page shown has its name lit and its icon in the light red, open or closed.
                 const current = g.label === activeGroup;
                 return (
                   <SidebarMenuItem key={g.label}>
                     <Collapsible open={isOpen(g.label)} onOpenChange={() => toggle(g.label)} role="group" aria-label={g.label} className="group/collapsible">
                       <CollapsibleTrigger asChild>
-                        <SidebarMenuButton className={cn(current && 'text-sidebar-accent-foreground [&>svg:first-child]:text-[var(--accent-on-dark)]')}>
+                        <SidebarMenuButton className={cn(current && CURRENT_GROUP)}>
                           <Icon name={groupIcon(g.label)} />
                           <span className="min-w-0 flex-1">{g.label}</span>
-                          <Icon
-                            name="chevron"
-                            size={15}
-                            className="text-white/[0.35] transition-transform duration-150 group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none"
-                          />
+                          <Icon name="chevron" size={15} className={GROUP_CHEVRON} />
                         </SidebarMenuButton>
                       </CollapsibleTrigger>
                       <CollapsibleContent>
@@ -482,8 +486,8 @@ export function App() {
               className="relative size-[30px] flex-none rounded-[8px] bg-[var(--accent-bright)] shadow-[inset_0_-1px_0_rgba(0,0,0,0.18)] after:absolute after:inset-[8.5px] after:rounded-[4px] after:border-[2.5px] after:border-white/95 after:content-['']"
             />
             <div className="flex min-w-0 flex-col leading-[1.2]">
-              <span className="text-[1.05rem] font-bold tracking-[-0.01em] text-white">HRMS</span>
-              <span className="truncate text-[0.74rem] text-white/50">{me?.companyName ?? ''}</span>
+              <span className="text-[1.05rem] font-semibold tracking-tight text-sidebar-accent-foreground">HRMS</span>
+              <span className="truncate text-[0.74rem] text-sidebar-muted-foreground">{me?.companyName ?? ''}</span>
             </div>
           </SidebarHeader>
           {/* The menu waits for the role's permissions: entries are never shown and then taken away. */}
@@ -551,9 +555,9 @@ export function App() {
             </Button>
             <div className="ml-1 flex items-center gap-[0.55rem] border-l border-border pl-3 phone:hidden [@media(max-width:1180px)]:pl-2" title={me?.accountKey ?? ''}>
               <Avatar aria-hidden="true" className="size-[32px]">
-                <AvatarFallback className="bg-[var(--info-soft)] text-[0.74rem] font-[650] text-[var(--info)] shadow-[inset_0_0_0_1px_var(--info-edge)]">{initialsOf(name)}</AvatarFallback>
+                <AvatarFallback className="text-[0.74rem] font-medium text-foreground">{initialsOf(name)}</AvatarFallback>
               </Avatar>
-              <span className="max-w-[170px] truncate text-[0.85rem] font-semibold text-foreground [@media(max-width:1180px)]:hidden">{name}</span>
+              <span className="max-w-[170px] truncate text-[0.85rem] font-medium text-foreground [@media(max-width:1180px)]:hidden">{name}</span>
             </div>
             <Button variant="ghost" aria-label="Sign out" title="Sign out" onClick={() => void signOut()}>
               <Icon name="logOut" size={16} className="size-[16px]" />

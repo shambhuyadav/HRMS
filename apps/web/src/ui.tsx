@@ -17,17 +17,16 @@ const SCOPE_WORDS: Readonly<Record<string, string>> = { COMPANY: 'Company-wide',
 export const scopeWords = (scopeKind: string) => SCOPE_WORDS[scopeKind.toUpperCase()] ?? scopeKind.toLowerCase();
 
 /**
- * A status badge on shadcn's Badge, in the status token colours. It stays inline-block, not shadcn's inline-flex: the first letter
- * is raised (sentence case: "Manager pending") by ::first-letter, which applies only to a block container. The dot sits in the
- * left padding, drawn as a background.
+ * A status badge on shadcn's Badge, in the status token colours: shadcn's shape and size (badge.tsx), no dot. It stays inline-block,
+ * not shadcn's inline-flex: the first letter is raised (sentence case: "Manager pending") by ::first-letter, which applies only to a
+ * block container.
  */
-const STATUS_BADGE =
-  'inline-block pl-[1.3rem] align-middle first-letter:uppercase bg-[radial-gradient(circle,currentColor_0_2.5px,transparent_3px)] bg-[length:8px_8px] bg-[position:0.55rem_50%] bg-no-repeat';
+const STATUS_BADGE = 'inline-block align-middle first-letter:uppercase';
 /**
  * On a phone a long status ("Review date passed: still withheld, needs review") wraps inside the badge and keeps to the card's width;
- * shadcn's badge never wraps, so such a badge ran past the edge of its card. A rounder-cornered box suits two lines better than a pill.
+ * shadcn's badge never wraps, so such a badge ran past the edge of its card.
  */
-const WRAPS_ON_PHONE = 'phone:max-w-full phone:whitespace-normal phone:rounded-lg';
+const WRAPS_ON_PHONE = 'phone:max-w-full phone:whitespace-normal';
 /** The badge a note opens with (NotPermitted, WarningNote) is on the card colour, apart from the note's tint, a little before the words. */
 const OPENS_NOTE = 'mr-[0.35rem] bg-card';
 
@@ -200,12 +199,13 @@ export const sortParams = (sort: SortState): Record<string, string> => (sort ? {
 /** A sortable heading's cell, as TableHead (components/ui/table.tsx) draws the other headings of its table: height and side padding. */
 const SORT_HEAD = 'h-10 px-2 align-middle';
 /**
- * The heading's button fills its cell, so the whole heading is clickable, in the size, weight and text colour of the table's other
- * headings; the sorted column is marked by its arrow. The cell's padding above and below is the `th` rule's of styles.css, which the
- * button takes back so that it fills the cell. Keyboard focus is the HRMS ring, drawn inside the cell.
+ * The heading's button fills its cell, so the whole heading is clickable, in the size, weight and muted text colour of the table's
+ * other headings, turning to the text colour under the pointer; the sorted column is marked by its arrow. The cell's padding above
+ * and below is the `th` rule's of styles.css, which the button takes back so that it fills the cell. Keyboard focus is the HRMS
+ * ring, drawn inside the cell.
  */
 const SORT_BUTTON =
-  '-mx-2 -my-[0.68rem] block w-[calc(100%+1rem)] min-h-0 cursor-pointer rounded-none border-0 bg-transparent px-2 py-[0.68rem] [text-align:inherit] text-[length:inherit] leading-[inherit] font-medium text-foreground shadow-none transition-colors outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset';
+  '-mx-2 -my-[0.68rem] block w-[calc(100%+1rem)] min-h-0 cursor-pointer rounded-none border-0 bg-transparent px-2 py-[0.68rem] [text-align:inherit] text-[length:inherit] leading-[inherit] font-medium text-muted-foreground hover:text-foreground shadow-none transition-colors outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:ring-inset';
 
 /**
  * A sortable column heading in a shadcn Table (FR-056, FR-007). The server applies the order, so it holds across pages; the order is
@@ -289,8 +289,12 @@ const HEADER_OVER_LOADING_TASKS = 'has-[+.tasks:empty:last-child]:mb-0 has-[+.ta
 /** CardTitle, as the section's <h2>. */
 const TITLE = 'text-base leading-snug font-semibold';
 
-/** A decision queue with nothing waiting, as one quiet line (QuietWhenEmptyContext, components/card-context.ts). */
-const QUIET_CARD = 'group/queue has-[p[data-slot=empty]]:bg-accent has-[p[data-slot=empty]]:px-[1.1rem] has-[p[data-slot=empty]]:py-[0.7rem] has-[p[data-slot=empty]]:shadow-none';
+/**
+ * A decision queue with nothing waiting, as one quiet line (QuietWhenEmptyContext, components/card-context.ts), on the muted tint at
+ * half strength: a light grey in the light theme, and in the dark theme no lighter than a card, so it never outshines a queue with
+ * something in it.
+ */
+const QUIET_CARD = 'group/queue has-[p[data-slot=empty]]:bg-muted/50 has-[p[data-slot=empty]]:px-[1.1rem] has-[p[data-slot=empty]]:py-[0.7rem] has-[p[data-slot=empty]]:shadow-none';
 const QUIET_HEADER = 'group-has-[p[data-slot=empty]]/queue:m-0 group-has-[p[data-slot=empty]]/queue:border-0 group-has-[p[data-slot=empty]]/queue:p-0';
 const QUIET_TITLE = 'group-has-[p[data-slot=empty]]/queue:text-[0.92rem]';
 

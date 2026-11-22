@@ -11,7 +11,11 @@
    Accessibility pass (20 Nov 2026, a review against Apple's Human Interface Guidelines, foundations only): text at least 4.5:1 and
    10.4px; field edges 3:1; keyboard focus in its own blue; the text size follows the browser setting (16px on a phone); 44px
    targets on a phone; the closed phone menu hidden from the keyboard; answers for increased contrast, reduced motion and Windows
-   high-contrast mode (at the end of this file). */
+   high-contrast mode (at the end of this file).
+   The shadcn/ui look (owner's request of 23 Nov 2026): shadcn's "new-york" style on its zinc neutrals in both themes, a light menu,
+   plain table headings, square-cornered badges and a plain card for the home greeting. The HRMS red stays for the main buttons,
+   the links and the menu's current page; the accessibility pass above still holds (muted text 4.5:1, field edges 3:1, the blue
+   keyboard focus). */
 
 /* The whole file is in the "legacy" cascade layer (order set in tailwind.css): shadcn/ui components, built from Tailwind's utility
    layer, take precedence over these rules. What is left here: the tokens, the rules for native elements, and the rules for the
@@ -38,21 +42,24 @@
 }
 
 :root {
-  /* Neutrals: page, surfaces, hairlines and three text weights (muted text keeps 4.5:1 on white and on --surface-soft). */
-  --bg: #f5f6f8;
+  /* Neutrals, on Tailwind's zinc scale: page, surfaces, hairlines and three text weights. Muted text is the lightest zinc grey that
+     keeps 4.5:1 on white, on --surface-soft, on --surface-sunken and on the status tints; --faint is for marks and disabled words,
+     never for text that has to be read. */
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-soft: #f8f9fb;
-  --surface-sunken: #f1f3f6;
-  --text: #0f1729;
-  --body: #344054;
-  --muted: #5d6779;
-  --faint: #8a93a3;
-  --line: #e6e9ef;
-  --line-strong: #d3d8e0;
-  --line-hover: #b8bfca;
-  /* A field's edge: 3:1 against the card, so an empty field can be seen (a hairline is not enough for a control). */
-  --field-edge: #878f9f;
-  --field-edge-hover: #6b7485;
+  --surface-soft: #fafafa;
+  --surface-sunken: #f4f4f5;
+  --text: #09090b;
+  --body: #3f3f46;
+  --muted: #6e6e77;
+  --faint: #8a8a93;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --line-hover: #a1a1aa;
+  /* A field's edge: 3:1 against every surface it sits on, so an empty field can be seen (shadcn's zinc-200 input edge, a hairline,
+     is not enough for a control). */
+  --field-edge: #8a8a93;
+  --field-edge-hover: #71717a;
   /* Brand. Accent text keeps 4.5:1 on white, on the page and on its own tint. */
   --accent: #bf3a2a;
   --accent-hover: #a02e21;
@@ -61,7 +68,6 @@
   --accent-edge: #f4c7c1;
   /* Keyboard focus has a colour of its own, so a focused field does not look like a field in error. */
   --focus: #1f5fa8;
-  --focus-on-dark: #80b6f6;
   --ring: rgba(31, 95, 168, 0.25);
   /* A filled button or link: white text on it keeps 4.5:1. */
   --accent-fill: #d1402f;
@@ -81,34 +87,42 @@
   --info: #1f5fa8;
   --info-soft: #eef5fd;
   --info-edge: #c7dcf3;
-  /* The sidebar and other dark surfaces. */
-  --dark: #10141b;
-  --dark-2: #171c24;
-  /* The light red on a dark surface: the lit icon of the menu's current page, the sign-in panel's feature marks. Those surfaces are
-     dark in both themes, so it is set once here for both. */
+  /* The menu (components/ui/sidebar.tsx, through the --color-sidebar roles of tailwind.css): shadcn's light sidebar. Its words keep
+     4.5:1 on the menu and on a row's hover tint; the marker is the brand red down the edge of the page shown (3:1 or more). */
+  --sidebar-bg: #fafafa;
+  --sidebar-text: #3f3f46;
+  --sidebar-text-strong: #09090b;
+  --sidebar-hover: #f4f4f5;
+  --sidebar-edge: #e4e4e7;
+  --sidebar-label: #6e6e77;
+  --sidebar-marker: #bf3a2a;
+  /* The sign-in page's brand panel, dark in both themes (zinc-900). */
+  --dark: #18181b;
+  /* The light red on that dark panel: its feature marks. The panel is dark in both themes, so it is set once here for both. */
   --accent-on-dark: #ff8a7d;
-  /* Shape and depth: hairline-first, a shadow only where something floats. */
+  /* Shape and depth: hairline-first, with shadcn's shadows (Tailwind's shadow-xs and shadow-sm on cards and controls; the larger two
+     only where something floats). */
   --radius-lg: 12px;
   --radius: 10px;
   --radius-sm: 8px;
   --radius-xs: 6px;
   --control-h: 38px;
-  --shadow-xs: 0 1px 2px rgba(15, 23, 41, 0.04);
-  --shadow-sm: 0 1px 2px rgba(15, 23, 41, 0.05), 0 1px 1px rgba(15, 23, 41, 0.02);
-  --shadow: 0 4px 10px -4px rgba(15, 23, 41, 0.1), 0 2px 4px -2px rgba(15, 23, 41, 0.04);
-  --shadow-lg: 0 20px 44px -16px rgba(15, 23, 41, 0.28);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
   /* Charts (dataviz reference palette, validated order; text never wears a series colour): categorical slots in fixed order, the
      hairline grid and baseline, and the track behind a part-of-whole bar. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
   --series-3: #1baf7a;
   --series-4: #eda100;
-  --chart-grid: #e6e9ef;
-  --chart-axis: #c3c8d1;
-  --chart-track: #eef1f5;
+  --chart-grid: #e4e4e7;
+  --chart-axis: #d4d4d8;
+  --chart-track: #f4f4f5;
   --tab-hover: rgba(255, 255, 255, 0.65);
   /* Marks drawn in a framed tile (an empty list; a list the role may not see), stroked in --muted and --warn of each theme. */
-  --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235d6779' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
+  --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236e6e77' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
   --icon-refusal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a5a00' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2'/%3E%3Cpath d='M8 10.5V7a4 4 0 0 1 8 0v3.5'/%3E%3C/svg%3E");
   color-scheme: light;
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -124,19 +138,19 @@
    values: one for the device setting, one for the choice.) */
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme='light'])) {
-    --bg: #0b0e13;
-    --surface: #141920;
-    --surface-soft: #1a2029;
-    --surface-sunken: #0f1318;
-    --text: #eef1f5;
-    --body: #c9d0da;
-    --muted: #9aa4b2;
-    --faint: #6f7987;
-    --line: #262d37;
-    --line-strong: #343c48;
-    --line-hover: #4b5462;
-    --field-edge: #657080;
-    --field-edge-hover: #7d8796;
+    --bg: #09090b;
+    --surface: #18181b;
+    --surface-soft: #1f1f23;
+    --surface-sunken: #27272a;
+    --text: #fafafa;
+    --body: #d4d4d8;
+    --muted: #a1a1aa;
+    --faint: #71717a;
+    --line: #27272a;
+    --line-strong: #3f3f46;
+    --line-hover: #52525b;
+    --field-edge: #71717a;
+    --field-edge-hover: #a1a1aa;
     --accent: #ff8070;
     --accent-hover: #ffa093;
     --accent-bright: #ec5a49;
@@ -159,39 +173,44 @@
     --info: #80b6f6;
     --info-soft: #122133;
     --info-edge: #25415f;
-    --dark: #0e1116;
-    --dark-2: #171c24;
-    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --sidebar-bg: #18181b;
+    --sidebar-text: #d4d4d8;
+    --sidebar-text-strong: #fafafa;
+    --sidebar-hover: #27272a;
+    --sidebar-edge: #27272a;
+    --sidebar-label: #a1a1aa;
+    --sidebar-marker: #ff8070;
+    --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.05);
+    --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
     --shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 20px 44px -16px rgba(0, 0, 0, 0.7);
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
     --series-4: #c98500;
-    --chart-grid: #262d37;
-    --chart-axis: #3a4350;
-    --chart-track: #1f262f;
+    --chart-grid: #27272a;
+    --chart-axis: #3f3f46;
+    --chart-track: #27272a;
     --tab-hover: rgba(255, 255, 255, 0.06);
-    --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa4b2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
+    --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
     --icon-refusal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f2c25f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2'/%3E%3Cpath d='M8 10.5V7a4 4 0 0 1 8 0v3.5'/%3E%3C/svg%3E");
     color-scheme: dark;
   }
 }
 :root[data-theme='dark'] {
-  --bg: #0b0e13;
-  --surface: #141920;
-  --surface-soft: #1a2029;
-  --surface-sunken: #0f1318;
-  --text: #eef1f5;
-  --body: #c9d0da;
-  --muted: #9aa4b2;
-  --faint: #6f7987;
-  --line: #262d37;
-  --line-strong: #343c48;
-  --line-hover: #4b5462;
-  --field-edge: #657080;
-  --field-edge-hover: #7d8796;
+  --bg: #09090b;
+  --surface: #18181b;
+  --surface-soft: #1f1f23;
+  --surface-sunken: #27272a;
+  --text: #fafafa;
+  --body: #d4d4d8;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --line: #27272a;
+  --line-strong: #3f3f46;
+  --line-hover: #52525b;
+  --field-edge: #71717a;
+  --field-edge-hover: #a1a1aa;
   --accent: #ff8070;
   --accent-hover: #ffa093;
   --accent-bright: #ec5a49;
@@ -214,29 +233,35 @@
   --info: #80b6f6;
   --info-soft: #122133;
   --info-edge: #25415f;
-  --dark: #0e1116;
-  --dark-2: #171c24;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --sidebar-bg: #18181b;
+  --sidebar-text: #d4d4d8;
+  --sidebar-text-strong: #fafafa;
+  --sidebar-hover: #27272a;
+  --sidebar-edge: #27272a;
+  --sidebar-label: #a1a1aa;
+  --sidebar-marker: #ff8070;
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
   --shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 20px 44px -16px rgba(0, 0, 0, 0.7);
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;
   --series-4: #c98500;
-  --chart-grid: #262d37;
-  --chart-axis: #3a4350;
-  --chart-track: #1f262f;
+  --chart-grid: #27272a;
+  --chart-axis: #3f3f46;
+  --chart-track: #27272a;
   --tab-hover: rgba(255, 255, 255, 0.06);
-  --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239aa4b2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
+  --icon-empty: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 13h5l2 3h4l2-3h5'/%3E%3Cpath d='M5.5 5h13L21 13v6H3v-6z'/%3E%3C/svg%3E");
   --icon-refusal: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f2c25f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4.5' y='10.5' width='15' height='10' rx='2'/%3E%3Cpath d='M8 10.5V7a4 4 0 0 1 8 0v3.5'/%3E%3C/svg%3E");
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 body { margin: 0; }
-h1, h2, h3, h4 { color: var(--text); letter-spacing: -0.011em; }
-h1 { font-size: 1.55rem; font-weight: 650; margin: 0 0 0.35rem; }
+/* Headings as shadcn sets them: semibold and tracking-tight (-0.025em). */
+h1, h2, h3, h4 { color: var(--text); letter-spacing: -0.025em; }
+h1 { font-size: 1.5rem; font-weight: 600; margin: 0 0 0.35rem; }
 h2 { font-size: 1.04rem; font-weight: 600; margin: 0; }
 h3 { font-size: 0.96rem; font-weight: 600; }
 h4 { font-size: 0.92rem; font-weight: 600; }
@@ -248,8 +273,9 @@ a:hover { color: var(--accent-hover); }
 /* The shell is as tall as the window and the page scrolls inside it (.content), so the top bar and the phone bar stay in place.
    (100dvh where the browser has it: on a phone 100vh reaches under the browser's own toolbar, which would hide the bottom bar.) */
 .shell { height: 100vh; height: 100dvh; }
-.role-chip { display: flex; flex-direction: column; line-height: 1.25; padding: 0.32rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-soft); max-width: 260px; }
-.role-name { font-size: 0.8rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The role chip is a quiet outline chip: a hairline on the top bar's own colour, as shadcn's outline badge. */
+.role-chip { display: flex; flex-direction: column; line-height: 1.25; padding: 0.32rem 0.75rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; max-width: 260px; }
+.role-name { font-size: 0.8rem; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .role-meta { font-size: 0.72rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* --content-top is the page's top padding: a sticky box stops below it, so sticky headings are lifted by it to meet the top bar. */
@@ -274,17 +300,17 @@ input[type='file'] { font: inherit; font-size: 0.88rem; color: var(--muted); }
 input[type='file']::file-selector-button {
   margin-right: 0.75rem;
   padding: 0.4rem 0.85rem;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font: inherit;
   font-size: 0.86rem;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-xs);
 }
-input[type='file']::file-selector-button:hover { background: var(--surface-soft); border-color: var(--line-hover); }
+input[type='file']::file-selector-button:hover { background: var(--surface-sunken); }
 label { display: flex; flex-direction: column; gap: 0.32rem; font-size: 0.83rem; font-weight: 500; color: var(--body); }
 input:not([type='checkbox']):not([type='radio']):not([type='file']), select { min-height: var(--control-h); }
 input, select, textarea { font: inherit; font-size: 0.92rem; padding: 0.45rem 0.75rem; border: 1px solid var(--field-edge); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); box-shadow: var(--shadow-xs); transition: border-color 0.12s, box-shadow 0.12s; }
@@ -301,7 +327,8 @@ button:disabled { cursor: not-allowed; background: var(--surface-sunken); border
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1.25rem 1.4rem; box-shadow: var(--shadow-xs); overflow-x: auto; }
-/* A link in a card's header is the card's action (New requisition, Documents): it looks like a button, not body text. */
+/* A link in a card's header is the card's action (New requisition, Documents): it looks like a button (shadcn's outline button), not
+   body text. */
 .card-header > a {
   display: inline-flex;
   align-items: center;
@@ -309,30 +336,30 @@ button:disabled { cursor: not-allowed; background: var(--surface-sunken); border
   flex: none;
   min-height: 34px;
   padding: 0.38rem 0.9rem;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font-size: 0.86rem;
-  font-weight: 600;
+  font-weight: 500;
   text-decoration: none;
   white-space: nowrap;
   box-shadow: var(--shadow-xs);
   transition: background 0.12s, border-color 0.12s;
 }
-.card-header > a:hover { background: var(--surface-soft); border-color: var(--line-hover); color: var(--text); }
+.card-header > a:hover { background: var(--surface-sunken); color: var(--text); }
 /* Links in running text: the brand colour with a light underline that firms up on hover (colour alone would not mark them). */
 .card a { text-decoration-color: var(--link-underline); text-underline-offset: 3px; }
 .card a:hover { text-decoration-color: currentColor; }
 table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.89rem; font-variant-numeric: tabular-nums; }
+/* Tables as shadcn draws them: plain headings in the muted text on the card itself, a hairline under the heading row and under every
+   row but the last, and a light tint under the row the pointer is on. (Rows are separated by their cells' edges: in a table whose
+   borders are separate, a row's own border is not drawn.) */
 th, td { text-align: left; padding: 0.68rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--muted); font-weight: 600; font-size: 0.79rem; letter-spacing: 0; background: var(--surface-soft); white-space: nowrap; }
-/* The heading row is one tinted strip with rounded ends; the rows below are separated by hairlines. */
-thead th { border-top: 1px solid var(--line); }
-thead th:first-child { border-top-left-radius: var(--radius-sm); border-bottom-left-radius: var(--radius-sm); border-left: 1px solid var(--line); }
-thead th:last-child { border-top-right-radius: var(--radius-sm); border-bottom-right-radius: var(--radius-sm); border-right: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-size: 0.79rem; letter-spacing: 0; white-space: nowrap; }
 tbody tr { transition: background 0.1s; }
-tbody tr:hover td { background: var(--surface-soft); }
+/* The tint of shadcn's TableRow (hover:bg-muted/50), for a table drawn without it. */
+tbody tr:hover { background: color-mix(in srgb, var(--surface-sunken) 50%, transparent); }
 td a { color: var(--text); font-weight: 600; text-decoration: none; }
 td a:hover { color: var(--accent); text-decoration: underline; }
 tbody tr:last-child td { border-bottom: none; }
@@ -373,35 +400,32 @@ tbody th[scope='row'] { background: none; color: var(--text); font-size: inherit
 /* ---- Page header: every page names itself the same way ----------------------------------------------------------------------- */
 .page-header { display: flex; flex-direction: column; gap: 0.15rem; margin-bottom: -0.25rem; }
 .page-eyebrow { margin: 0; font-size: 0.74rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.page-title, .content > h1 { margin: 0; font-size: 1.6rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text); line-height: 1.25; }
+.page-title, .content > h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.025em; color: var(--text); line-height: 1.25; }
 /* A note on the page ("Loading your workspace…", App.tsx) reads at a comfortable line length. */
 .content > p.hint { max-width: 90ch; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 /* ---- Dashboard ------------------------------------------------------------------------------------------------------------- */
+/* The greeting is a plain shadcn card: the card colour and hairline, the words in the text colours, the date and the context muted. */
 .dash-hero {
-  position: relative;
-  overflow: hidden;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
   padding: 1.5rem 1.75rem;
   border-radius: var(--radius-lg);
-  color: #fff;
-  background: var(--dark-2);
-  border: 1px solid #232a35;
-  box-shadow: inset 0 3px 0 var(--accent-bright);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
 }
-.dash-hero::after { content: none; }
-.dash-hero > * { position: relative; z-index: 1; }
-.dash-hero .page-eyebrow { color: rgba(255, 255, 255, 0.62); }
-.dash-greeting { margin: 0.35rem 0 0.4rem; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; color: #fff; }
+.dash-greeting { margin: 0.35rem 0 0.4rem; font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; line-height: 1.2; color: var(--text); }
 /* Role, company, scope and period as separate items with a quiet dot between them; on a narrow screen they wrap whole. */
-.dash-context { margin: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 0; font-size: 0.88rem; color: rgba(255, 255, 255, 0.72); }
+.dash-context { margin: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 0; font-size: 0.88rem; color: var(--muted); }
 .dash-context > span { white-space: nowrap; }
-.dash-context > span + span::before { content: '·'; margin: 0 0.5rem; color: rgba(255, 255, 255, 0.4); }
-.dash-refreshed { flex: none; font-size: 0.78rem; color: rgba(255, 255, 255, 0.6); padding: 0.3rem 0.7rem; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 999px; background: rgba(255, 255, 255, 0.06); }
+.dash-context > span + span::before { content: '·'; margin: 0 0.5rem; color: var(--faint); }
+/* When the figures were read: a quiet outline chip, as the role chip in the top bar. */
+.dash-refreshed { flex: none; font-size: 0.78rem; font-weight: 500; color: var(--muted); padding: 0.2rem 0.6rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: transparent; }
 .dash-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 1.25rem; align-items: start; }
 @media (max-width: 560px) {
   .dash-hero { flex-direction: column; align-items: flex-start; padding: 1.25rem; }
@@ -411,48 +435,45 @@ tbody th[scope='row'] { background: none; color: var(--text); font-size: inherit
   .dash-context > span + span::before { content: none; }
 }
 
+/* A figure is a shadcn card, as in shadcn's dashboard: its title and a muted icon on top, the figure large, a hairline that firms up
+   under the pointer. */
 .widgets { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; }
-.widget { display: flex; flex-direction: column; gap: 0.35rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1.05rem 1.2rem 1.1rem; box-shadow: var(--shadow-xs); transition: box-shadow 0.12s, border-color 0.12s; }
-.widget:hover { box-shadow: var(--shadow-sm); border-color: var(--line-strong); }
+.widget { display: flex; flex-direction: column; gap: 0.35rem; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 1.05rem 1.2rem 1.1rem; box-shadow: var(--shadow-xs); transition: border-color 0.12s; }
+.widget:hover { border-color: var(--line-strong); }
 .widget-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
 .widget-title { color: var(--muted); font-size: 0.84rem; font-weight: 500; line-height: 1.35; }
-.widget-icon { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--accent); background: var(--accent-soft); }
-.widget:nth-child(4n + 2) .widget-icon { color: var(--info); background: var(--info-soft); }
-.widget:nth-child(4n + 3) .widget-icon { color: var(--good); background: var(--good-soft); }
-.widget:nth-child(4n + 4) .widget-icon { color: var(--warn); background: var(--warn-soft); }
-.widget-value { font-size: 1.85rem; font-weight: 650; overflow-wrap: anywhere; color: var(--text); letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.widget-icon { flex: none; display: grid; place-items: center; color: var(--muted); }
+.widget-value { font-size: 1.75rem; font-weight: 600; overflow-wrap: anywhere; color: var(--text); letter-spacing: -0.025em; line-height: 1.15; font-variant-numeric: tabular-nums; }
 .widget-value a { color: var(--text); text-decoration: none; }
 /* A state ("Not processed"), not a count: set as a label, not as a large figure. */
-.widget-value.widget-value-text { font-size: 1.2rem; font-weight: 650; letter-spacing: -0.01em; padding: 0.35rem 0; }
+.widget-value.widget-value-text { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.01em; padding: 0.35rem 0; }
 .widget-value a:hover { color: var(--accent); }
 .widget-note { color: var(--muted); font-size: 0.82rem; }
-.widget-foot { margin-top: auto; padding-top: 0.35rem; font-size: 0.78rem; font-weight: 600; color: var(--accent); text-decoration: none; align-self: flex-start; }
+.widget-foot { margin-top: auto; padding-top: 0.35rem; font-size: 0.78rem; font-weight: 500; color: var(--accent); text-decoration: none; align-self: flex-start; }
 .widget-foot:hover { text-decoration: underline; }
 
+/* A quick action is a small shadcn card holding a link: a hairline and the lightest shadow, the hairline and a light tint under the
+   pointer, its icon on a muted tile. */
 .quick-actions { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; }
-.quick-action { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 0.9rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); text-decoration: none; font-weight: 600; font-size: 0.9rem; transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
-.quick-action:hover { border-color: var(--accent-bright); background: var(--accent-soft); color: var(--text); box-shadow: var(--shadow-sm); }
-.quick-action-icon { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; background: var(--surface-soft); border: 1px solid var(--line); color: var(--accent); }
+.quick-action { display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 0.9rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--text); text-decoration: none; font-weight: 500; font-size: 0.9rem; box-shadow: var(--shadow-xs); transition: border-color 0.15s, background 0.15s; }
+.quick-action:hover { border-color: var(--line-strong); background: var(--surface-soft); color: var(--text); }
+.quick-action-icon { flex: none; width: 34px; height: 34px; display: grid; place-items: center; border-radius: var(--radius-sm); background: var(--surface-sunken); color: var(--text); }
 .quick-action-label { flex: 1; min-width: 0; }
 .quick-action-go { color: var(--muted); }
 
 /* Badges always carry text; colour is a secondary cue only. */
-/* Sentence case ("Active confirmed", "Not set"): the first letter is raised, the rest stays as written. The dot is drawn in the
-   padding so the badge can be a block container (::first-letter does not apply to a flex box). */
+/* shadcn's badge: a small rounded rectangle (rounded-md), no dot. Sentence case ("Active confirmed", "Not set"): the first letter is
+   raised, the rest stays as written, so the badge is a block container (::first-letter does not apply to a flex box). */
 .badge {
   display: inline-block;
-  padding: 0.08rem 0.6rem 0.08rem 1.3rem;
-  border-radius: 999px;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
-  font-weight: 600;
-  line-height: 1.55;
-  border: 1px solid var(--line-strong);
-  background-color: var(--surface-soft);
-  background-image: radial-gradient(circle, currentColor 0 2.5px, transparent 3px);
-  background-repeat: no-repeat;
-  background-size: 8px 8px;
-  background-position: 0.55rem 50%;
-  color: var(--body);
+  font-weight: 500;
+  line-height: 1.4;
+  border: 1px solid var(--line);
+  background-color: var(--surface-sunken);
+  color: var(--text);
   white-space: nowrap;
   vertical-align: middle;
 }
@@ -522,7 +543,8 @@ td .empty::before, li .empty::before { display: none; }
 .org-card { display: flex; align-items: center; gap: 0.75rem; min-width: 0; max-width: 560px; flex: 1; padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-sm); }
 .org-card.hit { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 /* The person's initials on the card. */
-.avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 0.74rem; font-weight: 650; color: var(--info); background: var(--info-soft); box-shadow: inset 0 0 0 1px var(--info-edge); }
+/* (As shadcn's Avatar: the initials on the muted tile.) */
+.avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 0.74rem; font-weight: 500; color: var(--text); background: var(--surface-sunken); }
 .org-card-body { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1; }
 .org-card-name { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .org-card-name a { color: var(--text); text-decoration: none; }
@@ -547,7 +569,8 @@ td .empty::before, li .empty::before { display: none; }
 }
 @media (min-width: 561px) {
   .card[data-fit] { overflow: visible; }
-  .card[data-fit] table > thead > tr > th { position: sticky; top: calc(-1 * var(--content-top, 0rem)); z-index: 2; }
+  /* The card's colour behind a sticky heading, so the rows that scroll under it are hidden (a heading has no fill of its own). */
+  .card[data-fit] table > thead > tr > th { position: sticky; top: calc(-1 * var(--content-top, 0rem)); z-index: 2; background: var(--surface); }
   .content:has(> [data-slot='section-bar']) .card[data-fit] table > thead > tr > th { top: calc(var(--section-bar-h) - var(--content-top)); }
 }
 /* An empty list is a quiet framed panel in its card, so "nothing here" reads as a state of the list, not as a stray line of text. */
@@ -589,14 +612,14 @@ td .empty::before, li .empty::before { display: none; }
 /* ---- The person's display settings ------------------------------------------------------------------------------------------ */
 /* Increased contrast: muted text, hairlines and field edges darken (lighten in the dark theme); links keep a solid underline. */
 @media (prefers-contrast: more) {
-  :root { --muted: #3f4a5c; --faint: #5d6779; --line: #b8bfca; --field-edge: #6b7485; }
+  :root { --muted: #3f3f46; --faint: #52525b; --line: #a1a1aa; --field-edge: #71717a; --sidebar-label: #3f3f46; }
   .card a { text-decoration-color: currentColor; }
 }
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme='light'])) { --muted: #b9c1cc; --faint: #9aa4b2; --line: #4b5462; --field-edge: #8a94a3; }
+  :root:where(:not([data-theme='light'])) { --muted: #d4d4d8; --faint: #a1a1aa; --line: #52525b; --field-edge: #a1a1aa; --sidebar-label: #d4d4d8; }
 }
 @media (prefers-contrast: more) {
-  :root[data-theme='dark'] { --muted: #b9c1cc; --faint: #9aa4b2; --line: #4b5462; --field-edge: #8a94a3; }
+  :root[data-theme='dark'] { --muted: #d4d4d8; --faint: #a1a1aa; --line: #52525b; --field-edge: #a1a1aa; --sidebar-label: #d4d4d8; }
 }
 /* Reduced motion: the organisation chart's chevrons do not turn and the dashboard's bars do not grow. */
 @media (prefers-reduced-motion: reduce) {

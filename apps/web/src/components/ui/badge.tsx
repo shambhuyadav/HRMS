@@ -1,13 +1,13 @@
-// shadcn/ui Badge (registry new-york-v4), with the HRMS status tones beside shadcn's own variants: each tone is the status token set
-// of styles.css (text, tint and edge, chosen to keep 4.5:1 in both themes). Status is never told by colour alone: a badge always
-// carries its words.
+// shadcn/ui Badge (registry new-york-v4: a small rounded-md rectangle), with the HRMS status tones beside shadcn's own variants: each
+// tone is the status token set of styles.css (text, tint and edge, chosen to keep 4.5:1 in both themes), and neutral is shadcn's
+// secondary badge with a hairline. Status is never told by colour alone: a badge always carries its words.
 import { cva, type VariantProps } from 'class-variance-authority';
 import { Slot } from 'radix-ui';
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 const badgeVariants = cva(
-  'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3',
+  'inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-md border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3',
   {
     variants: {
       variant: {
@@ -19,7 +19,7 @@ const badgeVariants = cva(
         ghost: '[a&]:hover:bg-accent [a&]:hover:text-accent-foreground',
         link: 'text-primary underline-offset-4 [a&]:hover:underline',
         // HRMS status tones.
-        neutral: 'border-[var(--line-strong)] bg-accent text-[var(--body)]',
+        neutral: 'border-border bg-secondary text-secondary-foreground',
         good: 'border-[var(--good-edge)] bg-[var(--good-soft)] text-[var(--good)]',
         warn: 'border-[var(--warn-edge)] bg-[var(--warn-soft)] text-[var(--warn)]',
         bad: 'border-[var(--bad-edge)] bg-[var(--bad-soft)] text-[var(--bad)]',

@@ -89,8 +89,8 @@ export const person = (e: { employeeCode: string; displayName: string }) => `${e
 
 /** The employees a search found, one under another (the old `.choices` list). */
 const CHOICE_LIST = 'm-0 mt-3 flex list-none flex-col gap-[0.6rem] p-0';
-/** One found employee: a full-width outline button, its words from the left and wrapping, tinted in the brand colour on hover. */
-const CHOICE = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
+/** One found employee: a full-width outline button, its words from the left and wrapping, on the outline button's hover tint. */
+const CHOICE = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal';
 
 /** An employee found by the employee search (row scope, status and one's own record are checked by the server). */
 export function EmployeePicker({ title, value, onChange }: { title: string; value: EmployeeHit | null; onChange: (e: EmployeeHit | null) => void }) {

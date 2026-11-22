@@ -16,8 +16,8 @@ import type { Category } from './types';
 
 /** The matching employees, one choice per line (the old `.choices` list). */
 const CHOICE_LIST = 'm-0 mt-3 flex list-none flex-col gap-[0.6rem] p-0';
-/** One matching employee as a full-width choice, its words at the start, tinted in the accent on hover (the old `.choices button`). */
-const CHOICE = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
+/** One matching employee as a full-width choice, its words at the start, on the outline button's hover tint (the old `.choices button`). */
+const CHOICE = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal';
 
 // ---------------------------------------------------------------------------------------------------------
 // Lookups: categories (DF04 controlled list) and employees

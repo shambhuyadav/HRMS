@@ -27,41 +27,43 @@ const FEATURES: readonly [IconName, string][] = [
 ];
 
 /** The card beside the brand panel (the old `.narrow`), drawn as a shadcn Card: up to 440px wide, its parts stacked. */
-const AUTH_CARD = 'm-0 flex w-full max-w-[440px] flex-col gap-[0.9rem] rounded-xl border border-border bg-card px-8 py-9 shadow-[var(--shadow)]';
-/** The card's title, a little larger than a page title. */
-const AUTH_TITLE = 'text-[1.6rem]';
+const AUTH_CARD = 'm-0 flex w-full max-w-[440px] flex-col gap-[0.9rem] rounded-xl border border-border bg-card px-8 py-9 shadow-sm';
+/** The card's title, as in shadcn's sign-in cards (the h1 rule of styles.css makes it semibold and tight). */
+const AUTH_TITLE = 'text-2xl';
 /** The roles to choose from, one full-width choice under another (the old `.choices` list). */
 const CHOICE_LIST = 'm-0 flex list-none flex-col gap-[0.6rem] p-0';
 /**
- * One role as a full-width choice: its mark, its words from the left and wrapping, an arrow at the end, tinted red on hover. Button
- * narrows its side padding when it holds an icon (`has-[>svg]`); the arrow is one, so the choice repeats its own padding for that case.
+ * One role as a full-width choice: its mark, its words from the left and wrapping, an arrow at the end, on the outline button's
+ * hover tint under the pointer. Button narrows its side padding when it holds an icon (`has-[>svg]`); the arrow is one, so the
+ * choice repeats its own padding for that case.
  */
-const CHOICE_BUTTON =
-  'h-auto w-full justify-start gap-[0.85rem] px-4 py-[0.8rem] text-left whitespace-normal has-[>svg]:px-4 hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
-/** The role's mark: its icon on a soft red square. */
-const CHOICE_ICON = 'grid size-[40px] flex-none place-items-center rounded-[10px] bg-[var(--accent-soft)] text-[var(--accent)]';
+const CHOICE_BUTTON = 'h-auto w-full justify-start gap-[0.85rem] px-4 py-[0.8rem] text-left whitespace-normal has-[>svg]:px-4';
+/** The role's mark: its icon on a muted square. */
+const CHOICE_ICON = 'grid size-[40px] flex-none place-items-center rounded-[10px] bg-muted text-foreground';
 /** The role's name above its scope, taking the room between the mark and the arrow. */
 const CHOICE_TEXT = 'flex min-w-0 flex-1 flex-col gap-[0.1rem]';
 
-// The signed-out pages' frame: the brand panel beside the card. The panel is dark in both themes (the --dark surface, white words, the
-// light red of --accent-on-dark), with the brand red down its edge. At 920px or less the two stack: the panel becomes a bar holding
-// only the logo (a stretched row left a third of a phone screen dark and empty), the card below it.
+// The signed-out pages' frame: the brand panel beside the card. The panel is dark in both themes, as in shadcn's sign-in example (the
+// --dark surface, zinc-900; white words; the light red of --accent-on-dark), with the brand red down its edge. At 920px or less the
+// two stack: the panel becomes a bar holding only the logo (a stretched row left a third of a phone screen dark and empty), the card
+// below it.
 
 /** Two columns side by side; one column at 920px or less, the brand bar keeping its own height. */
 const AUTH_FRAME =
   'grid min-h-screen grid-cols-[minmax(340px,1fr)_minmax(380px,1fr)] bg-background [@media(max-width:920px)]:grid-cols-1 [@media(max-width:920px)]:grid-rows-[auto_1fr]';
 const BRAND_PANEL =
   'relative flex flex-col justify-between gap-8 overflow-hidden bg-[var(--dark)] px-12 py-10 text-white shadow-[inset_4px_0_0_var(--accent-bright)] [@media(max-width:920px)]:px-6 [@media(max-width:920px)]:py-5';
-const LOGO = 'flex items-center gap-3 text-[1.35rem] font-bold tracking-[-0.01em]';
+const LOGO = 'flex items-center gap-3 text-[1.35rem] font-semibold tracking-tight';
 /** The brand's mark: a rounded square in the brand red holding a white frame. */
 const BRAND_MARK =
   "relative size-[30px] flex-none rounded-[8px] bg-[var(--accent-bright)] shadow-[inset_0_-1px_0_rgb(0_0_0/0.18)] after:absolute after:inset-[8.5px] after:rounded-[4px] after:border-[2.5px] after:border-solid after:border-white/95 after:content-['']";
 /** The headline and the features; left out of the one-column bar. */
 const PITCH = '[@media(max-width:920px)]:hidden';
-const HEADLINE = 'm-0 mb-7 max-w-[27rem] text-[2.1rem] leading-[1.2] font-bold tracking-[-0.02em] text-white';
+const HEADLINE = 'm-0 mb-7 max-w-[27rem] text-[2.1rem] leading-[1.2] font-semibold tracking-tight text-white';
 const FEATURES_LIST = 'm-0 flex list-none flex-col gap-[0.9rem] p-0 text-white/84';
 const FEATURE_ICON = 'grid size-[36px] flex-none place-items-center rounded-[10px] border border-white/10 bg-white/8 text-[var(--accent-on-dark)]';
-const FOOT = 'm-0 text-[0.8rem] text-white/45 [@media(max-width:920px)]:hidden';
+/** The foot line, quieter than the features but still 4.5:1 on the panel (white at 60%). */
+const FOOT = 'm-0 text-[0.8rem] text-white/60 [@media(max-width:920px)]:hidden';
 /** The card's side: the card centred; under the bar at 920px or less, from the top. */
 const CARD_SIDE = 'flex items-center justify-center px-6 py-8 [@media(max-width:920px)]:items-start [@media(max-width:920px)]:pt-10';
 

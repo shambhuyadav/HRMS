@@ -3,8 +3,8 @@
 // HRMS tuning:
 // - React 18 passes no `ref` prop to a function component, and Radix gives refs to the parts it renders (the portal hands one to the
 //   overlay and the panel; a trigger may sit inside another asChild part), so the parts that draw an element are forwardRefs.
-// - The dimmed page and the panel's shadow are the HRMS scrim and large shadow, and the panel is the white card surface (shadcn's
-//   background is the grey page here). The panel slides in 0.2s, as the HRMS menu always has.
+// - The dimmed page is shadcn's scrim (black at 50%), the panel's shadow the HRMS large shadow, and the panel the card surface. The
+//   panel slides in 0.2s, as the HRMS menu always has.
 // - A person who asks for reduced motion sees the panel fade in place instead of sliding across.
 // - Borders name their colour and the close button sets every property of the old `button` rule of styles.css (no Tailwind reset).
 import { XIcon } from 'lucide-react';
@@ -37,7 +37,7 @@ const SheetOverlay = React.forwardRef<React.ComponentRef<typeof SheetPrimitive.O
         ref={ref}
         data-slot="sheet-overlay"
         className={cn(
-          'fixed inset-0 z-50 bg-[rgba(18,21,25,0.45)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0',
+          'fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0',
           className,
         )}
         {...props}

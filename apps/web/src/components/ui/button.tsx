@@ -31,9 +31,11 @@ const buttonVariants = cva(
           'bg-primary text-primary-foreground hover:bg-[var(--accent-fill-hover)] disabled:border-border disabled:bg-muted disabled:text-[var(--faint)] disabled:opacity-100',
         destructive:
           'bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40',
-        // On the HRMS white card: a white button with a hairline edge (shadcn's bg-background is the grey page here).
+        // On the card: a button of the card's colour with a hairline edge. In the dark theme, shadcn's faint fill and its lighter
+        // hairline: a tenth of the field-edge grey (a fifth under the pointer) and the stronger hairline, since the HRMS field edge
+        // (3:1, for fields) would make a button look like a field.
         outline:
-          'border-border bg-card text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
+          'border-border bg-card text-foreground shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-[var(--line-strong)] dark:bg-input/10 dark:hover:bg-input/20',
         danger:
           'border-[var(--bad-edge)] bg-card text-[var(--bad)] shadow-xs hover:border-[var(--bad)] hover:bg-[var(--bad-soft)] hover:text-[var(--bad)]',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',

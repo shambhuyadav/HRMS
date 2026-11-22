@@ -110,7 +110,7 @@ export function EmployeePicker({ label, value, onChange, filter }: { label: stri
               <Button
                 type="button"
                 variant="outline"
-                className="h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]"
+                className="h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal"
                 onClick={() => {
                   onChange(e);
                   setSearch('');

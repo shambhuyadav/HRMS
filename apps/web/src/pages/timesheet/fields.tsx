@@ -17,9 +17,9 @@ import type { Project, ProjectDetail } from './types';
 // Employee and job choices for the forms
 // ---------------------------------------------------------------------------------------------------------
 
-/** The employee search's matches, stacked, and one match as a full-width choice tinted red on hover (the old `.choices`). */
+/** The employee search's matches, stacked, and one match as a full-width choice on the outline button's hover tint (the old `.choices`). */
 const CHOICE_LIST = 'm-0 flex list-none flex-col gap-[0.6rem] p-0';
-const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal hover:border-[var(--accent-bright)] hover:bg-[var(--accent-soft)]';
+const CHOICE_BUTTON = 'h-auto w-full justify-start px-4 py-[0.8rem] text-left whitespace-normal';
 
 interface Choice {
   id: string;
