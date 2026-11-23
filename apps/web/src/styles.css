@@ -580,8 +580,10 @@ td .empty::before, li .empty::before { display: none; }
 .empty.empty-refusal::before { border-color: var(--warn-edge); background: var(--surface) var(--icon-refusal) no-repeat center / 20px; }
 
 /* ---- Smaller screens --------------------------------------------------------------------------------------------------------- */
+/* FR-096: the acting role's scope is always visible. A narrower top bar drops only the company name from the role chip; the scope
+   ("Company-wide", "My team", "My own record") stays at every width. */
 @media (max-width: 1180px) {
-  .role-meta { display: none; }
+  .role-company { display: none; }
 }
 @media (max-width: 920px) {
   .content { --content-top: 1.25rem; padding: var(--content-top) 1rem 2rem; }

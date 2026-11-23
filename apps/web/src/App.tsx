@@ -524,8 +524,10 @@ export function App() {
               {me ? (
                 <>
                   <span className="role-name">{me.roleName}</span>
+                  {/* On narrower screens only the company name gives way; the scope stays (FR-096). */}
                   <span className="role-meta">
-                    {me.companyName} · {scopeWords(me.scopeKind)}
+                    <span className="role-company">{me.companyName} · </span>
+                    {scopeWords(me.scopeKind)}
                   </span>
                 </>
               ) : (
