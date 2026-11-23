@@ -1,6 +1,7 @@
-/* HRMS look for Keycloak's sign-in pages, the same as the web app (apps/web/src/styles.css): Inter, the accent #d1402f for text and
-   buttons (readable on white) and #e74c3c for marks, near-black headings, slate text, a white rounded card with a soft shadow on a light
-   blue-grey page. Only colours, type and shapes change; Keycloak's pages and behaviour are its own. */
+/* HRMS look for Keycloak's sign-in pages, the same as the web app since release 19 (apps/web/src/styles.css, shadcn/ui "new-york"
+   with zinc neutrals): Inter, the accent #d1402f for buttons and #bf3a2a for links (both readable on white), #e74c3c for marks,
+   zinc text and hairlines, a white card with a soft shadow on a near-white page, field edges at 3:1 and a blue keyboard focus (the
+   web app's accessibility pass). Only colours, type and shapes change; Keycloak's pages and behaviour are its own. */
 
 /* Inter (SIL Open Font License 1.1, ../fonts/OFL.txt), served by Keycloak itself. */
 @font-face {
@@ -21,16 +22,30 @@
 }
 
 :root {
+  /* Button red (white text on it 4.68:1), link red (5.45:1 on white), mark red. */
   --hrms-accent: #d1402f;
   --hrms-accent-hover: #b83525;
+  --hrms-link: #bf3a2a;
+  --hrms-link-hover: #a02e21;
   --hrms-accent-bright: #e74c3c;
-  --hrms-text: #121519;
-  --hrms-body: #434a57;
-  --hrms-muted: #576071;
-  --hrms-line: #e3e9ef;
-  --hrms-line-strong: #d7dde2;
-  --hrms-bg: #f6f9fc;
-  --keycloak-card-top-color: var(--hrms-accent-bright);
+  /* Zinc neutrals, as the web app: text 19.9:1, body 10.4:1, muted 5.05:1 on white. */
+  --hrms-text: #09090b;
+  --hrms-body: #3f3f46;
+  --hrms-muted: #6e6e77;
+  --hrms-line: #e4e4e7;
+  --hrms-line-strong: #d4d4d8;
+  /* A field's edge keeps 3:1 against white, so an empty field can be seen; darker on hover. */
+  --hrms-field-edge: #8a8a93;
+  --hrms-field-edge-hover: #71717a;
+  --hrms-bg: #fafafa;
+  /* Keyboard focus in its own blue, so a focused field does not look like a field in error. */
+  --hrms-focus: #1f5fa8;
+  --hrms-ring: rgba(31, 95, 168, 0.25);
+  --hrms-error: #b42318;
+  /* The brand panel of wide screens: zinc-900, with the red edge. */
+  --hrms-panel: #18181b;
+  /* No coloured line along the card's top: as in the web app, the red edge belongs to the brand panel. */
+  --keycloak-card-top-color: transparent;
   --keycloak-bg-logo-url: none;
   --pf-v5-global--FontFamily--text: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --pf-v5-global--FontFamily--heading: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -38,19 +53,18 @@
   --pf-v5-global--FontFamily--redhatfont--heading: 'Inter', system-ui, sans-serif;
   --pf-v5-global--primary-color--100: var(--hrms-accent);
   --pf-v5-global--primary-color--200: var(--hrms-accent-hover);
-  --pf-v5-global--link--Color: var(--hrms-accent);
-  --pf-v5-global--link--Color--hover: var(--hrms-accent-hover);
+  --pf-v5-global--link--Color: var(--hrms-link);
+  --pf-v5-global--link--Color--hover: var(--hrms-link-hover);
   --pf-v5-global--active-color--100: var(--hrms-accent-bright);
   --pf-v5-global--Color--100: var(--hrms-text);
   --pf-v5-global--Color--200: var(--hrms-muted);
   --pf-v5-global--BorderColor--100: var(--hrms-line-strong);
 }
 
-/* The page: light blue-grey with a faint warm glow, no Keycloak background picture. */
+/* The page: plain near-white, no Keycloak background picture. */
 .login-pf body,
 body#keycloak-bg {
-  background: radial-gradient(circle at 12% 8%, rgba(231, 76, 60, 0.09), transparent 42%),
-    radial-gradient(circle at 88% 92%, rgba(63, 127, 202, 0.07), transparent 40%), var(--hrms-bg) !important;
+  background: var(--hrms-bg) !important;
   font-family: var(--pf-v5-global--FontFamily--text);
   color: var(--hrms-body);
   -webkit-font-smoothing: antialiased;
@@ -62,9 +76,9 @@ body, input, button, select, textarea { font-family: var(--pf-v5-global--FontFam
 #kc-header-wrapper {
   color: var(--hrms-text) !important;
   font-size: 2rem;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: none;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -80,52 +94,51 @@ body, input, button, select, textarea { font-family: var(--pf-v5-global--FontFam
   flex: none;
 }
 
-/* The card. */
+/* The card: white, a zinc hairline and shadcn's small shadow, no coloured top edge. */
 .pf-v5-c-login__main {
   background: #fff;
   border: 1px solid var(--hrms-line);
-  border-radius: 14px;
-  box-shadow: 0 0.5rem 1.75rem -0.125rem rgba(208, 208, 196, 0.48);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
   overflow: hidden;
 }
-.pf-v5-c-login__main-header { border-top: 4px solid var(--hrms-accent-bright); }
-.pf-v5-c-title, h1, h2, h3 { color: var(--hrms-text); font-weight: 700; letter-spacing: -0.01em; }
-#kc-page-title { font-size: 1.6rem; font-weight: 700 !important; --pf-v5-c-title--m-3xl--FontWeight: 700; }
-.pf-v5-c-form__label-text { color: var(--hrms-muted); font-weight: 500; font-size: 0.9rem; }
+.pf-v5-c-title, h1, h2, h3 { color: var(--hrms-text); font-weight: 600; letter-spacing: -0.025em; }
+#kc-page-title { font-size: 1.5rem; font-weight: 600 !important; --pf-v5-c-title--m-3xl--FontWeight: 600; }
+.pf-v5-c-form__label-text { color: var(--hrms-text); font-weight: 500; font-size: 0.875rem; }
 .pf-v5-c-login__main-footer, .pf-v5-c-login__main-footer-band { color: var(--hrms-muted); }
-a, .pf-v5-c-button.pf-m-link { color: var(--hrms-accent); }
-a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--hrms-accent-hover); }
+a, .pf-v5-c-button.pf-m-link { color: var(--hrms-link); }
+a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--hrms-link-hover); }
 
-/* Fields: rounded, a light border all round, the accent and a soft ring when focused. */
+/* Fields: shadcn's rounded box with a visible zinc edge, darker on hover, a blue ring when focused. */
 .pf-v5-c-form-control {
-  border-radius: 10px;
-  --pf-v5-c-form-control--BorderRadius: 10px;
+  border-radius: 8px;
+  --pf-v5-c-form-control--BorderRadius: 8px;
 }
 .pf-v5-c-form-control::before {
-  border: 1px solid var(--hrms-line-strong) !important;
-  border-radius: 10px;
+  border: 1px solid var(--hrms-field-edge) !important;
+  border-radius: 8px;
 }
 .pf-v5-c-form-control::after { border: none !important; }
-.pf-v5-c-form-control:hover::before { border-color: #b4bbc3 !important; }
+.pf-v5-c-form-control:hover::before { border-color: var(--hrms-field-edge-hover) !important; }
 .pf-v5-c-form-control:focus-within::before {
-  border-color: var(--hrms-accent-bright) !important;
-  box-shadow: 0 0 0 3px rgba(231, 76, 60, 0.18);
+  border-color: var(--hrms-focus) !important;
+  box-shadow: 0 0 0 3px var(--hrms-ring);
 }
 .pf-v5-c-form-control > input,
 .pf-v5-c-form-control > select,
 .pf-v5-c-form-control > textarea { font-size: 0.95rem; color: var(--hrms-text); }
-.pf-v5-c-form-control.pf-m-error::before { border-color: #b52a2a !important; }
+.pf-v5-c-form-control.pf-m-error::before { border-color: var(--hrms-error) !important; }
 
 /* The show-password button beside the password field. */
-.pf-v5-c-button.pf-m-control { border-radius: 10px; color: var(--hrms-muted); }
-.pf-v5-c-button.pf-m-control::after { border: 1px solid var(--hrms-line-strong) !important; border-radius: 10px; }
+.pf-v5-c-button.pf-m-control { border-radius: 8px; color: var(--hrms-muted); }
+.pf-v5-c-button.pf-m-control::after { border: 1px solid var(--hrms-field-edge) !important; border-radius: 8px; }
 .pf-v5-c-input-group { gap: 0.4rem; }
 
-/* Buttons. */
+/* Buttons: shadcn's rounded-md, medium weight. */
 .pf-v5-c-button {
-  --pf-v5-c-button--BorderRadius: 10px;
-  border-radius: 10px;
-  font-weight: 600;
+  --pf-v5-c-button--BorderRadius: 8px;
+  border-radius: 8px;
+  font-weight: 500;
 }
 .pf-v5-c-button.pf-m-primary {
   --pf-v5-c-button--m-primary--BackgroundColor: var(--hrms-accent);
@@ -140,16 +153,19 @@ a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--hrms-accent-hover); }
 .pf-v5-c-button.pf-m-primary:hover,
 .pf-v5-c-button.pf-m-primary:focus {
   background-color: var(--hrms-accent-hover);
-  box-shadow: 0 0.25rem 0.75rem rgba(209, 64, 47, 0.25);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
+/* A secondary button is shadcn's outline button: zinc text and edge, a zinc-100 fill on hover. */
 .pf-v5-c-button.pf-m-secondary {
-  --pf-v5-c-button--m-secondary--Color: var(--hrms-accent);
-  --pf-v5-c-button--m-secondary--hover--Color: var(--hrms-accent-hover);
-  color: var(--hrms-accent);
+  --pf-v5-c-button--m-secondary--Color: var(--hrms-text);
+  --pf-v5-c-button--m-secondary--hover--Color: var(--hrms-text);
+  color: var(--hrms-text);
+  background-color: #fff;
 }
-.pf-v5-c-button.pf-m-secondary::after { border: 1px solid var(--hrms-line-strong) !important; border-radius: 10px; }
-.pf-v5-c-button.pf-m-secondary:hover::after { border-color: var(--hrms-accent) !important; }
-:focus-visible { outline: 3px solid rgba(231, 76, 60, 0.45); outline-offset: 2px; }
+.pf-v5-c-button.pf-m-secondary::after { border: 1px solid var(--hrms-line-strong) !important; border-radius: 8px; }
+.pf-v5-c-button.pf-m-secondary:hover { background-color: #f4f4f5; }
+.pf-v5-c-button.pf-m-secondary:hover::after { border-color: var(--hrms-field-edge) !important; }
+:focus-visible { outline: 2px solid var(--hrms-focus); outline-offset: 2px; }
 
 /* Wide screens: the same split layout as the web app's sign-in (apps/web/src/pages/auth.tsx) — a dark brand panel with the product's
    line on the left, the card on the right. Made with CSS only, so Keycloak's own page templates stay untouched. */
@@ -172,11 +188,12 @@ a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--hrms-accent-hover); }
     padding: 0 3rem;
     color: #fff;
     font-size: 2.1rem;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1.2;
-    letter-spacing: -0.02em;
-    background: radial-gradient(circle at 12% 12%, rgba(231, 76, 60, 0.38), transparent 45%),
-      radial-gradient(circle at 88% 88%, rgba(63, 127, 202, 0.32), transparent 45%), #121519;
+    letter-spacing: -0.025em;
+    /* Zinc-900 with the red edge, as the web app's sign-in panel (no coloured glows). */
+    background: var(--hrms-panel);
+    box-shadow: inset 4px 0 0 var(--hrms-accent-bright);
   }
   .pf-v5-c-login::after {
     content: 'Secure sign-in \00B7  Two-step verification \00B7  Your data stays on your company\2019s server';
@@ -185,7 +202,8 @@ a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--hrms-accent-hover); }
     bottom: 2rem;
     max-width: calc(50% - 6rem);
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
+    /* 60% white keeps 7:1 on zinc-900 (50% fell under 4.5:1 there). */
+    color: rgba(255, 255, 255, 0.6);
   }
   .pf-v5-c-login__container {
     grid-row: 1;
@@ -211,5 +229,5 @@ a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--hrms-accent-hover); }
 
 /* Check boxes, radio buttons and the authenticator set-up steps. */
 input[type='checkbox'], input[type='radio'] { accent-color: var(--hrms-accent); }
-#kc-totp-secret-qr-code { border: 1px solid var(--hrms-line); border-radius: 10px; padding: 0.5rem; background: #fff; }
+#kc-totp-secret-qr-code { border: 1px solid var(--hrms-line); border-radius: 8px; padding: 0.5rem; background: #fff; }
 #kc-totp-settings li, #kc-totp-settings p { color: var(--hrms-body); }
