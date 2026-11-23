@@ -41,6 +41,15 @@ const proposeSchema = {
   },
 } as const;
 
+/**
+ * The user account routes wait on the sign-in provider (Keycloak, auth/identity-admin.ts), which may take up to 10 s for its token
+ * and 15 s per call. Under the interactive deadline (3 s to read, 5 s to change) a slow provider got the request answered 503
+ * while the provider went on and acted, and then the HRMS side rolled back: a new temporary password nobody was shown, a sign-in
+ * created or removed without its account. On the live server on 19 Nov 2026 an account's details failed twice and a new account
+ * once. These routes take the batch class (http/deadline.ts), whose two minutes outlast the provider's own limits.
+ */
+const WAITS_ON_SIGN_IN_PROVIDER = { servingClass: 'batch' } as const;
+
 const versionSchema = {
   type: 'object',
   additionalProperties: false,
@@ -285,13 +294,13 @@ export async function accessRoutes(app: FastifyInstance, opts: { db: Database; i
   });
 
   // DB007, FR-001 "A disabled user cannot sign in": an account whose ties are all in this company.
-  app.post('/access/users/:id/deactivate', { schema: { params: idParams, body: reasonSchema } }, async (request) => {
+  app.post('/access/users/:id/deactivate', { config: WAITS_ON_SIGN_IN_PROVIDER, schema: { params: idParams, body: reasonSchema } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'deactivate_user', ['operational'], { requireAll: true, recordKey: id });
     return withTransaction(db, (tx) => setAccountActive(tx, grant, id, false, request.body as AccountStateInput, identity));
   });
 
-  app.post('/access/users/:id/reactivate', { schema: { params: idParams, body: reasonSchema } }, async (request) => {
+  app.post('/access/users/:id/reactivate', { config: WAITS_ON_SIGN_IN_PROVIDER, schema: { params: idParams, body: reasonSchema } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'deactivate_user', ['operational'], { requireAll: true, recordKey: id });
     return withTransaction(db, (tx) => setAccountActive(tx, grant, id, true, request.body as AccountStateInput, identity));
@@ -299,32 +308,32 @@ export async function accessRoutes(app: FastifyInstance, opts: { db: Database; i
 
   // FR-001, the source system's User Master (0311; owner request of 13 Nov 2026): an account with its sign-in, created, changed,
   // given a new temporary password, or deleted when never used (accounts.ts).
-  app.post('/access/accounts', { schema: { body: newAccountSchema } }, async (request, reply) => {
+  app.post('/access/accounts', { config: WAITS_ON_SIGN_IN_PROVIDER, schema: { body: newAccountSchema } }, async (request, reply) => {
     const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true });
     const created = await withTransaction(db, (tx) => createAccount(tx, grant, identity, request.body as NewAccountInput));
     reply.status(201);
     return created;
   });
 
-  app.get('/access/accounts/:id', { schema: { params: idParams } }, async (request) => {
+  app.get('/access/accounts/:id', { config: WAITS_ON_SIGN_IN_PROVIDER, schema: { params: idParams } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
     return getAccount(db, grant, identity, id);
   });
 
-  app.patch('/access/accounts/:id', { schema: { params: idParams, body: accountChangeSchema } }, async (request) => {
+  app.patch('/access/accounts/:id', { config: WAITS_ON_SIGN_IN_PROVIDER, schema: { params: idParams, body: accountChangeSchema } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
     return withTransaction(db, (tx) => updateAccount(tx, grant, identity, id, request.body as AccountChangeInput));
   });
 
-  app.post('/access/accounts/:id/reset-password', { schema: { params: idParams, body: resetSchema } }, async (request) => {
+  app.post('/access/accounts/:id/reset-password', { config: WAITS_ON_SIGN_IN_PROVIDER, schema: { params: idParams, body: resetSchema } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
     return withTransaction(db, (tx) => resetPassword(tx, grant, identity, id, request.body as { reason: string }));
   });
 
-  app.post('/access/accounts/:id/delete', { schema: { params: idParams, body: reasonSchema } }, async (request) => {
+  app.post('/access/accounts/:id/delete', { config: WAITS_ON_SIGN_IN_PROVIDER, schema: { params: idParams, body: reasonSchema } }, async (request) => {
     const { id } = request.params as { id: string };
     const grant = await requireAccess(db, request, 'access', 'manage_accounts', ['operational'], { requireAll: true, recordKey: id });
     return withTransaction(db, (tx) => deleteAccount(tx, grant, identity, id, request.body as { expectedVersion: number; reason: string }));

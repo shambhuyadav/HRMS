@@ -168,6 +168,16 @@ if [ "${SMALL}" = yes ]; then
   else
     echo 'ConcurrentDatabaseReload no' >> /etc/clamav/clamd.conf
   fi
+  # That paused reload takes about 10 minutes here and slows everything. New signatures are fetched once a night instead of
+  # every hour, so the reload happens while nobody works (systemd/hrms-virus-signatures.timer).
+  install -m 0644 "${HERE}/systemd/hrms-virus-signatures.service" /etc/systemd/system/hrms-virus-signatures.service
+  install -m 0644 "${HERE}/systemd/hrms-virus-signatures.timer" /etc/systemd/system/hrms-virus-signatures.timer
+  systemctl daemon-reload
+  systemctl disable --now clamav-freshclam
+  systemctl enable --now hrms-virus-signatures.timer
+else
+  # A server upgraded from a small one goes back to the hourly freshclam service (enabled above); the nightly timer is not needed.
+  systemctl disable --now hrms-virus-signatures.timer 2>/dev/null || true
 fi
 systemctl enable clamav-daemon
 systemctl restart clamav-daemon

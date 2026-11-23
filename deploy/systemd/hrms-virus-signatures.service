@@ -1,0 +1,12 @@
+[Unit]
+Description=HRMS malware signature update (ClamAV freshclam, once a night on a small server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Run as root, freshclam writes the signatures as their owner (DatabaseOwner in /etc/clamav/freshclam.conf). clamd notices the new
+# signatures at its next self-check and reloads them.
+ExecStart=/usr/bin/freshclam --stdout
+Nice=10
+IOSchedulingClass=idle

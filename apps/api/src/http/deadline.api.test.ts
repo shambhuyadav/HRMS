@@ -30,6 +30,8 @@ const until = async (condition: () => boolean, ms = 20_000) => {
 };
 /** How long the synthetic slow handlers keep working: well past the 300 ms deadline, so the answer clearly precedes them. */
 const LATE_MS = 1_500;
+/** The note logged when a request's work stops at its next statement after the deadline answered 503 (http/deadline.ts). */
+const STOPPED_NOTE = 'work stopped after the deadline answer';
 const inject = (app: FastifyInstance, a: TestActor, method: 'GET' | 'POST' | 'PATCH', url: string, payload?: object) =>
   app.inject({
     method,
@@ -86,6 +88,18 @@ describe('serving classes and budgets', () => {
       ['POST', '/v1/biometric/profiles/:id/runs'],
     ] as const;
     for (const [method, url] of runWide) expect(classOf(method, url), `${method} ${url}`).toBe('batch');
+    // The user account routes wait on the sign-in provider, whose own limits outlast the interactive deadline.
+    const waitsOnSignInProvider = [
+      ['POST', '/v1/access/accounts'],
+      ['GET', '/v1/access/accounts/:id'],
+      ['PATCH', '/v1/access/accounts/:id'],
+      ['POST', '/v1/access/accounts/:id/reset-password'],
+      ['POST', '/v1/access/accounts/:id/delete'],
+      ['POST', '/v1/access/users/:id/deactivate'],
+      ['POST', '/v1/access/users/:id/reactivate'],
+    ] as const;
+    for (const [method, url] of waitsOnSignInProvider) expect(classOf(method, url), `${method} ${url}`).toBe('batch');
+    expect(classOf('GET', '/v1/access/users')).toBe('read');
     expect(seen.filter((r) => !r.url.startsWith('/v1/') && r.servingClass !== undefined)).toEqual([]);
     await app.close();
   });
@@ -165,6 +179,10 @@ describe('the deadline mechanism (synthetic routes on the real pool)', () => {
       await sleep(LATE_MS);
       return { late: true };
     });
+    app.post('/v1/late-failure', async () => {
+      await sleep(LATE_MS);
+      throw new Error('a synthetic fault after the deadline');
+    });
     app.get('/internal/unscoped', async (request) => ({ scoped: scopeOf(request) !== undefined, ...(await withTransaction(db, settings)) }));
     return app;
   };
@@ -192,9 +210,10 @@ describe('the deadline mechanism (synthetic routes on the real pool)', () => {
     expectUnavailable(res);
     expect(elapsed).toBeGreaterThanOrEqual(250);
     expect(elapsed).toBeLessThan(LATE_MS - 100); // answered before the statement in flight finished
-    // The handler resumes after pg_sleep: its next statement is refused, and Fastify logs the rejection.
-    await until(() => lines.join('').includes('"type":"DeadlineExceeded"'));
+    // The handler resumes after pg_sleep: its next statement is refused. That stop is expected, so it is a note, not an error.
+    await until(() => lines.join('').includes(STOPPED_NOTE));
     const text = lines.join('');
+    expect(text).not.toContain('"level":50');
     for (const secret of ['Synthetic', 'search=', 'slow-read?']) expect(text).not.toContain(secret);
     await app.close();
   });
@@ -204,8 +223,19 @@ describe('the deadline mechanism (synthetic routes on the real pool)', () => {
     const key = uniq('deadline-write.');
     expectUnavailable(await app.inject({ method: 'POST', url: '/v1/slow-write', payload: { key } }));
     // Only once the handler has ended (its commit refused) does the count prove anything: an open insert is invisible.
-    await until(() => lines.join('').includes('"type":"DeadlineExceeded"'));
+    await until(() => lines.join('').includes(STOPPED_NOTE));
     expect(await users(key)).toBe(0);
+    expect(lines.join('')).not.toContain('"level":50');
+    await app.close();
+  });
+
+  it('any other failure after the deadline answer is still logged as an error', async () => {
+    const app = mechanismApp(budgets);
+    expectUnavailable(await app.inject({ method: 'POST', url: '/v1/late-failure', payload: { a: 1 } }));
+    await until(() => lines.join('').includes('a synthetic fault after the deadline'));
+    const text = lines.join('');
+    expect(text).toContain('"level":50');
+    expect(text).not.toContain(STOPPED_NOTE);
     await app.close();
   });
 

@@ -74,7 +74,8 @@ scp -i ~/.ssh/<key> /tmp/hrms-release.tgz ubuntu@<server>:/tmp/
 
 **Small server (under 3 GB of memory, e.g. a 1 GB trial instance):** `setup-server.sh` adds a 4 GB swap file, a small-memory
 PostgreSQL configuration (`/etc/postgresql/16/main/conf.d/hrms-small-server.conf`), a smaller Keycloak heap, and ClamAV reloads
-without a second copy of its signatures. Package with `--with-web-build` (the web build does not fit there). It runs, slowly: sign-in
+without a second copy of its signatures, fetching new ones once a night at 02:30 India time (`hrms-virus-signatures.timer`
+instead of the hourly `clamav-freshclam` service) so that the slow reload happens while nobody works. Package with `--with-web-build` (the web build does not fit there). It runs, slowly: sign-in
 pages and file scans in particular. After upgrading the server, run `setup-server.sh` again (it removes the small-memory database
 settings and sizes Keycloak for the new memory; the swap file can stay or be removed with `swapoff /swapfile`).
 

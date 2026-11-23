@@ -7,17 +7,19 @@
 //          (REQUEST_BUDGET_MS in payroll/runs.ts) or a run-wide publication. A route may declare its class
 //          (`config: { servingClass }`), which wins over these rules; work over a whole payroll run or a provider's
 //          pages declares it (run creation and cancellation, bank manifests, loan recoveries, biometric runs), because
-//          a retry repeats the same work and would fail the same way under the interactive budget.
+//          a retry repeats the same work and would fail the same way under the interactive budget. So do the user
+//          account routes, which wait on the sign-in provider (access/routes.ts).
 // The deadline runs from the first hook, before the session check, until the answer is sent. When it passes, the
 // request is answered 503 UNAVAILABLE with Retry-After (http/errors.ts), and its work stops at its next database
-// statement: nothing new starts and nothing commits (db/instrument.ts, db/transaction.ts). Inside the request every
+// statement: nothing new starts and nothing commits (db/instrument.ts, db/transaction.ts). That stop is expected, so it is
+// logged as a note, not as an error (quietAfterDeadline below). Inside the request every
 // transaction runs with the class's statement timeout, capped by the time left, and a lock timeout at or below it, so a
 // blocked lock answers 503 quickly instead of holding the request until the deadline.
 //
 // Fastify's own `handlerTimeout` is not used: in Fastify 5.12 it clears its timer when the request stream closes, and
 // for a request with a body over a real socket that happens as soon as the body has been read, so it would never bound
 // a mutation. The values are starting budgets to be measured (G4), not capacity claims.
-import type { FastifyInstance, FastifyRequest, HTTPMethods } from 'fastify';
+import type { FastifyInstance, FastifyRequest, HTTPMethods, RouteOptions } from 'fastify';
 import { DeadlineExceeded, newScope, positiveIntFromEnv, runInScope, type StatementBudget, type WorkScope } from '../db/budget.js';
 
 export const SERVING_CLASSES = ['read', 'write', 'batch'] as const;
@@ -94,6 +96,27 @@ const pending = new WeakMap<FastifyRequest, Pending>();
 /** The request's unit of work (budget, deadline, statement count); undefined outside /v1. */
 export const scopeOf = (request: FastifyRequest): WorkScope | undefined => pending.get(request)?.scope;
 
+type RouteHandler = RouteOptions['handler'];
+
+/**
+ * The route's handler, with one failure kept out of the error log. Once the deadline has answered 503, the handler's own work
+ * stops at its next database statement by throwing DeadlineExceeded. Nobody is left to answer, and that stop is the design, so it
+ * is logged as a note. Without this, Fastify logs it as an error ("Promise errored, but reply.sent = true was set"), as the live
+ * server did on 19 and 22 Nov 2026. Any other failure, and a DeadlineExceeded before an answer was sent, reach Fastify unchanged.
+ */
+function quietAfterDeadline(handler: RouteHandler): RouteHandler {
+  return function handleWithinDeadline(this: FastifyInstance, request, reply) {
+    const result: unknown = handler.call(this, request, reply);
+    if (!(result instanceof Promise)) return result;
+    return result.catch((err: unknown) => {
+      const stoppedAfterAnswer = err instanceof DeadlineExceeded && reply.sent;
+      if (!stoppedAfterAnswer) throw err;
+      request.log.info({ failure: { code: err.code } }, 'work stopped after the deadline answer');
+      return undefined;
+    });
+  };
+}
+
 /** Registers the classes, the deadline and the request scope. Call before any route and before the actor context. */
 export function registerDeadlines(app: FastifyInstance, budgets: ServingBudgets): void {
   const serverBodyLimit = app.initialConfig.bodyLimit ?? 1_048_576;
@@ -101,6 +124,7 @@ export function registerDeadlines(app: FastifyInstance, budgets: ServingBudgets)
     if (!route.url.startsWith('/v1/')) return;
     const servingClass = route.config?.servingClass ?? servingClassOf(route.method, route.url, route.bodyLimit, serverBodyLimit);
     route.config = { ...route.config, servingClass };
+    route.handler = quietAfterDeadline(route.handler);
   });
   app.addHook('onRequest', (request, reply, done) => {
     const servingClass = request.routeOptions.config?.servingClass;

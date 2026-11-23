@@ -1,0 +1,12 @@
+[Unit]
+Description=HRMS nightly malware signature update
+
+[Timer]
+# 02:30 in India, while nobody works. On a small server the reload that follows pauses scans and slows the server for about
+# 10 minutes; with the hourly freshclam service it fell at 13:00-13:45 India time every day (live server, November 2026).
+OnCalendar=*-*-* 02:30:00 Asia/Kolkata
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
