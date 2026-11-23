@@ -45,7 +45,7 @@ fi
 
 log "Packages"
 apt-get update -q
-apt-get install -y -q acl ca-certificates curl gnupg jq openssl nginx clamav-daemon clamav-freshclam docker.io postgresql-common unattended-upgrades
+apt-get install -y -q acl age ca-certificates curl gnupg jq openssl nginx clamav-daemon clamav-freshclam docker.io postgresql-common unattended-upgrades
 
 if ! command -v node >/dev/null || [ "$(node -p 'process.versions.node.split(".")[0]')" != "${NODE_MAJOR}" ]; then
   install -d -m 0755 /etc/apt/keyrings

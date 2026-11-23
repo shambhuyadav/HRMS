@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Nightly backup on the server (hrms-backup.timer): the HRMS and Keycloak databases, the uploaded files and the secrets needed to read
 # them (HRMS_FIELD_KEYS seals private values: a database backup without its keys cannot be restored). Kept 14 days in
-# /var/backups/hrms (root only). These copies are on the same server: copy them off it (see deploy/README.md, "Backups").
+# /var/backups/hrms (root only). These copies are on the same server; backup-offsite.sh copies each night's off it, encrypted,
+# once that is set up (see deploy/README.md, "Backups").
 set -euo pipefail
 DEST=/var/backups/hrms
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -15,3 +16,8 @@ tar -C /etc -czf "hrms-etc-$STAMP.tgz.part" hrms && mv "hrms-etc-$STAMP.tgz.part
 chmod 0600 ./*-"$STAMP".*
 find "$DEST" -maxdepth 1 -type f -mtime +14 -delete
 echo "backup $STAMP: $(du -ch ./*-"$STAMP".* | tail -1 | cut -f1)"
+# The copy off the server, once it is set up (deploy/README.md, "Backups"). A failed copy fails this service, so it shows in
+# `systemctl --failed`; the copy on this disk is already complete.
+if [ -f /etc/hrms/offsite-backup.env ]; then
+  bash "$(dirname "$0")/backup-offsite.sh" "$STAMP"
+fi

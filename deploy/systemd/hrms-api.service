@@ -16,8 +16,8 @@ ExecStart=/var/www/html/HRMS/node_modules/.bin/tsx apps/api/src/main.ts
 Restart=always
 RestartSec=5
 TimeoutStopSec=30
-# The provider may still be starting after a reboot: main.ts retries its discovery for up to 2.5 minutes.
-TimeoutStartSec=200
+# The provider may still be starting after a reboot: main.ts retries its discovery for up to 10 minutes.
+TimeoutStartSec=660
 
 NoNewPrivileges=true
 PrivateTmp=true

@@ -211,8 +211,20 @@ each attempt. Later setup runs keep these settings unless new ones are given.
 ## Backups
 
 `hrms-backup.timer` writes nightly to `/var/backups/hrms` (14 days): both databases (`pg_dump -Fc`), the uploaded files and
-`/etc/hrms` (the keys: **a database backup cannot be restored without `HRMS_FIELD_KEYS`**). These copies are on the same disk: copy
-them off the server regularly (e.g. `rsync` to another machine, or object storage), encrypted, and test a restore:
+`/etc/hrms` (the keys: **a database backup cannot be restored without `HRMS_FIELD_KEYS`**). These copies are on the same disk, so
+`backup-offsite.sh` also copies each night's set off the server, encrypted, once it is set up:
+
+1. In the Oracle Cloud console, create a private bucket (Storage > Buckets, e.g. `hrms-backups`), add a lifecycle rule that
+   deletes objects older than 90 days, and create a pre-authenticated request on the bucket that permits object reads and
+   writes, with a far expiry date. Its URL ends in `/o/` and works like a password.
+2. Make an age key pair (`age-keygen -o hrms-backup-key.txt`). The private key file is the only way to read the copies: keep it,
+   and a second copy, off the server. Only its public line (`age1…`) goes on the server.
+3. On the server, as root, write `/etc/hrms/offsite-backup.env` (mode 0600) with `OFFSITE_UPLOAD_URL=<the URL>` and
+   `OFFSITE_RECIPIENT=<age1…>`, then run `systemctl start hrms-backup.service` and check `journalctl -u hrms-backup.service`
+   ends with "offsite copy … stored". A failed copy fails the service, so it shows in `systemctl --failed`.
+
+To restore from a copy: download it from the bucket, `age --decrypt -i hrms-backup-key.txt -o backup.tar hrms-backup-<time>.tar.age`,
+`tar -xf backup.tar`, then restore the dumps as below. Test a restore:
 
 ```bash
 sudo -u postgres createdb -O hrms hrms_restore_test && sudo -u postgres pg_restore -d hrms_restore_test /var/backups/hrms/hrms-db-<time>.dump

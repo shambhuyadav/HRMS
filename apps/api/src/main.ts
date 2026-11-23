@@ -38,15 +38,19 @@ const tokens = { issuer: process.env.SESSION_TOKEN_ISSUER?.trim() || 'hrms', aud
 const oidcConfig = oidcConfigFromEnv();
 if (!oidcConfig) throw new Error('OIDC_ISSUER and OIDC_CLIENT_ID must be set');
 
-// The provider may still be starting (same server): read its metadata with a few retries before giving up.
+// The provider may still be starting (same server): read its metadata, retrying for up to ten minutes before giving up. After a
+// restart of the 1 GB live server (23 Nov 2026) Keycloak took about seven minutes to serve its metadata; with the earlier limit of
+// two and a half minutes the API gave up, was restarted by systemd and began again.
+const DISCOVERY_RETRY_MS = 5_000;
+const DISCOVERY_ATTEMPTS = 120;
 let provider: OidcProvider | null = null;
 for (let attempt = 1; !provider; attempt++) {
   try {
     provider = await oidcProvider(oidcConfig);
   } catch (err) {
-    if (attempt >= 30) throw err;
-    console.error(`OIDC discovery failed (attempt ${attempt}); retrying in 5 s: ${(err as Error).message}`);
-    await new Promise((r) => setTimeout(r, 5000));
+    if (attempt >= DISCOVERY_ATTEMPTS) throw err;
+    console.error(`OIDC discovery failed (attempt ${attempt} of ${DISCOVERY_ATTEMPTS}); retrying in 5 s: ${(err as Error).message}`);
+    await new Promise((r) => setTimeout(r, DISCOVERY_RETRY_MS));
   }
 }
 
